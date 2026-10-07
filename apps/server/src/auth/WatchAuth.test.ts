@@ -179,6 +179,7 @@ it.layer(NodeServices.layer)("Watch auth", (it) => {
       const mcp = yield* auth.issueMcpClientSession({
         label: "MCP",
         access: "full-access",
+        peerLink: false,
         client,
       });
       const ordinary = yield* auth.issueSession();
