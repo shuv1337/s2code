@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
+  EnvironmentId,
   MessageId,
   NodeId,
   type OrchestrationV2Command,
@@ -58,8 +59,13 @@ it("stamps authoritative provenance on commands that create threads or messages"
     interactionMode: "default",
     branch: null,
     worktreePath: null,
-    // A client cannot claim a linked environment's origin for its own thread.
+    // A client cannot claim a linked environment's origin, or a parent there.
     linkOrigin: { sessionId: "forged", label: "Somewhere else" },
+    delegatedFrom: {
+      environmentId: EnvironmentId.make("environment:elsewhere"),
+      threadId: ThreadId.make("thread:elsewhere"),
+      title: "Somewhere else",
+    },
   };
 
   const stamped = ThreadManagementService.withCreationProvenance(command, {
@@ -71,6 +77,7 @@ it("stamps authoritative provenance on commands that create threads or messages"
     creationSource: "web",
   });
   expect(stamped).not.toHaveProperty("linkOrigin");
+  expect(stamped).not.toHaveProperty("delegatedFrom");
 });
 
 it("leaves commands that do not create durable authored content unchanged", () => {

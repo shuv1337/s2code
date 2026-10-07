@@ -829,7 +829,7 @@ describe("MessagesTimeline history and thread links", () => {
     const onOpenThread = vi.fn();
     await renderTimeline([], {
       onOpenThread,
-      parentThreadLink: { threadId: ThreadId.make("thread-parent"), title: "Architecture audit" },
+      parentThreadLink: { title: "Architecture audit", open: () => {} },
     });
     expect(text()).toContain("Subagent of");
     expect(text()).toContain("Architecture audit");
