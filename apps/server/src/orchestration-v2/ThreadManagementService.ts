@@ -37,6 +37,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { listWatchThreadIds } from "../watch/WatchProjection.ts";
 
 import * as Orchestrator from "./Orchestrator.ts";
 import { projectTurnItemForDetail } from "./WireProjection.ts";
@@ -275,6 +276,7 @@ export type ThreadManagementError = typeof ThreadManagementError.Type;
 type ThreadManagementFailure = ThreadManagementError | Orchestrator.OrchestratorV2Error;
 
 export interface ThreadManagementServiceShape {
+  readonly listWatchThreadIds: typeof listWatchThreadIds;
   readonly searchThreadStream: (
     input: OrchestrationV2SearchThreadInput,
   ) => Stream.Stream<OrchestrationV2SearchThreadResult, Orchestrator.OrchestratorV2Error>;
@@ -868,6 +870,7 @@ const make = Effect.gen(function* () {
     });
 
   return ThreadManagementService.of({
+    listWatchThreadIds,
     ensureLegacyTranscript,
     searchThreadStream: (input) =>
       Stream.unwrap(

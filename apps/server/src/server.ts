@@ -173,6 +173,9 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
+import * as WatchHttp from "./watch/http.ts";
+import * as WatchService from "./watch/WatchService.ts";
+import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
@@ -693,6 +696,12 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
       Layer.provide(CloudHttp.layer),
       Layer.provide(OrchestrationHttp.layer),
+      Layer.provide(
+        WatchHttp.layer.pipe(
+          Layer.provide(WatchService.layer.pipe(Layer.provide(CommandReceiptStore.layer))),
+          Layer.provide(WatchHttp.layerAuthenticatedAuth),
+        ),
+      ),
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
