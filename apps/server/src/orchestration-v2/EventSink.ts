@@ -120,6 +120,8 @@ export interface EventSinkV2Shape {
     EventSinkV2Error
   >;
   readonly commitCommand: (input: {
+    readonly payloadFingerprint?: string | null;
+    readonly principal?: string | null;
     readonly commandId: CommandId;
     readonly threadId: ThreadId;
     readonly commandType: string;
@@ -140,6 +142,8 @@ export interface EventSinkV2Shape {
     EventSinkV2Error
   >;
   readonly commitRejectedCommand: (input: {
+    readonly payloadFingerprint?: string | null;
+    readonly principal?: string | null;
     readonly commandId: CommandId;
     readonly threadId: ThreadId;
     readonly commandType: string;
@@ -530,6 +534,8 @@ const layerBase: Layer.Layer<
       const result = yield* commitThenPublish(
         Effect.gen(function* () {
           const reserved = yield* commandReceipts.insertIfAbsent({
+            payloadFingerprint: input.payloadFingerprint ?? null,
+            principal: input.principal ?? null,
             commandId: input.commandId,
             threadId: input.threadId,
             commandType: input.commandType,
@@ -557,6 +563,8 @@ const layerBase: Layer.Layer<
           yield* applyStoredEvents(storedEvents);
           yield* effectOutbox.enqueue(input.effects);
           const receipt: CommandReceiptStore.CommandReceiptV2 = {
+            payloadFingerprint: input.payloadFingerprint ?? null,
+            principal: input.principal ?? null,
             commandId: input.commandId,
             threadId: input.threadId,
             commandType: input.commandType,
@@ -599,6 +607,8 @@ const layerBase: Layer.Layer<
         Effect.gen(function* () {
           const sequence = yield* eventStore.latestSequence({ threadId: input.threadId });
           const receipt: CommandReceiptStore.CommandReceiptV2 = {
+            payloadFingerprint: input.payloadFingerprint ?? null,
+            principal: input.principal ?? null,
             commandId: input.commandId,
             threadId: input.threadId,
             commandType: input.commandType,

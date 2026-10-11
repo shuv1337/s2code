@@ -54,6 +54,8 @@ export const CommandReceiptV2 = Schema.Struct({
   resultSequence: NonNegativeInt,
   status: CommandReceiptV2Status,
   error: Schema.NullOr(Schema.String),
+  payloadFingerprint: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  principal: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type CommandReceiptV2 = typeof CommandReceiptV2.Type;
 
@@ -118,6 +120,8 @@ function fromApplicationReceipt(receipt: OrchestrationCommandReceipts.Orchestrat
     resultSequence: receipt.resultSequence,
     status: receipt.status,
     error: receipt.error,
+    payloadFingerprint: receipt.payloadFingerprint ?? null,
+    principal: receipt.principal ?? null,
   });
 }
 
@@ -134,6 +138,9 @@ function toApplicationReceipt(
     resultSequence: receipt.resultSequence,
     status: receipt.status,
     error: receipt.error,
+    payloadFingerprint:
+      "payloadFingerprint" in receipt ? (receipt.payloadFingerprint ?? null) : null,
+    principal: "principal" in receipt ? (receipt.principal ?? null) : null,
   };
 }
 

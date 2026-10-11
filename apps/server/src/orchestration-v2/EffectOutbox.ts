@@ -53,6 +53,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("provider-turn.steer"),
+    steerFollowUpPolicy: Schema.optional(Schema.Literals(["follow_up", "none"])),
     providerSessionId: ProviderSessionId,
     providerThreadId: ProviderThreadId,
     providerTurnId: ProviderTurnId,
@@ -245,6 +246,8 @@ export interface EffectOutboxV2Shape {
     readonly delayMs: number;
   }) => Effect.Effect<boolean, EffectOutboxError>;
   readonly fail: (input: {
+    /** A strict steer was accepted but could not be delivered; keep admission status intact. */
+    readonly receiptError?: string;
     readonly effectId: string;
     readonly workerId: string;
     readonly error: string;
@@ -638,7 +641,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             (cause) => new EffectOutboxError({ operation: "retry", effectId, cause }),
           ),
         ),
-      fail: ({ effectId, workerId, error }) =>
+      fail: ({ effectId, workerId, error, receiptError }) =>
         Effect.gen(function* () {
           const now = DateTime.formatIso(yield* DateTime.now);
           const rows = yield* sql<{ readonly effect_id: string }>`
@@ -655,12 +658,19 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               AND lease_owner = ${workerId}
             RETURNING effect_id
           `;
+          if (rows.length === 1 && receiptError !== undefined) {
+            yield* sql`
+              UPDATE orchestration_command_receipts SET error = ${receiptError}
+              WHERE command_id = (SELECT command_id FROM orchestration_v2_effect_outbox WHERE effect_id = ${effectId})
+            `;
+          }
           if (rows.length === 1) {
             cancellationSignals.delete(effectId);
             yield* notifyAvailable();
           }
           return rows.length === 1;
         }).pipe(
+          sql.withTransaction,
           Effect.mapError((cause) => new EffectOutboxError({ operation: "fail", effectId, cause })),
         ),
       pruneSettled: Effect.gen(function* () {

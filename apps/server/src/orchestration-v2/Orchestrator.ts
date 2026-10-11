@@ -84,7 +84,7 @@ import {
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.ts";
-import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
+import { CommandReceiptStoreV2, type CommandReceiptV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
 import { isRestartNoteSource } from "./RestartBackgroundNote.ts";
@@ -95,6 +95,7 @@ import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from 
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimit.ts";
+import { DispatchAdmissionRejectedError, dispatchPayloadFingerprint } from "./DispatchAdmission.ts";
 import {
   applyToProjection,
   emptyProjection,
@@ -265,6 +266,7 @@ export const OrchestratorV2Error = Schema.Union([
   OrchestratorCommandIdConflictError,
   OrchestratorSubagentThreadReadOnlyError,
   OrchestratorThreadAboveModeLimitError,
+  DispatchAdmissionRejectedError,
 ]);
 export type OrchestratorV2Error = typeof OrchestratorV2Error.Type;
 
@@ -3997,18 +3999,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const selectionMustApplyNow =
         selectionChanged &&
         (providerInstanceChanged || selectionTransition?.type !== "apply_on_next_turn");
+      const forceRestart =
+        input.forceRestart ||
+        selectionMustApplyNow ||
+        (selectionChanged &&
+          turnCapabilities.supportsInterrupt &&
+          turnCapabilities.supportsSteeringByInterruptRestart);
+      if (
+        input.command.type === "message.dispatch" &&
+        input.command.admission?.constraint.type === "requireNativeSteerOf" &&
+        forceRestart
+      ) {
+        return yield* new DispatchAdmissionRejectedError({ code: "steering_would_restart" });
+      }
       const steeringPolicy = yield* enforceCommandPolicy(input.command)(
         commandPolicy.decideSteeringExecution({
           commandId: input.command.commandId,
           threadId: input.command.threadId,
           providerInstanceId: targetRun.providerInstanceId,
           capabilities: session.providerSession.capabilities,
-          forceRestart:
-            input.forceRestart ||
-            selectionMustApplyNow ||
-            (selectionChanged &&
-              turnCapabilities.supportsInterrupt &&
-              turnCapabilities.supportsSteeringByInterruptRestart),
+          forceRestart,
         }),
       );
 
@@ -4052,6 +4062,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             threadId: input.command.threadId,
             request: {
               type: "provider-turn.steer",
+              ...(input.command.type === "message.dispatch"
+                ? {
+                    steerFollowUpPolicy:
+                      input.command.admission?.steerFollowUpPolicy ??
+                      input.command.steerFollowUpPolicy ??
+                      "follow_up",
+                  }
+                : {}),
               providerSessionId,
               providerThreadId: providerThread.id,
               providerTurnId: providerTurn.id,
@@ -10816,6 +10834,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.thread_id": commandThreadId(command),
     });
 
+    const payloadFingerprint = dispatchPayloadFingerprint(command);
+    const principal = command.type === "message.dispatch" ? (command.principal ?? null) : null;
+    const checkReceiptIdentity = (receipt: CommandReceiptV2) =>
+      receipt.payloadFingerprint != null &&
+      (receipt.payloadFingerprint !== payloadFingerprint ||
+        (receipt.principal ?? null) !== principal)
+        ? Effect.fail(new DispatchAdmissionRejectedError({ code: "command_conflict" }))
+        : Effect.void;
     const existingReceipt = yield* commandReceipts.getByCommandId(command.commandId).pipe(
       Effect.mapError(
         (cause) =>
@@ -10829,6 +10855,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     if (Option.isSome(existingReceipt)) {
       const receipt = existingReceipt.value;
+      yield* checkReceiptIdentity(receipt);
       if (receipt.status === "rejected") {
         return yield* new OrchestratorCommandPreviouslyRejectedError({
           commandId: command.commandId,
@@ -10882,7 +10909,70 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (shell !== null) yield* refuseAboveDispatchModeLimit(command, threadId, shell);
     }
 
-    const plan = yield* dispatchOnce(command).pipe(
+    const plan = yield* Effect.gen(function* () {
+      if (command.type === "message.dispatch" && command.admission !== undefined) {
+        const admission = command.admission;
+        const now = yield* DateTime.now;
+        if (DateTime.toEpochMillis(admission.notAfter) < DateTime.toEpochMillis(now)) {
+          return yield* new DispatchAdmissionRejectedError({ code: "expired" });
+        }
+        const projection = yield* loadProjectionForCommand(command, ["runs", "providerThreads"]);
+        if (
+          admission.expectedProviderInstanceId !== undefined &&
+          admission.expectedProviderInstanceId !== projection.thread.providerInstanceId
+        ) {
+          return yield* new DispatchAdmissionRejectedError({ code: "provider_mismatch" });
+        }
+        const active = projection.runs.find(isBlockingRun);
+        switch (admission.constraint.type) {
+          case "requireIdle":
+            if (active !== undefined)
+              return yield* new DispatchAdmissionRejectedError({ code: "thread_busy" });
+            break;
+          case "requireActive":
+            if (active === undefined)
+              return yield* new DispatchAdmissionRejectedError({ code: "thread_idle" });
+            break;
+          case "requireNativeSteerOf": {
+            if (active?.id !== admission.constraint.targetRunId) {
+              return yield* new DispatchAdmissionRejectedError({ code: "stale_target" });
+            }
+            const providerThread = projection.providerThreads.find(
+              (row) => row.id === active.providerThreadId,
+            );
+            const session =
+              providerThread?.providerSessionId == null
+                ? Option.none()
+                : yield* providerSessions
+                    .get(providerThread.providerSessionId)
+                    .pipe(mapDispatchError(command));
+            if (
+              Option.isNone(session) ||
+              !session.value.providerSession.capabilities.turns.supportsActiveSteering
+            ) {
+              return yield* new DispatchAdmissionRejectedError({ code: "steering_unsupported" });
+            }
+            break;
+          }
+        }
+      }
+      const planned = yield* dispatchOnce(command);
+      // Check the resolved plan too: completed-turn conversion and selection changes
+      // must never turn a strict steer into a new or interrupted turn.
+      if (
+        command.type === "message.dispatch" &&
+        command.admission?.constraint.type === "requireNativeSteerOf" &&
+        (!planned.effects.some((effect) => effect.request.type === "provider-turn.steer") ||
+          planned.effects.some(
+            (effect) =>
+              effect.request.type === "provider-turn.start" ||
+              effect.request.type === "provider-turn.restart",
+          ))
+      ) {
+        return yield* new DispatchAdmissionRejectedError({ code: "steering_would_restart" });
+      }
+      return planned;
+    }).pipe(
       Effect.flatMap((planned) =>
         // A settle that finds the provider already ended everything, or a
         // stop that finds nothing running, has nothing to record. That is
@@ -10908,6 +10998,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const rejectedAt = yield* DateTime.now;
           const receipt = yield* eventSink
             .commitRejectedCommand({
+              payloadFingerprint,
+              principal,
               commandId: command.commandId,
               threadId: commandThreadId(command),
               commandType: command.type,
@@ -10924,6 +11016,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   }),
               ),
             );
+          yield* checkReceiptIdentity(receipt);
           if (
             command.type === "queued-run.edit" &&
             receipt.status === "rejected" &&
@@ -10970,6 +11063,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const acceptedAt = plan.events.at(-1)?.occurredAt ?? (yield* DateTime.now);
     const committed = yield* eventSink
       .commitCommand({
+        payloadFingerprint,
+        principal,
         commandId: command.commandId,
         threadId: commandThreadId(command),
         commandType: command.type,
@@ -10991,6 +11086,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+    yield* checkReceiptIdentity(committed.receipt);
     if (committed.receipt.status === "rejected") {
       return yield* new OrchestratorCommandPreviouslyRejectedError({
         commandId: command.commandId,

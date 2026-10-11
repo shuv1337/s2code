@@ -34,6 +34,7 @@ export class OrchestrationEffectExecutionError extends Schema.TaggedError<Orches
   {
     effectId: Schema.String,
     effectType: Schema.String,
+    receiptError: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
@@ -239,6 +240,12 @@ export const layerExecutor: Layer.Layer<
                 Effect.catch((error) =>
                   Effect.gen(function* () {
                     if (
+                      effect.request.type === "provider-turn.steer" &&
+                      effect.request.steerFollowUpPolicy === "none"
+                    ) {
+                      return yield* error;
+                    }
+                    if (
                       !("turnCompleted" in error) ||
                       !error.turnCompleted ||
                       effect.request.type !== "provider-turn.steer"
@@ -298,6 +305,15 @@ export const layerExecutor: Layer.Layer<
                     new OrchestrationEffectExecutionError({
                       effectId: effect.id,
                       effectType: effect.request.type,
+                      ...(effect.request.type === "provider-turn.steer" &&
+                      effect.request.steerFollowUpPolicy === "none"
+                        ? {
+                            receiptError:
+                              "turnCompleted" in cause && cause.turnCompleted
+                                ? "admission:stale_target"
+                                : "admission:steering_unsupported",
+                          }
+                        : {}),
                       cause,
                     }),
                 ),
@@ -719,6 +735,9 @@ export const layerWithOptions = (
           }
 
           const error = Cause.pretty(exit.cause);
+          const receiptError = Option.getOrUndefined(
+            Cause.findErrorOption(exit.cause),
+          )?.receiptError;
           const nonRetryable = isNonRetryableProviderTurnControlFailure(effect.request.type, error);
           yield* Effect.logWarning("Orchestration effect execution failed", {
             effectId: effect.id,
@@ -733,9 +752,14 @@ export const layerWithOptions = (
             ? yield* outbox
                 .succeed({ effectId: effect.id, workerId })
                 .pipe(Effect.onError((cause) => terminalizeClaim(effect, cause)))
-            : effect.attemptCount >= maxAttempts
+            : receiptError !== undefined || effect.attemptCount >= maxAttempts
               ? yield* outbox
-                  .fail({ effectId: effect.id, workerId, error })
+                  .fail({
+                    effectId: effect.id,
+                    workerId,
+                    error,
+                    ...(receiptError === undefined ? {} : { receiptError }),
+                  })
                   .pipe(Effect.onError((cause) => terminalizeClaim(effect, cause)))
               : yield* outbox
                   .retry({
