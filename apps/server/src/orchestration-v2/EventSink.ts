@@ -120,6 +120,7 @@ export interface EventSinkV2Shape {
     EventSinkV2Error
   >;
   readonly commitCommand: (input: {
+    readonly admissionAction?: CommandReceiptStore.CommandReceiptV2["admissionAction"];
     readonly payloadFingerprint?: string | null;
     readonly principal?: string | null;
     readonly commandId: CommandId;
@@ -142,6 +143,7 @@ export interface EventSinkV2Shape {
     EventSinkV2Error
   >;
   readonly commitRejectedCommand: (input: {
+    readonly admissionAction?: CommandReceiptStore.CommandReceiptV2["admissionAction"];
     readonly payloadFingerprint?: string | null;
     readonly principal?: string | null;
     readonly commandId: CommandId;
@@ -536,6 +538,7 @@ const layerBase: Layer.Layer<
           const reserved = yield* commandReceipts.insertIfAbsent({
             payloadFingerprint: input.payloadFingerprint ?? null,
             principal: input.principal ?? null,
+            admissionAction: input.admissionAction ?? null,
             commandId: input.commandId,
             threadId: input.threadId,
             commandType: input.commandType,
@@ -565,6 +568,7 @@ const layerBase: Layer.Layer<
           const receipt: CommandReceiptStore.CommandReceiptV2 = {
             payloadFingerprint: input.payloadFingerprint ?? null,
             principal: input.principal ?? null,
+            admissionAction: input.admissionAction ?? null,
             commandId: input.commandId,
             threadId: input.threadId,
             commandType: input.commandType,
@@ -609,6 +613,7 @@ const layerBase: Layer.Layer<
           const receipt: CommandReceiptStore.CommandReceiptV2 = {
             payloadFingerprint: input.payloadFingerprint ?? null,
             principal: input.principal ?? null,
+            admissionAction: input.admissionAction ?? null,
             commandId: input.commandId,
             threadId: input.threadId,
             commandType: input.commandType,

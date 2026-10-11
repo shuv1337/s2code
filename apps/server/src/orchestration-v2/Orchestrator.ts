@@ -10835,6 +10835,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
 
     const payloadFingerprint = dispatchPayloadFingerprint(command);
+    const admissionAction =
+      command.type === "message.dispatch" ? (command.admission?.action ?? null) : null;
     const principal = command.type === "message.dispatch" ? (command.principal ?? null) : null;
     const checkReceiptIdentity = (receipt: CommandReceiptV2) =>
       receipt.payloadFingerprint != null &&
@@ -10999,6 +11001,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const receipt = yield* eventSink
             .commitRejectedCommand({
               payloadFingerprint,
+              admissionAction,
               principal,
               commandId: command.commandId,
               threadId: commandThreadId(command),
@@ -11039,6 +11042,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const resultSequence = yield* Effect.gen(function* () {
         const sequence = yield* eventSink.latestSequence({ threadId: commandThreadId(command) });
         yield* commandReceipts.insertIfAbsent({
+          admissionAction,
           commandId: command.commandId,
           threadId: commandThreadId(command),
           commandType: command.type,
@@ -11064,6 +11068,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const committed = yield* eventSink
       .commitCommand({
         payloadFingerprint,
+        admissionAction,
         principal,
         commandId: command.commandId,
         threadId: commandThreadId(command),

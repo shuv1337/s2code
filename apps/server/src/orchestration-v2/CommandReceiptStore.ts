@@ -1,4 +1,4 @@
-import { CommandId, NonNegativeInt, ProjectId, ThreadId } from "@t3tools/contracts";
+import { CommandId, NonNegativeInt, ProjectId, ThreadId, WatchAction } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -56,6 +56,7 @@ export const CommandReceiptV2 = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   payloadFingerprint: Schema.optionalKey(Schema.NullOr(Schema.String)),
   principal: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  admissionAction: Schema.NullOr(WatchAction),
 });
 export type CommandReceiptV2 = typeof CommandReceiptV2.Type;
 
@@ -71,7 +72,10 @@ export const ProjectCommandReceiptV2 = Schema.Struct({
 });
 export type ProjectCommandReceiptV2 = typeof ProjectCommandReceiptV2.Type;
 
-type AnyCommandReceiptV2 = CommandReceiptV2 | ProjectCommandReceiptV2;
+// Existing non-Watch writers may omit admission metadata; reads always return null.
+type AnyCommandReceiptV2 =
+  | (Omit<CommandReceiptV2, "admissionAction"> & { readonly admissionAction?: WatchAction | null })
+  | ProjectCommandReceiptV2;
 
 export interface CommandReceiptStoreV2Shape {
   readonly insertIfAbsent: (
@@ -122,6 +126,7 @@ function fromApplicationReceipt(receipt: OrchestrationCommandReceipts.Orchestrat
     error: receipt.error,
     payloadFingerprint: receipt.payloadFingerprint ?? null,
     principal: receipt.principal ?? null,
+    admissionAction: receipt.admissionAction ?? null,
   });
 }
 
@@ -141,6 +146,7 @@ function toApplicationReceipt(
     payloadFingerprint:
       "payloadFingerprint" in receipt ? (receipt.payloadFingerprint ?? null) : null,
     principal: "principal" in receipt ? (receipt.principal ?? null) : null,
+    admissionAction: "admissionAction" in receipt ? (receipt.admissionAction ?? null) : null,
   };
 }
 

@@ -6,7 +6,14 @@
  *
  * @module OrchestrationCommandReceiptRepository
  */
-import { CommandId, IsoDateTime, NonNegativeInt, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  IsoDateTime,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  WatchAction,
+} from "@t3tools/contracts";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import * as Context from "effect/Context";
@@ -31,6 +38,7 @@ export const OrchestrationCommandReceipt = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   payloadFingerprint: Schema.optionalKey(Schema.NullOr(Schema.String)),
   principal: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  admissionAction: Schema.optionalKey(Schema.NullOr(WatchAction)),
 });
 export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type;
 
@@ -87,7 +95,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
           status,
           error,
           payload_fingerprint,
-          principal
+          principal,
+          admission_action
         )
         VALUES (
           ${receipt.commandId},
@@ -99,7 +108,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
           ${receipt.status},
           ${receipt.error},
           ${receipt.payloadFingerprint ?? null},
-          ${receipt.principal ?? null}
+          ${receipt.principal ?? null},
+          ${receipt.admissionAction ?? null}
         )
         ON CONFLICT (command_id)
         DO UPDATE SET
@@ -111,7 +121,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
           status = excluded.status,
           error = excluded.error,
           payload_fingerprint = excluded.payload_fingerprint,
-          principal = excluded.principal
+          principal = excluded.principal,
+          admission_action = excluded.admission_action
       `,
   });
 
@@ -130,7 +141,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
           status,
           error,
           payload_fingerprint AS "payloadFingerprint",
-          principal
+          principal,
+          admission_action AS "admissionAction"
         FROM orchestration_command_receipts
         WHERE command_id = ${commandId}
       `,
@@ -155,7 +167,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
         status,
         error,
         payload_fingerprint,
-        principal
+        principal,
+        admission_action
       )
       VALUES (
         ${receipt.commandId},
@@ -167,7 +180,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
         ${receipt.status},
         ${receipt.error},
         ${receipt.payloadFingerprint ?? null},
-        ${receipt.principal ?? null}
+        ${receipt.principal ?? null},
+        ${receipt.admissionAction ?? null}
       )
       ON CONFLICT(command_id) DO NOTHING
       RETURNING command_id

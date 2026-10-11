@@ -5,4 +5,5 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`ALTER TABLE orchestration_command_receipts ADD COLUMN payload_fingerprint TEXT`;
   yield* sql`ALTER TABLE orchestration_command_receipts ADD COLUMN principal TEXT`;
+  yield* sql`ALTER TABLE orchestration_command_receipts ADD COLUMN admission_action TEXT CHECK (admission_action IN ('send', 'queue', 'steer'))`;
 });

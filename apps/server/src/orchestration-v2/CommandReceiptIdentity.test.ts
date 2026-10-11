@@ -26,6 +26,7 @@ it.effect(
         error: null,
         payloadFingerprint: "fingerprint",
         principal: "watch-session",
+        admissionAction: "send" as const,
       };
       assert.isTrue(yield* store.insertIfAbsent(receipt));
       assert.isFalse(
@@ -33,12 +34,22 @@ it.effect(
           ...receipt,
           payloadFingerprint: "other",
           principal: "other",
+          admissionAction: "queue",
         }),
       );
       assert.deepEqual(yield* store.getByCommandId(receipt.commandId), Option.some(receipt));
       const updated = { ...receipt, resultSequence: 2 };
       yield* store.upsert(updated);
       assert.deepEqual(yield* store.getByCommandId(receipt.commandId), Option.some(updated));
+      const rejected = {
+        ...receipt,
+        commandId: CommandId.make("rejected-command"),
+        status: "rejected" as const,
+        error: "admission:stale_target",
+        admissionAction: "steer" as const,
+      };
+      yield* store.insertIfAbsent(rejected);
+      assert.deepEqual(yield* store.getByCommandId(rejected.commandId), Option.some(rejected));
 
       const projectReceipt = {
         commandId: CommandId.make("project-command"),
@@ -71,5 +82,6 @@ it.effect("legacy SQL receipts decode nullable identity columns", () =>
     const receipt = Option.getOrThrow(yield* store.getByCommandId(CommandId.make("legacy")));
     assert.isNull(receipt.payloadFingerprint);
     assert.isNull(receipt.principal);
+    assert.isNull(receipt.admissionAction);
   }).pipe(Effect.provide(layer)),
 );

@@ -222,6 +222,7 @@ const makeHarness = Effect.fn("watchAdmissionHarness")(function* (
         assert.isTrue(Exit.isFailure(yield* Effect.exit(orchestrator.dispatch(input))));
         const row = yield* receipt(input.commandId);
         assert.equal(row.status, "rejected");
+        assert.equal(row.admissionAction, input.admission?.action);
         assert.deepEqual(parseAdmissionRejection(row.error ?? ""), Option.some(code));
       });
     const start = Effect.gen(function* () {
@@ -278,6 +279,7 @@ it.effect("admits idle send, rejects busy send, rejects idle queue and admits bu
         assert.equal(projection.runs.length, 1);
         assert.equal(projection.messages.length, 1);
         yield* s.orchestrator.dispatch(s.command("busy-queue", "queue"));
+        assert.equal((yield* s.receipt("busy-queue")).admissionAction, "queue");
         yield* s.worker.drain();
         projection = yield* s.orchestrator.getThreadProjection(threadId);
         assert.equal(projection.runs.filter((run) => run.status === "queued").length, 1);
@@ -296,8 +298,10 @@ it.effect.each([true, false])("strict native steer with native capability %s", (
         const first = yield* s.start;
         yield* s.reject(s.command("stale", "steer"), "stale_target");
         const steer = s.command("steer", "steer", first.runId);
-        if (native) yield* s.orchestrator.dispatch(steer);
-        else yield* s.reject(steer, "steering_unsupported");
+        if (native) {
+          yield* s.orchestrator.dispatch(steer);
+          assert.equal((yield* s.receipt("steer")).admissionAction, "steer");
+        } else yield* s.reject(steer, "steering_unsupported");
         yield* s.worker.drain();
         assert.deepEqual(h.steered, native ? [first.runId] : []);
         assert.equal(h.started.length, 1);
@@ -396,11 +400,13 @@ it.effect(
           assert.equal(results[0].sequence, results[1].sequence);
           const before = yield* s.receipt("same");
           assert.equal(before.status, "accepted");
+          assert.equal(before.admissionAction, "send");
           assert.match(before.payloadFingerprint!, /^[a-f0-9]{64}$/);
           assert.equal(before.principal, "watch-session-one");
           for (const changed of [
             { ...input, text: "different" },
             { ...input, principal: "watch-session-two" },
+            s.command("same", "queue"),
           ]) {
             const error = yield* Effect.flip(s.orchestrator.dispatch(changed));
             assert.deepEqual(
@@ -442,6 +448,7 @@ it.effect("legacy null-fingerprint receipts retain replay behavior", () =>
           ],
         });
         assert.isNull(result.receipt.payloadFingerprint);
+        assert.isNull(result.receipt.admissionAction);
         const replay = yield* s.orchestrator.dispatch({ ...input, text: "different" });
         assert.equal(replay.sequence, result.receipt.resultSequence);
         yield* s.worker.drain();
