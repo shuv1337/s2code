@@ -22,9 +22,17 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
+import {
+  WATCH_CLIENT_SUBJECT,
+  WatchPairingCredential,
+  type WatchRestriction,
+  watchClientScopes,
+} from "./WatchAuth.ts";
+import { base64UrlEncode, base64UrlDecodeUtf8 } from "./utils.ts";
 import * as AuthPairingLinks from "../persistence/AuthPairingLinks.ts";
 
 export interface BootstrapGrant {
+  readonly watchRestriction?: WatchRestriction;
   readonly method: ServerAuthBootstrapMethod;
   readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
   readonly subject: string;
@@ -218,7 +226,8 @@ export class PairingGrantStore extends Context.Service<
        * "startup" marks the credential the server mints for itself at boot,
        * which gets the long dev TTL when a dev URL is configured.
        */
-      readonly purpose?: "startup";
+      readonly purpose?: "startup" | "watch";
+      readonly watchRestriction?: WatchRestriction;
     }) => Effect.Effect<IssuedBootstrapCredential, BootstrapCredentialInternalError>;
     readonly listActive: () => Effect.Effect<
       ReadonlyArray<AuthPairingLink>,
@@ -229,6 +238,7 @@ export class PairingGrantStore extends Context.Service<
     readonly consume: (
       credential: string,
       input?: {
+        readonly purpose?: "watch";
         readonly proofKeyThumbprint?: string;
         readonly requestedScopes?: ReadonlyArray<AuthEnvironmentScope>;
       },
@@ -272,6 +282,12 @@ const DESKTOP_BOOTSTRAP_TTL_HOURS = Duration.hours(24);
 const DEV_STARTUP_TTL_HOURS = Duration.hours(24);
 const PAIRING_TOKEN_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const PAIRING_TOKEN_LENGTH = 12;
+const encodeWatchPairingCredential = Schema.encodeEffect(
+  Schema.fromJsonString(WatchPairingCredential),
+);
+const decodeWatchPairingCredential = Schema.decodeEffect(
+  Schema.fromJsonString(WatchPairingCredential),
+);
 const PAIRING_TOKEN_REJECTION_LIMIT =
   Math.floor(256 / PAIRING_TOKEN_ALPHABET.length) * PAIRING_TOKEN_ALPHABET.length;
 
@@ -403,7 +419,25 @@ export const make = Effect.gen(function* () {
         (cause) => new PairingCredentialRandomGenerationError({ operation: "generate-id", cause }),
       ),
     );
-    const credential = yield* generatePairingToken;
+    const nonce = yield* generatePairingToken;
+    const watchPayload =
+      input?.purpose === "watch"
+        ? yield* encodeWatchPairingCredential({
+            nonce,
+            restriction: input.watchRestriction ?? {},
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PairingCredentialIssueError({
+                  pairingLinkId: id,
+                  subject: WATCH_CLIENT_SUBJECT,
+                  cause,
+                }),
+            ),
+          )
+        : undefined;
+    const credential =
+      watchPayload === undefined ? nonce : `watch.${base64UrlEncode(watchPayload)}`;
     const isDevStartupToken = config.devUrl !== undefined && input?.purpose === "startup";
     const ttl =
       input?.ttl ??
@@ -417,13 +451,16 @@ export const make = Effect.gen(function* () {
       ...(input?.proofKeyThumbprint ? { proofKeyThumbprint: input.proofKeyThumbprint } : {}),
       expiresAt,
     };
-    const subject = input?.subject ?? "one-time-token";
+    const subject =
+      input?.purpose === "watch" ? WATCH_CLIENT_SUBJECT : (input?.subject ?? "one-time-token");
+    const scopes =
+      input?.purpose === "watch" ? watchClientScopes : (input?.scopes ?? AuthStandardClientScopes);
     yield* pairingLinks
       .create({
         id,
         credential,
         method: "one-time-token",
-        scopes: input?.scopes ?? AuthStandardClientScopes,
+        scopes,
         subject,
         label: input?.label ?? null,
         proofKeyThumbprint: input?.proofKeyThumbprint ?? null,
@@ -443,8 +480,8 @@ export const make = Effect.gen(function* () {
       );
     yield* emitUpsert({
       id,
-      scopes: input?.scopes ?? AuthStandardClientScopes,
-      subject: input?.subject ?? "one-time-token",
+      scopes,
+      subject,
       ...(input?.label ? { label: input.label } : {}),
       createdAt: now,
       expiresAt,
@@ -454,6 +491,9 @@ export const make = Effect.gen(function* () {
 
   const consume: PairingGrantStore["Service"]["consume"] = Effect.fn("PairingGrantStore.consume")(
     function* (credential, input) {
+      if (credential.startsWith("watch.") && input?.purpose !== "watch") {
+        return yield* new UnknownBootstrapCredentialError({});
+      }
       const now = yield* DateTime.now;
       if (consumeRotatingDesktopToken(credential, now.epochMilliseconds)) {
         return {
@@ -573,7 +613,14 @@ export const make = Effect.gen(function* () {
 
       if (Option.isSome(consumed)) {
         yield* emitRemoved(consumed.value.id);
+        const watch =
+          consumed.value.subject === WATCH_CLIENT_SUBJECT
+            ? yield* decodeWatchPairingCredential(
+                base64UrlDecodeUtf8(credential.slice("watch.".length)),
+              ).pipe(Effect.mapError((cause) => new BootstrapCredentialConsumeError({ cause })))
+            : undefined;
         return {
+          ...(watch ? { watchRestriction: watch.restriction } : {}),
           method: consumed.value.method,
           scopes: consumed.value.scopes,
           subject: consumed.value.subject,

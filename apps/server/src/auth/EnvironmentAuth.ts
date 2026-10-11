@@ -45,6 +45,11 @@ import * as SessionStore from "./SessionStore.ts";
 import { REUSABLE_DEV_SESSION_EXPIRES_AT, resolveReusableDevAuth } from "./ReusableDevAuth.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import { WATCH_CLIENT_SUBJECT, type WatchRestriction, watchClientScopes } from "./WatchAuth.ts";
+
+export interface WatchClientSession extends AuthenticatedSession {
+  readonly restriction: WatchRestriction;
+}
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
@@ -473,6 +478,18 @@ export class EnvironmentAuth extends Context.Service<
   EnvironmentAuth,
   {
     readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
+    readonly authenticateWatchClient: (
+      request: HttpServerRequest.HttpServerRequest,
+    ) => Effect.Effect<WatchClientSession, ServerAuthCredentialError | ServerAuthInternalError>;
+    readonly issueWatchPairingCredential: (input: {
+      readonly issuer: Pick<AuthenticatedSession, "subject" | "scopes">;
+      readonly restriction?: WatchRestriction;
+      readonly label?: string;
+      readonly ttl?: Duration.Duration;
+    }) => Effect.Effect<
+      IssuedPairingLink,
+      ServerAuthInternalError | ServerAuthScopeNotGrantedError
+    >;
     readonly getSessionState: (
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<AuthSessionState, ServerAuthInternalError>;
@@ -621,13 +638,13 @@ export function toBootstrapExchangeError(
   });
 }
 
-const rejectMcpClientAudience = <S extends { readonly subject: string }>(session: S) =>
-  session.subject === MCP_CLIENT_SUBJECT
+const rejectRestrictedAudience = <S extends { readonly subject: string }>(session: S) =>
+  session.subject === MCP_CLIENT_SUBJECT || session.subject === WATCH_CLIENT_SUBJECT
     ? Effect.fail(
         new ServerAuthInvalidCredentialError({
-          diagnostic: "MCP client sessions are only accepted by the MCP endpoint.",
+          diagnostic: "Audience-restricted sessions are only accepted by their dedicated endpoint.",
         }),
-      ).pipe(Effect.tap(() => Effect.logWarning("Rejected an MCP client session outside /mcp.")))
+      )
     : Effect.succeed(session);
 
 const mapSessionVerificationErrors = <A, R>(
@@ -715,7 +732,7 @@ export const make = Effect.gen(function* () {
           : Effect.void,
       ),
       mapSessionVerificationErrors,
-      Effect.flatMap(rejectMcpClientAudience),
+      Effect.flatMap(rejectRestrictedAudience),
       Effect.map((session) => ({
         sessionId: session.sessionId,
         subject: session.subject,
@@ -864,7 +881,7 @@ export const make = Effect.gen(function* () {
 
   type ResolvedBootstrapGrant = Pick<
     PairingGrantStore.BootstrapGrant,
-    "scopes" | "subject" | "label"
+    "scopes" | "subject" | "label" | "watchRestriction"
   > & {
     readonly method: PairingGrantStore.BootstrapGrant["method"] | "reusable-dev-token";
   };
@@ -873,6 +890,7 @@ export const make = Effect.gen(function* () {
     input?: {
       readonly proofKeyThumbprint?: string;
       readonly requestedScopes?: ReadonlyArray<AuthEnvironmentScope>;
+      readonly purpose?: "watch";
     },
   ): Effect.Effect<
     ResolvedBootstrapGrant,
@@ -906,14 +924,19 @@ export const make = Effect.gen(function* () {
     (credential, requestedScopes, requestMetadata, input) => {
       return resolveBootstrapGrant(credential, {
         ...input,
+        ...(credential.startsWith("watch.") && !input?.proofKeyThumbprint
+          ? { purpose: "watch" as const }
+          : {}),
         ...(requestedScopes !== undefined ? { requestedScopes } : {}),
       }).pipe(
         Effect.flatMap((grant) =>
           Effect.gen(function* () {
             const grantedScopes =
-              requestedScopes === undefined
-                ? grant.scopes
-                : [...new Set(requestedScopes)].filter((scope) => grant.scopes.includes(scope));
+              grant.subject === WATCH_CLIENT_SUBJECT
+                ? watchClientScopes
+                : requestedScopes === undefined
+                  ? grant.scopes
+                  : [...new Set(requestedScopes)].filter((scope) => grant.scopes.includes(scope));
             if (grantedScopes.length === 0) {
               return yield* new ServerAuthScopeNotGrantedError({});
             }
@@ -922,6 +945,7 @@ export const make = Effect.gen(function* () {
                 method: input?.proofKeyThumbprint ? "dpop-access-token" : "bearer-access-token",
                 subject: grant.subject,
                 scopes: grantedScopes,
+                ...(grant.watchRestriction ? { watchRestriction: grant.watchRestriction } : {}),
                 ...(input?.proofKeyThumbprint
                   ? {
                       proofKeyThumbprint: input.proofKeyThumbprint,
@@ -1190,7 +1214,7 @@ export const make = Effect.gen(function* () {
         if (websocketTicket && websocketTicket.trim().length > 0) {
           return yield* sessions.verifyWebSocketToken(websocketTicket).pipe(
             mapSessionVerificationErrors,
-            Effect.flatMap(rejectMcpClientAudience),
+            Effect.flatMap(rejectRestrictedAudience),
             Effect.map((session) => ({
               sessionId: session.sessionId,
               subject: session.subject,
@@ -1228,6 +1252,59 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("EnvironmentAuth.authenticateMcpClient"),
     );
   };
+
+  const authenticateWatchClient: EnvironmentAuth["Service"]["authenticateWatchClient"] = (
+    request,
+  ) => {
+    const token = parseBearerToken(request);
+    if (token === null) return Effect.fail(new ServerAuthMissingCredentialError({}));
+    return sessions.verify(token).pipe(
+      mapSessionVerificationErrors,
+      Effect.flatMap((session) =>
+        session.subject === WATCH_CLIENT_SUBJECT &&
+        session.method === "bearer-access-token" &&
+        session.watchRestriction !== undefined &&
+        !session.proofKeyThumbprint
+          ? Effect.succeed({
+              sessionId: session.sessionId,
+              subject: session.subject,
+              method: session.method,
+              scopes: session.scopes,
+              restriction: session.watchRestriction,
+              ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
+            })
+          : Effect.fail(
+              new ServerAuthInvalidCredentialError({
+                diagnostic: "Only Watch client bearer sessions are accepted here.",
+              }),
+            ),
+      ),
+      Effect.withSpan("EnvironmentAuth.authenticateWatchClient"),
+    );
+  };
+
+  const issueWatchPairingCredential: EnvironmentAuth["Service"]["issueWatchPairingCredential"] =
+    Effect.fn("EnvironmentAuth.issueWatchPairingCredential")(function* (input) {
+      if (
+        input.issuer.subject === MCP_CLIENT_SUBJECT ||
+        input.issuer.subject === WATCH_CLIENT_SUBJECT ||
+        ![AuthAccessWriteScope, ...watchClientScopes].every((scope) =>
+          input.issuer.scopes.includes(scope),
+        )
+      ) {
+        return yield* new ServerAuthScopeNotGrantedError({});
+      }
+      const createdAt = yield* DateTime.now;
+      const issued = yield* bootstrapCredentials
+        .issueOneTimeToken({
+          purpose: "watch",
+          watchRestriction: input.restriction ?? {},
+          ...(input.label ? { label: input.label } : {}),
+          ...(input.ttl ? { ttl: input.ttl } : {}),
+        })
+        .pipe(Effect.mapError((cause) => new ServerAuthPairingLinkCreationError({ cause })));
+      return { ...issued, createdAt, subject: WATCH_CLIENT_SUBJECT, scopes: watchClientScopes };
+    });
 
   const issueMcpClientSession: EnvironmentAuth["Service"]["issueMcpClientSession"] = (input) =>
     sessions
@@ -1285,6 +1362,8 @@ export const make = Effect.gen(function* () {
     );
 
   return EnvironmentAuth.of({
+    authenticateWatchClient,
+    issueWatchPairingCredential,
     getDescriptor: () =>
       Effect.succeed(descriptor).pipe(Effect.withSpan("EnvironmentAuth.getDescriptor")),
     getSessionState,

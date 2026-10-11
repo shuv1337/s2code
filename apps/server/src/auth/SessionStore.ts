@@ -23,6 +23,7 @@ import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 
 import * as ServerConfig from "../config.ts";
+import { WatchRestriction } from "./WatchAuth.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as AuthSessions from "../persistence/AuthSessions.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
@@ -61,6 +62,7 @@ export interface VerifiedSession {
   readonly proofKeyThumbprint?: string;
   /** The most an MCP client approved through OAuth may hand to the threads it drives. */
   readonly runtimeModeCeiling?: RuntimeMode;
+  readonly watchRestriction?: WatchRestriction;
 }
 
 export type SessionCredentialChange =
@@ -378,6 +380,7 @@ export class SessionStore extends Context.Service<
       readonly client?: AuthClientMetadata;
       readonly proofKeyThumbprint?: string;
       readonly runtimeModeCeiling?: RuntimeMode;
+      readonly watchRestriction?: WatchRestriction;
       /**
        * Atomically revoke active sessions with the same subject and method
        * before storing this session.
@@ -441,6 +444,7 @@ const SessionClaims = Schema.Struct({
   method: Schema.Literals(["browser-session-cookie", "bearer-access-token", "dpop-access-token"]),
   jkt: Schema.optionalKey(Schema.String),
   rtc: Schema.optionalKey(RuntimeMode),
+  watch: Schema.optionalKey(WatchRestriction),
   iat: Schema.Number,
   exp: Schema.Number,
 });
@@ -677,6 +681,7 @@ export const make = Effect.gen(function* () {
         method: input?.method ?? "browser-session-cookie",
         ...(input?.proofKeyThumbprint ? { jkt: input.proofKeyThumbprint } : {}),
         ...(input?.runtimeModeCeiling ? { rtc: input.runtimeModeCeiling } : {}),
+        ...(input?.watchRestriction ? { watch: input.watchRestriction } : {}),
         iat: issuedAt.epochMilliseconds,
         exp: expiresAt.epochMilliseconds,
       };
@@ -858,6 +863,7 @@ export const make = Effect.gen(function* () {
         scopes: claims.scopes,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
         ...(claims.rtc ? { runtimeModeCeiling: claims.rtc } : {}),
+        ...(claims.watch ? { watchRestriction: claims.watch } : {}),
       } satisfies VerifiedSession;
     },
   );

@@ -12,6 +12,9 @@
 import {
   type AuthEnvironmentScope,
   AuthStandardClientScopes,
+  AuthAdministrativeScopes,
+  ThreadId,
+  ProjectId,
   ExecutionEnvironmentDescriptor,
   PortSchema,
 } from "@t3tools/contracts";
@@ -56,6 +59,17 @@ import { authScopesFlag } from "./authScopes.ts";
 import { baseDirFlag, DurationFromString } from "./config.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
+const encodeWatchPairingOutput = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      purpose: Schema.String,
+      origin: Schema.String,
+      credential: Schema.String,
+      expiresAt: Schema.String,
+      exchangePath: Schema.String,
+    }),
+  ),
+);
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
 // Tailscale provisions an HTTPS certificate on the first request to a fresh
 // serve mapping, which can take a few seconds.
@@ -63,6 +77,15 @@ const TAILSCALE_PROBE_ATTEMPTS = 5;
 const TAILSCALE_PROBE_RETRY_DELAY = Duration.seconds(1);
 
 export type PairStateVariant = "userdata" | "dev";
+
+class WatchPairingFlagError extends Schema.TaggedError<WatchPairingFlagError>()(
+  "WatchPairingFlagError",
+  {},
+) {
+  override get message(): string {
+    return "--thread and --project restrictions require --watch.";
+  }
+}
 
 // deriveServerPaths only checks devUrl for undefined-ness when picking the
 // dev-vs-userdata state directory; the value itself is not used.
@@ -431,9 +454,23 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
   readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
   readonly ttl: Option.Option<Duration.Duration>;
   readonly label: Option.Option<string>;
+  readonly watch: boolean;
+  readonly threadIds: ReadonlyArray<ThreadId>;
+  readonly projectIds: ReadonlyArray<ProjectId>;
 }) {
   return yield* Effect.gen(function* () {
     const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    if (input.watch) {
+      return yield* environmentAuth.issueWatchPairingCredential({
+        issuer: { subject: "local-cli", scopes: AuthAdministrativeScopes },
+        restriction: {
+          ...(input.threadIds.length ? { threadIds: input.threadIds } : {}),
+          ...(input.projectIds.length ? { projectIds: input.projectIds } : {}),
+        },
+        label: Option.getOrElse(input.label, () => "t3 pair --watch"),
+        ...(Option.isSome(input.ttl) ? { ttl: input.ttl.value } : {}),
+      });
+    }
     return yield* environmentAuth.createPairingLink({
       scopes: input.scopes,
       subject: "one-time-token",
@@ -478,6 +515,9 @@ const tailscaleServePortFlag = Flag.Int("tailscale-serve-port").pipe(
 
 export const pairCommand = Command.make("pair", {
   baseDir: baseDirFlag,
+  watch: Flag.Boolean("watch").pipe(Flag.withDefault(false)),
+  threadIds: Flag.String("thread").pipe(Flag.withSchema(ThreadId), Flag.atLeast(0)),
+  projectIds: Flag.String("project").pipe(Flag.withSchema(ProjectId), Flag.atLeast(0)),
   scopes: authScopesFlag(AuthStandardClientScopes),
   ttl: ttlFlag,
   label: labelFlag,
@@ -490,6 +530,9 @@ export const pairCommand = Command.make("pair", {
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const cliLogLevel = yield* GlobalFlag.LogLevel;
+      if (!flags.watch && (flags.threadIds.length > 0 || flags.projectIds.length > 0)) {
+        return yield* new WatchPairingFlagError({});
+      }
       // Default to Warn so storage/migration chatter cannot bury the QR code;
       // an explicit --log-level still wins.
       const logLevel = Option.getOrElse(cliLogLevel, () => "Warn" as const);
@@ -525,8 +568,24 @@ export const pairCommand = Command.make("pair", {
         scopes: flags.scopes,
         ttl: flags.ttl,
         label: flags.label,
+        watch: flags.watch,
+        threadIds: flags.threadIds,
+        projectIds: flags.projectIds,
       });
       const pairingUrl = buildPairingUrl(pairingBaseUrl, issued.credential);
+
+      if (flags.watch) {
+        yield* Console.log(
+          yield* encodeWatchPairingOutput({
+            purpose: "watch",
+            origin: pairingBaseUrl,
+            credential: issued.credential,
+            expiresAt: DateTime.formatIso(issued.expiresAt),
+            exchangePath: "/oauth/token",
+          }),
+        );
+        return;
+      }
 
       yield* Console.log(
         formatPairOutput({
