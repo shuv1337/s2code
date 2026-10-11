@@ -186,7 +186,12 @@ const receiptFields = {
   observed: Schema.NullOr(WatchCommandObservedState),
 };
 
-/** Rejections have no acceptance timestamp or committed result sequence. */
+/**
+ * `accepted` means the environment committed the command; it says nothing about provider
+ * completion. `failed` means it was committed but could not be applied afterwards (for example a
+ * strict steer whose target run finished first), so no follow-up work was created. Rejections have
+ * no acceptance timestamp or committed result sequence.
+ */
 export const WatchCommandReceipt = Schema.Union([
   Schema.Struct({
     ...receiptFields,
@@ -194,6 +199,13 @@ export const WatchCommandReceipt = Schema.Union([
     acceptedAt: Schema.DateTimeUtcFromString,
     resultSequence: NonNegativeInt,
     error: Schema.Null,
+  }),
+  Schema.Struct({
+    ...receiptFields,
+    status: Schema.Literal("failed"),
+    acceptedAt: Schema.DateTimeUtcFromString,
+    resultSequence: NonNegativeInt,
+    error: WatchCommandError,
   }),
   Schema.Struct({
     ...receiptFields,

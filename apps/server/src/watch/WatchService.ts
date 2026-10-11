@@ -245,14 +245,6 @@ const make = Effect.gen(function* () {
         activity: activity(shell.activityRunStatus ?? shell.status),
       },
     };
-    if (receipt.status === "accepted")
-      return {
-        ...common,
-        status: "accepted",
-        acceptedAt: receipt.acceptedAt,
-        resultSequence: receipt.resultSequence,
-        error: null,
-      };
     const code =
       receipt.error === null
         ? "invalid_envelope"
@@ -260,6 +252,25 @@ const make = Effect.gen(function* () {
             parseAdmissionRejection(receipt.error),
             () => "invalid_envelope" as const,
           );
+    if (receipt.status === "accepted") {
+      // A committed strict steer that could not be applied afterwards keeps its accepted receipt
+      // but records the failure in `error`; it must not read as success.
+      if (receipt.error === null)
+        return {
+          ...common,
+          status: "accepted",
+          acceptedAt: receipt.acceptedAt,
+          resultSequence: receipt.resultSequence,
+          error: null,
+        };
+      return {
+        ...common,
+        status: "failed",
+        acceptedAt: receipt.acceptedAt,
+        resultSequence: receipt.resultSequence,
+        error: { code, message: `Watch command could not be applied: ${code}.` },
+      };
+    }
     return {
       ...common,
       status: "rejected",

@@ -123,4 +123,25 @@ describe("Watch HTTP DTOs", () => {
     expect(() => decode({ ...rejected, error: { code: "other", message: "Unknown" } })).toThrow();
     expect(() => decode({ ...rejected, status: "accepted" })).toThrow();
   });
+
+  it("distinguishes a committed-then-failed command from acceptance and rejection", () => {
+    const decode = Schema.decodeUnknownSync(WatchCommandReceipt);
+    const committed = {
+      commandId: envelope.commandId,
+      threadId: envelope.threadId,
+      action: "steer",
+      acceptedAt: "2026-10-10T21:39:05.000Z",
+      resultSequence: 12,
+      observed: null,
+    };
+    const failed = {
+      ...committed,
+      status: "failed",
+      error: { code: "stale_target", message: "Target run finished first" },
+    };
+    expect(decode(failed).status).toBe("failed");
+    expect(() => decode({ ...failed, error: null })).toThrow();
+    expect(() => decode({ ...failed, acceptedAt: null, resultSequence: null })).toThrow();
+    expect(() => decode({ ...committed, status: "accepted", error: failed.error })).toThrow();
+  });
 });
