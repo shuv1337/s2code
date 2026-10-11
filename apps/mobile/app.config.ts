@@ -79,7 +79,7 @@ const VARIANT_CONFIG = {
   production: {
     appName: "shuv2code",
     scheme: "shuv2code",
-    iosBundleIdentifier: "com.shuv2code.app",
+    iosBundleIdentifier: "dev.shuv.shuv2code",
     androidPackage: "com.shuv2code.app",
     relyingParty: "clerk.shuv.me",
     assets: RELEASE_ASSETS,
@@ -163,11 +163,10 @@ const config: ExpoConfig = {
   scheme: variant.scheme,
   version: "0.1.1-alpha.2",
   runtimeVersion: {
-    // Fingerprint (not appVersion) so an OTA only reaches binaries whose native
-    // project — native deps, config plugins, AND patches/ — matches the update.
-    // With appVersion, every 0.1.0 build shares a runtime version, so a JS update
-    // could land on a binary missing the native changes it needs and crash.
-    policy: process.env.MOBILE_VERSION_POLICY ?? "fingerprint",
+    // EAS profiles opt into fingerprinting explicitly. Local standalone builds
+    // use appVersion so Expo resolves a concrete runtime value instead of the
+    // invalid `file:fingerprint` placeholder emitted by a raw Xcode archive.
+    policy: process.env.MOBILE_VERSION_POLICY ?? "appVersion",
   },
   orientation: "portrait",
   icon: variant.assets.appIcon,
@@ -188,7 +187,7 @@ const config: ExpoConfig = {
     // Pin code signing to the shuv team so non-interactive `expo run:ios`
     // does not fall back to a personal team (which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
+    appleTeamId: "7H54B326YZ",
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,

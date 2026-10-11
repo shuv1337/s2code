@@ -45,6 +45,10 @@ export const BRAND_PATTERNS: ReadonlyArray<BrandPattern> = [
   { id: "legacy-command", expression: /(?<![.\w])t3(?!\w)/gu },
   { id: "legacy-visible-word", expression: /\bT3\b/gu },
   {
+    id: "legacy-t3-glyph",
+    expression: /M33\.4509 93V47\.56H15\.5309V37H64\.3309/gu,
+  },
+  {
     id: "legacy-state",
     expression: /\.t3(?=\/|\\|["'`\s]|$)/gu,
   },

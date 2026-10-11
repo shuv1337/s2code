@@ -1,163 +1,83 @@
-# HANDOFF
+# shuv2code iOS Sqim Release Handoff
 
-## Objective
+Updated: 2026-08-17 00:51 PDT
 
-Obtain and install the missing **Developer ID Application** certificate (and related macOS signing inputs) so this machine can produce a **signed, notarized** production macOS desktop DMG for shuv2code via:
+## Goal
+
+Finish a development-signed Sqim iPhone build for `shuv2code@0.1.1-alpha.2` on shuvbot, verify the install link, then use that successful matching iOS build as the prerequisite for the public `next` release workflow.
+
+## Environment
+
+- Work locally on shuvbot in `/Users/shuv/repos/shuv2code`.
+- The checkout is colocated with Jujutsu. Use `jj`, not routine Git commands.
+- `main` is at `a43fc50e1caeb1a3c17c1e3f3019935a17e23532`.
+- Dependencies were refreshed successfully with `pnpm install --frozen-lockfile`.
+- Sqim is authenticated with the intended organizational account. Verify with `sqim status --json`, but do not print or copy credentials.
+- The iOS workspace is `apps/mobile/ios/shuv2code.xcworkspace`; the scheme is `shuv2code`.
+- Apple development team ID: `7H54B326YZ`.
+
+## Preserve Existing Work
+
+The shuvbot working copy contains pre-existing mobile branding changes. Do not reset, discard, overwrite, or commit them without explicit user direction. Current paths are visible with `jj status` and include mobile branding components/config, the production app icon, lockfile, and brand-check scripts.
+
+The checkout was previously 370 commits behind. Those changes were rebased onto current `main`. One conflict in `apps/mobile/src/features/home/HomeHeader.tsx` was resolved by retaining upstream `WorkspaceConnectionTitle` behavior while using the local canonical `Shuv2CodeMark` and `shuv2code` product name.
+
+## Current Failure
+
+The Sqim archive reaches the share extension signing step and fails:
+
+```text
+CodeSign .../expo-sharing-extension.appex
+.../expo-sharing-extension.appex: errSecInternalComponent
+Command CodeSign failed with a nonzero exit code
+```
+
+Adding the team ID fixed the earlier missing-development-team error. Automatic provisioning now selects a development certificate and creates/selects a provisioning profile for the sharing extension. The failure persists even when the command is run from a visible Herdr terminal, so do not assume this is only an SSH keychain-session problem.
+
+The reported React Core XCFramework `rsync` failure in one earlier run was cancellation fallout from the signing failure, not an independently established root cause.
+
+## Next Actions
+
+1. Load and follow the local Sqim skill at `~/.agents/skills/sqim/SKILL.md`.
+2. Use a focused diagnosis workflow before changing project files. Inspect the active code-signing identities, login keychain lock/search-list state, private-key accessibility, certificate validity, and relevant `securityd`/codesign diagnostics.
+3. Reproduce signing against the generated extension bundle or with the smallest relevant Xcode archive command if that isolates the Keychain failure faster.
+4. Prefer repairing Keychain access or the signing identity over changing bundle IDs, entitlements, or removing the share extension.
+5. If macOS presents a private-key access prompt, approve the intended Apple Development identity with the minimum durable access needed for Xcode/codesign.
+6. Retry the full upload from `apps/mobile`:
 
 ```bash
-node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --signed
+sqim upload --device . --build \
+  --workspace ios/shuv2code.xcworkspace \
+  --scheme shuv2code \
+  --team-id 7H54B326YZ \
+  --allow-provisioning-updates
 ```
 
-This handoff is for a **computer-use / GUI agent** driving Safari/Chrome + Keychain Access + Xcode/Apple Developer portal on the local Mac (owner account already has team access).
+7. Treat only the final successful Sqim output line as the HTTPS install URL. Install/launch it on an iPhone if available and verify the app opens.
+8. Send the successful install URL through SHark. A Live Activity may still exist under key `shuv2code-sqim-build`; update/end it rather than creating notification spam.
+9. Once the matching iOS build is genuinely confirmed, dispatch `.github/workflows/release.yml` from `main` with `mode=publish`, `channel=next`, and `ios_sqim_release_confirmed=true`. Verify npm installation, Git tag, GitHub release, and release artifacts. Do not set the confirmation before the iOS build succeeds.
 
-## Current status
+## Release Context
 
-- **Done:** Dependencies installed; macOS **unsigned** production artifacts built:
-  - `release/shuv2code-0.1.0-alpha.1-arm64.dmg`
-  - `release/shuv2code-0.1.0-alpha.1-arm64.zip`
-- **Done:** Desktop dev app was runnable via `vp run dev:desktop`.
-- **Done:** iOS development device build uploaded to Sqim (separate from this task).
-- **Blocked:** Signed macOS desktop build. Keychain has **no** `Developer ID Application` identity. Only:
-  1. `Apple Distribution: Kevin Crommett (7H54B326YZ)`
-  2. `Apple Development: Created via API (FS8S8T7847)`
-  3. `Apple Development: Kevin Crommett (Z9ZSRFYPB9)`
-- Team ID observed from certs/Xcode: **`7H54B326YZ`** (Kevin Crommett).
-- No local `.env` / `.env.local` with signing vars. Repo expects secrets listed in `docs/operations/release.md` (Signing inputs).
+- PR: https://github.com/shuv1337/shuv2code/pull/120
+- Passing prepare run: https://github.com/shuv1337/shuv2code/actions/runs/31976297755
+- Expected gate failure before iOS confirmation: https://github.com/shuv1337/shuv2code/actions/runs/31977913603
+- npm package, tag `v0.1.1-alpha.2`, and GitHub release were absent when last checked.
+- Release workflow: `.github/workflows/release.yml`
+- Canonical package version: `apps/server/package.json`
 
-## Key context
+## Suggested Skills
 
-| Need                                                                           | Why                                                                             | Present?                                            |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Developer ID Application** cert                                              | electron-builder / Gatekeeper distribution outside App Store                    | **No**                                              |
-| Notarization API key (`APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`) | Stapled notarization on DMG/ZIP                                                 | Unknown / not in env                                |
-| `SHUV2CODE_APPLE_TEAM_ID=7H54B326YZ`                                           | Passkey-capable signed mac config                                               | Not in env file                                     |
-| `SHUV2CODE_MACOS_PROVISIONING_PROFILE`                                         | Associated Domains profile for app id `dev.shuv.shuv2code`                      | **No** macOS profile found (only iOS team profiles) |
-| `SHUV2CODE_CLERK_PUBLISHABLE_KEY` or `SHUV2CODE_CLERK_PASSKEY_RP_DOMAINS`      | Required when `--signed` enables passkey entitlements                           | Missing locally                                     |
-| Optional `CSC_LINK` + `CSC_KEY_PASSWORD`                                       | CI-style .p12 import; local Keychain identity can substitute if named correctly | Missing                                             |
+- `sqim`: required for the device build/upload contract and final install URL.
+- `diagnose`: minimize and establish the Keychain/codesign root cause before fixing it.
+- `ios-debugger-agent`: useful for focused Xcode inspection or on-device verification on shuvbot.
+- `shark`: update the existing Live Activity and send the final install link.
+- `clankspace`: required if consequential edits are needed and `.clankspace.json` is present.
 
-**Important:** Apple **Development** / **Distribution** (App Store) certs are **not** substitutes for **Developer ID Application**. Do not “force” signing with Development for a shareable DMG.
+## Completion Criteria
 
-App identity for desktop: `dev.shuv.shuv2code` (`DESKTOP_APP_ID` in `scripts/build-desktop-artifact.ts`).
-
-## Important files
-
-- `scripts/build-desktop-artifact.ts` — `--signed` path; requires mac passkey signing config when signed.
-- `docs/operations/release.md` — canonical secret list and acceptance (signature + notarization stapled).
-- `docs/reference/scripts.md` — local `dist:desktop:dmg` / `--signed` notes.
-- `.env.example` — documents `SHUV2CODE_APPLE_TEAM_ID`, `SHUV2CODE_MACOS_PROVISIONING_PROFILE`.
-- `release/shuv2code-0.1.0-alpha.1-arm64.dmg` — current unsigned prod build (leave in place).
-
-## Next steps (computer-use agent)
-
-Work as the logged-in Mac user. Prefer Apple Developer website + Keychain Access. **Do not commit certs, .p12, API keys, or profiles into git.**
-
-### A. Developer ID Application certificate
-
-1. Open [Apple Developer Certificates](https://developer.apple.com/account/resources/certificates/list) signed in as the account on team **Kevin Crommett / 7H54B326YZ**.
-2. Inventory existing certs. If **Developer ID Application** already exists for this team:
-   - If the private key is on another machine only, you cannot download a usable identity from the portal alone — need the original `.p12` or CSR machine. Prefer locating an existing exported `.p12` in the owner’s password manager / secure store / CI secrets (`CSC_LINK`) rather than revoking.
-3. If none exists (or owner authorizes a new one):
-   - Keychain Access → Certificate Assistant → **Request a Certificate From a Certificate Authority** → save CSR to disk (email = owner; Common Name descriptive; “Saved to disk”).
-   - Developer portal → Certificates → **+** → **Developer ID Application** → upload CSR → download `.cer`.
-   - Double-click `.cer` to install into **login** keychain.
-4. Verify:
-
-   ```bash
-   security find-identity -v -p codesigning | grep "Developer ID Application"
-   ```
-
-   Expect a line containing `Developer ID Application: … (7H54B326YZ)`.
-
-5. Optional export for CI (only if owner asks): Keychain → export identity as `.p12` → base64 for `CSC_LINK`; store password as `CSC_KEY_PASSWORD`. **Never paste secrets into HANDOFF or chat logs.**
-
-### B. Notarization credentials (App Store Connect API key)
-
-1. [App Store Connect → Users and Access → Integrations → Team Key](https://appstoreconnect.apple.com/access/integrations/api) (or existing Developer API key with notary access).
-2. Create or locate a key that can notarize. Download the `.p8` **once** if new.
-3. Record locally (owner-only path, e.g. `~/.private/shuv2code-signing/`, gitignored):
-   - `APPLE_API_KEY` = path to `.p8` **or** file contents per electron-builder convention used in this project’s CI
-   - `APPLE_API_KEY_ID`
-   - `APPLE_API_ISSUER` (Issuer UUID)
-4. Confirm electron-builder env names match `docs/operations/release.md`.
-
-### C. macOS provisioning profile (Associated Domains / passkeys)
-
-Signed builds call `resolveMacPasskeySigningConfiguration()` and need:
-
-- Bundle / app id: `dev.shuv.shuv2code`
-- Team: `7H54B326YZ`
-- Profile type suitable for **Developer ID** + **Associated Domains** (passkey RP)
-
-Steps:
-
-1. Developer portal → Identifiers → ensure Mac app id `dev.shuv.shuv2code` exists with **Associated Domains** enabled.
-2. Profiles → create **Developer ID** provisioning profile for that App ID (or the profile type this app already uses in CI — match GitHub secret `MACOS_PROVISIONING_PROFILE` / env `SHUV2CODE_MACOS_PROVISIONING_PROFILE` if recoverable from CI).
-3. Download `.provisionprofile` to a stable path, e.g. `~/.private/shuv2code-signing/shuv2code.provisionprofile`.
-
-### D. Local env (do not commit)
-
-Create **gitignored** repo-root `.env.local` (or export in the shell) with at least:
-
-```bash
-SHUV2CODE_APPLE_TEAM_ID=7H54B326YZ
-SHUV2CODE_MACOS_PROVISIONING_PROFILE=/absolute/path/to/shuv2code.provisionprofile
-# One of:
-# SHUV2CODE_CLERK_PUBLISHABLE_KEY=pk_...
-# SHUV2CODE_CLERK_PASSKEY_RP_DOMAINS=clerk.example.com
-```
-
-Plus notarization vars from B. If using .p12 instead of Keychain discovery, set `CSC_LINK` / `CSC_KEY_PASSWORD`.
-
-Unlock keychain before long builds if codesign fails with `errSecInternalComponent`:
-
-```bash
-security unlock-keychain ~/Library/Keychains/login.keychain-db
-```
-
-### E. Rebuild signed DMG
-
-```bash
-cd /Volumes/shuvbot-data/repos/shuv2code
-export PATH="$PWD/node_modules/.bin:$PATH"
-node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --signed
-```
-
-Validate:
-
-```bash
-codesign -dv --verbose=4 release/shuv2code-*.app 2>&1 | head   # if app unpacked
-spctl -a -vv -t install release/shuv2code-0.1.0-alpha.1-arm64.dmg
-xcrun stapler validate release/shuv2code-0.1.0-alpha.1-arm64.dmg
-```
-
-## Risks / open questions
-
-- **Private key locality:** Creating a new Developer ID cert without the CSR machine’s private key orphans the cert. Prefer recovering existing CI `CSC_LINK` over minting duplicates.
-- **Account / 2FA:** Portal actions may need owner approval or hardware 2FA; computer-use agent must pause for human challenge, not bypass.
-- **Passkey domains:** Without Clerk publishable key or explicit `SHUV2CODE_CLERK_PASSKEY_RP_DOMAINS`, `--signed` fails even with Developer ID installed.
-- **CI vs local:** Release publish path uses GitHub secrets; local `.env.local` is only for this machine’s rebuild. Do not write secrets into the repo or this file.
-- **Unsigned DMG** remains usable for local smoke tests; Gatekeeper will warn/block on other Macs until Developer ID + notarization succeed.
-
-## Validation
-
-Success criteria for the follow-up agent:
-
-1. `security find-identity -v -p codesigning` lists **Developer ID Application** for team `7H54B326YZ`.
-2. Provisioning profile path exists and team/app id match `dev.shuv.shuv2code`.
-3. `node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --signed` exits 0.
-4. DMG passes `spctl` / stapler validate (notarization stapled).
-5. No certs, p12, p8, or profiles committed to git (`git status` clean of secrets).
-
-## Resume prompt
-
-```
-You are a computer-use agent on the shuv2code Mac.
-
-Read /Volumes/shuvbot-data/repos/shuv2code/HANDOFF.md and execute sections A–E.
-
-Goal: install Developer ID Application for team 7H54B326YZ, obtain notarization API creds and macOS Associated Domains profile for dev.shuv.shuv2code, write gitignored env, then run:
-
-  node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64 --signed
-
-Do not commit secrets. Pause for any 2FA/owner confirmation. Prefer recovering an existing Developer ID .p12 / CI CSC_LINK over creating a new cert if one already exists on the team.
-```
+- Sqim upload succeeds under the intended account.
+- The resulting HTTPS install link works and the iPhone app launches.
+- SHark receives the install link.
+- Only then is the publish workflow dispatched with the iOS confirmation set to true.
+- npm `shuv2code@0.1.1-alpha.2`, Git tag, GitHub release, and artifacts are independently verified.

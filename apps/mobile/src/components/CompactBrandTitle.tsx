@@ -6,7 +6,7 @@ import type {
 import { Platform, View } from "react-native";
 
 import { AppText as Text } from "./AppText";
-import { Shuv2CodeWordmark } from "./Shuv2CodeWordmark";
+import { Shuv2CodeMark } from "./Shuv2CodeMark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
 import { useThemeColor } from "../lib/useThemeColor";
@@ -36,7 +36,6 @@ export function CompactBrandTitle(
     readonly nativeLeadingItem?: boolean;
   } = {},
 ) {
-  const iconColor = useThemeColor("--color-icon");
   const mutedColor = useThemeColor("--color-foreground-muted");
   const subtleColor = useThemeColor("--color-subtle");
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
@@ -55,7 +54,7 @@ export function CompactBrandTitle(
         marginLeft: titleOffset,
       }}
     >
-      <Shuv2CodeWordmark color={iconColor} height={15} />
+      <Shuv2CodeMark height={20} />
       <Text
         style={{
           color: mutedColor,
@@ -64,7 +63,7 @@ export function CompactBrandTitle(
           letterSpacing: -0.5,
         }}
       >
-        Code
+        shuv2code
       </Text>
       <View
         style={{
