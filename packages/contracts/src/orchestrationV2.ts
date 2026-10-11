@@ -2847,6 +2847,11 @@ export const OrchestrationV2Command = Schema.Union([
     admission: Schema.optional(OrchestrationDispatchAdmission),
     /** Omission preserves the existing failed-steer follow-up behavior. */
     steerFollowUpPolicy: Schema.optional(Schema.Literals(["follow_up", "none"])),
+    /**
+     * Authenticated session identity set server-side by transports that need receipt ownership
+     * (e.g. the Watch adapter). Never trusted from a client payload.
+     */
+    principal: Schema.optional(TrimmedNonEmptyString),
     notification: Schema.optional(OrchestrationV2Notification),
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
