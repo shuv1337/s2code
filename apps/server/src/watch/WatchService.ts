@@ -221,25 +221,22 @@ const make = Effect.gen(function* () {
 
   const readReceipt = Effect.fn("WatchService.getReceipt")(function* (
     input: ReceiptInput,
-    knownAction?: WatchCommandReceipt["action"],
   ): Effect.fn.Return<WatchCommandReceipt, Failure> {
     const found = yield* receipts
       .getByCommandId(input.commandId)
       .pipe(Effect.mapError(storageError));
     if (Option.isNone(found)) return yield* new WatchServiceError({ code: "thread_not_found" });
     const receipt = found.value;
-    // TODO(W1): persist watchAction beside principal/fingerprint on both accepted and rejected
-    // receipts. Submit knows the action; standalone lookup must fail closed until it is stored.
-    if (!("principal" in receipt) || receipt.principal !== input.principal)
+    if (receipt.principal !== input.principal)
       return yield* new WatchServiceError({ code: "forbidden" });
     const shell = yield* shellFor(receipt.threadId, input.restriction);
-    const action = "watchAction" in receipt ? receipt.watchAction : knownAction;
-    if (action !== "send" && action !== "queue" && action !== "steer")
-      return yield* new WatchServiceError({ code: "invalid_envelope" });
+    // Receipts without an admission action were not dispatched through the Watch surface.
+    if (receipt.admissionAction === null)
+      return yield* new WatchServiceError({ code: "thread_not_found" });
     const common = {
       commandId: receipt.commandId,
       threadId: receipt.threadId,
-      action: action as WatchCommandReceipt["action"],
+      action: receipt.admissionAction,
       observed: {
         activeRunId: shell.activeRunId,
         activity: activity(shell.activityRunStatus ?? shell.status),
@@ -374,10 +371,7 @@ const make = Effect.gen(function* () {
           },
         };
       }
-      return yield* readReceipt(
-        { commandId: envelope.commandId, principal, restriction },
-        envelope.action,
-      );
+      return yield* readReceipt({ commandId: envelope.commandId, principal, restriction });
     }),
   });
 });

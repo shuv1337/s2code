@@ -117,7 +117,7 @@ it.effect("serves compact HTTP capabilities and applies authenticated restrictio
       .thread({ headers: {}, params: { threadId: ThreadId.make("hidden") } })
       .pipe(Effect.flip);
     assert.equal(denied._tag, "WatchRequestError");
-  }).pipe(Effect.provide(httpLayer), Effect.provide(HttpServer.layerServices)),
+  }).pipe(Effect.provide(Layer.merge(httpLayer, HttpServer.layerServices))),
 );
 
 const createThread = Effect.fnUntraced(function* (name: string, project = projectId) {
@@ -332,7 +332,8 @@ it.effect(
         status: "accepted" as const,
         error: null,
         principal: "watch-session",
-        watchAction: "send",
+        admissionAction: "send" as const,
+        payloadFingerprint: null,
       };
       const serviceLayer = Layer.fresh(Watch.layer).pipe(
         Layer.provide(
