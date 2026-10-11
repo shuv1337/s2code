@@ -1,6 +1,6 @@
 # HANDOFF — T3 Watch (Apple Watch voice control)
 
-Written 2026-10-10 ~17:30 PDT by Claude (Fable 5.1) orchestrating Astra build agents. Read this, then `docs/rfcs/watch-voice-control.md`, then `AGENTS.md`.
+Written 2026-10-10 ~17:30 PDT by Claude (Fable 5.1) orchestrating Astra build agents; updated 2026-10-11 ~16:35 PDT after the live E2E smoke. Read this, then `docs/rfcs/watch-voice-control.md`, then `AGENTS.md`.
 
 > This file fights `AGENTS.md` ("do not commit plans or agent scratch files"). It is committed because the
 > owner asked for a durable handoff. Delete it before anything is proposed upstream.
@@ -12,11 +12,11 @@ Written 2026-10-10 ~17:30 PDT by Claude (Fable 5.1) orchestrating Astra build ag
 | Fork                  | `git@github.com:shuv1337/shuv2code.git` (`origin`); upstream `pingdotgg/t3code`                                                                                                                            |
 | Worktree              | `/Users/shuv/repos/shuv2code-nightly` (a linked worktree of `/Users/shuv/repos/shuv2code`; that main checkout holds the **old, rebranded** fork with uncommitted mobile-branding work — leave it alone)    |
 | Base                  | `upstream-nightly` = `fork/nightly` = `4f63275ac` = tag `v0.0.46-nightly.20261010.2948` (published 2026-10-10 14:39 PDT). Pristine upstream; **not** rebranded; package name is still `@t3tools/monorepo`. |
-| Work branch           | `feature/watch-server`, pushed, 9 commits ahead of `fork/nightly`, working tree clean                                                                                                                      |
+| Work branch           | `feature/watch-server`, pushed, 10 commits ahead of `fork/nightly`, working tree clean                                                                                                                     |
 | Tooling               | **Use `./node_modules/.bin/vp`**, not global `vp` — the global one launches an incompatible Vitest 4 here (papercut `pc_28654f08f725`). Deps are installed.                                                |
 | Plan/review artifacts | Outside the tree: `/private/var/folders/22/x85ftt9s769dkyr6b_37ys4c0000gn/T/shuvcode/t3-watch-{review-and-plan,brief}.md`                                                                                  |
 
-Upstream has **no `nightly` branch**; nightlies are tags cut from `main`. To rebase onto a newer nightly: `git fetch upstream --tags`, fast-forward `upstream-nightly` to the new tag, rebase `feature/watch-server`.
+Upstream has **no `nightly` branch**; nightlies are tags cut from `main`. To rebase onto a newer nightly: `git fetch upstream --tags`, fast-forward `upstream-nightly` to the new tag, rebase `feature/watch-server`. As of 2026-10-11 the newest is `v0.0.46-nightly.20261011.2994` (three nightlies past our base); the owner has not asked to move the baseline.
 
 ## Decisions already made (owner-confirmed via Plannotator, do not relitigate)
 
@@ -25,7 +25,7 @@ Upstream has **no `nightly` branch**; nightlies are tags cut from `main`. To reb
 - No "acknowledge tool interruption" flag. `activeSteeringInterruptsTools` is exposed in the thread DTO for the client to warn; it does not gate admission.
 - Auth fence is the **subject** `"watch-client"` (mirrors `"mcp-client"`), scopes `orchestration:read` + `orchestration:operate`. Not a new scope.
 - Receipt table gained columns via migration **061** (amended in place twice; unreleased on this branch — don't run a dev DB that already applied an earlier 061 against it).
-- A committed strict steer that fails afterwards is reported as receipt status **`failed`** (committed, not applied) — a third state next to `accepted` / `rejected`. This was the orchestrator's call, not in the plan; the owner has seen it in review but not explicitly signed off.
+- A committed strict steer that fails afterwards is reported as receipt status **`failed`** (committed, not applied) — a third state next to `accepted` / `rejected`. The owner reviewed the full branch diff in Plannotator (`review --git --base fork/nightly`, 35 files) and submitted **LGTM with zero annotations** on 2026-10-10 22:07 PDT, so treat this as accepted.
 
 ## What is built (Slice B — server boundary — complete and green)
 
@@ -70,18 +70,42 @@ Key invariants, each covered by a test:
 
 Do not run repo-wide `vp check` / `-r typecheck` / `-r test` (AGENTS.md).
 
-## Known rough edges (fix these first)
+## Live E2E smoke against a real provider (done 2026-10-11, all green)
+
+Run on this host against a dev server in this worktree (`./node_modules/.bin/vp run dev`, seeded with `vp run migrate-dev-db`), provider **Codex `gpt-6-astra`** in `approval-required` mode, project `shuv2code-nightly`. Everything below was observed over the real `/api/watch/v1` routes with a real `watch-client` session, then confirmed in the persisted V2 projection the normal client reads.
+
+| Case                                                       | Result                                                                                                                                             |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pair --watch` → `/oauth/token` exchange                   | Bearer with scopes `orchestration:read orchestration:operate`, subject `watch-client`                                                              |
+| Watch token on generic HTTP (`/api/auth/session`)          | `authenticated: false`; ordinary client token on `/api/watch/v1/*` → 401                                                                           |
+| `steer` with live `activeRunId` mid-run                    | `accepted`; Codex abandoned its file-reading loop and replied `WATCH-STEERED` **2.7 s** after the receipt; still one run, no synthesized follow-up |
+| Identical envelope replay                                  | Byte-identical original receipt                                                                                                                    |
+| Same `commandId`, different text                           | `rejected` / `command_conflict`, original receipt untouched                                                                                        |
+| `send` while busy · `steer` stale run · `notAfter` in past | `rejected` / `thread_busy` · `stale_target` · `expired` (each persisted as a rejected receipt with `principal` + fingerprint)                      |
+| Wrong `environmentId`                                      | `WatchRequestError` `environment_mismatch`                                                                                                         |
+| `--thread`-restricted grant                                | List shows only the allowed thread; GET thread, GET receipt, and POST on a hidden thread all → `forbidden` (no existence leak)                     |
+| `send` on idle thread, then `queue` while it ran           | `send` → run 2 (`WATCH-SENT…`); `queue` → `queuedCount: 1` until run 2 finished, then run 3 answered `WATCH-QUEUED`                                |
+
+**Recipe** (reproducible; helper scripts live gitignored at `apps/server/.logs/watch-e2e/{launch,dispatch}.ts` in this worktree — they open an Effect `RpcClient` over `ws://127.0.0.1:<port>/ws?orchestrationProtocol=2` with an `Authorization: Bearer` header, pattern from `apps/server/integration/NetworkTransferMeasurement.integration.ts`):
+
+1. `vp run migrate-dev-db` (dev server stopped), then `vp run dev` in the background; read `serverPort` from the `[dev-runner]` line.
+2. `node apps/server/src/bin.ts auth session issue --base-dir <worktree>/.t3 --scope orchestration:read --scope orchestration:operate --json` → ordinary client bearer for the WS helpers.
+3. `launch.ts <port> <tokenFile> <projectId>` calls `orchestration.launchThread` with an initial message. Codex `approval-required` maps to the `untrusted` policy, so approve its command requests with `dispatch.ts … '{"type":"runtime-request.respond","threadId":…,"requestId":<pendingAttention.runtimeRequest.id>,"decision":"acceptForSession"}'`.
+4. `pair --watch [--thread <id>]` → POST `/oauth/token` form fields `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token=<credential>`, `subject_token_type=urn:t3:params:oauth:token-type:environment-bootstrap`, `requested_token_type=urn:ietf:params:oauth:token-type:access_token`.
+5. `curl` the watch routes. Stop the dev server by the PIDs you tracked (the `vp` wrapper exits before its server/web children; check each port owner's cwd before killing).
+
+## Known rough edges
 
 1. **Error codes are stringly-typed in receipts** (`"admission:<code>"` parsed by `parseAdmissionRejection`). Works, tested, but a typed column would be cleaner. Low priority unless it bites.
-2. **`failed` receipt status** needs explicit owner sign-off (see Decisions).
-3. **No way to mint a watch grant from the UI.** Only `node apps/server/src/bin.ts pair --watch ...` (prints JSON with origin, credential, expiry, exchange path; exchange happens at the existing `/oauth/token`). Connections settings UI is Slice C/E work.
-4. **No end-to-end run against a real provider yet.** Everything is proven with the fake adapter. Slice C exit criterion is "a dictated steer affects the chosen running thread and is visible in the normal T3 client" — the first thing to do with real hardware/provider is: start a Claude or Codex thread (both report `supportsActiveSteering: true`), `pair --watch --thread <id>`, exchange, then `curl` a `steer` with the live `activeRunId` and watch it land.
-5. **Review was opened but not acted on.** Plannotator review of the branch diff was launched (`plannotator review --git --base fork/nightly --tailscale`); any annotations the owner leaves are in Plannotator's session store (`plannotator last` / `plannotator sessions`). Check before changing anything.
+2. **`WatchRequestError` is always HTTP 400**, including `forbidden` and `not_found` (`packages/contracts/src/environmentHttp.ts`, `httpApiStatus: 400`). The Swift client must branch on `error.code`, never on the status. Mapping `forbidden` → 403 / `not_found` → 404 is a small contract change if wanted.
+3. **`latestAssistantExcerpt` is the last _completed_ assistant message.** While a run streams, the thread DTO still shows the previous run's final text. The Watch UI must pair the excerpt with `activity`, or it will look stale.
+4. **No way to mint a watch grant from the UI.** Only `node apps/server/src/bin.ts pair --watch ...` (prints JSON with `origin`, `credential`, `expiresAt`, `exchangePath`). In dev the printed `origin` is the Vite web URL; the server port accepts the same requests directly. Connections settings UI is Slice C/E work.
+5. **Untested live:** steering while a runtime request (tool approval) is pending — the smoke approved the request immediately before steering. Claude was not exercised (the owner's threads are all Codex); its adapter reports the same `supportsActiveSteering: true` constant.
 
 ## What's next (RFC §10)
 
 - **Slice A** (hardware spike, not started): prove a native watchOS target survives `expo prebuild --clean` via a config plugin (pattern: `apps/mobile/plugins/withShareExtensionDisplayName.cjs`, local modules under `apps/mobile/modules/t3-native-controls/`); prove system dictation returns reviewable text on a paired Watch. Fork identity needs an audit: bundle IDs hard-coded in `apps/mobile/app.config.ts:74–99`, keychain group `:264`, EAS project `:496`. **Note:** `apps/mobile/src/widgets/AgentActivity.tsx:316` already ships a watchOS Smart Stack Live Activity card — the RFC missed this; reuse its identity/entitlement surface.
-- **Slice C** (voice loop): Swift package (`packages/watch-native/`) with DTOs mirroring `packages/contracts/src/watch.ts`, URLSession client, durable local envelope before first send, receipt reconciliation; SwiftUI app under `apps/watch/`. Start with watchOS 26 unless hardware says otherwise.
+- **Slice C** (voice loop): Swift package (`packages/watch-native/`) with DTOs mirroring `packages/contracts/src/watch.ts`, URLSession client, durable local envelope before first send, receipt reconciliation; SwiftUI app under `apps/watch/`. Start with watchOS 26 unless hardware says otherwise. The server half of its exit criterion ("a dictated redirect affects the chosen running thread and is visible in the normal T3 client; retrying produces no second admitted instruction") is now proven — see the E2E section. Host has Xcode 27.2 with the watchOS 27.2 SDK, a watchOS 26.5 simulator (`SHark Watch MVP`), and a paired physical iPhone (`shuvphone`).
 - **Slice D** (phone relay): WCSession bridge as a native Expo module, forwards the identical envelope with the watch credential — never the phone's session.
 - **Slice E**: Stop (`run.interrupt` with `holdQueue` — a bare interrupt is _not_ UI Stop), complications, Connections UI for watch grants, notifications.
 
@@ -95,6 +119,6 @@ Do not run repo-wide `vp check` / `-r typecheck` / `-r test` (AGENTS.md).
 
 ## Process conventions in force
 
-- Global prefs live in `/Users/shuv/AGENTS.md`: Plannotator (`--tailscale`, open locally, SHark the tailnet URL) for plan/spec/code review; `sharkctl` for pings; board key prefix `<harness>-shuvbot:`; papercuts CLI for recurring friction. Board item for this work: `claude-code-shuvbot:t3-watch:spec-review` (currently `review`).
+- Global prefs live in `/Users/shuv/AGENTS.md`: Plannotator (`--tailscale`, open locally, SHark the tailnet URL) for plan/spec/code review; `sharkctl` for pings; board key prefix `<harness>-shuvbot:`; papercuts CLI for recurring friction. Board items so far: `claude-code-shuvbot:t3-watch:spec-review` (closed) and `claude-code-shuvbot:t3-watch:e2e-smoke` (done). Plannotator's submitted decisions for this project are in `~/.plannotator/feedback/shuv2code-nightly/index.jsonl`.
 - **Never open an upstream PR.** A PR to `shuv1337/shuv2code` only when the owner explicitly asks.
 - Conventional commits; `git add` by explicit path; this worktree is shared with parallel agents, so never `git add -A`, stash, or reset other people's files.
