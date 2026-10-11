@@ -45,6 +45,7 @@ import {
 } from "./environment.ts";
 import {
   DpopFailureReason,
+  CommandId,
   AuthSessionId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -55,6 +56,15 @@ import {
   OrchestrationV2ThreadDetailSnapshot,
   OrchestrationV2ThreadHistoryPage,
 } from "./orchestrationV2.ts";
+import {
+  WatchCapabilities,
+  WatchCommandEnvelope,
+  WatchCommandErrorCode,
+  WatchCommandReceipt,
+  WatchThreadPage,
+  WatchThreadSummary,
+  WATCH_MAX_THREAD_PAGE_SIZE,
+} from "./watch.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
   PullRequestDiffInput,
@@ -640,6 +650,80 @@ class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestration")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+/** Failures before a command can produce a correlated receipt. */
+export class WatchRequestError extends Schema.TaggedError<WatchRequestError>()(
+  "WatchRequestError",
+  {
+    code: WatchCommandErrorCode,
+    message: Schema.String,
+  },
+  { httpApiStatus: 400 },
+) {
+  [HttpServerRespondable.symbol]() {
+    return HttpServerResponse.schemaJson(WatchRequestError)(this, { status: 400 });
+  }
+}
+
+export const WatchThreadListQuery = Schema.Struct({
+  cursor: Schema.optionalKey(TrimmedNonEmptyString),
+  // Omission means 20; do not bake a default into the encoded query.
+  limit: Schema.optionalKey(
+    Schema.NumberFromString.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: WATCH_MAX_THREAD_PAGE_SIZE }),
+    ),
+  ),
+});
+export type WatchThreadListQuery = typeof WatchThreadListQuery.Type;
+
+const WatchHttpErrors = [
+  WatchRequestError,
+  EnvironmentScopeRequiredError,
+  EnvironmentResourceNotFoundError,
+  EnvironmentInternalError,
+] as const;
+
+class EnvironmentWatchHttpApi extends HttpApiGroup.make("watch")
+  .add(
+    HttpApiEndpoint.get("capabilities", "/api/watch/v1/capabilities", {
+      headers: OptionalBearerHeaders,
+      success: WatchCapabilities,
+      error: WatchHttpErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("threads", "/api/watch/v1/threads", {
+      headers: OptionalBearerHeaders,
+      query: WatchThreadListQuery,
+      success: WatchThreadPage,
+      error: WatchHttpErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("thread", "/api/watch/v1/threads/:threadId", {
+      headers: OptionalBearerHeaders,
+      params: Schema.Struct({ threadId: ThreadId }),
+      success: WatchThreadSummary,
+      error: WatchHttpErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("command", "/api/watch/v1/commands", {
+      headers: OptionalBearerHeaders,
+      payload: WatchCommandEnvelope,
+      success: WatchCommandReceipt,
+      error: WatchHttpErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("commandReceipt", "/api/watch/v1/commands/:commandId", {
+      headers: OptionalBearerHeaders,
+      params: Schema.Struct({ commandId: CommandId.check(Schema.isUUID()) }),
+      success: WatchCommandReceipt,
+      error: WatchHttpErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
   .add(
     HttpApiEndpoint.get("snapshot", "/api/projects", {
@@ -763,6 +847,7 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentMcpOAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
+  .add(EnvironmentWatchHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentConnectHttpApi)
