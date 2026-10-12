@@ -179,3 +179,31 @@ index 07706139379384dae27befef4e3e5ae09d04a0db..924fa0029243664e369ce08c81e504b6
    /**
     * Whether the activity is displayed in a context with reduced luminance.
     * @platform iOS 16+
+diff --git a/plugin/src/ios/xcode/addPbxGroup.ts b/plugin/src/ios/xcode/addPbxGroup.ts
+--- a/plugin/src/ios/xcode/addPbxGroup.ts
++++ b/plugin/src/ios/xcode/addPbxGroup.ts
+@@ -16,7 +16,9 @@
+ 
+   // Add PBX group
+   const { uuid: pbxGroupUuid } = xcodeProject.addPbxGroup(
+-    Array.from(new Set([...widgetFiles, `${targetName}.entitlements`])),
++    // INFOPLIST_FILE reads the plist directly; node-xcode would reuse its bare
++    // path across extension groups, producing an invalid shared reference.
++    Array.from(new Set([...widgetFiles.filter((file) => file !== 'Info.plist'), `${targetName}.entitlements`])),
+     targetName,
+     targetName
+   );
+diff --git a/plugin/build/ios/xcode/addPbxGroup.js b/plugin/build/ios/xcode/addPbxGroup.js
+--- a/plugin/build/ios/xcode/addPbxGroup.js
++++ b/plugin/build/ios/xcode/addPbxGroup.js
+@@ -14,7 +14,9 @@
+     }
+     // Add PBX group
+     const { uuid: pbxGroupUuid } = xcodeProject.addPbxGroup(Array.from(new Set([
+-        ...widgetFiles,
++        // INFOPLIST_FILE reads the plist directly; node-xcode would reuse its bare
++        // path across extension groups, producing an invalid shared reference.
++        ...widgetFiles.filter((file)=>file !== 'Info.plist'),
+         `${targetName}.entitlements`
+     ])), targetName, targetName);
+     // Add PBXGroup to top level group

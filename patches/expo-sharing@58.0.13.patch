@@ -125,3 +125,29 @@ index 18af320420e7c01a8ffbd7fa5347320409f905d8..3a52b70a20efbc588ad5ca974c38c951
  };
  
  export type BaseResolvedSharePayload = SharePayload & {
+diff --git a/plugin/src/ios/xcode/addPbxGroup.ts b/plugin/src/ios/xcode/addPbxGroup.ts
+--- a/plugin/src/ios/xcode/addPbxGroup.ts
++++ b/plugin/src/ios/xcode/addPbxGroup.ts
+@@ -19,7 +19,8 @@
+ 
+   // Add generated files
+   targetFiles.push(`${targetName}.entitlements`);
+-  targetFiles.push(`Info.plist`);
++  // INFOPLIST_FILE reads the plist directly. A bare path here would be reused
++  // across extension groups by node-xcode, producing an invalid shared reference.
+ 
+   const sharedFiles = Object.values(shareExtensionFiles.sharedFiles ?? [])
+     .flat()
+diff --git a/plugin/build/ios/xcode/addPbxGroup.js b/plugin/build/ios/xcode/addPbxGroup.js
+--- a/plugin/build/ios/xcode/addPbxGroup.js
++++ b/plugin/build/ios/xcode/addPbxGroup.js
+@@ -29,7 +29,8 @@
+     }).flat();
+     // Add generated files
+     targetFiles.push(`${targetName}.entitlements`);
+-    targetFiles.push(`Info.plist`);
++    // INFOPLIST_FILE reads the plist directly. A bare path here would be reused
++    // across extension groups by node-xcode, producing an invalid shared reference.
+     const sharedFiles = Object.values(shareExtensionFiles.sharedFiles ?? []).flat().map((file)=>_path().default.join(sharedFilesPath, file)).map((file)=>_path().default.relative(_path().default.join(platformProjectRoot, targetName, 'shared'), file));
+     const { uuid: mainGroupUuid } = xcodeProject.addPbxGroup(targetFiles, targetName, targetName);
+     const { uuid: sharedGroupUuid } = xcodeProject.addPbxGroup(sharedFiles, 'shared', 'shared');
