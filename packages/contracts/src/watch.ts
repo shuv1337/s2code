@@ -158,6 +158,7 @@ export const WatchCommandErrorCode = Schema.Literals([
   "expired",
   "command_conflict",
   "thread_not_found",
+  "receipt_not_found",
   "thread_read_only",
   "forbidden",
   "environment_mismatch",

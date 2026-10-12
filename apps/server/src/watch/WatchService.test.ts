@@ -347,7 +347,10 @@ it.effect(
                 }),
             }),
             Layer.mock(Receipts.CommandReceiptStoreV2)({
-              getByCommandId: () => Effect.succeed(Option.some(receipt)),
+              getByCommandId: (commandId) =>
+                Effect.succeed(
+                  commandId === receipt.commandId ? Option.some(receipt) : Option.none(),
+                ),
             }),
           ),
         ),
@@ -396,6 +399,13 @@ it.effect(
           .getReceipt({ commandId: receipt.commandId, principal: "other" })
           .pipe(Effect.flip);
         assert.equal(isWatchServiceError(otherPrincipal) && otherPrincipal.code, "forbidden");
+        const missing = yield* service
+          .getReceipt({
+            commandId: CommandId.make("00000000-0000-4000-8000-000000000000"),
+            principal: "watch-session",
+          })
+          .pipe(Effect.flip);
+        assert.equal(isWatchServiceError(missing) && missing.code, "receipt_not_found");
       }).pipe(Effect.provide(serviceLayer));
     }).pipe(Effect.provide(layer), Effect.scoped),
 );

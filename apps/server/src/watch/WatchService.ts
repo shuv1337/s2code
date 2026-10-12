@@ -225,14 +225,14 @@ const make = Effect.gen(function* () {
     const found = yield* receipts
       .getByCommandId(input.commandId)
       .pipe(Effect.mapError(storageError));
-    if (Option.isNone(found)) return yield* new WatchServiceError({ code: "thread_not_found" });
+    if (Option.isNone(found)) return yield* new WatchServiceError({ code: "receipt_not_found" });
     const receipt = found.value;
     if (receipt.principal !== input.principal)
       return yield* new WatchServiceError({ code: "forbidden" });
     const shell = yield* shellFor(receipt.threadId, input.restriction);
     // Receipts without an admission action were not dispatched through the Watch surface.
     if (receipt.admissionAction === null)
-      return yield* new WatchServiceError({ code: "thread_not_found" });
+      return yield* new WatchServiceError({ code: "receipt_not_found" });
     const common = {
       commandId: receipt.commandId,
       threadId: receipt.threadId,
