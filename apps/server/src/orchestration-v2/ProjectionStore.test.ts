@@ -349,6 +349,54 @@ it.effect("memory recovery selection includes unfinished items from missing runs
   }).pipe(Effect.provide(ProjectionStore.layerMemory)),
 );
 
+const runlessNativeSubagentNeedsRecovery = Effect.gen(function* () {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const threadId = yield* addRolledBackRecoveryCandidate("runless-native-recovery");
+  const now = yield* DateTime.now;
+  const id = NodeId.make("node:runless-native-recovery");
+  assert.notInclude(yield* store.getRecoveryThreadIds("runtime"), threadId);
+  for (const status of ["pending", "running", "waiting", "completed"] as const) {
+    yield* store.apply({
+      id: EventId.make(`event:runless-native-recovery:${status}`),
+      type: "subagent.updated",
+      threadId,
+      nodeId: id,
+      driver,
+      providerInstanceId,
+      occurredAt: now,
+      payload: {
+        id,
+        threadId,
+        runId: null,
+        parentNodeId: NodeId.make("node:runless-native-parent"),
+        origin: "provider_native",
+        createdBy: "agent",
+        driver,
+        providerInstanceId,
+        providerThreadId: null,
+        childThreadId: null,
+        nativeTaskRef: { driver, nativeId: "runless-native", strength: "strong" },
+        prompt: "Do the work",
+        title: "Workflow member",
+        model: null,
+        status,
+        result: null,
+        startedAt: now,
+        completedAt: status === "completed" ? now : null,
+        updatedAt: now,
+      },
+    });
+    assert.equal(
+      (yield* store.getRecoveryThreadIds("runtime")).includes(threadId),
+      status !== "completed",
+    );
+  }
+});
+
+it.effect("memory recovery selects unfinished runless native subagents", () =>
+  runlessNativeSubagentNeedsRecovery.pipe(Effect.provide(ProjectionStore.layerMemory)),
+);
+
 // Project A holds an active thread, an archived thread and a fork of a run in
 // an archived project B thread, so a project-scoped snapshot still has to load
 // a fork source that is outside the project and archived.
@@ -501,6 +549,11 @@ it.effect("memory shell snapshots scope to one project", () =>
 );
 
 it.layer(layerTest)("ProjectionStoreV2", (it) => {
+  it.effect(
+    "SQL recovery selects unfinished runless native subagents",
+    () => runlessNativeSubagentNeedsRecovery,
+  );
+
   it.effect(
     "keeps restart-cancelled work through a stale run.updated",
     () => restartCancelledWorkSurvivesStaleRunUpdate,
@@ -2520,6 +2573,8 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       const now = yield* DateTime.now;
       const settledThreadId = ThreadId.make("thread:recovery-candidates:settled");
       const runningThreadId = ThreadId.make("thread:recovery-candidates:running");
+      const memberThreadId = ThreadId.make("thread:recovery-candidates:member");
+      const childThreadId = ThreadId.make("thread:recovery-candidates:child");
       const rolledBackThreadId = yield* addRolledBackRecoveryCandidate("recovery-candidates");
       const orphanedThreadId = yield* addOrphanedRecoveryCandidate("recovery-candidates");
       const projectId = ProjectId.make("project:recovery-candidates");
@@ -2551,7 +2606,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         deletedAt: null,
       });
 
-      for (const threadId of [settledThreadId, runningThreadId]) {
+      for (const threadId of [settledThreadId, runningThreadId, memberThreadId, childThreadId]) {
         yield* projectionStore.apply({
           id: EventId.make(`event:recovery-candidates:${threadId}:created`),
           type: "thread.created",
@@ -2591,11 +2646,118 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         },
       });
 
+      const memberId = NodeId.make("node:recovery-candidates:member");
+      const childRootNodeId = NodeId.make("node:recovery-candidates:child-root");
+      const nativeTaskRef = { driver, nativeId: "workflow:agent:1", strength: "strong" as const };
+      const memberNode = {
+        id: memberId,
+        threadId: memberThreadId,
+        runId: null,
+        parentNodeId: NodeId.make("node:recovery-candidates:coordinator-root"),
+        rootNodeId: NodeId.make("node:recovery-candidates:coordinator-root"),
+        kind: "subagent" as const,
+        status: "running" as const,
+        countsForRun: false,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: nativeTaskRef,
+        runtimeRequestId: null,
+        checkpointScopeId: null,
+        startedAt: now,
+        completedAt: null,
+      };
+      yield* projectionStore.apply({
+        id: EventId.make("event:recovery-candidates:member"),
+        type: "subagent.updated",
+        threadId: memberThreadId,
+        nodeId: memberId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: memberId,
+          threadId: memberThreadId,
+          runId: null,
+          parentNodeId: memberNode.parentNodeId,
+          origin: "provider_native",
+          createdBy: "agent",
+          driver,
+          providerInstanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef,
+          prompt: "Do the work",
+          title: "Member",
+          model: null,
+          status: "running",
+          result: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        },
+      });
+      for (const [threadId, node] of [
+        [memberThreadId, memberNode],
+        [
+          childThreadId,
+          {
+            ...memberNode,
+            id: childRootNodeId,
+            threadId: childThreadId,
+            parentNodeId: null,
+            rootNodeId: childRootNodeId,
+            kind: "root_turn" as const,
+          },
+        ],
+      ] as const) {
+        yield* projectionStore.apply({
+          id: EventId.make(`event:recovery-candidates:node:${node.id}`),
+          type: "node.updated",
+          threadId,
+          nodeId: node.id,
+          driver,
+          occurredAt: now,
+          payload: node,
+        });
+      }
+
       const recoveryThreadIds = yield* projectionStore.getRecoveryThreadIds("runtime");
       assert.include(recoveryThreadIds, runningThreadId);
       assert.include(recoveryThreadIds, orphanedThreadId);
+      assert.include(recoveryThreadIds, memberThreadId);
+      assert.include(recoveryThreadIds, childThreadId);
       assert.notInclude(recoveryThreadIds, settledThreadId);
       assert.notInclude(recoveryThreadIds, rolledBackThreadId);
+      const memberRecovery = yield* projectionStore.getRuntimeRecoveryProjection(memberThreadId);
+      const childRecovery = yield* projectionStore.getRuntimeRecoveryProjection(childThreadId);
+      assert.deepEqual(
+        memberRecovery.subagents.map((subagent) => subagent.id),
+        [memberId],
+      );
+      assert.deepEqual(
+        memberRecovery.nodes.map((node) => node.id),
+        [memberId],
+      );
+      assert.deepEqual(
+        childRecovery.nodes.map((node) => node.id),
+        [childRootNodeId],
+      );
+      yield* projectionStore.apply({
+        id: EventId.make("event:recovery-candidates:member-cancelled"),
+        type: "subagent.updated",
+        threadId: memberThreadId,
+        nodeId: memberId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...memberRecovery.subagents[0]!,
+          status: "cancelled",
+          completedAt: now,
+          updatedAt: now,
+        },
+      });
+      assert.include(yield* projectionStore.getRecoveryThreadIds("runtime"), childThreadId);
     }),
   );
 
@@ -3091,6 +3253,180 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         (yield* projectionStore.getThreadProjection(secondThreadId)).providerSessions,
         1,
       );
+    }),
+  );
+
+  it.effect("looks up a thread's last provider error through its own session bindings", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      const later = DateTime.add(now, { minutes: 1 });
+      const projectId = ProjectId.make("project:projection-session-error-lookup");
+      const attachErroredSession = Effect.fnUntraced(function* (
+        name: string,
+        lastError: string,
+        updatedAt: DateTime.Utc,
+      ) {
+        const threadId = ThreadId.make(`thread:projection-session-error-lookup:${name}`);
+        yield* projectionStore.apply({
+          id: EventId.make(`event:projection-session-error-lookup:${name}:thread`),
+          type: "thread.created",
+          threadId,
+          occurredAt: now,
+          payload: {
+            createdBy: "user",
+            creationSource: "web",
+            id: threadId,
+            projectId,
+            title: name,
+            providerInstanceId,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            activeProviderThreadId: null,
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+        });
+        yield* projectionStore.apply({
+          id: EventId.make(`event:projection-session-error-lookup:${name}:session`),
+          type: "provider-session.attached",
+          threadId,
+          driver,
+          providerInstanceId,
+          occurredAt: updatedAt,
+          payload: {
+            id: ProviderSessionId.make(`provider-session:projection-session-error-lookup:${name}`),
+            driver,
+            providerInstanceId,
+            status: "error",
+            cwd: "/workspace",
+            model: modelSelection.model,
+            capabilities: CodexProviderCapabilitiesV2,
+            createdAt: updatedAt,
+            updatedAt,
+            lastError,
+          },
+        });
+        return threadId;
+      });
+
+      const failure = {
+        class: "usage_limit" as const,
+        message: "Plan limit reached.",
+        resetAt: "2099-01-01T00:00:00.000Z",
+        code: "usageLimitExceeded",
+        retryable: null,
+      };
+      const threadId = yield* attachErroredSession("own", failure.message, now);
+      // The own session repeats the root turn's limit, so the thread stays a
+      // recovery candidate only while the lookup reads that session.
+      const runId = RunId.make("run:projection-session-error-lookup:own");
+      const rootNodeId = NodeId.make("node:projection-session-error-lookup:own");
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-session-error-lookup:own:run"),
+        type: "run.created",
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: runId,
+          threadId,
+          ordinal: 1,
+          providerInstanceId,
+          modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make("message:projection-session-error-lookup:own"),
+          rootNodeId,
+          activeAttemptId: null,
+          status: "failed",
+          requestedAt: now,
+          startedAt: now,
+          completedAt: now,
+          checkpointId: null,
+          contextHandoffId: null,
+        },
+      });
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-session-error-lookup:own:error"),
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          id: TurnItemId.make("projection-session-error-lookup:own:error"),
+          threadId,
+          runId,
+          nodeId: rootNodeId,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "failed",
+          title: "Usage limit reached",
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          type: "error",
+          failure,
+        },
+      });
+      // Every thread on the provider instance has its own session, and these
+      // are newer. They must neither leak into the thread nor be walked for it.
+      for (let index = 0; index < 24; index++) {
+        yield* attachErroredSession(`other-${index}`, "other session failed", later);
+      }
+
+      const { statements, tracer } = traceSqlStatements();
+      const shell = yield* projectionStore.getShellSnapshot().pipe(Effect.withTracer(tracer));
+      assert.equal(
+        shell.threads.find((thread) => thread.id === threadId)?.lastError,
+        failure.message,
+      );
+      const candidates = yield* projectionStore
+        .getLimitRecoveryCandidates({ now, autoResume: true, snooze: false })
+        .pipe(Effect.withTracer(tracer));
+      // Another thread's newer error would replace the limit and drop the candidate.
+      const candidate = candidates.find((row) => row.id === threadId);
+      assert.isDefined(candidate);
+      assert.include(candidate, {
+        status: "failed",
+        lastErrorClass: "usage_limit",
+        usageLimitResetAt: failure.resetAt,
+        latestRunId: runId,
+      });
+
+      // One provider instance usually holds most sessions. Driving the lookup
+      // from sessions walks all of them for every thread in the snapshot.
+      for (const marker of ["AS blocking_failure_payload_json", "AS failure_payload_json"]) {
+        const statement = statements.find((query) => query.includes(marker));
+        assert.isDefined(statement, marker);
+        const plan = (yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${statement}`,
+        )).map((row) => row.detail);
+        const bindingLookup = plan.findIndex((detail) => detail.startsWith("SEARCH binding "));
+        const sessionLookup = plan.findIndex((detail) => detail.startsWith("SEARCH session "));
+        assert.isAtLeast(bindingLookup, 0, marker);
+        assert.include(
+          plan[bindingLookup],
+          "orchestration_v2_projection_provider_session_bindings_thread_idx (thread_id=?)",
+        );
+        assert.isAbove(sessionLookup, bindingLookup, marker);
+        assert.include(plan[sessionLookup], "(provider_session_id=?)");
+      }
     }),
   );
 

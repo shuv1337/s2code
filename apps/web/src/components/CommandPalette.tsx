@@ -99,6 +99,11 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import {
+  composerPromptLink,
+  copyPromptLink,
+  promptLinkRepositoryOf,
+} from "./promptLinks/copyPromptLink";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { useCustomThemes } from "../hooks/useCustomThemes";
@@ -211,7 +216,11 @@ import {
   CommandPaletteMetaDot,
   ThreadCommandSubtitle,
 } from "./ThreadCommandSubtitle";
-import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
+import {
+  ThreadRowLeadingStatus,
+  ThreadRowTrailingStatus,
+  ThreadSearchPullRequestNumber,
+} from "./ThreadStatusIndicators";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 import {
   applyProviderInstanceSettings,
@@ -637,6 +646,10 @@ function OpenCommandPaletteDialog(props: {
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
+  const paletteRouteTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -721,9 +734,12 @@ function OpenCommandPaletteDialog(props: {
         (environment.environmentId === primaryEnvironmentId ? providers : []);
       const derived = deriveProviderInstanceEntries(environmentProviders);
       // Settings fill the ACP registry identity (agent id, icon URL) the
-      // derived entries alone do not carry.
+      // derived entries alone do not carry. This map is keyed by environment,
+      // not project, because it backs thread rows across every project on
+      // that environment; `enabled` stays machine-scoped (`null`) since no
+      // single project applies.
       const entries = serverConfig
-        ? applyProviderInstanceSettings(derived, serverConfig.settings)
+        ? applyProviderInstanceSettings(derived, serverConfig.settings, null)
         : derived;
       for (const entry of entries) {
         map.set(`${environment.environmentId}:${entry.instanceId}`, entry);
@@ -1323,7 +1339,16 @@ function OpenCommandPaletteDialog(props: {
         sortOrder: clientSettings.sidebarThreadSortOrder,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+        renderTrailingContent: (thread) => (
+          <>
+            <ThreadSearchPullRequestNumber
+              thread={thread}
+              query={threadSearchQuery}
+              settled={thread.settledOverride === "settled"}
+            />
+            <ThreadRowTrailingStatus thread={thread} />
+          </>
+        ),
         renderDescription: (thread, { projectTitle }) => {
           const modelInstanceId =
             thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
@@ -1383,6 +1408,7 @@ function OpenCommandPaletteDialog(props: {
       providerEntryByEnvironmentAndInstanceId,
       threadContentMatchByKey,
       threadSearch.query,
+      threadSearchQuery,
       threads,
     ],
   );
@@ -1842,6 +1868,56 @@ function OpenCommandPaletteDialog(props: {
         requestThreadFindOpen();
       },
     });
+  }
+
+  // Read once per open: the palette is a snapshot of the composer, not a live view of it.
+  const promptLinkTarget = paletteRouteTarget
+    ? paletteRouteTarget.kind === "server"
+      ? paletteRouteTarget.threadRef
+      : paletteRouteTarget.draftId
+    : null;
+  const promptLinkProjectRef = activeThread ?? activeDraftThread;
+  const promptLinkInput =
+    promptLinkTarget === null
+      ? null
+      : {
+          target: promptLinkTarget,
+          project: projects.find(
+            (project) =>
+              project.environmentId === promptLinkProjectRef?.environmentId &&
+              project.id === promptLinkProjectRef.projectId,
+          ),
+          providers:
+            environments.find(
+              (environment) => environment.environmentId === promptLinkProjectRef?.environmentId,
+            )?.serverConfig?.providers ?? [],
+          threadModelSelection: activeThread?.modelSelection ?? null,
+        };
+  const plainPromptLink = promptLinkInput
+    ? composerPromptLink({ ...promptLinkInput, withContext: false })
+    : null;
+  if (promptLinkInput !== null && plainPromptLink !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:copy-prompt-link",
+      searchTerms: ["copy", "share", "prompt", "link"],
+      title: "Copy prompt link",
+      icon: <LinkIcon className={ITEM_ICON_CLASS} />,
+      run: () => copyPromptLink(plainPromptLink),
+    });
+    if (promptLinkRepositoryOf(promptLinkInput.project) !== null) {
+      const contextLink = composerPromptLink({ ...promptLinkInput, withContext: true });
+      if (contextLink !== null) {
+        actionItems.push({
+          kind: "action",
+          value: "action:copy-prompt-link-with-context",
+          searchTerms: ["copy", "share", "prompt", "link", "repository", "model"],
+          title: "Copy prompt link with repo and model",
+          icon: <LinkIcon className={ITEM_ICON_CLASS} />,
+          run: () => copyPromptLink(contextLink),
+        });
+      }
+    }
   }
 
   if (activeThreadReferenceCopyTarget !== null) {
