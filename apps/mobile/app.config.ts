@@ -109,10 +109,24 @@ function resolveAppVariant(value: string | undefined): AppVariant {
   }
 }
 
+// A fork signing with its own paid team cannot use upstream's App IDs. These
+// override just the identity; every derived ID (widgets, app group, watch)
+// follows, and the default build stays upstream's.
+const forkBundleIdentifier = repoEnv.T3CODE_IOS_BUNDLE_IDENTIFIER?.trim();
+if (forkBundleIdentifier && !IOS_BUNDLE_IDENTIFIER_PATTERN.test(forkBundleIdentifier)) {
+  throw new Error(
+    "T3CODE_IOS_BUNDLE_IDENTIFIER must be a reverse-DNS identifier such as com.example.t3code.",
+  );
+}
+const appleTeamId = repoEnv.T3CODE_IOS_TEAM_ID?.trim() || "ARK85ZXQ4Z";
+
 const variant = VARIANT_CONFIG[APP_VARIANT];
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
-  : variant.iosBundleIdentifier;
+  : forkBundleIdentifier
+    ? forkBundleIdentifier +
+      variant.iosBundleIdentifier.slice(VARIANT_CONFIG.production.iosBundleIdentifier.length)
+    : variant.iosBundleIdentifier;
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
@@ -255,13 +269,13 @@ const config: ExpoConfig = {
     // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
     // does not fall back to a personal team (which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
+    appleTeamId,
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
     ],
     entitlements: {
-      "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
       UISupportedInterfaceOrientations: [

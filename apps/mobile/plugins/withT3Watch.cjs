@@ -128,6 +128,8 @@ function buildSettings(opts, mainSwiftVersion, { assetCatalogRoot, debug }) {
     CURRENT_PROJECT_VERSION: q(opts.buildNumber),
     ENABLE_PREVIEWS: "YES",
     GENERATE_INFOPLIST_FILE: "YES",
+    // Merged with the generated keys; carries what INFOPLIST_KEY_* cannot express.
+    INFOPLIST_FILE: q(`${opts.targetName}/Info.plist`),
     INFOPLIST_KEY_CFBundleDisplayName: q(opts.displayName),
     INFOPLIST_KEY_UISupportedInterfaceOrientations: q(
       "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown",
@@ -584,16 +586,33 @@ function withWatchXcodeProject(config, opts) {
   });
 }
 
-function withWatchEntitlements(config, opts) {
-  if (!opts.groupIdentifier) return config;
+function withWatchTargetFiles(config, opts) {
   return withDangerousMod(config, [
     "ios",
     (cfg) => {
       const dir = path.join(cfg.modRequest.platformProjectRoot, opts.targetName);
       fs.mkdirSync(dir, { recursive: true });
+      // Users point the Watch at `npx t3` servers on their LAN over plain
+      // HTTP, the same reason the iPhone app allows arbitrary loads.
       fs.writeFileSync(
-        path.join(dir, `${opts.targetName}.entitlements`),
+        path.join(dir, "Info.plist"),
         `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+  </dict>
+</dict>
+</plist>
+`,
+      );
+      if (opts.groupIdentifier) {
+        fs.writeFileSync(
+          path.join(dir, `${opts.targetName}.entitlements`),
+          `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -604,7 +623,8 @@ function withWatchEntitlements(config, opts) {
 </dict>
 </plist>
 `,
-      );
+        );
+      }
       return cfg;
     },
   ]);
@@ -642,5 +662,5 @@ function withWatchEasConfig(config, opts) {
 
 module.exports = function withT3Watch(config, options = {}) {
   const opts = resolveOptions(config, options);
-  return withWatchXcodeProject(withWatchEntitlements(withWatchEasConfig(config, opts), opts), opts);
+  return withWatchXcodeProject(withWatchTargetFiles(withWatchEasConfig(config, opts), opts), opts);
 };
