@@ -10,7 +10,7 @@ struct T3WatchApp: App {
     WindowGroup {
       RootView()
         .environment(model)
-        .task(id: scenePhase) {
+        .task(id: "\(scenePhase)-\(model.accounts.selectedId ?? "unpaired")") {
           if scenePhase == .active { await model.reconcile() }
         }
     }
@@ -41,6 +41,7 @@ struct RootView: View {
             }
           }
       }
+      .id(model.accounts.selectedId)
     } else {
       NavigationStack { SetupView() }
     }

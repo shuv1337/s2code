@@ -42,6 +42,12 @@ struct SetupView: View {
     } header: {
       Text("Environment URL")
     }
+    Section("Connection") {
+      Picker("Route", selection: Bindable(model).pairingMode) {
+        ForEach(WatchConnectionMode.allCases, id: \.self) { mode in Text(mode.label).tag(mode) }
+      }
+      Text("Use iPhone for servers reached through your phone’s Tailscale connection.").font(.caption2)
+    }
     if let message = error ?? outcomeMessage ?? model.startupError {
       Text(message).font(.footnote).foregroundStyle(.red)
     }
@@ -94,7 +100,7 @@ struct SetupView: View {
       .font(.caption2).foregroundStyle(.secondary)
     } footer: {
       VStack(alignment: .leading, spacing: 2) {
-        Text("Approve on your Mac:")
+        Text("Approve on your server:")
         Text("t3 pair --watch --approve \(pending.userCode)").font(.caption2.monospaced())
       }
     }

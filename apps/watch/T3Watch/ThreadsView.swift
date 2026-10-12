@@ -101,6 +101,7 @@ struct ThreadsView: View {
   @Environment(AppModel.self) private var app
   @Environment(\.scenePhase) private var scenePhase
   @State private var model = ThreadsModel()
+  @State private var showsEnvironments = false
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: freshnessTick)) { context in
@@ -128,11 +129,14 @@ struct ThreadsView: View {
           }
         }
         Section {
-          Button("Unpair", role: .destructive) { app.unpair() }
+          Button { showsEnvironments = true } label: {
+            Label(app.environmentLabel, systemImage: "server.rack")
+          }
         }
       }
     }
     .navigationTitle("Threads")
+    .sheet(isPresented: $showsEnvironments) { NavigationStack { EnvironmentsView() } }
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button {

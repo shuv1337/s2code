@@ -17,7 +17,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { withDangerousMod, withXcodeProject } = require("expo/config-plugins");
+const { withAppDelegate, withDangerousMod, withXcodeProject } = require("expo/config-plugins");
 
 const EMBED_PHASE_NAME = "Embed Watch Content";
 
@@ -350,6 +350,34 @@ function applyWatchTarget(project, opts, { projectName, platformProjectRoot, pro
     );
     packageProductDependencies.push(ref(productDependencyUuid, opts.packageProduct));
     frameworkBuildFiles.push(ref(buildFileUuid, `${opts.packageProduct} in Frameworks`));
+    // The iPhone owns the native relay, independent of the React lifecycle.
+    const phoneProduct = id("phone-package-product");
+    const phoneBuild = id("build:phone-package-product");
+    put(
+      objects,
+      "XCSwiftPackageProductDependency",
+      phoneProduct,
+      { package: packageUuid, productName: q(opts.packageProduct) },
+      opts.packageProduct,
+    );
+    put(
+      objects,
+      "PBXBuildFile",
+      phoneBuild,
+      { productRef: phoneProduct, productRef_comment: opts.packageProduct },
+      `${opts.packageProduct} in Frameworks`,
+    );
+    mainTarget.packageProductDependencies ??= [];
+    if (!mainTarget.packageProductDependencies.some((p) => p.value === phoneProduct)) {
+      mainTarget.packageProductDependencies.push(ref(phoneProduct, opts.packageProduct));
+    }
+    const phoneFrameworks = mainTarget.buildPhases
+      .map((p) => lookup(objects, p.value))
+      .find((p) => p?.isa === "PBXFrameworksBuildPhase");
+    if (!phoneFrameworks) throw new Error("withT3Watch: iOS Frameworks phase missing.");
+    if (!phoneFrameworks.files.some((p) => p.value === phoneBuild)) {
+      phoneFrameworks.files.push(ref(phoneBuild, `${opts.packageProduct} in Frameworks`));
+    }
   }
 
   // Build phases.
@@ -664,5 +692,22 @@ function withWatchEasConfig(config, opts) {
 
 module.exports = function withT3Watch(config, options = {}) {
   const opts = resolveOptions(config, options);
+  config = withAppDelegate(config, (cfg) => {
+    if (cfg.modResults.language !== "swift")
+      throw new Error("withT3Watch requires Swift AppDelegate.");
+    let source = cfg.modResults.contents;
+    if (!source.includes("import T3WatchKit")) source = `import T3WatchKit\n${source}`;
+    if (!source.includes("WatchPhoneHost.activate()")) {
+      const marker =
+        "    return super.application(application, didFinishLaunchingWithOptions: launchOptions)";
+      if (!source.includes(marker)) throw new Error("withT3Watch: launch hook not found.");
+      source = source.replace(
+        marker,
+        "    if #available(iOS 18.0, *) { WatchPhoneHost.activate() }\n" + marker,
+      );
+    }
+    cfg.modResults.contents = source;
+    return cfg;
+  });
   return withWatchXcodeProject(withWatchTargetFiles(withWatchEasConfig(config, opts), opts), opts);
 };

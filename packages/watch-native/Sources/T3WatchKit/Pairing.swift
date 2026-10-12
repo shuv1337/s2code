@@ -206,6 +206,7 @@ public actor PairingStore {
 public struct PairingRunner: Sendable {
   public var store: PairingStore?
   public var urlSession: URLSession
+  public var transport: (any WatchHTTPTransport)?
   public var clientLabel: String
   public var clock: @Sendable () -> Date
   public var sleep: @Sendable (TimeInterval) async throws -> Void
@@ -213,6 +214,7 @@ public struct PairingRunner: Sendable {
   public init(
     store: PairingStore?,
     urlSession: URLSession = .shared,
+    transport: (any WatchHTTPTransport)? = nil,
     clientLabel: String = "T3 Watch",
     clock: @escaping @Sendable () -> Date = { Date() },
     sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
@@ -221,6 +223,7 @@ public struct PairingRunner: Sendable {
   ) {
     self.store = store
     self.urlSession = urlSession
+    self.transport = transport
     self.clientLabel = clientLabel
     self.clock = clock
     self.sleep = sleep
@@ -248,7 +251,7 @@ public struct PairingRunner: Sendable {
         do throws(WatchClientError) {
           event = .started(
             try await WatchClient.startPairing(
-              origin: origin, clientLabel: clientLabel, session: urlSession))
+              origin: origin, clientLabel: clientLabel, session: urlSession, transport: transport))
         } catch {
           event = .startFailed(error)
         }
@@ -270,7 +273,7 @@ public struct PairingRunner: Sendable {
         do throws(WatchClientError) {
           event = .polled(
             try await WatchClient.pollPairing(
-              origin: origin, deviceCode: deviceCode, session: urlSession))
+              origin: origin, deviceCode: deviceCode, session: urlSession, transport: transport))
         } catch {
           event = .pollFailed(error)
         }

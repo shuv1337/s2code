@@ -12,8 +12,9 @@ const native = vi.hoisted(() => ({
   decode: vi.fn<() => Promise<{ text: string }>>(),
   create: vi.fn<() => Promise<unknown>>(),
 }));
-vi.mock("sherpa-onnx-node", () => ({
-  default: { OfflineRecognizer: { createAsync: native.create } },
+vi.mock("./NativeSpeech.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./NativeSpeech.ts")>()),
+  loadSherpa: () => ({ OfflineRecognizer: { createAsync: native.create } }),
 }));
 beforeEach(() => {
   native.decode.mockReset().mockResolvedValue({ text: "Run the tests." });

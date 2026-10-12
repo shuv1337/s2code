@@ -7,7 +7,7 @@ import Testing
 @Suite(.serialized) struct ClientTests {
   let base = URL(string: "https://shuvbot.example.ts.net:13773/")!
   let credentials = InMemoryCredentialStore(
-    WatchCredentials(origin: URL(string: "https://shuvbot.example.ts.net:13773")!, accessToken: "secret-token"))
+    WatchCredentials(origin: URL(string: "https://shuvbot.example.ts.net:13773")!, accessToken: "secret-token", environmentId: Fixtures.environmentId))
 
   var client: WatchClient {
     WatchClient(baseURL: base, credentials: credentials, session: StubURLProtocol.session())

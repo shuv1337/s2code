@@ -112,9 +112,11 @@ struct ThreadView: View {
     }
     .task(id: PollTrigger(phase: scenePhase, commits: app.commitEpochs[thread.threadId] ?? 0)) {
       await model.restore(cache: app.cache)
-      guard scenePhase == .active, let client = app.client else { return }
+      guard scenePhase == .active, let client = app.client, client.environmentId == thread.environmentId else { return }
       model.invalidate()
-      await model.poll(client: client, store: app.store, cache: app.cache) { app.handle($0) }
+      await model.poll(client: client, store: app.store, cache: app.cache) { error in
+        if app.client?.environmentId == thread.environmentId { app.handle(error) }
+      }
     }
   }
 
@@ -180,17 +182,20 @@ struct ThreadView: View {
   }
 
   private func refreshNow() async {
-    guard let client = app.client else { return }
+    guard let client = app.client, client.environmentId == thread.environmentId else { return }
     model.invalidate()
     if let error = await model.refresh(client: client, store: app.store, cache: app.cache) {
-      app.handle(error)
+      if app.client?.environmentId == thread.environmentId { app.handle(error) }
     }
   }
 
   private func openParent() async {
-    guard let client = app.client, let parentId = thread.parentThreadId else { return }
+    guard let client = app.client, client.environmentId == thread.environmentId,
+      let parentId = thread.parentThreadId else { return }
     do {
-      app.path.append(.thread(try await client.thread(id: parentId), fetchedAt: Date()))
+      let parent = try await client.thread(id: parentId)
+      guard app.client?.environmentId == thread.environmentId else { return }
+      app.path.append(.thread(parent, fetchedAt: Date()))
     } catch {
       parentError = error.localizedDescription
     }

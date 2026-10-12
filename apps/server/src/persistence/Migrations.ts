@@ -74,8 +74,10 @@ import Migration0057 from "./Migrations/057_ScheduledTaskWebhooks.ts";
 import Migration0058 from "./Migrations/058_WebhookRelayDeliveries.ts";
 import Migration0059 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
-import Migration0061 from "./Migrations/061_CommandReceiptIdentity.ts";
-import Migration0062 from "./Migrations/062_WatchPairingRequests.ts";
+import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
+import Migration0062 from "./Migrations/062_CommandReceiptIdentity.ts";
+import Migration0063 from "./Migrations/063_WatchPairingRequests.ts";
+import { reconcileWatchPreviewMigration } from "./reconcileWatchPreviewMigration.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -150,8 +152,9 @@ export const migrationEntries = [
   [58, "WebhookRelayDeliveries", Migration0058],
   [59, "McpAppModelContext", Migration0059],
   [60, "ThreadSnapshotWindowIndexes", Migration0060],
-  [61, "CommandReceiptIdentity", Migration0061],
-  [62, "WatchPairingRequests", Migration0062],
+  [61, "PullRequestReviewGuides", Migration0061],
+  [62, "CommandReceiptIdentity", Migration0062],
+  [63, "WatchPairingRequests", Migration0063],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -192,8 +195,13 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     toMigrationInclusive === undefined || toMigrationInclusive >= 55
       ? yield* reconcileV2PreviewMigration()
       : [];
+  const watchPreviewMigrations =
+    toMigrationInclusive === undefined || toMigrationInclusive >= 63
+      ? yield* reconcileWatchPreviewMigration()
+      : [];
   const executedMigrations = [
     ...previewMigrations,
+    ...watchPreviewMigrations,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);

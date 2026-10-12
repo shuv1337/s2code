@@ -101,7 +101,8 @@ struct ReceiptView: View {
     .navigationTitle("Receipt")
     .sensoryFeedback(.success, trigger: model.acceptedTrigger) { _, accepted in accepted }
     .onChange(of: model.committed) { _, committed in
-      if committed, let threadId = model.submission?.envelope.threadId {
+      if committed, model.submission?.envelope.environmentId == app.client?.environmentId,
+        let threadId = model.submission?.envelope.threadId {
         app.noteCommitted(threadId: threadId)
       }
     }
@@ -189,12 +190,14 @@ struct ReceiptView: View {
   }
 
   private func editAsNew(_ submission: Submission) async {
-    guard let client = app.client else { return }
+    guard let client = app.client, client.environmentId == submission.envelope.environmentId else { return }
     do {
       let thread = try await client.thread(id: submission.envelope.threadId)
+      guard app.client?.environmentId == submission.envelope.environmentId else { return }
       var draft = WatchDraft(thread: thread, text: submission.envelope.text)
       draft.action = nil
       try await app.store?.saveDraft(draft)
+      guard app.client?.environmentId == submission.envelope.environmentId else { return }
       if !app.path.isEmpty { app.path.removeLast() }
       app.path.append(.compose(thread))
     } catch {

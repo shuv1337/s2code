@@ -458,6 +458,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("installs optional native dependencies for the target desktop architecture", () => {
     assert.deepStrictEqual(STAGE_INSTALL_ARGS, ["install", "--prod"]);
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "x64" }), {
+      sideEffectsCache: false,
       supportedArchitectures: {
         os: ["darwin"],
         cpu: ["x64"],
@@ -465,6 +466,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "linux", arch: "x64" }), {
+      sideEffectsCache: false,
       supportedArchitectures: {
         os: ["linux"],
         cpu: ["x64"],
@@ -475,6 +477,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     // Windows stages only win32 natives; WSL runs the separately built Linux
     // CLI archive rather than anything installed here.
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "x64" }), {
+      sideEffectsCache: false,
       supportedArchitectures: {
         os: ["win32"],
         cpu: ["x64"],
@@ -482,6 +485,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "arm64" }), {
+      sideEffectsCache: false,
       supportedArchitectures: {
         os: ["win32"],
         cpu: ["arm64"],
@@ -489,6 +493,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       packageExtensions: stagePackageExtensions,
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "universal" }), {
+      sideEffectsCache: false,
       supportedArchitectures: {
         os: ["darwin"],
         cpu: ["arm64", "x64"],
@@ -515,6 +520,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         },
       }),
       {
+        sideEffectsCache: false,
         supportedArchitectures: {
           os: ["linux"],
           cpu: ["x64"],
@@ -547,6 +553,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         overrides: {},
       }),
       {
+        sideEffectsCache: false,
         supportedArchitectures: {
           os: ["darwin"],
           cpu: ["arm64"],

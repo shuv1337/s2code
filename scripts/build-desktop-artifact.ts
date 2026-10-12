@@ -71,6 +71,7 @@ const WorkspaceConfig = Schema.Struct({
 type WorkspaceConfig = typeof WorkspaceConfig.Type;
 
 const StageWorkspaceConfig = Schema.Struct({
+  sideEffectsCache: Schema.Boolean,
   supportedArchitectures: Schema.Struct({
     os: Schema.Array(Schema.String),
     cpu: Schema.Array(Schema.String),
@@ -1626,6 +1627,9 @@ export function createStageWorkspaceConfig(input: {
         };
 
   return {
+    // Install-script outputs can depend on the archive target rather than the host.
+    // In particular, cached ffmpeg-static output can otherwise cross platform boundaries.
+    sideEffectsCache: false,
     supportedArchitectures,
     ...(allowBuilds && Object.keys(allowBuilds).length > 0 ? { allowBuilds } : {}),
     ...(patchedDependencies && Object.keys(patchedDependencies).length > 0
@@ -3151,6 +3155,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: serverStageDir,
+      extendEnv: true,
       env: { npm_config_platform: "win32", npm_config_arch: input.arch },
       shell: installCommand.shell,
     }),
@@ -3921,6 +3926,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,
+      extendEnv: true,
       env: {
         npm_config_platform:
           options.platform === "mac" ? "darwin" : options.platform === "win" ? "win32" : "linux",

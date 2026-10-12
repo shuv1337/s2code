@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Observation
 import T3WatchKit
 
@@ -21,21 +22,29 @@ final class AppModel {
   /// Per thread, bumped whenever one of its receipts commits, so the visible thread refetches.
   private(set) var commitEpochs: [String: Int] = [:]
   var path: [Route] = []
-  let pins = PinStore()
+  private(set) var accounts = WatchEnvironmentAccounts()
+  private(set) var pins = PinStore()
+  var pairingMode: WatchConnectionMode = WatchConnectionMode(rawValue: UserDefaults.standard.string(forKey: "T3Watch.pairingMode") ?? "") ?? .automatic {
+    didSet { UserDefaults.standard.set(pairingMode.rawValue, forKey: "T3Watch.pairingMode") }
+  }
+  var addingEnvironment = false
+  var environmentLabel: String { accounts.selected?.label ?? "Environment" }
+  private var generation = 0
 
   let store: SubmissionStore?
-  let cache: SnapshotCache?
+  private(set) var cache: SnapshotCache?
   private let pairingStore: PairingStore?
-  private let credentialStore: any CredentialStore
+  private let accountStore: any EnvironmentAccountStore
   private var pairingTask: Task<Void, Never>?
   private var pairingRun = 0
 
-  init(credentialStore: any CredentialStore = KeychainCredentialStore()) {
-    self.credentialStore = credentialStore
+  init(credentialStore: any CredentialStore = KeychainCredentialStore(),
+    accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
+    self.accountStore = accountStore
+    WatchConnectivityBridge.shared.activate()
     do {
       let directory = try WatchStorage.directory()
       store = try SubmissionStore(directory: directory)
-      cache = try? SnapshotCache(directory: directory)
       pairingStore = try? PairingStore(directory: directory)
     } catch {
       store = nil
@@ -43,7 +52,10 @@ final class AppModel {
       pairingStore = nil
       startupError = "Local storage unavailable: \(error.localizedDescription)"
     }
-    if let saved = try? credentialStore.load() { configure(saved) }
+    do {
+      accounts = try loadEnvironmentAccounts(from: accountStore, migrating: credentialStore)
+      if let selected = accounts.selected { configure(selected) }
+    } catch { startupError = "Could not load paired environments: \(error.localizedDescription)" }
   }
 
   var isPaired: Bool { client != nil }
@@ -54,7 +66,7 @@ final class AppModel {
     guard credential.trimmingCharacters(in: .whitespaces).hasPrefix("watch.") else {
       throw SetupError.invalidCredential
     }
-    try await complete(origin: url, credential: credential)
+    try await complete(origin: url, credential: credential, mode: pairingMode, runId: pairingRun)
   }
 
   /// Device-code pairing: shows a code to approve on the environment, then exchanges the
@@ -66,7 +78,7 @@ final class AppModel {
 
   /// Resumes polling a code persisted before the app was suspended or killed.
   func resumeDevicePairing() async {
-    guard !isPaired, !pairing.isActive, let pending = await pairingStore?.pending else { return }
+    guard (!isPaired || addingEnvironment), !pairing.isActive, let pending = await pairingStore?.pending else { return }
     run(PairingSession(resuming: pending))
   }
 
@@ -77,22 +89,63 @@ final class AppModel {
     pairing = .idle
   }
 
+  func selectEnvironment(_ id: String) throws {
+    var next = accounts
+    next.select(id)
+    try accountStore.save(next)
+    cancelDevicePairing()
+    accounts = next
+    if let selected = next.selected { configure(selected) }
+  }
+
+  func setConnectionMode(_ mode: WatchConnectionMode) throws {
+    guard var selected = accounts.selected else { return }
+    selected.mode = mode
+    var next = accounts
+    next.upsert(selected)
+    try accountStore.save(next)
+    accounts = next
+    configure(selected)
+  }
+
   func unpair() {
-    try? credentialStore.clear()
-    Task { [cache] in try? await cache?.clear() }
+    var next = accounts
+    if let id = next.selectedId { next.remove(id) }
+    do { try accountStore.save(next) } catch {
+      startupError = "Could not remove environment: \(error.localizedDescription)"
+      return
+    }
+    cancelDevicePairing()
+    accounts = next
+    generation += 1
     credentials = nil
     client = nil
     coordinator = nil
     capabilities = nil
+    cache = nil
     authError = nil
-    pairing = .idle
     path = []
+    if let selected = next.selected { configure(selected) }
   }
 
   /// Called on launch and resume: unresolved submissions survive suspension and app kills.
   func reconcile() async {
     guard let client else { return }
-    if capabilities == nil { capabilities = try? await client.capabilities() }
+    let current = generation
+    let coordinator = coordinator
+    if capabilities == nil {
+      let fetched = try? await client.capabilities()
+      guard current == generation else { return }
+      capabilities = fetched
+      if let fetched, var selected = accounts.selected, selected.credentials.environmentId == nil {
+        selected.credentials.environmentId = fetched.environmentId
+        var next = accounts
+        next.upsert(selected)
+        do { try accountStore.save(next); accounts = next; configure(selected) }
+        catch { startupError = error.localizedDescription }
+        return
+      }
+    }
     await coordinator?.reconcileAll()
     try? await store?.prune(olderThan: 7 * 24 * 3600)
   }
@@ -113,14 +166,15 @@ final class AppModel {
     pairingRun += 1
     let runId = pairingRun
     pairing = session.state
-    let runner = PairingRunner(store: pairingStore)
+    let mode = pairingMode
+    let runner = PairingRunner(store: pairingStore, transport: WatchConnectivityBridge.shared.transport(mode: mode))
     pairingTask = Task { [weak self] in
       await previous?.value
       _ = await runner.run(
         session,
         exchange: { [weak self] origin, credential in
           guard let self else { throw CancellationError() }
-          try await self.complete(origin: origin, credential: credential)
+          try await self.complete(origin: origin, credential: credential, mode: mode, runId: runId)
         },
         update: { [weak self] state in await self?.setPairing(state, runId: runId) })
       self?.finishPairing(runId: runId)
@@ -139,16 +193,25 @@ final class AppModel {
 
   /// Exchange, capabilities probe, then Keychain save. The credential is single-use, so a failure
   /// after the exchange means pairing again.
-  private func complete(origin url: URL, credential: String) async throws {
-    var credentials = try await WatchClient.exchange(origin: url, credential: credential)
-    let probe = WatchClient(baseURL: url, credentials: InMemoryCredentialStore(credentials))
+  private func complete(origin url: URL, credential: String, mode: WatchConnectionMode, runId: Int) async throws {
+    let transport = WatchConnectivityBridge.shared.transport(mode: mode)
+    var credentials = try await WatchClient.exchange(origin: url, credential: credential, transport: transport)
+    let probe = WatchClient(baseURL: url, credentials: InMemoryCredentialStore(credentials), transport: transport)
     let capabilities = try await probe.capabilities()
+    try Task.checkCancellation()
+    guard runId == pairingRun else { throw CancellationError() }
     credentials.environmentId = capabilities.environmentId
-    try credentialStore.save(credentials)
-    try? await cache?.clear()
-    configure(credentials)
+    var next = accounts
+    let label: String
+    if case .waitingForApproval(let pending, _) = pairing { label = pending.environment.label }
+    else { label = url.host() ?? "Environment" }
+    let account = WatchEnvironmentAccount(credentials: credentials, label: label, mode: mode)
+    next.upsert(account)
+    try accountStore.save(next)
+    accounts = next
+    configure(account)
     self.capabilities = capabilities
-    authError = nil
+    addingEnvironment = false
   }
 
   private func parseOrigin(_ origin: String) throws -> URL {
@@ -159,11 +222,21 @@ final class AppModel {
     return url
   }
 
-  private func configure(_ credentials: WatchCredentials) {
-    self.credentials = credentials
-    let client = WatchClient(baseURL: credentials.origin, credentials: credentialStore)
+  private func configure(_ account: WatchEnvironmentAccount) {
+    generation += 1
+    self.credentials = account.credentials
+    let client = WatchClient(baseURL: account.credentials.origin,
+      credentials: InMemoryCredentialStore(account.credentials),
+      transport: WatchConnectivityBridge.shared.transport(mode: account.mode))
     self.client = client
     coordinator = store.map { SubmissionCoordinator(store: $0, client: client) }
+    let partition = SHA256.hash(data: Data(account.id.utf8)).map { String(format: "%02x", $0) }.joined()
+    cache = try? SnapshotCache(directory: WatchStorage.directory(), fileName: "snapshots-\(partition).json")
+    pins = PinStore(environment: partition)
+    capabilities = nil
+    authError = nil
+    commitEpochs = [:]
+    path = []
   }
 }
 
@@ -181,17 +254,23 @@ enum SetupError: LocalizedError {
 /// Local navigation preference only; never an authorization rule. Order is the pin order.
 @MainActor @Observable
 final class PinStore {
-  private static let key = "T3Watch.pinnedThreadIds"
+  private let key: String
   private(set) var ids: [String]
 
-  init() {
-    ids = UserDefaults.standard.stringArray(forKey: Self.key) ?? []
+  init(environment: String = "unpaired") {
+    key = "T3Watch.pinnedThreadIds.\(environment)"
+    if let scoped = UserDefaults.standard.stringArray(forKey: key) { ids = scoped }
+    else if environment != "unpaired", let legacy = UserDefaults.standard.stringArray(forKey: "T3Watch.pinnedThreadIds") {
+      ids = legacy
+      UserDefaults.standard.set(legacy, forKey: key)
+      UserDefaults.standard.removeObject(forKey: "T3Watch.pinnedThreadIds")
+    } else { ids = [] }
   }
 
   func contains(_ id: String) -> Bool { ids.contains(id) }
 
   func toggle(_ id: String) {
     if let index = ids.firstIndex(of: id) { ids.remove(at: index) } else { ids.append(id) }
-    UserDefaults.standard.set(ids, forKey: Self.key)
+    UserDefaults.standard.set(ids, forKey: key)
   }
 }

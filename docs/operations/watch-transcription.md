@@ -12,7 +12,8 @@ of the sherpa-onnx model maintainer's Hugging Face repository and are checked
 against fixed SHA-256 hashes. Once cached, transcription works without internet
 access. An interrupted download can be retried; completed files are reused.
 
-Audio stays on the server. The server accepts AAC recordings up to two minutes and
+Audio is sent only to the selected server, directly or through the paired iPhone.
+The server accepts AAC recordings up to two minutes and
 1 MiB, decodes them using the bundled FFmpeg, and removes temporary audio when the
 request finishes. A transcript is returned to the Watch for review; transcription
 alone never sends or steers a thread. One recording is processed at a time, with

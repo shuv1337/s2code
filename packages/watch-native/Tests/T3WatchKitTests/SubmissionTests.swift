@@ -177,7 +177,7 @@ import Testing
     draft.action = .queue
     try await SubmissionStore(directory: dir).saveDraft(draft)
     let reopened = try SubmissionStore(directory: dir)
-    #expect(await reopened.draft(threadId: Fixtures.threadId) == draft)
+    #expect(await reopened.draft(environmentId: Fixtures.environmentId, threadId: Fixtures.threadId) == draft)
   }
 
   @Test func pruneKeepsUnresolved() async throws {

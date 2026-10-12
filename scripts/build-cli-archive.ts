@@ -57,6 +57,7 @@ const WorkspaceConfig = Schema.Struct({
 const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig));
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const StageWorkspaceConfig = Schema.Struct({
+  sideEffectsCache: Schema.Boolean,
   supportedArchitectures: Schema.Struct({
     os: Schema.Array(Schema.String),
     cpu: Schema.Array(Schema.String),
@@ -212,6 +213,7 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
   yield* runCommand(
     ChildProcess.make(install.command, install.args, {
       cwd: input.stageDir,
+      extendEnv: true,
       // Binary downloaders must use the archive target, not the build host.
       env: {
         npm_config_platform:
@@ -555,7 +557,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     // file as a file. macOS's bsdtar has no such flag; pnpm clones there.
     yield* runCommand(
       ChildProcess.make("tar", [
-        ...(input.platform === "linux" ? ["--hard-dereference"] : []),
+        ...(hostPlatform === "linux" ? ["--hard-dereference"] : []),
         "-czf",
         archivePath,
         "-C",

@@ -9,6 +9,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type { OfflineRecognizer } from "sherpa-onnx-node";
+import { loadFfmpeg, loadSherpa } from "./NativeSpeech.ts";
 import * as LocalSpeechModel from "./LocalSpeechModel.ts";
 
 export class TranscriptionError extends Schema.TaggedError<TranscriptionError>()(
@@ -63,8 +64,7 @@ const make = Effect.gen(function* () {
       return yield* new TranscriptionError({ code: "invalid_audio" });
     }
     const work = Effect.gen(function* () {
-      const ffmpeg = yield* Effect.tryPromise(() => import("ffmpeg-static")).pipe(
-        Effect.map((module) => module.default),
+      const ffmpeg = yield* Effect.try(loadFfmpeg).pipe(
         Effect.mapError(
           (cause) => new TranscriptionError({ code: "transcription_unavailable", cause }),
         ),
@@ -129,7 +129,7 @@ const make = Effect.gen(function* () {
           ),
         );
         recognizer = yield* Effect.tryPromise(async () => {
-          const { default: sherpa } = await import("sherpa-onnx-node");
+          const sherpa = loadSherpa();
           return sherpa.OfflineRecognizer.createAsync({
             featConfig: { sampleRate: 16000, featureDim: 80 },
             modelConfig: {

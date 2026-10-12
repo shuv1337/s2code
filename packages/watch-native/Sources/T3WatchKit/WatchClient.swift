@@ -53,20 +53,26 @@ public struct WatchClient: Sendable {
   public let baseURL: URL
   public let credentials: any CredentialStore
   public let session: URLSession
+  public let transport: any WatchHTTPTransport
   public let timeout: TimeInterval
 
   public init(
     baseURL: URL, credentials: any CredentialStore, session: URLSession = .shared,
-    timeout: TimeInterval = 15
+    timeout: TimeInterval = 15, transport: (any WatchHTTPTransport)? = nil
   ) {
     self.baseURL = baseURL
     self.credentials = credentials
     self.session = session
     self.timeout = timeout
+    self.transport = transport ?? DirectWatchTransport(session: session)
   }
 
+  public var environmentId: String? { (try? credentials.load())?.environmentId }
+
   public func capabilities() async throws(WatchClientError) -> WatchCapabilities {
-    try await get(["api", "watch", "v1", "capabilities"])
+    let result: WatchCapabilities = try await get(["api", "watch", "v1", "capabilities"])
+    try validateEnvironment(result.environmentId)
+    return result
   }
 
   public func threads(cursor: String? = nil, limit: Int? = nil) async throws(WatchClientError)
@@ -75,17 +81,22 @@ public struct WatchClient: Sendable {
     var query: [(String, String)] = []
     if let cursor { query.append(("cursor", cursor)) }
     if let limit { query.append(("limit", String(min(max(limit, 1), WatchLimits.maxThreadPageSize)))) }
-    return try await get(["api", "watch", "v1", "threads"], query: query)
+    let page: WatchThreadPage = try await get(["api", "watch", "v1", "threads"], query: query)
+    for thread in page.items { try validateEnvironment(thread.environmentId) }
+    return page
   }
 
   public func thread(id threadId: String) async throws(WatchClientError) -> WatchThreadSummary {
-    try await get(["api", "watch", "v1", "threads", threadId])
+    let thread: WatchThreadSummary = try await get(["api", "watch", "v1", "threads", threadId])
+    try validateEnvironment(thread.environmentId)
+    return thread
   }
 
   /// A `rejected` receipt is a successful response, not a thrown error.
   public func submit(_ envelope: WatchCommandEnvelope) async throws(WatchClientError)
     -> WatchCommandReceipt
   {
+    try validateEnvironment(envelope.environmentId)
     let body: Data
     do { body = try envelope.encodedBody() } catch { throw .decoding("envelope encoding failed") }
     var request = try authorizedRequest(url: url(["api", "watch", "v1", "commands"]))
@@ -132,7 +143,7 @@ public struct WatchClient: Sendable {
     clientLabel: String? = "Apple Watch",
     deviceType: String = "mobile",
     session: URLSession = .shared,
-    now: Date = Date()
+    now: Date = Date(), transport: (any WatchHTTPTransport)? = nil
   ) async throws(WatchClientError) -> WatchCredentials {
     var fields: [(String, String)] = [
       ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
@@ -149,7 +160,7 @@ public struct WatchClient: Sendable {
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.httpBody = Data(
       fields.map { "\(encodeComponent($0.0))=\(encodeComponent($0.1))" }.joined(separator: "&").utf8)
-    let token: WatchTokenResponse = try await perform(request, session: session)
+    let token: WatchTokenResponse = try await perform(request, transport: transport ?? DirectWatchTransport(session: session))
     guard token.tokenType.caseInsensitiveCompare("Bearer") == .orderedSame else {
       throw .decoding("unsupported token_type \(token.tokenType)")
     }
@@ -163,7 +174,8 @@ public struct WatchClient: Sendable {
 
   /// Starts device-code pairing. Unauthenticated; the user approves `userCode` on the environment.
   public static func startPairing(
-    origin: URL, clientLabel: String = "T3 Watch", session: URLSession = .shared
+    origin: URL, clientLabel: String = "T3 Watch", session: URLSession = .shared,
+    transport: (any WatchHTTPTransport)? = nil
   ) async throws(WatchClientError) -> WatchPairingStart {
     struct Body: Encodable {
       var protocolVersion = WatchLimits.protocolVersion
@@ -171,13 +183,14 @@ public struct WatchClient: Sendable {
     }
     return try await postJSON(
       origin: origin, segments: ["api", "watch", "v1", "pairing", "start"],
-      body: Body(clientLabel: clientLabel), session: session)
+      body: Body(clientLabel: clientLabel), session: session, transport: transport)
   }
 
   /// Polls a device code. Unauthenticated; `approved` carries a `watch.…` bootstrap credential for
   /// `exchange(origin:credential:)`.
   public static func pollPairing(
-    origin: URL, deviceCode: String, session: URLSession = .shared
+    origin: URL, deviceCode: String, session: URLSession = .shared,
+    transport: (any WatchHTTPTransport)? = nil
   ) async throws(WatchClientError) -> WatchPairingPoll {
     struct Body: Encodable {
       var protocolVersion = WatchLimits.protocolVersion
@@ -185,13 +198,14 @@ public struct WatchClient: Sendable {
     }
     return try await postJSON(
       origin: origin, segments: ["api", "watch", "v1", "pairing", "token"],
-      body: Body(deviceCode: deviceCode), session: session)
+      body: Body(deviceCode: deviceCode), session: session, transport: transport)
   }
 
   // MARK: - Plumbing
 
   private static func postJSON<Body: Encodable, T: Decodable>(
-    origin: URL, segments: [String], body: Body, session: URLSession
+    origin: URL, segments: [String], body: Body, session: URLSession,
+    transport: (any WatchHTTPTransport)?
   ) async throws(WatchClientError) -> T {
     var request = URLRequest(url: buildURL(base: origin, segments: segments, query: []))
     request.httpMethod = "POST"
@@ -202,7 +216,7 @@ public struct WatchClient: Sendable {
     do { request.httpBody = try JSONEncoder.watch.encode(body) } catch {
       throw .decoding("request encoding failed")
     }
-    return try await perform(request, session: session)
+    return try await perform(request, transport: transport ?? DirectWatchTransport(session: session))
   }
 
   private func get<T: Decodable>(_ segments: [String], query: [(String, String)] = [])
@@ -219,7 +233,10 @@ public struct WatchClient: Sendable {
   private func authorizedRequest(url: URL) throws(WatchClientError) -> URLRequest {
     let stored: WatchCredentials?
     do { stored = try credentials.load() } catch { throw .notConfigured }
-    guard let token = stored?.accessToken else { throw .notConfigured }
+    guard let stored,
+      stored.origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        == baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { throw .notConfigured }
+    let token = stored.accessToken
     var request = URLRequest(url: url)
     request.timeoutInterval = timeout
     request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -228,23 +245,32 @@ public struct WatchClient: Sendable {
     return request
   }
 
-  private func send<T: Decodable>(_ request: URLRequest) async throws(WatchClientError) -> T {
-    try await Self.perform(request, session: session)
+  private func validateEnvironment(_ actual: String) throws(WatchClientError) {
+    if let expected = environmentId, actual != expected {
+      throw .request(code: .environmentMismatch, message: "This instruction belongs to another environment.")
+    }
   }
 
-  private static func perform<T: Decodable>(_ request: URLRequest, session: URLSession)
+  private func send<T: Decodable>(_ request: URLRequest) async throws(WatchClientError) -> T {
+    try await Self.perform(request, transport: transport)
+  }
+
+  private static func perform<T: Decodable>(_ request: URLRequest, transport: any WatchHTTPTransport)
     async throws(WatchClientError) -> T
   {
     let data: Data
-    let response: URLResponse
+    let response: WatchHTTPResponse
     do {
-      (data, response) = try await session.data(for: request)
+      response = try await transport.send(request)
+      data = response.body
+    } catch let error as WatchClientError {
+      throw error
     } catch let error as URLError {
       throw .transport(code: error.code.rawValue, description: error.localizedDescription)
     } catch {
       throw .transport(code: URLError.unknown.rawValue, description: error.localizedDescription)
     }
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    let status = response.status
     guard (200..<300).contains(status) else { throw decodeError(status: status, body: data) }
     do {
       return try JSONDecoder.watch.decode(T.self, from: data)

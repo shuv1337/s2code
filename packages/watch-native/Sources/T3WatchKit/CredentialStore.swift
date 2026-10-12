@@ -71,6 +71,10 @@ public struct KeychainCredentialStore: CredentialStore {
   }
 
   public func load() throws -> WatchCredentials? {
+    try loadData().map { try JSONDecoder.watch.decode(WatchCredentials.self, from: $0) }
+  }
+
+  func loadData() throws -> Data? {
     var query = baseQuery
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -80,11 +84,14 @@ public struct KeychainCredentialStore: CredentialStore {
     guard status == errSecSuccess, let data = result as? Data else {
       throw KeychainError(status: status)
     }
-    return try JSONDecoder.watch.decode(WatchCredentials.self, from: data)
+    return data
   }
 
   public func save(_ credentials: WatchCredentials) throws {
-    let data = try JSONEncoder.watch.encode(credentials)
+    try saveData(JSONEncoder.watch.encode(credentials))
+  }
+
+  func saveData(_ data: Data) throws {
     let update: [String: Any] = [
       kSecValueData as String: data,
       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,

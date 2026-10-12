@@ -13,6 +13,7 @@ public enum SubmissionStoreError: Error, Hashable, Sendable {
   /// An earlier command for this thread is still unresolved; resolve it before sending a new one.
   case unresolvedSubmission(commandId: String)
   case unknownSubmission(commandId: String)
+  case wrongEnvironment
 }
 
 /// File-backed JSON store for drafts and submissions. Every mutation is written atomically before
@@ -78,18 +79,18 @@ public actor SubmissionStore {
     try persist()
   }
 
-  public func draft(threadId: String) -> WatchDraft? {
-    snapshot.drafts.first { $0.target.threadId == threadId }
+  public func draft(environmentId: String, threadId: String) -> WatchDraft? {
+    snapshot.drafts.first { $0.target.environmentId == environmentId && $0.target.threadId == threadId }
   }
 
   public func saveDraft(_ draft: WatchDraft) throws {
-    snapshot.drafts.removeAll { $0.target.threadId == draft.target.threadId }
+    snapshot.drafts.removeAll { $0.target.environmentId == draft.target.environmentId && $0.target.threadId == draft.target.threadId }
     snapshot.drafts.append(draft)
     try persist()
   }
 
-  public func discardDraft(threadId: String) throws {
-    snapshot.drafts.removeAll { $0.target.threadId == threadId }
+  public func discardDraft(environmentId: String, threadId: String) throws {
+    snapshot.drafts.removeAll { $0.target.environmentId == environmentId && $0.target.threadId == threadId }
     try persist()
   }
 
@@ -117,6 +118,7 @@ public actor SubmissionCoordinator {
   public func submit(_ envelope: WatchCommandEnvelope, labels: WatchThreadLabels) async throws
     -> Submission
   {
+    guard client.environmentId == envelope.environmentId else { throw SubmissionStoreError.wrongEnvironment }
     let submission = Submission(envelope: envelope, labels: labels, now: clock())
     try await store.insert(submission)
     return try await drive(id: submission.id)
@@ -139,6 +141,9 @@ public actor SubmissionCoordinator {
   private func advance(id: String, maxSteps: Int) async throws -> Submission {
     guard var submission = await store.submission(id: id) else {
       throw SubmissionStoreError.unknownSubmission(commandId: id)
+    }
+    guard client.environmentId == submission.envelope.environmentId else {
+      throw SubmissionStoreError.wrongEnvironment
     }
     for _ in 0..<maxSteps {
       let event: Submission.Event
@@ -176,7 +181,7 @@ public actor SubmissionCoordinator {
 
   /// Re-drives every unresolved submission, e.g. on launch or resume.
   public func reconcileAll() async {
-    for submission in await store.submissions where !submission.isResolved {
+    for submission in await store.submissions where !submission.isResolved && submission.envelope.environmentId == client.environmentId {
       _ = try? await drive(id: submission.id)
     }
   }

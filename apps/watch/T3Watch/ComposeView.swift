@@ -16,7 +16,7 @@ final class ComposeModel {
 
   /// Restores a saved draft for the same thread, then checks it against the current snapshot.
   func restore(from store: SubmissionStore?, current: WatchThreadSummary) async {
-    guard let saved = await store?.draft(threadId: current.threadId) else { return }
+    guard let saved = await store?.draft(environmentId: current.environmentId, threadId: current.threadId) else { return }
     draft = saved
     apply(try? saved.revalidate(against: current))
   }
@@ -28,7 +28,7 @@ final class ComposeModel {
 
   func discard(from store: SubmissionStore?) async {
     isClosed = true
-    try? await store?.discardDraft(threadId: draft.target.threadId)
+    try? await store?.discardDraft(environmentId: draft.target.environmentId, threadId: draft.target.threadId)
   }
 
   /// Re-fetches the thread, refuses to send if the run or provider moved, then persists the
@@ -193,7 +193,7 @@ struct ComposeView: View {
           recorder.discard()
           model = ComposeModel(thread: thread)
           transcriptionError = nil
-          Task { try? await app.store?.discardDraft(threadId: thread.threadId) }
+          Task { try? await app.store?.discardDraft(environmentId: thread.environmentId, threadId: thread.threadId) }
         }.disabled(isTranscribing || model.isSubmitting)
       }
     }
@@ -226,7 +226,8 @@ struct ComposeView: View {
   }
 
   private func transcribe() async {
-    guard !isTranscribing, let url = recorder.fileURL, let client = app.client else { return }
+    guard !isTranscribing, let url = recorder.fileURL, let client = app.client,
+      client.environmentId == thread.environmentId else { return }
     isTranscribing = true
     transcriptionError = nil
     defer { isTranscribing = false }
@@ -241,13 +242,15 @@ struct ComposeView: View {
     } catch {
       guard !Task.isCancelled else { return }
       transcriptionError = error.localizedDescription
-      app.handle(error)
+      if app.client?.environmentId == thread.environmentId { app.handle(error) }
     }
   }
 
   private func submit() async {
-    guard let client = app.client, let store = app.store else { return }
+    guard let client = app.client, let store = app.store,
+      client.environmentId == thread.environmentId else { return }
     guard let commandId = await model.finalize(client: client, store: store) else { return }
+    guard app.client?.environmentId == thread.environmentId else { return }
     if model.isClosed { model = ComposeModel(thread: thread) }
     app.path.append(.receipt(commandId: commandId))
   }

@@ -647,6 +647,80 @@
         "licenseId": "MIT",
         "copyrights": ["Copyright (c) 2019-present Fabio Spampinato, Andrew Maney"]
       }
+    },
+    {
+      "name": "sherpa-onnx-node",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "sherpa-onnx-darwin-arm64",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "sherpa-onnx-darwin-x64",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "sherpa-onnx-linux-arm64",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "sherpa-onnx-linux-x64",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "sherpa-onnx-win-x64",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "sherpa-onnx-win-arm64",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+      "generatedNotice": {
+        "licenseId": "Apache-2.0"
+      }
+    },
+    {
+      "name": "https-proxy-agent",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/TooTallNate/proxy-agents/tree/main/packages/https-proxy-agent",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>"]
+      }
+    },
+    {
+      "name": "agent-base",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/TooTallNate/proxy-agents/tree/main/packages/agent-base",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>"]
+      }
     }
   ]
 }
