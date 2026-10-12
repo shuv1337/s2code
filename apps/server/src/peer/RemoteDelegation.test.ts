@@ -91,7 +91,9 @@ interface BoxThread {
   /** The first message the thread there was launched with. */
   readonly message: Ref.Ref<string | null>;
   readonly status: Ref.Ref<OrchestrationV2Run["status"]>;
-  readonly reply: Ref.Ref<string>;
+  readonly reply: Ref.Ref<string | null>;
+  readonly error: Ref.Ref<string | null>;
+  readonly laterError: Ref.Ref<string | null>;
   /** A later run's reply, after the task's own, as a follow-up message would leave. */
   readonly laterReply: Ref.Ref<string | null>;
   /** The run each wait asked for, in order. */
@@ -122,7 +124,9 @@ const makeBoxThread = Effect.gen(function* () {
     launchedWith: yield* Ref.make<LaunchedWith | null>(null),
     message: yield* Ref.make<string | null>(null),
     status: yield* Ref.make<OrchestrationV2Run["status"]>("running"),
-    reply: yield* Ref.make("Working…"),
+    reply: yield* Ref.make<string | null>("Working…"),
+    error: yield* Ref.make<string | null>(null),
+    laterError: yield* Ref.make<string | null>(null),
     laterReply: yield* Ref.make<string | null>(null),
     waitedFor: yield* Ref.make<ReadonlyArray<RunId | undefined>>([]),
     gone: yield* Ref.make(false),
@@ -260,19 +264,55 @@ const boxToolkitLayer = (thread: BoxThread) => {
         }
         const reply = yield* Ref.get(thread.reply);
         const later = yield* Ref.get(thread.laterReply);
-        // One assistant message per page, so a read has to page to find the task's.
+        const error = yield* Ref.get(thread.error);
+        const laterError = yield* Ref.get(thread.laterError);
+        // One item per page, with errors available only in the activity view.
         const replies = [
-          { id: TurnItemId.make("item:reply"), runId, text: reply },
+          ...(reply === null
+            ? []
+            : [
+                {
+                  id: TurnItemId.make("item:reply"),
+                  runId,
+                  text: reply,
+                  type: "assistant_message",
+                },
+              ]),
+          ...(error === null
+            ? []
+            : [{ id: TurnItemId.make("item:error"), runId, text: error, type: "error" }]),
           ...(later === null
             ? []
-            : [{ id: TurnItemId.make("item:later-reply"), runId: boxLaterRunId, text: later }]),
+            : [
+                {
+                  id: TurnItemId.make("item:later-reply"),
+                  runId: boxLaterRunId,
+                  text: later,
+                  type: "assistant_message",
+                },
+              ]),
+          ...(laterError === null
+            ? []
+            : [
+                {
+                  id: TurnItemId.make("item:later-error"),
+                  runId: boxLaterRunId,
+                  text: laterError,
+                  type: "error",
+                },
+              ]),
         ].map((entry, position) => ({ ...entry, position }));
-        const matching =
+        const visible =
           options.itemId === undefined
-            ? replies.filter((entry) => entry.position > (options.afterPosition ?? -1)).slice(0, 1)
+            ? replies.filter(
+                (entry) => options.view === "activity" || entry.type === "assistant_message",
+              )
             : replies.filter((entry) => entry.id === options.itemId);
+        const matching = visible
+          .filter((entry) => entry.position > (options.afterPosition ?? -1))
+          .slice(0, 1);
         return {
-          items: matching.map(({ id, runId: itemRunId, text, position }) => ({
+          items: matching.map(({ id, runId: itemRunId, text, position, type }) => ({
             position,
             visibility: "local" as const,
             sourceThreadId: threadId,
@@ -292,17 +332,21 @@ const boxToolkitLayer = (thread: BoxThread) => {
               startedAt: DateTime.makeUnsafe(0),
               completedAt: DateTime.makeUnsafe(0),
               updatedAt: DateTime.makeUnsafe(0),
-              type: "assistant_message" as const,
-              messageId: MessageId.make(`message:${id}`),
-              text,
-              streaming: false,
+              ...(type === "error"
+                ? { type, failure: { message: text } }
+                : {
+                    type: "assistant_message" as const,
+                    messageId: MessageId.make(`message:${id}`),
+                    text,
+                    streaming: false,
+                  }),
             } as never,
           })),
           totalItems: replies.length,
           hasMore:
             options.itemId === undefined &&
             matching.length > 0 &&
-            matching.at(-1)!.position < replies.length - 1,
+            visible.some((entry) => entry.position > matching.at(-1)!.position),
         };
       }),
     interruptThread: (input) =>
@@ -942,6 +986,103 @@ it.effect("the same key from another provider session is another task", () =>
       expect(second.taskId).not.toBe(first.taskId);
       expect(second.remoteChild.threadId).not.toBe(first.remoteChild.threadId);
       expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toHaveLength(2);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect.each([null, "Working before the provider failed."])(
+  "reports the failed remote run's error instead of its earlier reply (%s)",
+  (reply) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const thread = yield* makeBoxThread;
+        const b = yield* serveBox(thread);
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+        const a = yield* makeLaptop(database, offers);
+        yield* linkTo(a.links, b, "full-access");
+        yield* seedParent(a);
+        const delegated = yield* delegateToBox(a);
+        yield* Ref.set(thread.reply, reply);
+        const error = "Provider failed: authentication expired on the destination.";
+        yield* Ref.set(thread.error, error);
+        yield* Ref.set(thread.status, "failed");
+        yield* Deferred.succeed(thread.finished, undefined);
+        expect(yield* taskResult(a, delegated.taskId)).toMatchObject({
+          status: "failed",
+          result: error,
+        });
+        const status = yield* a.call("task_status", { taskId: delegated.taskId });
+        expect(status.structuredContent).toMatchObject({
+          status: "failed",
+          summary: error,
+          latestTerminalSummary: error,
+        });
+        const offered = yield* SubscriptionRef.changes(offers).pipe(
+          Stream.filter((seen) => seen.some((offer) => offer.threadId === parentThreadId)),
+          Stream.runHead,
+        );
+        expect(Option.isSome(offered)).toBe(true);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect.each([false, true])(
+  "ignores later-run errors and reads the failed run's full error (ownError=%s)",
+  (ownError) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const thread = yield* makeBoxThread;
+        const b = yield* serveBox(thread);
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+        const a = yield* makeLaptop(database, offers);
+        yield* linkTo(a.links, b, "full-access");
+        yield* seedParent(a);
+        const delegated = yield* delegateToBox(a);
+        yield* Ref.set(thread.reply, null);
+        const error = `Provider failed: ${"detail ".repeat(10_000)}end of error.`;
+        if (ownError) yield* Ref.set(thread.error, error);
+        yield* Ref.set(thread.laterReply, "A later user run answered.");
+        yield* Ref.set(thread.laterError, "Another run's provider error.");
+        yield* Ref.set(thread.status, "failed");
+        yield* Deferred.succeed(thread.finished, undefined);
+        expect(yield* taskResult(a, delegated.taskId)).toMatchObject({
+          status: "failed",
+          result: ownError
+            ? error
+            : "(The thread in the linked environment ended without a reply.)",
+        });
+        expect(yield* Ref.get(thread.waitedFor)).toEqual([boxRunId]);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("keeps a successful remote reply despite an error item in the run's activity", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+      const delegated = yield* delegateToBox(a);
+      yield* Ref.set(thread.reply, "Recovered and completed the task.");
+      yield* Ref.set(thread.error, "A recoverable tool error.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      expect(yield* taskResult(a, delegated.taskId)).toMatchObject({
+        status: "completed",
+        result: "Recovered and completed the task.",
+      });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
