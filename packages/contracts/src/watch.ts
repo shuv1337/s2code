@@ -5,8 +5,10 @@ import {
   EnvironmentId,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   RunId,
   ThreadId,
+  TrimmedString,
 } from "./baseSchemas.ts";
 import { OrchestrationV2ThreadShell } from "./orchestrationV2.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
@@ -165,6 +167,8 @@ export const WatchCommandErrorCode = Schema.Literals([
   "provider_mismatch",
   "invalid_envelope",
   "text_too_long",
+  "pairing_rate_limited",
+  "pairing_not_found",
 ]);
 export type WatchCommandErrorCode = typeof WatchCommandErrorCode.Type;
 
@@ -217,3 +221,48 @@ export const WatchCommandReceipt = Schema.Union([
   }),
 ]);
 export type WatchCommandReceipt = typeof WatchCommandReceipt.Type;
+
+export const WATCH_PAIRING_CLIENT_LABEL_MAX_LENGTH = 64;
+export const WATCH_PAIRING_DEFAULT_CLIENT_LABEL = "T3 Watch";
+
+/**
+ * Device authorization: the Watch starts a request, shows `userCode`, and polls with `deviceCode`
+ * until the owner approves. The approved `credential` is an ordinary `watch.` bootstrap credential
+ * for the `/oauth/token` exchange. A blank `clientLabel` means the default.
+ */
+export const WatchPairingStartRequest = Schema.Struct({
+  protocolVersion: WatchProtocolVersion,
+  clientLabel: Schema.optionalKey(
+    TrimmedString.check(Schema.isMaxLength(WATCH_PAIRING_CLIENT_LABEL_MAX_LENGTH)),
+  ),
+});
+export type WatchPairingStartRequest = typeof WatchPairingStartRequest.Type;
+
+export const WatchPairingStartResponse = Schema.Struct({
+  deviceCode: Schema.String,
+  userCode: Schema.String,
+  expiresAt: Schema.DateTimeUtcFromString,
+  interval: PositiveInt,
+  environment: Schema.Struct({ id: EnvironmentId, label: Schema.String }),
+});
+export type WatchPairingStartResponse = typeof WatchPairingStartResponse.Type;
+
+export const WatchPairingTokenRequest = Schema.Struct({
+  protocolVersion: WatchProtocolVersion,
+  deviceCode: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+});
+export type WatchPairingTokenRequest = typeof WatchPairingTokenRequest.Type;
+
+/** `approved` is returned once; later polls fail with `pairing_not_found`. */
+export const WatchPairingTokenResponse = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("pending") }),
+  Schema.Struct({ status: Schema.Literal("slow_down"), interval: PositiveInt }),
+  Schema.Struct({
+    status: Schema.Literal("approved"),
+    credential: Schema.String,
+    expiresAt: Schema.DateTimeUtcFromString,
+  }),
+  Schema.Struct({ status: Schema.Literal("denied") }),
+  Schema.Struct({ status: Schema.Literal("expired") }),
+]);
+export type WatchPairingTokenResponse = typeof WatchPairingTokenResponse.Type;

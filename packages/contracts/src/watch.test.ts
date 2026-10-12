@@ -4,7 +4,15 @@ import * as Schema from "effect/Schema";
 
 import { WatchThreadListQuery } from "./environmentHttp.ts";
 import { OrchestrationV2Command } from "./orchestrationV2.ts";
-import { WatchAdmission, WatchCommandEnvelope, WatchCommandReceipt } from "./watch.ts";
+import {
+  WatchAdmission,
+  WatchCommandEnvelope,
+  WatchCommandReceipt,
+  WatchPairingStartRequest,
+  WatchPairingStartResponse,
+  WatchPairingTokenRequest,
+  WatchPairingTokenResponse,
+} from "./watch.ts";
 
 const envelope = {
   protocolVersion: 1,
@@ -18,6 +26,10 @@ const envelope = {
 const decodeEnvelope = Schema.decodeUnknownSync(WatchCommandEnvelope);
 const decodeCommand = Schema.decodeUnknownSync(OrchestrationV2Command);
 const encodeCommand = Schema.encodeSync(OrchestrationV2Command);
+const decodePairingStart = Schema.decodeUnknownSync(WatchPairingStartResponse);
+const encodePairingStart = Schema.encodeSync(WatchPairingStartResponse);
+const decodePairingToken = Schema.decodeUnknownSync(WatchPairingTokenResponse);
+const encodePairingToken = Schema.encodeSync(WatchPairingTokenResponse);
 
 describe("Watch command envelope", () => {
   it.each(["send", "queue", "steer"])("accepts a valid %s command", (action) => {
@@ -143,5 +155,55 @@ describe("Watch HTTP DTOs", () => {
     expect(() => decode({ ...failed, error: null })).toThrow();
     expect(() => decode({ ...failed, acceptedAt: null, resultSequence: null })).toThrow();
     expect(() => decode({ ...committed, status: "accepted", error: failed.error })).toThrow();
+  });
+});
+
+describe("Watch device pairing", () => {
+  it("trims and bounds the client label and requires protocol version 1", () => {
+    const decode = Schema.decodeUnknownSync(WatchPairingStartRequest);
+    expect(decode({ protocolVersion: 1 })).toEqual({ protocolVersion: 1 });
+    expect(decode({ protocolVersion: 1, clientLabel: "  Wrist  " })).toEqual({
+      protocolVersion: 1,
+      clientLabel: "Wrist",
+    });
+    expect(
+      decode({ protocolVersion: 1, clientLabel: ` ${"a".repeat(64)} ` }).clientLabel,
+    ).toHaveLength(64);
+    expect(() => decode({ protocolVersion: 1, clientLabel: "a".repeat(65) })).toThrow();
+    expect(() => decode({ protocolVersion: 2 })).toThrow();
+    const decodeToken = Schema.decodeUnknownSync(WatchPairingTokenRequest);
+    expect(decodeToken({ protocolVersion: 1, deviceCode: "abc" }).deviceCode).toBe("abc");
+    expect(() => decodeToken({ protocolVersion: 1, deviceCode: "" })).toThrow();
+  });
+
+  it("round-trips the start response with a millisecond UTC expiry", () => {
+    const response = {
+      deviceCode: "Zk3n9mCq1x0A8vRZp2yHq7cV5bT4wL6sJ1uE0oN3dKg",
+      userCode: "ABCD-EFGH",
+      expiresAt: "2026-10-12T08:44:00.000Z",
+      interval: 5,
+      environment: { id: "environment-1", label: "Studio Mac" },
+    };
+    expect(encodePairingStart(decodePairingStart(response))).toEqual(response);
+  });
+
+  it.each([
+    { status: "pending" },
+    { status: "slow_down", interval: 10 },
+    { status: "approved", credential: "watch.e30", expiresAt: "2026-10-12T08:49:00.000Z" },
+    { status: "denied" },
+    { status: "expired" },
+  ])("decodes and re-encodes the $status poll result", (response) => {
+    const decoded = decodePairingToken(response);
+    expect(decoded.status).toBe(response.status);
+    expect(encodePairingToken(decoded)).toEqual(response);
+  });
+
+  it("rejects unknown statuses and incomplete variants", () => {
+    const decode = decodePairingToken;
+    expect(() => decode({ status: "authorization_pending" })).toThrow();
+    expect(() => decode({ status: "slow_down" })).toThrow();
+    expect(() => decode({ status: "slow_down", interval: 0 })).toThrow();
+    expect(() => decode({ status: "approved", credential: "watch.e30" })).toThrow();
   });
 });

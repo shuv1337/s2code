@@ -40,7 +40,11 @@ import { Command, Flag, GlobalFlag } from "effect/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as PairingGrantStore from "../auth/PairingGrantStore.ts";
+import { WatchRestriction } from "../auth/WatchAuth.ts";
+import * as WatchPairingStore from "../auth/WatchPairingStore.ts";
 import * as ServerConfig from "../config.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import {
   type PersistedServerRuntimeState,
@@ -70,6 +74,31 @@ const encodeWatchPairingOutput = Schema.encodeEffect(
     }),
   ),
 );
+const encodeWatchApprovalOutput = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      userCode: Schema.String,
+      clientLabel: Schema.String,
+      restriction: WatchRestriction,
+      expiresAt: Schema.String,
+    }),
+  ),
+);
+const encodeWatchDenialOutput = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Struct({ userCode: Schema.String, status: Schema.String })),
+);
+const encodeWatchPendingOutput = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        userCode: Schema.String,
+        clientLabel: Schema.String,
+        createdAt: Schema.String,
+        expiresAt: Schema.String,
+      }),
+    ),
+  ),
+);
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
 // Tailscale provisions an HTTPS certificate on the first request to a fresh
 // serve mapping, which can take a few seconds.
@@ -84,6 +113,15 @@ class WatchPairingFlagError extends Schema.TaggedError<WatchPairingFlagError>()(
 ) {
   override get message(): string {
     return "--thread and --project restrictions require --watch.";
+  }
+}
+
+class WatchPairingRequestFlagError extends Schema.TaggedError<WatchPairingRequestFlagError>()(
+  "WatchPairingRequestFlagError",
+  {},
+) {
+  override get message(): string {
+    return "--approve, --deny, and --pending require --watch and cannot be combined.";
   }
 }
 
@@ -487,6 +525,67 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
   );
 });
 
+type WatchPairingRequestAction =
+  | { readonly type: "approve"; readonly userCode: string }
+  | { readonly type: "deny"; readonly userCode: string }
+  | { readonly type: "pending" };
+
+/** Approves, denies, or lists Watch device-pairing requests in the running server's database. */
+const handleWatchPairingRequest = Effect.fn("pair.handleWatchPairingRequest")(function* (input: {
+  readonly config: ServerConfig.ServerConfig["Service"];
+  readonly action: WatchPairingRequestAction;
+  readonly label: Option.Option<string>;
+  readonly threadIds: ReadonlyArray<ThreadId>;
+  readonly projectIds: ReadonlyArray<ProjectId>;
+}) {
+  const output = yield* Effect.gen(function* () {
+    const pairing = yield* WatchPairingStore.WatchPairingStore;
+    switch (input.action.type) {
+      case "approve": {
+        const approved = yield* pairing.approve({
+          userCode: input.action.userCode,
+          restriction: {
+            ...(input.threadIds.length ? { threadIds: input.threadIds } : {}),
+            ...(input.projectIds.length ? { projectIds: input.projectIds } : {}),
+          },
+          ...(Option.isSome(input.label) ? { label: input.label.value } : {}),
+        });
+        return yield* encodeWatchApprovalOutput({
+          userCode: approved.userCode,
+          clientLabel: approved.clientLabel,
+          restriction: approved.restriction,
+          expiresAt: DateTime.formatIso(approved.expiresAt),
+        });
+      }
+      case "deny": {
+        const denied = yield* pairing.deny({ userCode: input.action.userCode });
+        return yield* encodeWatchDenialOutput({ userCode: denied.userCode, status: "denied" });
+      }
+      case "pending": {
+        const pending = yield* pairing.listPending();
+        return yield* encodeWatchPendingOutput(
+          pending.map((request) => ({
+            userCode: request.userCode,
+            clientLabel: request.clientLabel,
+            createdAt: DateTime.formatIso(request.createdAt),
+            expiresAt: DateTime.formatIso(request.expiresAt),
+          })),
+        );
+      }
+    }
+  }).pipe(
+    Effect.provide(
+      WatchPairingStore.layer.pipe(
+        Layer.provide(PairingGrantStore.layer),
+        Layer.provideMerge(SqlitePersistence.layerConfig),
+        Layer.provide(ServerConfig.layer(input.config)),
+        Layer.provide(Layer.succeed(References.MinimumLogLevel, input.config.logLevel)),
+      ),
+    ),
+  );
+  yield* Console.log(output);
+});
+
 const ttlFlag = Flag.String("ttl").pipe(
   Flag.withSchema(DurationFromString),
   Flag.withDescription(
@@ -518,6 +617,18 @@ export const pairCommand = Command.make("pair", {
   watch: Flag.Boolean("watch").pipe(Flag.withDefault(false)),
   threadIds: Flag.String("thread").pipe(Flag.withSchema(ThreadId), Flag.atLeast(0)),
   projectIds: Flag.String("project").pipe(Flag.withSchema(ProjectId), Flag.atLeast(0)),
+  approve: Flag.String("approve").pipe(
+    Flag.withDescription("With --watch: approve the Watch pairing request with this code."),
+    Flag.optional,
+  ),
+  deny: Flag.String("deny").pipe(
+    Flag.withDescription("With --watch: deny the Watch pairing request with this code."),
+    Flag.optional,
+  ),
+  pending: Flag.Boolean("pending").pipe(
+    Flag.withDescription("With --watch: list pending Watch pairing requests as JSON."),
+    Flag.withDefault(false),
+  ),
   scopes: authScopesFlag(AuthStandardClientScopes),
   ttl: ttlFlag,
   label: labelFlag,
@@ -533,11 +644,34 @@ export const pairCommand = Command.make("pair", {
       if (!flags.watch && (flags.threadIds.length > 0 || flags.projectIds.length > 0)) {
         return yield* new WatchPairingFlagError({});
       }
+      const requestActions: ReadonlyArray<WatchPairingRequestAction> = [
+        ...Option.toArray(
+          Option.map(flags.approve, (userCode) => ({ type: "approve", userCode }) as const),
+        ),
+        ...Option.toArray(
+          Option.map(flags.deny, (userCode) => ({ type: "deny", userCode }) as const),
+        ),
+        ...(flags.pending ? [{ type: "pending" } as const] : []),
+      ];
+      if (requestActions.length > 1 || (requestActions.length === 1 && !flags.watch)) {
+        return yield* new WatchPairingRequestFlagError({});
+      }
       // Default to Warn so storage/migration chatter cannot bury the QR code;
       // an explicit --log-level still wins.
       const logLevel = Option.getOrElse(cliLogLevel, () => "Warn" as const);
 
       const target = yield* discoverPairTarget(Option.getOrUndefined(flags.baseDir));
+
+      const requestAction = requestActions[0];
+      if (requestAction !== undefined) {
+        return yield* handleWatchPairingRequest({
+          config: yield* makePairServerConfig({ target, logLevel }),
+          action: requestAction,
+          label: flags.label,
+          threadIds: flags.threadIds,
+          projectIds: flags.projectIds,
+        });
+      }
 
       const notes: Array<string> = [];
       let pairingBaseUrl: string;

@@ -256,6 +256,7 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "provider_session_runtime",
   "auth_sessions",
   "auth_pairing_links",
+  "auth_watch_pairing_requests",
 ];
 
 /** Shared between threads; the prune keeps the ones a kept thread is bound to. */

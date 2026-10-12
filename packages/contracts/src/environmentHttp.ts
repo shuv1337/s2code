@@ -61,6 +61,10 @@ import {
   WatchCommandEnvelope,
   WatchCommandErrorCode,
   WatchCommandReceipt,
+  WatchPairingStartRequest,
+  WatchPairingStartResponse,
+  WatchPairingTokenRequest,
+  WatchPairingTokenResponse,
   WatchThreadPage,
   WatchThreadSummary,
   WATCH_MAX_THREAD_PAGE_SIZE,
@@ -683,6 +687,11 @@ const WatchHttpErrors = [
   EnvironmentInternalError,
 ] as const;
 
+/** Applies the Watch body cap to the unauthenticated pairing routes; it authenticates nothing. */
+export class WatchPairingBodyLimit extends HttpApiMiddleware.Service<WatchPairingBodyLimit>()(
+  "WatchPairingBodyLimit",
+) {}
+
 class EnvironmentWatchHttpApi extends HttpApiGroup.make("watch")
   .add(
     HttpApiEndpoint.get("capabilities", "/api/watch/v1/capabilities", {
@@ -722,6 +731,20 @@ class EnvironmentWatchHttpApi extends HttpApiGroup.make("watch")
       success: WatchCommandReceipt,
       error: WatchHttpErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("pairingStart", "/api/watch/v1/pairing/start", {
+      payload: WatchPairingStartRequest,
+      success: WatchPairingStartResponse,
+      error: [WatchRequestError, EnvironmentInternalError],
+    }).middleware(WatchPairingBodyLimit),
+  )
+  .add(
+    HttpApiEndpoint.post("pairingToken", "/api/watch/v1/pairing/token", {
+      payload: WatchPairingTokenRequest,
+      success: WatchPairingTokenResponse,
+      error: [WatchRequestError, EnvironmentInternalError],
+    }).middleware(WatchPairingBodyLimit),
   ) {}
 
 class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")

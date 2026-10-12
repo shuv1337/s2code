@@ -175,6 +175,7 @@ import {
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as WatchHttp from "./watch/http.ts";
 import * as WatchService from "./watch/WatchService.ts";
+import * as WatchPairingStore from "./auth/WatchPairingStore.ts";
 import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -699,6 +700,7 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(
         WatchHttp.layer.pipe(
           Layer.provide(WatchService.layer.pipe(Layer.provide(CommandReceiptStore.layer))),
+          Layer.provide(WatchPairingStore.layer),
           Layer.provide(WatchHttp.layerAuthenticatedAuth),
         ),
       ),

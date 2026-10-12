@@ -39,6 +39,7 @@ import * as ProviderInstances from "../provider/ProviderInstanceRegistry.ts";
 import * as Watch from "./WatchService.ts";
 import * as WatchHttp from "./http.ts";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as WatchPairingStore from "../auth/WatchPairingStore.ts";
 import * as HttpApiTest from "effect/http-api/HttpApiTest";
 import * as HttpServer from "effect/http/HttpServer";
 
@@ -86,6 +87,7 @@ const dependencies = Layer.mergeAll(
 const layer = Watch.layer.pipe(Layer.provideMerge(dependencies));
 const httpLayer = WatchHttp.layer.pipe(
   Layer.provide(layer),
+  Layer.provide(Layer.mock(WatchPairingStore.WatchPairingStore)({})),
   Layer.provideMerge(
     WatchHttp.layerAuthenticatedAuth.pipe(
       Layer.provide(
