@@ -459,6 +459,14 @@ const config: ExpoConfig = {
     // would delete the asset catalog) and its xcodeproj mod creates the widget
     // target (which must exist before the compile phase can be attached).
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
+    // Order-independent: only needs the iOS app target, which the template provides.
+    [
+      "./plugins/withT3Watch.cjs",
+      {
+        // Personal Teams cannot sign App Groups.
+        groupIdentifier: isIosPersonalTeamBuild ? null : `group.${iosBundleIdentifier}`,
+      },
+    ],
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",
