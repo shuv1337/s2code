@@ -1,5 +1,14 @@
 import Foundation
 
+/// The app's file stores (submissions, snapshot cache, in-progress pairing) share one directory.
+public enum WatchStorage {
+  public static func directory() throws -> URL {
+    let base = try FileManager.default.url(
+      for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    return base.appendingPathComponent("T3Watch", isDirectory: true)
+  }
+}
+
 public enum SubmissionStoreError: Error, Hashable, Sendable {
   /// An earlier command for this thread is still unresolved; resolve it before sending a new one.
   case unresolvedSubmission(commandId: String)
@@ -28,9 +37,7 @@ public actor SubmissionStore {
   }
 
   public static func applicationSupport() throws -> SubmissionStore {
-    let base = try FileManager.default.url(
-      for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    return try SubmissionStore(directory: base.appendingPathComponent("T3Watch", isDirectory: true))
+    try SubmissionStore(directory: WatchStorage.directory())
   }
 
   public var submissions: [Submission] { snapshot.submissions }

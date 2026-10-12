@@ -50,29 +50,44 @@ extension WatchAction {
 
 struct ActivityBadge: View {
   let activity: WatchThreadActivity
+  /// A stale activity is last known, not live, so it loses its colour.
+  var isStale = false
 
   var body: some View {
     Label(activity.label, systemImage: "circle.fill")
       .labelStyle(.titleAndIcon)
       .font(.caption2)
-      .foregroundStyle(activity.tint)
+      .foregroundStyle(isStale ? Color.secondary : activity.tint)
   }
 }
 
-/// Coarse "updated 20s ago" label; refreshes on a slow timer to avoid per-second repaints.
-struct RefreshAge: View {
-  let date: Date?
+/// Coarse ticks for age labels and staleness; never per-second repaints.
+let freshnessTick: TimeInterval = 15
+
+/// "Updated 20s ago", plus a caption once the snapshot is stale. `now` comes from a coarse
+/// `TimelineView` owned by the screen, which also uses it to gate actions.
+struct FreshnessLabel: View {
+  let freshness: SnapshotFreshness
+  let now: Date
 
   var body: some View {
-    TimelineView(.periodic(from: .now, by: 15)) { context in
-      Text(text(now: context.date))
+    VStack(alignment: .leading, spacing: 1) {
+      Text(age).font(.caption2).foregroundStyle(.secondary)
+      if freshness.fetchedAt != nil && freshness.isStale(now: now) {
+        Label(
+          freshness.lastRefreshFailed ? "Offline · last known state" : "Stale · last known state",
+          systemImage: freshness.lastRefreshFailed ? "wifi.slash" : "clock.arrow.circlepath"
+        )
         .font(.caption2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.yellow)
+      }
     }
   }
 
-  private func text(now: Date) -> String {
-    guard let date else { return "Not refreshed" }
+  private var age: String {
+    guard let date = freshness.fetchedAt else {
+      return freshness.lastRefreshFailed ? "Couldn't refresh" : "Not refreshed"
+    }
     let seconds = max(0, Int(now.timeIntervalSince(date)))
     if seconds < 15 { return "Updated just now" }
     if seconds < 60 { return "Updated \(seconds)s ago" }

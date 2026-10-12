@@ -60,6 +60,9 @@ public struct WatchCommandErrorCode: RawRepresentable, Codable, Hashable, Sendab
   public static let providerMismatch: Self = "provider_mismatch"
   public static let invalidEnvelope: Self = "invalid_envelope"
   public static let textTooLong: Self = "text_too_long"
+  public static let pairingRateLimited: Self = "pairing_rate_limited"
+  /// Unknown device code, including one whose `approved` answer was already delivered.
+  public static let pairingNotFound: Self = "pairing_not_found"
 }
 
 public struct WatchCapabilities: Codable, Hashable, Sendable {
@@ -252,6 +255,59 @@ public struct WatchCommandReceipt: Codable, Hashable, Sendable {
     try c.encode(acceptedAt, forKey: .acceptedAt)
     try c.encode(resultSequence, forKey: .resultSequence)
     try c.encode(error, forKey: .error)
+  }
+}
+
+public struct WatchPairingEnvironment: Codable, Hashable, Sendable {
+  public var id: String
+  public var label: String
+
+  public init(id: String, label: String) {
+    self.id = id
+    self.label = label
+  }
+}
+
+/// `POST /api/watch/v1/pairing/start`.
+public struct WatchPairingStart: Codable, Hashable, Sendable {
+  public var deviceCode: String
+  /// Shown on the Watch and typed into `t3 pair --watch --approve`.
+  public var userCode: String
+  public var expiresAt: Date
+  /// Seconds between polls.
+  public var interval: TimeInterval
+  public var environment: WatchPairingEnvironment
+}
+
+/// `POST /api/watch/v1/pairing/token`, discriminated on `status`.
+public enum WatchPairingPoll: Decodable, Hashable, Sendable {
+  case pending
+  case slowDown(interval: TimeInterval)
+  /// Delivered exactly once; the device code is gone afterwards.
+  case approved(credential: String, expiresAt: Date?)
+  case denied
+  case expired
+
+  private enum CodingKeys: String, CodingKey {
+    case status, interval, credential, expiresAt
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    let status = try c.decode(String.self, forKey: .status)
+    switch status {
+    case "pending": self = .pending
+    case "slow_down": self = .slowDown(interval: try c.decode(TimeInterval.self, forKey: .interval))
+    case "approved":
+      self = .approved(
+        credential: try c.decode(String.self, forKey: .credential),
+        expiresAt: try c.decodeIfPresent(Date.self, forKey: .expiresAt))
+    case "denied": self = .denied
+    case "expired": self = .expired
+    default:
+      throw DecodingError.dataCorruptedError(
+        forKey: .status, in: c, debugDescription: "Unknown pairing status \(status)")
+    }
   }
 }
 

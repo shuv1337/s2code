@@ -135,7 +135,49 @@ public struct WatchClient: Sendable {
     )
   }
 
+  /// Starts device-code pairing. Unauthenticated; the user approves `userCode` on the environment.
+  public static func startPairing(
+    origin: URL, clientLabel: String = "T3 Watch", session: URLSession = .shared
+  ) async throws(WatchClientError) -> WatchPairingStart {
+    struct Body: Encodable {
+      var protocolVersion = WatchLimits.protocolVersion
+      var clientLabel: String
+    }
+    return try await postJSON(
+      origin: origin, segments: ["api", "watch", "v1", "pairing", "start"],
+      body: Body(clientLabel: clientLabel), session: session)
+  }
+
+  /// Polls a device code. Unauthenticated; `approved` carries a `watch.…` bootstrap credential for
+  /// `exchange(origin:credential:)`.
+  public static func pollPairing(
+    origin: URL, deviceCode: String, session: URLSession = .shared
+  ) async throws(WatchClientError) -> WatchPairingPoll {
+    struct Body: Encodable {
+      var protocolVersion = WatchLimits.protocolVersion
+      var deviceCode: String
+    }
+    return try await postJSON(
+      origin: origin, segments: ["api", "watch", "v1", "pairing", "token"],
+      body: Body(deviceCode: deviceCode), session: session)
+  }
+
   // MARK: - Plumbing
+
+  private static func postJSON<Body: Encodable, T: Decodable>(
+    origin: URL, segments: [String], body: Body, session: URLSession
+  ) async throws(WatchClientError) -> T {
+    var request = URLRequest(url: buildURL(base: origin, segments: segments, query: []))
+    request.httpMethod = "POST"
+    request.timeoutInterval = 15
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    do { request.httpBody = try JSONEncoder.watch.encode(body) } catch {
+      throw .decoding("request encoding failed")
+    }
+    return try await perform(request, session: session)
+  }
 
   private func get<T: Decodable>(_ segments: [String], query: [(String, String)] = [])
     async throws(WatchClientError) -> T

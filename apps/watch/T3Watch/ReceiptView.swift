@@ -17,6 +17,12 @@ final class ReceiptModel {
     return false
   }
 
+  /// `accepted` or `failed`: either way the environment committed and the thread moved.
+  var committed: Bool {
+    if case .receipt(let receipt) = submission?.state { return receipt.acceptedAt != nil }
+    return false
+  }
+
   func load(store: SubmissionStore?) async {
     submission = await store?.submission(id: commandId)
   }
@@ -94,6 +100,11 @@ struct ReceiptView: View {
     }
     .navigationTitle("Receipt")
     .sensoryFeedback(.success, trigger: model.acceptedTrigger) { _, accepted in accepted }
+    .onChange(of: model.committed) { _, committed in
+      if committed, let threadId = model.submission?.envelope.threadId {
+        app.noteCommitted(threadId: threadId)
+      }
+    }
     .task(id: scenePhase) {
       await model.load(store: app.store)
       guard scenePhase == .active else { return }

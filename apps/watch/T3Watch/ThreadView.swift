@@ -6,39 +6,73 @@ final class ThreadModel {
   private(set) var thread: WatchThreadSummary
   private(set) var error: String?
   private(set) var lastRefresh: Date?
+  private(set) var lastRefreshFailed = false
   private(set) var unresolvedCommandId: String?
   private var interval: Duration = .seconds(3)
+  private var generation = GenerationGate()
 
-  init(thread: WatchThreadSummary) {
+  init(thread: WatchThreadSummary, fetchedAt: Date?) {
     self.thread = thread
+    lastRefresh = fetchedAt
   }
 
-  func refresh(client: WatchClient, store: SubmissionStore?) async -> (any Error)? {
+  var freshness: SnapshotFreshness {
+    SnapshotFreshness(fetchedAt: lastRefresh, lastRefreshFailed: lastRefreshFailed)
+  }
+
+  /// Adopts the cached summary when it is newer than what the view opened with.
+  func restore(cache: SnapshotCache?) async {
+    guard let cached = await cache?.thread(id: thread.threadId),
+      cached.fetchedAt > (lastRefresh ?? .distantPast)
+    else { return }
+    thread = cached.summary
+    lastRefresh = cached.fetchedAt
+  }
+
+  /// Discards any refresh already in flight. Call when a receipt commits, on explicit refresh,
+  /// and when the scene becomes active.
+  func invalidate() {
+    generation.advance()
+  }
+
+  func refresh(client: WatchClient, store: SubmissionStore?, cache: SnapshotCache?) async
+    -> (any Error)?
+  {
+    let started = generation.current
     unresolvedCommandId = await store?.unresolved(
       environmentId: thread.environmentId, threadId: thread.threadId)?.id
     do {
       let fresh = try await client.thread(id: thread.threadId)
+      guard generation.isCurrent(started), !Task.isCancelled else { return nil }
       let changed =
         fresh.activity != thread.activity || fresh.activeRunId != thread.activeRunId
         || fresh.updatedAt != thread.updatedAt || fresh.queuedCount != thread.queuedCount
         || fresh.pendingAttention != thread.pendingAttention
+      let now = Date()
       thread = fresh
-      lastRefresh = Date()
+      lastRefresh = now
+      lastRefreshFailed = false
       error = nil
       interval = changed ? .seconds(3) : min(interval * 1.5, .seconds(10))
+      try? await cache?.saveThread(fresh, fetchedAt: now)
       return nil
     } catch {
+      guard generation.isCurrent(started), !Task.isCancelled else { return nil }
       self.error = error.localizedDescription
+      lastRefreshFailed = true
       interval = min(interval * 2, .seconds(10))
       return error
     }
   }
 
   /// Adaptive 3–10 s polling while the view is visible and the scene is active.
-  func poll(client: WatchClient, store: SubmissionStore?, onError: (any Error) -> Void) async {
+  func poll(
+    client: WatchClient, store: SubmissionStore?, cache: SnapshotCache?,
+    onError: (any Error) -> Void
+  ) async {
     interval = .seconds(3)
     while !Task.isCancelled {
-      if let error = await refresh(client: client, store: store) { onError(error) }
+      if let error = await refresh(client: client, store: store, cache: cache) { onError(error) }
       try? await Task.sleep(for: interval)
     }
   }
@@ -50,24 +84,52 @@ struct ThreadView: View {
   @State private var model: ThreadModel
   @State private var parentError: String?
 
-  init(initial: WatchThreadSummary) {
-    _model = State(initialValue: ThreadModel(thread: initial))
+  /// Polling restarts (with a fresh generation) when the scene activates or a receipt commits.
+  private struct PollTrigger: Hashable {
+    var phase: ScenePhase
+    var commits: Int
+  }
+
+  init(initial: WatchThreadSummary, fetchedAt: Date?) {
+    _model = State(initialValue: ThreadModel(thread: initial, fetchedAt: fetchedAt))
   }
 
   private var thread: WatchThreadSummary { model.thread }
 
   var body: some View {
+    TimelineView(.periodic(from: .now, by: freshnessTick)) { context in
+      list(stale: model.freshness.isStale(now: context.date), now: context.date)
+    }
+    .navigationTitle(thread.labels.thread)
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Button {
+          Task { await refreshNow() }
+        } label: {
+          Image(systemName: "arrow.clockwise")
+        }
+      }
+    }
+    .task(id: PollTrigger(phase: scenePhase, commits: app.commitEpochs[thread.threadId] ?? 0)) {
+      await model.restore(cache: app.cache)
+      guard scenePhase == .active, let client = app.client else { return }
+      model.invalidate()
+      await model.poll(client: client, store: app.store, cache: app.cache) { app.handle($0) }
+    }
+  }
+
+  private func list(stale: Bool, now: Date) -> some View {
     List {
       Section {
         TargetHeader(labels: thread.labels)
         Text(thread.providerInstanceId).font(.caption2).foregroundStyle(.secondary)
         HStack {
-          ActivityBadge(activity: thread.activity)
+          ActivityBadge(activity: thread.activity, isStale: stale)
           if thread.queuedCount > 0 {
             Text("\(thread.queuedCount) queued").font(.caption2).foregroundStyle(.secondary)
           }
         }
-        RefreshAge(date: model.lastRefresh)
+        FreshnessLabel(freshness: model.freshness, now: now)
         if let error = model.error {
           Text(error).font(.caption2).foregroundStyle(.red)
         }
@@ -84,12 +146,12 @@ struct ThreadView: View {
         } footer: {
           Text("Respond on another T3 client.")
         }
-        .foregroundStyle(.orange)
+        .foregroundStyle(stale ? Color.secondary : .orange)
       }
 
       if let excerpt = thread.latestAssistantExcerpt {
         Section("Last completed reply") {
-          Text(excerpt).font(.footnote)
+          Text(excerpt).font(.footnote).foregroundStyle(stale ? .secondary : .primary)
         }
       }
 
@@ -110,9 +172,13 @@ struct ThreadView: View {
           NavigationLink(value: Route.compose(thread)) {
             Label("New instruction", systemImage: "mic.fill")
           }
-          .disabled(actions.isEmpty)
-          Text(actions.map(\.label).joined(separator: " · "))
-            .font(.caption2).foregroundStyle(.secondary)
+          .disabled(actions.isEmpty || stale)
+          if stale {
+            Text("Waiting for a fresh snapshot.").font(.caption2).foregroundStyle(.secondary)
+          } else {
+            Text(actions.map(\.label).joined(separator: " · "))
+              .font(.caption2).foregroundStyle(.secondary)
+          }
         }
       }
 
@@ -122,17 +188,20 @@ struct ThreadView: View {
         }
       }
     }
-    .navigationTitle(thread.labels.thread)
-    .task(id: scenePhase) {
-      guard scenePhase == .active, let client = app.client else { return }
-      await model.poll(client: client, store: app.store) { app.handle($0) }
+  }
+
+  private func refreshNow() async {
+    guard let client = app.client else { return }
+    model.invalidate()
+    if let error = await model.refresh(client: client, store: app.store, cache: app.cache) {
+      app.handle(error)
     }
   }
 
   private func openParent() async {
     guard let client = app.client, let parentId = thread.parentThreadId else { return }
     do {
-      app.path.append(.thread(try await client.thread(id: parentId)))
+      app.path.append(.thread(try await client.thread(id: parentId), fetchedAt: Date()))
     } catch {
       parentError = error.localizedDescription
     }
