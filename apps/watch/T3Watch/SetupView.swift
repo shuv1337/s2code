@@ -3,8 +3,10 @@ import T3WatchKit
 
 struct SetupView: View {
   @Environment(AppModel.self) private var model
-  @State private var origin = ""
-  @State private var credential = ""
+  // Debug builds prefill from the environment so the simulator can be paired
+  // with `simctl launch` instead of typing a credential on a 40 mm screen.
+  @State private var origin = debugEnvironment("T3_WATCH_ORIGIN")
+  @State private var credential = debugEnvironment("T3_WATCH_CREDENTIAL")
   @State private var isPairing = false
   @State private var error: String?
 
@@ -49,4 +51,12 @@ struct SetupView: View {
       self.error = error.localizedDescription
     }
   }
+}
+
+private func debugEnvironment(_ key: String) -> String {
+  #if DEBUG
+    return ProcessInfo.processInfo.environment[key] ?? ""
+  #else
+    return ""
+  #endif
 }
