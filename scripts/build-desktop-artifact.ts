@@ -3151,6 +3151,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: serverStageDir,
+      env: { npm_config_platform: "win32", npm_config_arch: input.arch },
       shell: installCommand.shell,
     }),
     { label: "vp install --prod (server sidecar)", verbose: input.verbose },
@@ -3920,6 +3921,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* runCommand(
     ChildProcess.make(installCommand.command, installCommand.args, {
       cwd: stageAppDir,
+      env: {
+        npm_config_platform:
+          options.platform === "mac" ? "darwin" : options.platform === "win" ? "win32" : "linux",
+        ...(options.arch === "universal" ? {} : { npm_config_arch: options.arch }),
+      },
       shell: installCommand.shell,
     }),
     { label: "vp install --prod", verbose: options.verbose },

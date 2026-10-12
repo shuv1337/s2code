@@ -38,6 +38,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProviderInstances from "../provider/ProviderInstanceRegistry.ts";
 import * as Watch from "./WatchService.ts";
 import * as WatchHttp from "./http.ts";
+import * as WatchTranscription from "./WatchTranscription.ts";
+import * as LocalTranscription from "../transcription/LocalTranscription.ts";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as WatchPairingStore from "../auth/WatchPairingStore.ts";
 import * as HttpApiTest from "effect/http-api/HttpApiTest";
@@ -86,6 +88,16 @@ const dependencies = Layer.mergeAll(
 ).pipe(Layer.provideMerge(database), Layer.provideMerge(runtime));
 const layer = Watch.layer.pipe(Layer.provideMerge(dependencies));
 const httpLayer = WatchHttp.layer.pipe(
+  Layer.provide(
+    WatchTranscription.layer.pipe(
+      Layer.provide(layer),
+      Layer.provide(
+        Layer.succeed(LocalTranscription.LocalTranscription, {
+          transcribe: () => Effect.succeed("A local transcript."),
+        }),
+      ),
+    ),
+  ),
   Layer.provide(layer),
   Layer.provide(Layer.mock(WatchPairingStore.WatchPairingStore)({})),
   Layer.provideMerge(
@@ -119,6 +131,15 @@ it.effect("serves compact HTTP capabilities and applies authenticated restrictio
       .thread({ headers: {}, params: { threadId: ThreadId.make("hidden") } })
       .pipe(Effect.flip);
     assert.equal(denied._tag, "WatchRequestError");
+    const voiceDenied = yield* client.watch
+      .transcription({
+        headers: {},
+        params: { threadId: ThreadId.make("hidden") },
+        payload: { audioBase64: Buffer.alloc(60_000).toString("base64") },
+      })
+      .pipe(Effect.flip);
+    assert.equal(voiceDenied._tag, "WatchRequestError");
+    if (voiceDenied._tag === "WatchRequestError") assert.equal(voiceDenied.code, "forbidden");
   }).pipe(Effect.provide(Layer.merge(httpLayer, HttpServer.layerServices))),
 );
 

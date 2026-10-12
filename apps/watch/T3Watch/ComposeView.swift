@@ -7,11 +7,11 @@ final class ComposeModel {
   private(set) var notice: String?
   private(set) var error: String?
   private(set) var isSubmitting = false
-  private var isClosed = false
+  private(set) var isClosed = false
 
   init(thread: WatchThreadSummary) {
     draft = WatchDraft(thread: thread)
-    preselectSingleAction()
+    preselectDefaultAction()
   }
 
   /// Restores a saved draft for the same thread, then checks it against the current snapshot.
@@ -22,7 +22,7 @@ final class ComposeModel {
   }
 
   func save(to store: SubmissionStore?) async {
-    guard !isClosed, !draft.text.isEmpty else { return }
+    guard !isClosed else { return }
     try? await store?.saveDraft(draft)
   }
 
@@ -63,19 +63,17 @@ final class ComposeModel {
   private func apply(_ check: WatchDraft.Revalidation?) {
     guard case .targetChanged(let rebased) = check else { return }
     draft = rebased
-    notice = "The thread changed while you were composing. Choose the action again."
-    preselectSingleAction()
+    notice = "The thread changed while you were composing. Review delivery before sending."
+    preselectDefaultAction()
   }
 
-  private func preselectSingleAction() {
-    if draft.action == nil, draft.availableActions == [.send] {
-      draft.action = .send
-    }
+  private func preselectDefaultAction() {
+    if draft.action == nil { draft.action = draft.availableActions.first }
   }
 
   private func describe(_ error: any Error) -> String {
     switch error {
-    case WatchDraftError.text(.empty): "Dictate or type an instruction first."
+    case WatchDraftError.text(.empty): "Record an instruction first."
     case WatchDraftError.text(.tooManyScalars(let count)): "Too long (\(count) of 8000 characters)."
     case WatchDraftError.text(.tooManyBytes): "Too long to send."
     case WatchDraftError.bodyTooLarge: "Too long to send."
@@ -88,8 +86,12 @@ final class ComposeModel {
 
 struct ComposeView: View {
   @Environment(AppModel.self) private var app
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.scenePhase) private var scenePhase
   @State private var model: ComposeModel
+  @State private var recorder = VoiceRecorder()
+  @State private var isTranscribing = false
+  @State private var transcriptionError: String?
+  @State private var transcriptionTask: Task<Void, Never>?
   private let thread: WatchThreadSummary
 
   init(thread: WatchThreadSummary) {
@@ -98,85 +100,155 @@ struct ComposeView: View {
   }
 
   var body: some View {
-    @Bindable var model = model
     let actions = model.draft.availableActions.filter {
       app.capabilities?.actions.contains($0) ?? true
     }
-    ScrollView {
-      VStack(alignment: .leading, spacing: 8) {
-        TargetHeader(labels: model.draft.target.labels)
-
-        // The system input sheet offers dictation; dismissing it never submits.
-        TextField("Instruction", text: $model.draft.text, axis: .vertical)
-          .lineLimit(1...12)
-        if model.draft.text.unicodeScalars.count > 7_000 {
-          Text("\(model.draft.text.unicodeScalars.count) / 8000")
-            .font(.caption2).foregroundStyle(.secondary)
+    VStack(spacing: 10) {
+      if recorder.isRecording {
+        Button {
+          recorder.stop()
+          startTranscription()
+        } label: {
+          VStack(spacing: 5) {
+            Image(systemName: "stop.fill").font(.system(size: 30))
+            Text("Stop recording").font(.headline)
+          }.frame(maxWidth: .infinity).padding(.vertical, 10)
         }
-
-        if let notice = model.notice {
-          Text(notice).font(.caption2).foregroundStyle(.orange)
-        }
-
-        if actions.isEmpty {
-          Text("No delivery action is available right now.").font(.caption2)
-        }
-        ForEach(actions, id: \.self) { action in
-          Button {
-            model.draft.action = action
-          } label: {
-            HStack {
-              Image(systemName: model.draft.action == action ? "largecircle.fill.circle" : "circle")
-              VStack(alignment: .leading) {
-                Text(action.label)
-                Text(action.explanation).font(.caption2).foregroundStyle(.secondary)
-              }
+        .buttonStyle(.borderedProminent).tint(.red)
+        Text(Duration.seconds(recorder.elapsed).formatted(.time(pattern: .minuteSecond)))
+          .monospacedDigit()
+        ProgressView(value: recorder.level).accessibilityLabel("Microphone level")
+      } else if isTranscribing {
+        ProgressView("Transcribing…").padding(.vertical, 20)
+        Text("First use prepares the server’s speech model and may take a few minutes.")
+          .font(.caption2).foregroundStyle(.secondary)
+      } else if model.draft.text.isEmpty, recorder.fileURL != nil {
+        Button("Transcribe recording", systemImage: "waveform") {
+          startTranscription()
+        }.buttonStyle(.borderedProminent)
+        Text("Recording saved").font(.caption2).foregroundStyle(.secondary)
+      } else if model.draft.text.isEmpty {
+        Button {
+          Task {
+            guard let store = app.store else { return }
+            do {
+              try await store.saveDraft(model.draft)
+              await recorder.start(draftId: model.draft.id)
+            } catch {
+              transcriptionError = "Could not save this recording. Try again."
             }
           }
+        } label: {
+          VStack(spacing: 5) {
+            Image(systemName: "mic.fill").font(.system(size: 36))
+            Text(recorder.isStarting ? "Starting…" : "Record").font(.headline)
+          }.frame(maxWidth: .infinity).padding(.vertical, 10)
         }
-
-        if model.draft.showsDisruptionWarning {
-          Label("Steering may interrupt running tools.", systemImage: "exclamationmark.triangle.fill")
-            .font(.caption2).foregroundStyle(.yellow)
-        }
-
-        if let error = model.error {
-          Text(error).font(.caption2).foregroundStyle(.red)
-        }
-
+        .buttonStyle(.borderedProminent)
+        .disabled(recorder.isStarting || actions.isEmpty || app.store == nil)
+      } else {
         Button {
           Task { await submit() }
         } label: {
           if model.isSubmitting {
             ProgressView()
           } else {
-            Text(model.draft.action.map { "\($0.label) now" } ?? "Choose an action")
+            Label(
+              model.draft.action.map { "\($0.label) now" } ?? "Choose delivery",
+              systemImage: "paperplane.fill")
           }
         }
         .buttonStyle(.borderedProminent)
-        .disabled(model.isSubmitting || model.draft.action == nil || model.draft.text.isEmpty)
+        .disabled(
+          model.isSubmitting || model.draft.action == nil || !actions.contains(model.draft.action!))
+        Text(model.draft.text).frame(maxWidth: .infinity, alignment: .leading)
+      }
 
-        HStack {
-          Button("Clear") { model.draft.text = "" }
-          Button("Cancel", role: .cancel) {
-            Task {
-              await model.discard(from: app.store)
-              dismiss()
-            }
+      if let error = transcriptionError ?? recorder.error ?? model.error {
+        Text(error).font(.caption2).foregroundStyle(.red)
+      }
+      if let notice = model.notice {
+        Text(notice).font(.caption2).foregroundStyle(.orange)
+      }
+      if let action = model.draft.action {
+        Text("Delivery: \(action.label)").font(.caption2).foregroundStyle(.secondary)
+      }
+      if actions.count > 1 {
+        ForEach(actions, id: \.self) { action in
+          Button {
+            model.draft.action = action
+          } label: {
+            Label(
+              action.label,
+              systemImage: model.draft.action == action ? "checkmark.circle.fill" : "circle")
           }
+          .disabled(recorder.isRecording || isTranscribing || model.isSubmitting)
         }
-        .font(.caption)
+      }
+      if model.draft.showsDisruptionWarning {
+        Text("Steering may interrupt running tools.").font(.caption2).foregroundStyle(.secondary)
+      }
+      if !model.draft.text.isEmpty || recorder.fileURL != nil {
+        Button("Discard", role: .destructive) {
+          recorder.discard()
+          model = ComposeModel(thread: thread)
+          transcriptionError = nil
+          Task { try? await app.store?.discardDraft(threadId: thread.threadId) }
+        }.disabled(isTranscribing || model.isSubmitting)
       }
     }
-    .navigationTitle("Compose")
-    .task { await model.restore(from: app.store, current: thread) }
-    .onDisappear { Task { [model, store = app.store] in await model.save(to: store) } }
+    .task {
+      await model.restore(from: app.store, current: thread)
+      recorder.restore(draftId: model.draft.id)
+      let available = model.draft.availableActions.filter {
+        app.capabilities?.actions.contains($0) ?? true
+      }
+      if !available.contains(where: { $0 == model.draft.action }) {
+        model.draft.action = available.first
+      }
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase != .active { recorder.stop() }
+    }
+    .onDisappear {
+      transcriptionTask?.cancel()
+      recorder.stop()
+      Task { [model, store = app.store] in await model.save(to: store) }
+    }
+  }
+
+  private func startTranscription() {
+    guard transcriptionTask == nil else { return }
+    transcriptionTask = Task {
+      await transcribe()
+      transcriptionTask = nil
+    }
+  }
+
+  private func transcribe() async {
+    guard !isTranscribing, let url = recorder.fileURL, let client = app.client else { return }
+    isTranscribing = true
+    transcriptionError = nil
+    defer { isTranscribing = false }
+    do {
+      let text = try await client.transcribe(
+        audio: Data(contentsOf: url), threadId: thread.threadId)
+      try Task.checkCancellation()
+      model.draft.text = text
+      guard let store = app.store else { return }
+      try await store.saveDraft(model.draft)
+      recorder.discard()
+    } catch {
+      guard !Task.isCancelled else { return }
+      transcriptionError = error.localizedDescription
+      app.handle(error)
+    }
   }
 
   private func submit() async {
     guard let client = app.client, let store = app.store else { return }
     guard let commandId = await model.finalize(client: client, store: store) else { return }
-    if !app.path.isEmpty { app.path.removeLast() }
+    if model.isClosed { model = ComposeModel(thread: thread) }
     app.path.append(.receipt(commandId: commandId))
   }
 }

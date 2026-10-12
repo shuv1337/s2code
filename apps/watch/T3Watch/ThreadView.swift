@@ -121,6 +121,22 @@ struct ThreadView: View {
   private func list(stale: Bool, now: Date) -> some View {
     List {
       Section {
+        if let commandId = model.unresolvedCommandId {
+          NavigationLink(value: Route.receipt(commandId: commandId)) {
+            Label("Check instruction", systemImage: "questionmark.circle")
+          }
+        } else if thread.isReadOnly {
+          Text("Messages go to this agent's parent.").font(.caption2)
+          if thread.parentThreadId != nil {
+            Button("Open parent") { Task { await openParent() } }
+          }
+          if let parentError { Text(parentError).font(.caption2).foregroundStyle(.red) }
+        } else {
+          ComposeView(thread: thread)
+        }
+      }.listRowBackground(Color.clear)
+
+      Section {
         TargetHeader(labels: thread.labels)
         Text(thread.providerInstanceId).font(.caption2).foregroundStyle(.secondary)
         HStack {
@@ -152,33 +168,6 @@ struct ThreadView: View {
       if let excerpt = thread.latestAssistantExcerpt {
         Section("Last completed reply") {
           Text(excerpt).font(.footnote).foregroundStyle(stale ? .secondary : .primary)
-        }
-      }
-
-      Section {
-        if let commandId = model.unresolvedCommandId {
-          NavigationLink(value: Route.receipt(commandId: commandId)) {
-            Label("Earlier instruction unresolved", systemImage: "questionmark.circle")
-          }
-        } else if thread.isReadOnly {
-          Text("Subagent thread. Messages go to its parent.").font(.caption2)
-          if thread.parentThreadId != nil {
-            Button("Open parent") { Task { await openParent() } }
-          }
-          if let parentError { Text(parentError).font(.caption2).foregroundStyle(.red) }
-        } else {
-          let actions = WatchAdmissionRules.availableActions(
-            for: thread, serverActions: app.capabilities?.actions)
-          NavigationLink(value: Route.compose(thread)) {
-            Label("New instruction", systemImage: "mic.fill")
-          }
-          .disabled(actions.isEmpty || stale)
-          if stale {
-            Text("Waiting for a fresh snapshot.").font(.caption2).foregroundStyle(.secondary)
-          } else {
-            Text(actions.map(\.label).joined(separator: " · "))
-              .font(.caption2).foregroundStyle(.secondary)
-          }
         }
       }
 

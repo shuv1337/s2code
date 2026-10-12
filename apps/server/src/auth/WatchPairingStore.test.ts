@@ -23,6 +23,7 @@ import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as WatchHttp from "../watch/http.ts";
+import * as WatchTranscription from "../watch/WatchTranscription.ts";
 import * as WatchService from "../watch/WatchService.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as WatchPairingStore from "./WatchPairingStore.ts";
@@ -36,6 +37,7 @@ const layerStore = WatchPairingStore.layer.pipe(
 
 const environmentId = EnvironmentId.make("watch-pairing-test");
 const layerHttp = WatchHttp.layer.pipe(
+  Layer.provide(Layer.mock(WatchTranscription.WatchTranscription)({})),
   Layer.provide(Layer.mock(WatchService.WatchService)({})),
   Layer.provide(
     Layer.mock(ServerEnvironment.ServerEnvironment)({

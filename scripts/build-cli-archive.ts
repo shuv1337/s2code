@@ -212,6 +212,12 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
   yield* runCommand(
     ChildProcess.make(install.command, install.args, {
       cwd: input.stageDir,
+      // Binary downloaders must use the archive target, not the build host.
+      env: {
+        npm_config_platform:
+          input.platform === "mac" ? "darwin" : input.platform === "win" ? "win32" : "linux",
+        npm_config_arch: input.arch,
+      },
       shell: install.shell,
       stdout: "inherit",
       stderr: "inherit",

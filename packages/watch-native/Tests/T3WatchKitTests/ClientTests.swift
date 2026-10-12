@@ -25,6 +25,39 @@ import Testing
     #expect(request.headers["Authorization"] == "Bearer secret-token")
   }
 
+  @Test func uploadsRecordingWithoutDispatchingAnInstruction() async throws {
+    StubURLProtocol.install { _ in .json(200, "{\"text\":\"Fix the tests.\"}") }
+    let audio = Data([0, 1, 2, 3])
+    let text = try await client.transcribe(audio: audio, threadId: Fixtures.threadId)
+    #expect(text == "Fix the tests.")
+    #expect(StubURLProtocol.requests.count == 1)
+    let request = try #require(StubURLProtocol.requests.first)
+    #expect(request.method == "POST")
+    #expect(request.url.hasSuffix("/transcription"))
+    #expect(request.headers["Authorization"] == "Bearer secret-token")
+    let data = try #require(request.body)
+    let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
+    let encoded = try #require(body["audioBase64"])
+    #expect(Data(base64Encoded: encoded) == audio)
+  }
+
+  @Test func rejectsEmptyTranscript() async throws {
+    StubURLProtocol.install { _ in .json(200, "{\"text\":\"   \"}") }
+    await #expect(throws: WatchClientError.self) {
+      try await client.transcribe(audio: Data([1]), threadId: Fixtures.threadId)
+    }
+    #expect(StubURLProtocol.requests.count == 1)
+  }
+
+  @Test func rejectsOversizedRecordingBeforeUpload() async throws {
+    StubURLProtocol.install { _ in .json(200, "{\"text\":\"no\"}") }
+    await #expect(throws: WatchClientError.self) {
+      try await client.transcribe(
+        audio: Data(repeating: 0, count: 1_048_577), threadId: Fixtures.threadId)
+    }
+    #expect(StubURLProtocol.requests.isEmpty)
+  }
+
   @Test func encodesListQuery() async throws {
     StubURLProtocol.install { _ in .json(200, "{\"items\":[],\"nextCursor\":null,\"snapshotRevision\":1}") }
     _ = try await client.threads(cursor: "a+b/c=", limit: 99)

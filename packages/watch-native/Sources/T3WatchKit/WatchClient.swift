@@ -95,6 +95,32 @@ public struct WatchClient: Sendable {
     return try await send(request)
   }
 
+  /// Uploads a recording for transcription only. Dispatch still uses the durable command receipt.
+  public func transcribe(audio: Data, threadId: String) async throws(WatchClientError) -> String {
+    guard !audio.isEmpty, audio.count <= 1_048_576 else {
+      throw .decoding("Record a clip of up to two minutes.")
+    }
+    struct Body: Encodable {
+      var audioBase64: String
+      var locale: String
+    }
+    struct Transcript: Decodable { var text: String }
+    var request = try authorizedRequest(
+      url: url(["api", "watch", "v1", "threads", threadId, "transcription"]))
+    request.httpMethod = "POST"
+    request.timeoutInterval = 900
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    do {
+      request.httpBody = try JSONEncoder().encode(
+        Body(audioBase64: audio.base64EncodedString(), locale: Locale.current.identifier))
+    } catch { throw .decoding("recording encoding failed") }
+    let result: Transcript = try await send(request)
+    guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw .decoding("No speech was heard. Try recording again.")
+    }
+    return result.text
+  }
+
   public func receipt(commandId: String) async throws(WatchClientError) -> WatchCommandReceipt {
     try await get(["api", "watch", "v1", "commands", commandId])
   }

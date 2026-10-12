@@ -67,6 +67,8 @@ import {
   WatchPairingTokenResponse,
   WatchThreadPage,
   WatchThreadSummary,
+  WatchTranscriptionRequest,
+  WatchTranscriptionResponse,
   WATCH_MAX_THREAD_PAGE_SIZE,
 } from "./watch.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
@@ -713,6 +715,15 @@ class EnvironmentWatchHttpApi extends HttpApiGroup.make("watch")
       headers: OptionalBearerHeaders,
       params: Schema.Struct({ threadId: ThreadId }),
       success: WatchThreadSummary,
+      error: WatchHttpErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("transcription", "/api/watch/v1/threads/:threadId/transcription", {
+      headers: OptionalBearerHeaders,
+      params: Schema.Struct({ threadId: ThreadId }),
+      payload: WatchTranscriptionRequest,
+      success: WatchTranscriptionResponse,
       error: WatchHttpErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )

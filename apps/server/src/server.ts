@@ -175,6 +175,9 @@ import {
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as WatchHttp from "./watch/http.ts";
 import * as WatchService from "./watch/WatchService.ts";
+import * as WatchTranscription from "./watch/WatchTranscription.ts";
+import * as LocalTranscription from "./transcription/LocalTranscription.ts";
+import * as LocalSpeechModel from "./transcription/LocalSpeechModel.ts";
 import * as WatchPairingStore from "./auth/WatchPairingStore.ts";
 import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
 import * as ProjectHttp from "./project/http.ts";
@@ -699,6 +702,11 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(
         WatchHttp.layer.pipe(
+          Layer.provide(
+            WatchTranscription.layer.pipe(
+              Layer.provide(LocalTranscription.layer.pipe(Layer.provide(LocalSpeechModel.layer))),
+            ),
+          ),
           Layer.provide(WatchService.layer.pipe(Layer.provide(CommandReceiptStore.layer))),
           Layer.provide(WatchPairingStore.layer),
           Layer.provide(WatchHttp.layerAuthenticatedAuth),

@@ -106,12 +106,6 @@ struct ThreadsView: View {
     TimelineView(.periodic(from: .now, by: freshnessTick)) { context in
       let stale = model.freshness.isStale(now: context.date)
       List {
-        Section {
-          FreshnessLabel(freshness: model.freshness, now: context.date)
-          if let error = model.error ?? app.authError ?? app.startupError {
-            Text(error).font(.caption2).foregroundStyle(.red)
-          }
-        }
         if !model.pinned.isEmpty {
           Section("Pinned") {
             ForEach(model.pinned) { row($0, stale: stale) }
@@ -125,6 +119,12 @@ struct ThreadsView: View {
           }
           if model.recent.isEmpty && model.pinned.isEmpty && !model.isLoading {
             Text("No threads").foregroundStyle(.secondary)
+          }
+        }
+        Section {
+          FreshnessLabel(freshness: model.freshness, now: context.date)
+          if let error = model.error ?? app.authError ?? app.startupError {
+            Text(error).font(.caption2).foregroundStyle(.red)
           }
         }
         Section {

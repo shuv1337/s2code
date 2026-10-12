@@ -83,7 +83,15 @@ describe("selectCliRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      ["@cursor/sdk", "@ff-labs/fff-node", "@napi-rs/keyring", "node-pty", "playwright-core"],
+      [
+        "@cursor/sdk",
+        "@ff-labs/fff-node",
+        "@napi-rs/keyring",
+        "ffmpeg-static",
+        "node-pty",
+        "playwright-core",
+        "sherpa-onnx-node",
+      ],
     );
   });
 });
@@ -190,6 +198,9 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
         const manifest = installed.get(name);
         if (!manifest) continue;
 
+        // ffmpeg-static's runtime index uses only node builtins and its own
+        // package.json. Its declared dependencies belong to install.js only.
+        if (name === "ffmpeg-static") continue;
         const declared = {
           ...(manifest.dependencies ?? {}),
           ...(manifest.optionalDependencies ?? {}),

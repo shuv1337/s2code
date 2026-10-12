@@ -22,6 +22,15 @@ export type WatchProtocolVersion = typeof WatchProtocolVersion.Type;
 export const WATCH_MAX_TEXT_CODE_POINTS = 8_000;
 export const WATCH_MAX_TEXT_BYTES = 32 * 1_024;
 export const WATCH_MAX_BODY_BYTES = 48 * 1_024;
+export const WATCH_MAX_AUDIO_BYTES = 1_048_576;
+export const WATCH_MAX_TRANSCRIPTION_BODY_BYTES = 1_400_000;
+
+export const WatchTranscriptionRequest = Schema.Struct({
+  audioBase64: Schema.String.check(Schema.isMinLength(4), Schema.isMaxLength(1_398_104)),
+  locale: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
+});
+export type WatchTranscriptionRequest = typeof WatchTranscriptionRequest.Type;
+
 export const WATCH_MAX_THREAD_PAGE_SIZE = 50;
 export const WATCH_DEFAULT_THREAD_PAGE_SIZE = 20;
 
@@ -41,6 +50,8 @@ export const WatchText = Schema.String.check(
   ),
 );
 export type WatchText = typeof WatchText.Type;
+
+export const WatchTranscriptionResponse = Schema.Struct({ text: WatchText });
 
 const envelopeFields = {
   protocolVersion: WatchProtocolVersion,
@@ -169,6 +180,12 @@ export const WatchCommandErrorCode = Schema.Literals([
   "text_too_long",
   "pairing_rate_limited",
   "pairing_not_found",
+  "transcription_unavailable",
+  "transcription_busy",
+  "invalid_audio",
+  "transcription_failed",
+  "speech_model_unavailable",
+  "no_speech",
 ]);
 export type WatchCommandErrorCode = typeof WatchCommandErrorCode.Type;
 

@@ -2,6 +2,7 @@ import {
   AuthOrchestrationOperateScope,
   EnvironmentAuthenticatedAuth,
   WATCH_MAX_BODY_BYTES,
+  WATCH_MAX_TRANSCRIPTION_BODY_BYTES,
   EnvironmentHttpApi,
   WatchPairingBodyLimit,
   WatchRequestError,
@@ -17,6 +18,7 @@ import * as WatchPairingStore from "../auth/WatchPairingStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { currentWatchPrincipal } from "./principal.ts";
 import * as WatchService from "./WatchService.ts";
+import * as WatchTranscription from "./WatchTranscription.ts";
 import * as WatchAuthHttp from "../auth/WatchHttp.ts";
 
 const withWatchBodyLimit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -29,7 +31,17 @@ export const layerAuthenticatedAuth = Layer.effect(
   EnvironmentAuthenticatedAuth,
   Effect.gen(function* () {
     const authenticate = yield* EnvironmentAuthenticatedAuth;
-    return (handler, metadata) => withWatchBodyLimit(authenticate(handler, metadata));
+    return (handler, metadata) =>
+      authenticate(handler, metadata).pipe(
+        Effect.provideService(
+          HttpIncomingMessage.MaxBodySize,
+          ByteSize.bytes(
+            metadata.endpoint.identifier === "transcription"
+              ? WATCH_MAX_TRANSCRIPTION_BODY_BYTES
+              : WATCH_MAX_BODY_BYTES,
+          ),
+        ),
+      );
   }),
 ).pipe(Layer.provide(WatchAuthHttp.layerAuthenticatedAuth));
 
@@ -67,6 +79,7 @@ export const layer = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const service = yield* WatchService.WatchService;
     const pairing = yield* WatchPairingStore.WatchPairingStore;
+    const transcription = yield* WatchTranscription.WatchTranscription;
     const environment = yield* ServerEnvironment.ServerEnvironment;
     return handlers
       .handle(
@@ -96,6 +109,23 @@ export const layer = HttpApiBuilder.group(
           return yield* mapErrors(
             service.getThread({ ...params, restriction: principal.restriction }),
           );
+        }),
+      )
+      .handle(
+        "transcription",
+        Effect.fnUntraced(function* ({ params, payload }) {
+          const principal = yield* currentWatchPrincipal(AuthOrchestrationOperateScope);
+          return yield* transcription
+            .transcribe({ ...params, recording: payload, restriction: principal.restriction })
+            .pipe(
+              Effect.catchTags({
+                WatchServiceError: (error) =>
+                  Effect.fail(new WatchRequestError({ code: error.code, message: error.message })),
+                WatchStorageError: (cause) => failEnvironmentInternal("internal_error", cause),
+                TranscriptionError: (error) =>
+                  Effect.fail(new WatchRequestError({ code: error.code, message: error.message })),
+              }),
+            );
         }),
       )
       .handle(
