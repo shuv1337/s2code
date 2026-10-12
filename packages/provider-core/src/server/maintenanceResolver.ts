@@ -221,6 +221,19 @@ function isBunGlobalCommandPath(commandPath: string): boolean {
   return normalizeCommandPath(commandPath).includes("/.bun/bin/");
 }
 
+/**
+ * The package a Bun global bin links into: `~/.bun/bin/<cmd>` points at
+ * `<bun install>/install/global/node_modules/<pkg>/…`. Null when the real path
+ * does not show it, such as a Windows `.bunx` shim.
+ */
+export function bunGlobalPackageFromCommandPath(realCommandPath: string): string | null {
+  return (
+    /\/install\/global\/node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(
+      realCommandPath.replaceAll("\\", "/"),
+    )?.[1] ?? null
+  );
+}
+
 function isYarnGlobalCommandPath(commandPath: string): boolean {
   // `~/.config/yarn/global/…` on POSIX, `%LOCALAPPDATA%\Yarn\Data\global\…` on Windows.
   return /\/yarn\/(?:data\/)?global\/node_modules\//.test(normalizeCommandPath(commandPath));
@@ -418,11 +431,18 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
     });
   }
   if (commandPaths.some(isBunGlobalCommandPath)) {
+    // A fork published under its own name (shuvcode for OpenCode) must update
+    // and compare against that package; installing the driver's package would
+    // leave the configured binary untouched. Bun blocks install scripts of
+    // untrusted packages and still exits 0, which leaves a package whose
+    // postinstall places its native binary (@opencode/cli) as a failing stub,
+    // so this package is trusted.
+    const bunPackageName = bunGlobalPackageFromCommandPath(context.realCommandPath) ?? packageName;
     return makeProviderMaintenanceCapabilities({
       provider: definition.provider,
-      packageName,
+      packageName: bunPackageName,
       updateExecutable: "bun",
-      updateArgs: ["i", "-g", `${packageName}@latest`],
+      updateArgs: ["i", "-g", "--trust", `${bunPackageName}@latest`],
       updateLockKey: "bun-global",
     });
   }

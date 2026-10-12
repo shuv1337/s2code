@@ -19,6 +19,7 @@ import * as ProviderLatestVersions from "./ProviderLatestVersions.ts";
 import {
   createProviderVersionAdvisory,
   makeTargetedProviderUpdateAction,
+  bunGlobalPackageFromCommandPath,
   enrichProviderSnapshotWithVersionAdvisory,
   homebrewOwnershipFromCommandPath,
   makeCachedProviderMaintenanceResolution,
@@ -306,6 +307,20 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     ).toBeNull();
   });
 
+  it("reads the owning package from a bun global real path", () => {
+    expect(
+      bunGlobalPackageFromCommandPath(
+        "/Users/a/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe",
+      ),
+    ).toBe("@opencode/cli");
+    expect(
+      bunGlobalPackageFromCommandPath(
+        "/Users/a/.bun/install/global/node_modules/shuvcode/bin/launcher.mjs",
+      ),
+    ).toBe("shuvcode");
+    expect(bunGlobalPackageFromCommandPath("/Users/a/.bun/bin/opencode")).toBeNull();
+  });
+
   // The Codex Windows installer exposes `%LOCALAPPDATA%\\Programs\\OpenAI\\Codex\\bin`
   // as a junction into `%CODEX_HOME%\\packages\\standalone\\current\\bin`. Node's
   // realpath follows junctions, so the real path carries the standalone marker
@@ -434,7 +449,44 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
         );
 
         expect(capabilities.update).toMatchObject({
-          command: "bun i -g @example/package-tool@latest",
+          command: "bun i -g --trust @example/package-tool@latest",
+          lockKey: "bun-global",
+        });
+      }),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "updates the bun global package the binary links into, not the driver's package",
+    () =>
+      Effect.gen(function* () {
+        // `~/.bun/bin/fork-tool` -> `~/.bun/install/global/node_modules/fork-tool/…`
+        const tempDir = yield* makeTempDir("t3-bun-fork-capabilities");
+        const bunDir = NodePath.join(tempDir, ".bun");
+        const target = NodePath.join(
+          bunDir,
+          "install",
+          "global",
+          "node_modules",
+          "fork-tool",
+          "bin",
+          "launcher.mjs",
+        );
+        writeExecutable(target);
+        const link = NodePath.join(bunDir, "bin", "fork-tool");
+        NodeFS.mkdirSync(NodePath.dirname(link), { recursive: true });
+        NodeFS.symlinkSync(target, link);
+
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
+          packageToolUpdate,
+          { binaryPath: "fork-tool", env: { PATH: NodePath.dirname(link) } },
+        ).pipe(
+          Effect.provideService(HostProcess.Platform, "darwin"),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
+        );
+
+        expect(capabilities.packageName).toBe("fork-tool");
+        expect(capabilities.update).toMatchObject({
+          args: ["i", "-g", "--trust", "fork-tool@latest"],
           lockKey: "bun-global",
         });
       }),
