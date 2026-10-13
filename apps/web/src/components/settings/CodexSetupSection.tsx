@@ -577,8 +577,8 @@ function ManagedCodexSetup({
         : installation?.phase === "verifying"
           ? "Checking Codex."
           : installed
-            ? `${installation?.source === "local" ? "Using your installed Codex" : "Managed by T3 Code"}${installation?.installedVersion ? ` · v${installation.installedVersion}` : ""}.`
-            : (installation?.message ?? "T3 Code downloads and manages Codex for you.");
+            ? `${installation?.source === "local" ? "Using your installed Codex" : "Managed by shuv2code"}${installation?.installedVersion ? ` · v${installation.installedVersion}` : ""}.`
+            : (installation?.message ?? "shuv2code downloads and manages Codex for you.");
   const accountDescription = finishingSignIn ? (
     "Finishing sign-in..."
   ) : installActive ? (
@@ -655,7 +655,7 @@ function ManagedCodexSetup({
   const callbackCompletion =
     !handoff && auth?.phase === "waiting" && url ? (
       <div className="flex w-full flex-col gap-3 text-xs leading-relaxed text-muted-foreground">
-        <p>If sign-in doesn't return to T3 Code, paste the URL from the final localhost page.</p>
+        <p>If sign-in doesn't return to shuv2code, paste the URL from the final localhost page.</p>
         <form
           className="flex flex-col gap-2 sm:flex-row sm:items-center"
           onSubmit={(event) => {
@@ -1032,7 +1032,7 @@ export function CodexManagedRuntimeFields({
     <>
       <SettingsRow
         title="Binary path"
-        description="Selected by T3 Code."
+        description="Selected by shuv2code."
         control={
           <div className="w-full sm:w-80">
             <Input

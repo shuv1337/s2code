@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./productIdentity": {
+      "types": "./src/productIdentity.ts",
+      "import": "./src/productIdentity.ts"
+    },
+    "./localServerAttachment": {
+      "types": "./src/localServerAttachment.ts",
+      "import": "./src/localServerAttachment.ts"
+    },
     "./githubMarkdownLinks": {
       "types": "./src/githubMarkdownLinks.ts",
       "import": "./src/githubMarkdownLinks.ts"

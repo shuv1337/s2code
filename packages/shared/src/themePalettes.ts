@@ -134,7 +134,7 @@ export type ThemeDefinition = Readonly<{
  * Search uses amber across built-ins to separate matches from accent-tinted
  * inline code. The current match uses a stronger gold with dark text.
  */
-export const T3_CODE_LIGHT_THEME_COLORS: ThemeColors = {
+const STANDARD_LIGHT_THEME_COLORS: ThemeColors = {
   searchMatchBackground: "#ffde8b",
   searchMatchForeground: "#21180a",
   searchMatchActiveBackground: "#eea52b",
@@ -198,7 +198,7 @@ export const T3_CODE_LIGHT_THEME_COLORS: ThemeColors = {
   terminalScrollbarHover: "#bdbdbd",
 };
 
-export const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
+const STANDARD_DARK_THEME_COLORS: ThemeColors = {
   searchMatchBackground: "#8c6c1f",
   searchMatchForeground: "#f5f5f5",
   searchMatchActiveBackground: "#eea52b",
@@ -260,6 +260,82 @@ export const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
   terminalSelection: "#343a47",
   terminalScrollbar: "#222222",
   terminalScrollbarHover: "#363636",
+};
+
+// Keep semantic status/diff colors and optional themes upstream-owned.
+export const T3_CODE_LIGHT_THEME_COLORS: ThemeColors = {
+  ...STANDARD_LIGHT_THEME_COLORS,
+  canvas: "#FAF8F5",
+  chrome: "#FAF8F5",
+  toolbar: "#FAF8F5",
+  text: "#1C1A17",
+  textMuted: "#76726A",
+  toolbarForeground: "#1C1A17",
+  border: "#DBD7CD",
+  input: "#DBD7CD",
+  toolbarBorder: "#DBD7CD",
+  focus: "#B64E36",
+  accent: "#B64E36",
+  messageAction: "#B64E36",
+  messageActionHover: "#9F432E",
+  muted: "#F1EEE9",
+  mutedForeground: "#76726A",
+  placeholder: "#76726A",
+  secondaryLabel: "#76726A",
+  iconMuted: "#76726A",
+  sidebar: "#F1EEE9",
+  sidebarForeground: "#1C1A17",
+  sidebarMutedForeground: "#76726A",
+  sidebarControlSurface: "#FAF8F5",
+  sidebarRowHover: "#FAF8F5",
+  sidebarRowSelected: "#DBD7CD",
+  sidebarBorder: "#DBD7CD",
+  terminalBackground: "#FAF8F5",
+  terminalForeground: "#1C1A17",
+};
+export const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
+  ...STANDARD_DARK_THEME_COLORS,
+  canvas: "#0C1119",
+  chrome: "#0C1119",
+  toolbar: "#0C1119",
+  text: "#E7ECF3",
+  textMuted: "#8995A6",
+  toolbarForeground: "#E7ECF3",
+  surface: "#161D28",
+  surfaceRaised: "#1F2835",
+  surfaceOverlay: "#1F2835",
+  border: "#1F2835",
+  input: "#1F2835",
+  toolbarBorder: "#1F2835",
+  toolbarControl: "#161D28",
+  toolbarControlHover: "#1F2835",
+  focus: "#D35C46",
+  accent: "#D35C46",
+  accentForeground: "#0C1119",
+  messageAction: "#D35C46",
+  messageActionForeground: "#0C1119",
+  messageActionHover: "#E47760",
+  muted: "#161D28",
+  mutedForeground: "#8995A6",
+  placeholder: "#8995A6",
+  secondary: "#161D28",
+  secondaryLabel: "#8995A6",
+  iconMuted: "#8995A6",
+  accentSurface: "#1F2835",
+  messageSurface: "#161D28",
+  messageForeground: "#E7ECF3",
+  codeBackground: "#161D28",
+  codeForeground: "#E7ECF3",
+  sidebar: "#0F1621",
+  sidebarForeground: "#E7ECF3",
+  sidebarMutedForeground: "#8995A6",
+  sidebarControlSurface: "#161D28",
+  sidebarRowHover: "#161D28",
+  sidebarRowActive: "#1F2835",
+  sidebarRowSelected: "#1F2835",
+  sidebarBorder: "#1F2835",
+  terminalBackground: "#0C1119",
+  terminalForeground: "#E7ECF3",
 };
 
 export const T3_CHAT_THEME: ThemeDefinition = {

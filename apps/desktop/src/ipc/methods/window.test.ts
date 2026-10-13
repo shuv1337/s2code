@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { currentDesktopBootstrapToken } from "@t3tools/shared/desktopBootstrapToken";
+import * as Clock from "effect/Clock";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
@@ -114,7 +116,10 @@ describe("getLocalEnvironmentBootstraps", () => {
           runningDistro: "Ubuntu",
           httpBaseUrl: "http://127.0.0.1:3774/",
           wsBaseUrl: "ws://127.0.0.1:3774/",
-          bootstrapToken: "current-window-token",
+          bootstrapToken: currentDesktopBootstrapToken(
+            "desktop-secret",
+            yield* Clock.currentTimeMillis,
+          ),
         },
       ]);
     }).pipe(

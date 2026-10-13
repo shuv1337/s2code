@@ -4,6 +4,7 @@ import {
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
   EnvironmentHttpApi,
+  WatchPairingBodyLimit,
   type AuthBrowserSessionRequest,
   type AuthBrowserSessionResult,
   type AuthCreatePairingCredentialInput,
@@ -119,6 +120,7 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
         ),
       ]),
       Effect.provideService(EnvironmentAuthenticatedAuth, authenticatedAuth),
+      Effect.provideService(WatchPairingBodyLimit, (effect) => effect),
       Effect.scoped,
     ),
   );

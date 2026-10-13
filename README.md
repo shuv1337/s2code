@@ -1,4 +1,25 @@
-# T3 Code
+# shuv2code
+
+A branded fork of [T3 Code](https://github.com/pingdotgg/t3code), retaining its provider and
+client architecture with the devil-terminal identity and Apple Watch work.
+
+## Run this fork
+
+Use [fork builds](https://github.com/shuv1337/shuv2code/releases) or build from source with
+`vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#fork-builds)
+cover desktop artifacts. Published fork CLI packages use `shuv2code` / `s2c`.
+
+The installed fork starts with a fresh `~/.shuv2code-v2` home and separate Electron profile.
+Old shuv2code and upstream T3 data are not imported automatically. `T3CODE_HOME` and other
+upstream configuration names still apply; choose a separate V2 home when overriding it.
+The desktop automatically attaches to an already-running fork server in that home when
+their exact versions match. Quitting the desktop leaves that server running.
+
+Local networking and Tailscale are the primary remote paths. Fork-hosted Connect and mobile
+OTA need their own deployment configuration. Upstream app-store and package-manager links
+below install T3 Code, not this fork.
+
+## Upstream project notes
 
 T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 

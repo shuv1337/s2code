@@ -37,9 +37,10 @@ const config = {
 };
 
 describe("DesktopLocalEnvironmentAuth", () => {
-  it.effect("exchanges the desktop bootstrap credential only once", () =>
+  it.effect("caches the bearer session until the attached server credential changes", () =>
     Effect.gen(function* () {
       const requestCount = yield* Ref.make(0);
+      const currentConfig = yield* Ref.make(config);
       const layerHttpClient = Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
@@ -67,7 +68,7 @@ describe("DesktopLocalEnvironmentAuth", () => {
           {
             id: PRIMARY_LOCAL_ENVIRONMENT_ID,
             label: Effect.succeed("Windows"),
-            currentConfig: Effect.succeedSome(config),
+            currentConfig: Ref.get(currentConfig).pipe(Effect.asSome),
           },
         ]),
       } as unknown as DesktopBackendPool.DesktopBackendPool["Service"]);
@@ -77,12 +78,19 @@ describe("DesktopLocalEnvironmentAuth", () => {
 
       const [first, second] = yield* Effect.gen(function* () {
         const auth = yield* DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth;
-        return yield* Effect.all([auth.getBearerToken, auth.getBearerToken]);
+        const tokens = yield* Effect.all([auth.getBearerToken, auth.getBearerToken]);
+        assert.strictEqual(yield* Ref.get(requestCount), 1);
+        yield* Ref.set(currentConfig, {
+          ...config,
+          bootstrap: { ...config.bootstrap, desktopBootstrapToken: "replacement-server-token" },
+        });
+        yield* auth.getBearerToken;
+        return tokens;
       }).pipe(Effect.provide(layerTest));
 
       assert.strictEqual(first, "desktop-bearer-token");
       assert.strictEqual(second, "desktop-bearer-token");
-      assert.strictEqual(yield* Ref.get(requestCount), 1);
+      assert.strictEqual(yield* Ref.get(requestCount), 2);
     }),
   );
 

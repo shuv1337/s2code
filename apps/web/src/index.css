@@ -1242,6 +1242,83 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* The default fork palette. Optional theme mappings below still take precedence. */
+:root {
+  --brand-mark-canvas: #0c1119;
+  --brand-mark-ink: #e7ecf3;
+  --background: #faf8f5;
+  --foreground: #1c1a17;
+  --card-foreground: #1c1a17;
+  --popover-foreground: #1c1a17;
+  --primary: #b64e36;
+  --secondary: #f1eee9;
+  --secondary-foreground: #1c1a17;
+  --muted: #f1eee9;
+  --muted-foreground: #76726a;
+  --accent: #dbd7cd;
+  --accent-foreground: #1c1a17;
+  --border: #dbd7cd;
+  --input: #dbd7cd;
+  --sidebar: #f1eee9;
+  @variant dark {
+    --background: #0c1119;
+    --foreground: #e7ecf3;
+    --card: #161d28;
+    --card-foreground: #e7ecf3;
+    --popover: #1f2835;
+    --popover-foreground: #e7ecf3;
+    --surface-raised: #1f2835;
+    --primary: #d35c46;
+    --primary-foreground: #0c1119;
+    --secondary: #161d28;
+    --secondary-foreground: #e7ecf3;
+    --muted: #161d28;
+    --muted-foreground: #8995a6;
+    --accent: #1f2835;
+    --accent-foreground: #e7ecf3;
+    --border: #1f2835;
+    --input: #1f2835;
+    --sidebar: #0f1621;
+  }
+}
+[data-app-sidebar] {
+  --background: #f1eee9;
+  --foreground: #1c1a17;
+  --card-foreground: #1c1a17;
+  --accent: #dbd7cd;
+  --accent-foreground: #1c1a17;
+  --muted: #faf8f5;
+  --muted-foreground: #76726a;
+  --border: #dbd7cd;
+  --input: #dbd7cd;
+  --sidebar: #f1eee9;
+  --sidebar-foreground: #1c1a17;
+  --sidebar-muted-foreground: #76726a;
+  --sidebar-control-surface: #faf8f5;
+  --sidebar-row-hover: #faf8f5;
+  --sidebar-row-selected: #dbd7cd;
+  --sidebar-border: #dbd7cd;
+  @variant dark {
+    --background: #0f1621;
+    --foreground: #e7ecf3;
+    --card: #0f1621;
+    --card-foreground: #e7ecf3;
+    --accent: #1f2835;
+    --accent-foreground: #e7ecf3;
+    --muted: #161d28;
+    --muted-foreground: #8995a6;
+    --border: #1f2835;
+    --input: #1f2835;
+    --sidebar: #0f1621;
+    --sidebar-foreground: #e7ecf3;
+    --sidebar-muted-foreground: #8995a6;
+    --sidebar-control-surface: #161d28;
+    --sidebar-row-hover: #161d28;
+    --sidebar-row-selected: #1f2835;
+    --sidebar-border: #1f2835;
+  }
+}
+
 /* Theme files are expressed in app color roles and mapped to the existing
    semantic surface tokens here. Keep this block after the sidebar-version
    compatibility overrides so both navigation implementations receive the

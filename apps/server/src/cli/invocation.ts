@@ -45,7 +45,7 @@ function detectCliRunner(entryPath: string): CliRunner | null {
 const InstallManifest = Schema.Struct({
   name: Schema.String,
   version: Schema.String,
-  bin: Schema.optionalKey(Schema.Struct({ t3: Schema.String })),
+  bin: Schema.optionalKey(Schema.Struct({ shuv2code: Schema.String })),
   optionalDependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 });
 const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(InstallManifest));
@@ -60,7 +60,7 @@ export const resolveServerInstallation = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const entry = yield* fs.realPath(executable ? executablePath : (args[1] ?? ""));
   const match =
-    /^(.*)\/lib\/node_modules\/t3\/(?:dist\/bin\.mjs|bin\/t3\.js|node_modules\/@t3code\/t3-[^/]+\/t3)$/.exec(
+    /^(.*)\/lib\/node_modules\/shuv2code\/(?:dist\/bin\.mjs|bin\/t3\.js|node_modules\/@shuv2code\/t3-[^/]+\/t3)$/.exec(
       entry,
     );
   if (!match) {
@@ -80,20 +80,20 @@ export const resolveServerInstallation = Effect.gen(function* () {
   )
     return null;
 
-  const packageRoot = path.join(prefix, "lib/node_modules/t3");
+  const packageRoot = path.join(prefix, "lib/node_modules/shuv2code");
   const manifest = yield* fs
     .readFileString(path.join(packageRoot, "package.json"))
     .pipe(Effect.flatMap(decodeInstallManifest));
-  if (manifest.name !== "t3" || !manifest.bin) return null;
-  const bin = yield* fs.realPath(path.join(packageRoot, manifest.bin.t3));
-  const globalBin = yield* fs.realPath(path.join(prefix, "bin/t3"));
+  if (manifest.name !== "shuv2code" || !manifest.bin) return null;
+  const bin = yield* fs.realPath(path.join(packageRoot, manifest.bin.shuv2code));
+  const globalBin = yield* fs.realPath(path.join(prefix, "bin/shuv2code"));
   if (globalBin !== bin) return null;
   if (executable) {
     const nativeManifest = yield* fs
       .readFileString(path.join(path.dirname(entry), "package.json"))
       .pipe(Effect.flatMap(decodeInstallManifest));
     if (
-      manifest.bin.t3 !== "./bin/t3.js" ||
+      manifest.bin.shuv2code !== "./bin/t3.js" ||
       manifest.optionalDependencies?.[nativeManifest.name] !== nativeManifest.version ||
       nativeManifest.version !== manifest.version
     )
@@ -112,7 +112,7 @@ export const resolveServerInstallation = Effect.gen(function* () {
  */
 function suggestedPackageSpec(version: string): string {
   const channel = /^[^-+]+-(nightly|preview)\./.exec(version)?.[1];
-  return channel === undefined ? "t3" : `t3@${channel}`;
+  return channel === undefined ? "shuv2code" : `shuv2code@${channel}`;
 }
 
 /**
@@ -128,7 +128,7 @@ export function formatCliCommand(input: {
 }): string {
   const runner = detectCliRunner(input.entryPath);
   if (runner === null) {
-    return `t3 ${input.subcommand}`;
+    return `shuv2code ${input.subcommand}`;
   }
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }
@@ -172,8 +172,8 @@ const resolveInstallLauncher = Effect.gen(function* () {
 const resolveHostCliCommand = (subcommand: string) =>
   Effect.gen(function* () {
     const command = yield* resolveCliCommand(subcommand);
-    if (command !== `t3 ${subcommand}`) return { command, launcher: false };
-    if (yield* isCommandAvailable("t3")) return { command, launcher: false };
+    if (command !== `shuv2code ${subcommand}`) return { command, launcher: false };
+    if (yield* isCommandAvailable("shuv2code")) return { command, launcher: false };
     const launcher = yield* resolveInstallLauncher;
     return Option.isSome(launcher)
       ? { command: `${shellWord(launcher.value)} ${subcommand}`, launcher: true }

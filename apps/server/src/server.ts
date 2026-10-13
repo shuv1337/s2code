@@ -762,9 +762,15 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(ServerHttp.layerHttpCompression),
 );
 
+import {
+  persistLocalServerAttachment,
+  clearLocalServerAttachment,
+  withLocalDesktopBootstrap,
+} from "./localServerAttachment.ts";
+
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
+    const config = yield* withLocalDesktopBootstrap(yield* ServerConfig.ServerConfig);
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);
     const layerActivation = Layer.succeed(ServerActivation.ServerActivation, awaitActivation);
@@ -795,6 +801,9 @@ const layerMakeServer = Layer.unwrap(
           }
 
           const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
+          yield* persistLocalServerAttachment(config, address.port).pipe(
+            Effect.catch(() => Effect.logWarning("Could not publish local desktop attachment")),
+          );
           const state = yield* makePersistedServerRuntimeState({
             config,
             port: address.port,
@@ -810,7 +819,8 @@ const layerMakeServer = Layer.unwrap(
           );
         }),
         () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
+          clearLocalServerAttachment(config.stateDir).pipe(
+            Effect.andThen(clearPersistedServerRuntimeState(config.serverRuntimeStatePath)),
             Effect.catchCause((cause) =>
               Effect.logWarning("Failed to clear server runtime state", { cause }),
             ),
@@ -1136,6 +1146,7 @@ const layerMakeServer = Layer.unwrap(
       // Every agent and terminal spawn reads this, so it sits below everything.
       Layer.provideMerge(AgentScopeLive.layer),
       Layer.provideMerge(layerPlatformServices),
+      Layer.provide(ServerConfig.layer(config)),
     );
   }),
 );

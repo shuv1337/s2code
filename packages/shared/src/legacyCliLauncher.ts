@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const executableName = process.platform === "win32" ? "t3.exe" : "t3";
-const executable = join(dirname(require.resolve("@t3code/t3-" + process.platform + "-" + process.arch + "/package.json")), executableName);
+const executable = join(dirname(require.resolve("@shuv2code/t3-" + process.platform + "-" + process.arch + "/package.json")), executableName);
 const ipc = process.send !== undefined;
 const child = spawn(executable, process.argv.slice(2), {
   stdio: ipc ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",

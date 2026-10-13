@@ -10,6 +10,9 @@ import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import { HttpClient } from "effect/http";
+import * as DesktopLocalServerAttach from "./DesktopLocalServerAttach.ts";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -844,6 +847,7 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+  const httpClient = yield* HttpClient.HttpClient;
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
   const wslServerTree = yield* DesktopWslServerTree.DesktopWslServerTree;
   const settings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -924,10 +928,44 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
-    return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath, cliPath }).pipe(
+    const config = yield* resolvePrimaryStartConfig({
+      ...shared,
+      resourceMonitorPath,
+      cliPath,
+    }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
     );
+    if (environment.isDevelopment) return config;
+    const attachment = yield* DesktopLocalServerAttach.discover(environment).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, environment.path),
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.match({ onFailure: (error) => ({ error }), onSuccess: (record) => ({ record }) }),
+    );
+    if ("error" in attachment)
+      return {
+        ...config,
+        preflightFailure: Option.some({
+          reason: "Cannot attach to the existing local server. Check its version and availability.",
+          fatal: true,
+        }),
+      };
+    if (!attachment.record) return config;
+    return {
+      ...config,
+      attachedPid: attachment.record.pid,
+      httpBaseUrl: new URL(`http://127.0.0.1:${attachment.record.port}`),
+      bootstrap: {
+        ...config.bootstrap,
+        port: attachment.record.port,
+        desktopBootstrapSecret: attachment.record.bootstrapSecret,
+        desktopBootstrapToken: currentDesktopBootstrapToken(
+          attachment.record.bootstrapSecret,
+          yield* Clock.currentTimeMillis,
+        ),
+      },
+    };
   });
 
   // Single source of truth for what the primary actually runs as. Both

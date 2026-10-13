@@ -43,8 +43,8 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import { windowsSystemTar } from "./build-cli-archive.ts";
 
-export const NPM_PLATFORM_PACKAGE_SCOPE = "@t3code";
-export const NPM_LAUNCHER_PACKAGE_NAME = "t3";
+export const NPM_PLATFORM_PACKAGE_SCOPE = "@shuv2code";
+export const NPM_LAUNCHER_PACKAGE_NAME = "shuv2code";
 
 const encodePackageJson = Schema.encodeEffect(fromJsonStringPretty(Schema.Unknown));
 
@@ -107,7 +107,7 @@ export function npmPlatformPackageManifest(
   return {
     name: npmPlatformPackageName(platformKey),
     version,
-    description: `T3 Code CLI executable for ${platformKey}`,
+    description: `shuv2code CLI executable for ${platformKey}`,
     license: serverPackageJson.license,
     repository: serverPackageJson.repository,
     os: [os],
@@ -163,7 +163,7 @@ export function npmPlatformPackageReadme(platformKey: CliArchivePlatformKey): st
     `npx ${NPM_LAUNCHER_PACKAGE_NAME}@latest`,
     "```",
     "",
-    "Source and documentation: https://github.com/pingdotgg/t3code",
+    "Source and documentation: https://github.com/shuv1337/shuv2code",
     "",
   ].join("\n");
 }
@@ -176,10 +176,10 @@ export function npmLauncherPackageManifest(
   return {
     name: NPM_LAUNCHER_PACKAGE_NAME,
     version,
-    description: "T3 Code CLI. Installs the self-contained executable for this platform.",
+    description: "shuv2code CLI. Installs the self-contained executable for this platform.",
     license: serverPackageJson.license,
     repository: serverPackageJson.repository,
-    bin: { t3: "./bin/t3.js" },
+    bin: { shuv2code: "./bin/t3.js", s2c: "./bin/t3.js" },
     files: ["bin", "dist"],
     optionalDependencies: Object.fromEntries(
       platformKeys.map((key) => [npmPlatformPackageName(key), version]),
@@ -207,10 +207,10 @@ try {
 } catch {
   process.stderr.write(
     [
-      "t3: no T3 Code CLI build is available for this platform (" + key + ").",
+      "shuv2code: no CLI build is available for this platform (" + key + ").",
       "Supported platforms: " + SUPPORTED.join(", ") + ".",
-      "If yours is listed, reinstall t3 so npm fetches its optional dependency.",
-      "The desktop app and release archives are at https://github.com/pingdotgg/t3code/releases",
+      "If yours is listed, reinstall shuv2code so npm fetches its optional dependency.",
+      "The desktop app and release archives are at https://github.com/shuv1337/shuv2code/releases",
       "",
     ].join("\\n"),
   );

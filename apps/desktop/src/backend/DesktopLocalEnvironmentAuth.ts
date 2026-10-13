@@ -71,17 +71,12 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const httpClient = yield* HttpClient.HttpClient;
-  const tokenRef = yield* Ref.make(Option.none<string>());
+  const tokenRef = yield* Ref.make(Option.none<{ key: string; token: string }>());
   const mutex = yield* Semaphore.make(1);
 
   const getBearerToken = mutex
     .withPermits(1)(
       Effect.gen(function* () {
-        const cached = yield* Ref.get(tokenRef);
-        if (Option.isSome(cached)) {
-          return cached.value;
-        }
-
         const instances = yield* pool.list;
         const primary = instances.find((instance) => instance.id === PRIMARY_LOCAL_ENVIRONMENT_ID);
         const configOption = primary === undefined ? Option.none() : yield* primary.currentConfig;
@@ -93,6 +88,9 @@ export const make = Effect.gen(function* () {
         // window's token, not the one frozen into its launch config; this
         // exchange can run long after launch (e.g. after a suspend).
         const secret = config.bootstrap.desktopBootstrapSecret;
+        const key = `${config.httpBaseUrl.href}:${secret ?? config.bootstrap.desktopBootstrapToken}`;
+        const cached = yield* Ref.get(tokenRef);
+        if (Option.isSome(cached) && cached.value.key === key) return cached.value.token;
         const credential =
           secret === undefined
             ? config.bootstrap.desktopBootstrapToken
@@ -104,7 +102,7 @@ export const make = Effect.gen(function* () {
           httpBaseUrl: config.httpBaseUrl.href,
           credential,
           clientMetadata: {
-            label: "T3 Code Desktop",
+            label: "shuv2code Desktop",
             deviceType: "desktop",
           },
         }).pipe(
@@ -122,7 +120,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-        yield* Ref.set(tokenRef, Option.some(session.access_token));
+        yield* Ref.set(tokenRef, Option.some({ key, token: session.access_token }));
         return session.access_token;
       }),
     )

@@ -14,7 +14,20 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
+import * as BackendConfiguration from "./DesktopBackendConfiguration.ts";
+import { HttpClient } from "effect/http";
+
+const DesktopBackendConfiguration = {
+  ...BackendConfiguration,
+  layer: BackendConfiguration.layer.pipe(
+    Layer.provide(
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("unexpected attachment HTTP request")),
+      ),
+    ),
+  ),
+};
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -112,7 +125,7 @@ const withHarness = <A, E, R>(
     | R
     | DesktopEnvironment.DesktopEnvironment
     | FileSystem.FileSystem
-    | DesktopBackendConfiguration.DesktopBackendConfiguration
+    | BackendConfiguration.DesktopBackendConfiguration
   >,
 ) =>
   Effect.gen(function* () {
@@ -158,7 +171,7 @@ const withPackagedWslHarness = <A, E, R>(
   ) => Effect.Effect<
     A,
     E,
-    R | FileSystem.FileSystem | Path.Path | DesktopBackendConfiguration.DesktopBackendConfiguration
+    R | FileSystem.FileSystem | Path.Path | BackendConfiguration.DesktopBackendConfiguration
   >,
 ) =>
   Effect.gen(function* () {

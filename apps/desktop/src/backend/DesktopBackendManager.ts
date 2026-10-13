@@ -54,6 +54,7 @@ import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
+import * as DesktopLocalServerAttach from "./DesktopLocalServerAttach.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
 const MAX_RESTART_DELAY = Duration.seconds(10);
@@ -87,6 +88,8 @@ export interface BackendProcessContext {
 export type DesktopBackendBootstrapDelivery = "fd3" | "stdin";
 
 export interface DesktopBackendStartConfig extends BackendProcessContext {
+  // An independent server has no child-process handle and must never be killed.
+  readonly attachedPid?: number;
   readonly args: ReadonlyArray<string>;
   readonly env: Record<string, string | undefined>;
   // When true the spawner merges the desktop process.env on top of `env`;
@@ -445,6 +448,16 @@ const decodeDesktopTelemetryControlLine = Schema.decodeUnknownEffect(
 export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   options: RunBackendProcessOptions,
 ): Effect.fn.Return<BackendProcessExit, BackendProcessError, BackendProcessRunRequirements> {
+  if (options.attachedPid !== undefined) {
+    const pid = options.attachedPid;
+    yield* options.onStarted?.(pid) ?? Effect.void;
+    yield* options.onReady?.() ?? Effect.void;
+    yield* Effect.sync(() => DesktopLocalServerAttach.isProcessAlive(pid)).pipe(
+      Effect.repeat({ while: (alive) => alive, schedule: Schedule.spaced("2 seconds") }),
+    );
+    yield* options.onExitObserved?.() ?? Effect.void;
+    return { code: Option.none(), reason: "attached server stopped" };
+  }
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const bootstrapJson = yield* encodeBootstrapJson(options.bootstrap).pipe(
     Effect.mapError(

@@ -1,0 +1,55 @@
+name: Fork desktop artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact fork artifact version (for example 0.0.46-nightly.20261012.3035)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    if: github.repository == 'shuv1337/shuv2code'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-arm64
+            platform: mac
+            arch: arm64
+            target: dmg
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+            target: AppImage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/shuv2code
+      FORK_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          run-install: true
+      - name: Align server and client versions
+        run: node scripts/update-release-package-versions.ts "$FORK_VERSION"
+      - name: Build fork artifact with upstream packaging
+        shell: bash
+        run: >-
+          node scripts/build-desktop-artifact.ts
+          --platform '${{ matrix.platform }}'
+          --arch '${{ matrix.arch }}'
+          --target '${{ matrix.target }}'
+          --build-version "$FORK_VERSION"
+          --output-dir release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shuv2code-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release/
+          if-no-files-found: error

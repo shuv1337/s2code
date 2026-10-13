@@ -192,8 +192,8 @@ const publishCmd = Command.make(
       // npm runs with cwd set to the packages dir below, so tarball paths are
       // resolved once here rather than joined twice.
       const packagesDir = path.resolve(config.packagesDir);
-      const scopeDir = path.join(packagesDir, "@t3code");
-      const launcherTarball = path.join(packagesDir, "t3.tgz");
+      const scopeDir = path.join(packagesDir, "@shuv2code");
+      const launcherTarball = path.join(packagesDir, "shuv2code.tgz");
       const platformTarballs = (yield* fs
         .readDirectory(scopeDir)
         .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])))

@@ -31,8 +31,8 @@ export class DesktopLegacyLocalStorage extends Context.Service<
 >()("@t3tools/desktop/app/DesktopLegacyLocalStorage") {}
 
 const MARKER_FILE_NAME = "v1-local-storage-imported";
-// V1 used "T3 Code (Alpha)" when that folder existed and "t3code" otherwise.
-const V1_PROFILE_NAMES = ["T3 Code (Alpha)", "t3code"];
+// The fork starts fresh. Old-fork profiles need a separate, copy-only import.
+const V1_PROFILE_NAMES: readonly string[] = [];
 
 const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;

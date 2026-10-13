@@ -118,9 +118,9 @@ describe("link round trips", () => {
   });
 
   it("hands an in-app path to the installed app", () => {
-    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("t3code://new?prompt=hi");
+    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("shuv2code://new?prompt=hi");
     expect(promptLinkDeepLink("/env-1/thread-1?prompt=hi")).toBe(
-      "t3code://threads/env-1/thread-1?prompt=hi",
+      "shuv2code://threads/env-1/thread-1?prompt=hi",
     );
   });
 });

@@ -37,6 +37,7 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProviderInstances from "../provider/ProviderInstanceRegistry.ts";
 import * as Watch from "./WatchService.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as WatchHttp from "./http.ts";
 import * as WatchTranscription from "./WatchTranscription.ts";
 import * as LocalTranscription from "../transcription/LocalTranscription.ts";
@@ -67,7 +68,11 @@ const runtime = ProviderReplayHarness.layerWithRegistry(
   { databaseLayer: database, runEffectWorker: false },
 );
 const dependencies = Layer.mergeAll(
-  ThreadManagement.layer.pipe(Layer.provide(runtime)),
+  ThreadManagement.layer.pipe(
+    Layer.provide(runtime),
+    Layer.provide(Receipts.layer.pipe(Layer.provide(database))),
+    Layer.provide(ServerSettings.layerTest()),
+  ),
   ProjectionStore.layer,
   Receipts.layer,
   ProjectStore.layer,

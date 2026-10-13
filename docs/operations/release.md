@@ -2,7 +2,20 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
-This document covers the unified release workflow for stable and nightly desktop releases.
+## Fork builds
+
+On `shuv1337/shuv2code`, run **Fork desktop artifacts** (`fork-desktop.yml`) manually on the
+branch to build, supplying an exact version. It stamps the server and clients together and
+uses the upstream packager to produce unsigned macOS ARM64 and Linux x64 workflow artifacts.
+It does not publish a release, npm packages, hosted web, or Connect services.
+
+Fork downloads and updates use `shuv1337/shuv2code`; npm distribution uses `shuv2code` with
+`@shuv2code/t3-<platform>` optional packages. Executable/archive filenames retain upstream's
+`t3` names. Configure fork signing, npm publishing, and updater assets before publishing.
+Mobile OTA requires an explicit fork Expo project and opt-in. Marketing deployments set
+`T3CODE_MARKETING_URL` to their own origin.
+
+The unified upstream release workflow below is restricted to `pingdotgg/t3code`.
 
 ## What the workflow does
 

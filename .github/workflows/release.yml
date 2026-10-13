@@ -49,6 +49,8 @@ jobs:
   # published nightly, so stable only ever ships a build that nightly users
   # have already run. Scheduled runs also decide here whether a nightly is due.
   resolve_commit:
+    # Fork artifacts use fork-desktop.yml until fork-hosted Connect/signing is configured.
+    if: github.repository == 'pingdotgg/t3code'
     name: Resolve release commit
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 5
