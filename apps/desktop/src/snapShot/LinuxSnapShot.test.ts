@@ -360,13 +360,29 @@ it.each([false, true])(
   },
 );
 
-it("uses the GNOME extension and preserves its window identity", async () => {
-  bus.portalVersion = 2;
-  bus.extensionVersion = 1;
-  expect(await captureLinuxWindow(appId)).toEqual({ png, window: metadata });
-  expect(bus.requestName).toHaveBeenCalledWith(`${appId}.SnapShot`, expect.any(Number));
-  expect(bus.calls.some((call) => call.member === "Screenshot")).toBe(false);
-});
+it.each([
+  ["com.t3tools.T3Code", ""],
+  ["dev.shuv.shuv2code.nightly", ".nightly"],
+  ["dev.shuv.shuv2code.preview", ".preview"],
+  ["dev.shuv.shuv2code.Development", ".Development"],
+])(
+  "uses only the fork GNOME service for %s and preserves window identity",
+  async (client, suffix) => {
+    bus.portalVersion = 2;
+    bus.extensionVersion = 1;
+    expect(await captureLinuxWindow(client)).toEqual({ png, window: metadata });
+    expect(bus.requestName).toHaveBeenCalledWith(
+      `io.github.shuv1337.shuv2code.SnapShot.Client${suffix}`,
+      expect.any(Number),
+    );
+    expect(bus.calls.find((call) => call.member === "Capture")).toMatchObject({
+      destination: "io.github.shuv1337.shuv2code.SnapShot",
+      interface: "io.github.shuv1337.shuv2code.SnapShot",
+      path: "/io/github/shuv1337/shuv2code/SnapShot",
+    });
+    expect(bus.calls.some((call) => call.member === "Screenshot")).toBe(false);
+  },
+);
 
 it("fails instead of opening a picker after an extension denial", async () => {
   bus.portalVersion = 2;

@@ -1,5 +1,42 @@
 import { expect, it } from "vite-plus/test";
-import { CaptureService, CLIENT_NAMES, isWaylandSession } from "./captureService.js";
+import {
+  CaptureService,
+  CLIENT_NAMES,
+  DBUS_NAME,
+  DBUS_PATH,
+  isWaylandSession,
+} from "./captureService.js";
+import bundle from "./bundle.json" with { type: "json" };
+import metadata from "./metadata.json" with { type: "json" };
+import { PRODUCT_DBUS_PREFIX } from "../../../packages/shared/src/productIdentity.ts";
+import { gnomeCaptureClientName } from "../src/snapShot/gnomeCaptureBundle.ts";
+
+it("ships matching fork extension, service and channel-client identities", () => {
+  expect(metadata.uuid).toBe(bundle.uuid);
+  expect(bundle.uuid).toBe("snap-shot@shuv1337.github.io");
+  expect(bundle.dbusName).toBe(DBUS_NAME);
+  expect(DBUS_NAME).toBe(`${PRODUCT_DBUS_PREFIX}.SnapShot`);
+  expect(bundle.dbusPath).toBe(DBUS_PATH);
+  expect(DBUS_PATH).toBe(`/${DBUS_NAME.replaceAll(".", "/")}`);
+  const callers = [
+    "dev.shuv.shuv2code",
+    "dev.shuv.shuv2code.Development",
+    "dev.shuv.shuv2code.nightly",
+    "dev.shuv.shuv2code.preview",
+  ];
+  expect(callers.map(gnomeCaptureClientName)).toEqual(CLIENT_NAMES);
+});
+
+it.each(["com.t3tools.T3Code.SnapShot", "com.t3tools.T3Code.Development.SnapShot"])(
+  "rejects the upstream owner of %s without capturing pixels",
+  async (upstream) => {
+    const { service, snapshots } = fixture({
+      getNameOwner: async (name) => (name === upstream ? ":1.23" : null),
+    });
+    await expect(service.capture(":1.23")).rejects.toThrow("Only shuv2code");
+    expect(snapshots()).toBe(0);
+  },
+);
 
 it("supports GNOME 50 without the removed X11 API, rejecting older X11 sessions", () => {
   expect(isWaylandSession({})).toBe(true);
@@ -23,7 +60,7 @@ function fixture(overrides = {}) {
 
 it("rejects other clients before looking at the active window", async () => {
   const { service, snapshots } = fixture();
-  await expect(service.capture(":1.99")).rejects.toThrow("Only T3 Code");
+  await expect(service.capture(":1.99")).rejects.toThrow("Only shuv2code");
   expect(snapshots()).toBe(0);
   expect(await service.capture(":1.23")).toBe("pixels");
 });
@@ -38,7 +75,7 @@ it("rechecks the name owner on each capture", async () => {
   const { service } = fixture({ getNameOwner: async () => owner });
   expect(await service.capture(owner)).toBe("pixels");
   owner = ":1.24";
-  await expect(service.capture(":1.23")).rejects.toThrow("Only T3 Code");
+  await expect(service.capture(":1.23")).rejects.toThrow("Only shuv2code");
 });
 
 it("rejects locked and non-Wayland sessions without taking a screenshot", async () => {
@@ -94,7 +131,7 @@ it("rejects concurrent requests and clears busy after a failed capture", async (
   await expect(service.capture(":1.23")).rejects.toThrow("already in progress");
   finish(new Error("gone"));
   await expect(first).rejects.toThrow("gone");
-  await expect(service.capture(":1.99")).rejects.toThrow("Only T3 Code");
+  await expect(service.capture(":1.99")).rejects.toThrow("Only shuv2code");
 });
 
 it("prepares focus/effects only after pixels and identity have been captured", async () => {

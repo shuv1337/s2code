@@ -5,6 +5,8 @@ import * as NodePath from "node:path";
 import { Message, sessionBus, type MessageBus, type MessageLike } from "dbus-next";
 import * as Schema from "effect/Schema";
 import type { DesktopCaptureExtensionState } from "@t3tools/contracts";
+import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
+import { assertCaptureDirectories, regularCaptureFile } from "./captureHelperFiles.ts";
 
 import { GNOME_CAPTURE_FILES, GNOME_CAPTURE_UUID } from "./gnomeCaptureBundle.ts";
 export { isGnomeCaptureSession } from "./linuxCaptureSession.ts";
@@ -33,15 +35,28 @@ const Metadata = Schema.Struct({
 });
 const decodeMetadata = Schema.decodeUnknownSync(Schema.fromJsonString(Metadata));
 
+async function readMetadata(directory: string) {
+  const contents = await regularCaptureFile(NodePath.join(directory, "metadata.json"));
+  if (!contents) throw new Error("Cannot establish ownership without fork extension metadata.");
+  return decodeMetadata(contents.toString());
+}
+
+async function installedMetadata(directory: string) {
+  const exists = await NodeFSP.lstat(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    return undefined;
+  });
+  return exists ? readMetadata(directory) : undefined;
+}
+
 type SetupPaths = { readonly bundle: string; readonly dataHome: string };
 
 /** Copies only the shipped extension, offline. Replaced versions are kept for recovery. */
 export async function installGnomeCaptureBundle({ bundle, dataHome }: SetupPaths) {
-  const metadata = decodeMetadata(
-    await NodeFSP.readFile(NodePath.join(bundle, "metadata.json"), "utf8"),
-  );
+  const metadata = await readMetadata(bundle);
   const parent = NodePath.join(dataHome, "gnome-shell", "extensions");
   const target = NodePath.join(parent, GNOME_CAPTURE_UUID);
+  await assertCaptureDirectories(dataHome, parent);
   await NodeFSP.mkdir(parent, { recursive: true });
   const existing = await NodeFSP.lstat(target).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
@@ -52,13 +67,11 @@ export async function installGnomeCaptureBundle({ bundle, dataHome }: SetupPaths
       "The extension installation is not a regular directory. Manage it in GNOME Extensions instead.",
     );
   if (existing) {
-    const installed = decodeMetadata(
-      await NodeFSP.readFile(NodePath.join(target, "metadata.json"), "utf8"),
-    );
+    const installed = await readMetadata(target);
     if (installed.version > metadata.version)
       throw new Error("A newer extension is installed. Update T3 Code instead of replacing it.");
   }
-  const staged = await NodeFSP.mkdtemp(NodePath.join(parent, ".t3-capture-install-"));
+  const staged = await NodeFSP.mkdtemp(NodePath.join(parent, `.${PRODUCT_ID}-capture-install-`));
   let backup: string | undefined;
   try {
     for (const name of GNOME_CAPTURE_FILES) {
@@ -67,7 +80,8 @@ export async function installGnomeCaptureBundle({ bundle, dataHome }: SetupPaths
     }
     await NodeFSP.chmod(staged, 0o755);
     if (existing) {
-      const backupParent = NodePath.join(dataHome, "t3code", "extension-backups");
+      const backupParent = NodePath.join(dataHome, PRODUCT_ID, "extension-backups");
+      await assertCaptureDirectories(dataHome, backupParent);
       await NodeFSP.mkdir(backupParent, { recursive: true });
       backup = NodePath.join(
         await NodeFSP.mkdtemp(NodePath.join(backupParent, "capture-")),
@@ -136,6 +150,10 @@ export class GnomeCaptureSetup {
 
   async state(): Promise<DesktopCaptureExtensionState> {
     try {
+      await assertCaptureDirectories(
+        this.paths.dataHome,
+        NodePath.join(this.paths.dataHome, "gnome-shell", "extensions", GNOME_CAPTURE_UUID),
+      );
       const [properties, info, bundled, installed] = await Promise.all([
         this.call({
           interface: "org.freedesktop.DBus.Properties",
@@ -149,24 +167,10 @@ export class GnomeCaptureSetup {
           signature: "s",
           body: [GNOME_CAPTURE_UUID],
         }).then(decodeInfo),
-        NodeFSP.readFile(NodePath.join(this.paths.bundle, "metadata.json"), "utf8").then(
-          decodeMetadata,
+        readMetadata(this.paths.bundle),
+        installedMetadata(
+          NodePath.join(this.paths.dataHome, "gnome-shell", "extensions", GNOME_CAPTURE_UUID),
         ),
-        NodeFSP.readFile(
-          NodePath.join(
-            this.paths.dataHome,
-            "gnome-shell",
-            "extensions",
-            GNOME_CAPTURE_UUID,
-            "metadata.json",
-          ),
-          "utf8",
-        )
-          .then(decodeMetadata)
-          .catch((error: NodeJS.ErrnoException) => {
-            if (error.code !== "ENOENT") throw error;
-            return undefined;
-          }),
       ]);
       const major = properties.ShellVersion.value.split(".")[0]!;
       if (!bundled["shell-version"].includes(major))
@@ -234,6 +238,17 @@ export class GnomeCaptureSetup {
     }
     if (action === "enable-extension" && state.status !== "disabled")
       throw new Error(state.message);
+    if (action === "disable-extension") {
+      // A failed-to-load fork extension must still be disableable, but not foreign state.
+      const target = NodePath.join(
+        this.paths.dataHome,
+        "gnome-shell",
+        "extensions",
+        GNOME_CAPTURE_UUID,
+      );
+      await assertCaptureDirectories(this.paths.dataHome, target);
+      await installedMetadata(target);
+    }
     const result = await this.call({
       interface: EXTENSIONS,
       member: action === "enable-extension" ? "EnableExtension" : "DisableExtension",

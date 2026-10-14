@@ -7,16 +7,25 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as Schema from "effect/Schema";
 import type { DesktopCaptureHelperState } from "@t3tools/contracts";
+import {
+  PRODUCT_ID,
+  PRODUCT_DBUS_PREFIX,
+  KDE_CAPTURE_HELPER_EXECUTABLE,
+} from "@t3tools/shared/productIdentity";
 
 import { escapeDesktopEntryExecArgument } from "../app/DesktopLinuxUrlHandler.ts";
 import type { LinuxWindowSnapshot } from "./LinuxSnapShot.ts";
 import { readPortalPng } from "./linuxCaptureSession.ts";
 import { startNativeCaptureFeedback } from "./NativeCaptureFeedback.ts";
+import {
+  assertCaptureDirectories,
+  regularCaptureFile as regularFile,
+} from "./captureHelperFiles.ts";
 export { isKdeCaptureSession } from "./linuxCaptureSession.ts";
 
-export const KDE_CAPTURE_EXECUTABLE = "t3-kde-snap-shot";
-const DESKTOP_FILE = "com.t3tools.T3Code.KdeCapture.desktop";
-const MARKER = "X-T3Code-Capture-Helper=true";
+export const KDE_CAPTURE_EXECUTABLE = KDE_CAPTURE_HELPER_EXECUTABLE;
+const DESKTOP_FILE = `${PRODUCT_DBUS_PREFIX}.KdeCapture.desktop`;
+const MARKER = "X-Shuv2Code-Capture-Helper=true";
 const decodeCapabilities = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ feedbackAvailable: Schema.optional(Schema.Boolean) })),
 );
@@ -24,7 +33,7 @@ export type KdeCapturePaths = { readonly bundle: string; readonly dataHome: stri
 
 export function kdeCapturePaths(paths: KdeCapturePaths) {
   return {
-    executable: NodePath.join(paths.dataHome, "t3code", "kde-capture", KDE_CAPTURE_EXECUTABLE),
+    executable: NodePath.join(paths.dataHome, PRODUCT_ID, "kde-capture", KDE_CAPTURE_EXECUTABLE),
     desktop: NodePath.join(paths.dataHome, "applications", DESKTOP_FILE),
   };
 }
@@ -33,7 +42,7 @@ export function kdeCaptureDesktopEntry(executable: string): string {
   return [
     "[Desktop Entry]",
     "Type=Application",
-    "Name=T3 Code SnapShots",
+    "Name=shuv2code SnapShots",
     "NoDisplay=true",
     `Exec=${escapeDesktopEntryExecArgument(executable)} check`,
     // KService reads this custom property as a KConfig list, not an XDG ';' list.
@@ -82,17 +91,13 @@ function run(executable: string, args: string[], signal?: AbortSignal): Promise<
   });
 }
 
-async function regularFile(path: string): Promise<Buffer | undefined> {
-  const stat = await NodeFSP.lstat(path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code !== "ENOENT") throw error;
-    return undefined;
-  });
-  if (!stat) return undefined;
-  if (!stat.isFile() || stat.isSymbolicLink())
+function assertOwnership(installed: Buffer | undefined, entry: Buffer | undefined) {
+  if (entry && !entry.toString().split("\n").includes(MARKER))
     throw new Error(
-      "Capture helper files must be regular files. Remove the conflicting link before trying again.",
+      "Another desktop entry uses the capture helper's name. Rename it before continuing.",
     );
-  return NodeFSP.readFile(path);
+  if (installed && !entry)
+    throw new Error("Cannot establish capture helper ownership without its fork desktop entry.");
 }
 
 /** No install on launch: writes happen only after the user chooses Install helper. */
@@ -105,7 +110,10 @@ export class KdeCaptureSetup {
   async state(): Promise<DesktopCaptureHelperState> {
     try {
       const { executable, desktop } = kdeCapturePaths(this.paths);
+      await assertCaptureDirectories(this.paths.dataHome, NodePath.dirname(executable));
+      await assertCaptureDirectories(this.paths.dataHome, NodePath.dirname(desktop));
       const [installed, entry] = await Promise.all([regularFile(executable), regularFile(desktop)]);
+      assertOwnership(installed, entry);
       if (!installed || !entry)
         return {
           status: "not-installed",
@@ -139,25 +147,18 @@ export class KdeCaptureSetup {
 
   async perform(action: "install-kde-helper" | "remove-kde-helper") {
     const { executable, desktop } = kdeCapturePaths(this.paths);
+    await assertCaptureDirectories(this.paths.dataHome, NodePath.dirname(executable));
+    await assertCaptureDirectories(this.paths.dataHome, NodePath.dirname(desktop));
     const entry = await regularFile(desktop);
-    if (entry && !entry.toString().split("\n").includes(MARKER))
-      throw new Error(
-        "Another desktop entry uses the capture helper's name. Rename it before continuing.",
-      );
+    const installed = await regularFile(executable);
+    assertOwnership(installed, entry);
     // Never overwrite/follow a symlink, including the installation directory itself.
     const directory = NodePath.dirname(executable);
-    const existing = await NodeFSP.lstat(directory).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-      return undefined;
-    });
-    if (existing && (!existing.isDirectory() || existing.isSymbolicLink()))
-      throw new Error("The capture helper directory is not a regular directory.");
-    await regularFile(executable);
     if (action === "remove-kde-helper") {
-      if (entry) await NodeFSP.unlink(desktop);
       await NodeFSP.unlink(executable).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
       });
+      if (entry) await NodeFSP.unlink(desktop);
     } else {
       const bundle = await regularFile(this.paths.bundle);
       if (!bundle)
@@ -171,12 +172,13 @@ export class KdeCaptureSetup {
       try {
         const staged = NodePath.join(staging, KDE_CAPTURE_EXECUTABLE);
         await NodeFSP.writeFile(staged, bundle, { mode: 0o755 });
-        await NodeFSP.rename(staged, executable);
         await NodeFSP.writeFile(stagedDesktop, kdeCaptureDesktopEntry(executable), {
           mode: 0o644,
           flag: "wx",
         });
+        // Publish ownership first so a failed binary publish remains safely retryable.
         await NodeFSP.rename(stagedDesktop, desktop);
+        await NodeFSP.rename(staged, executable);
       } finally {
         await NodeFSP.rm(stagedDesktop, { force: true });
         await NodeFSP.rm(staging, { recursive: true, force: true });
