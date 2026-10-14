@@ -22,6 +22,8 @@ import * as DesktopUpdates from "./DesktopUpdates.ts";
 export const flushCallbacks = Effect.yieldNow;
 
 export interface UpdatesHarnessOptions {
+  readonly appVersion?: string;
+  readonly isPackaged?: boolean;
   readonly checkForUpdates?: Effect.Effect<
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
@@ -46,6 +48,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   let allowDowngrade = false;
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
+  const updaterChannels: string[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
   const sentStates: DesktopUpdateState[] = [];
   const installSteps: string[] = [];
@@ -74,7 +77,10 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       }),
     setAutoDownload: () => Effect.void,
     setAutoInstallOnAppQuit: () => Effect.void,
-    setChannel: () => Effect.void,
+    setChannel: (channel) =>
+      Effect.sync(() => {
+        updaterChannels.push(channel);
+      }),
     setAllowPrerelease: () => Effect.void,
     allowDowngrade: Effect.sync(() => allowDowngrade),
     setAllowDowngrade: (value) =>
@@ -152,9 +158,9 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     homeDirectory: `/tmp/t3-desktop-updates-home-${process.pid}`,
     platform: options.platform ?? "darwin",
     processArch: "x64",
-    appVersion: "1.2.3",
+    appVersion: options.appVersion ?? "1.2.3",
     appPath: "/repo",
-    isPackaged: true,
+    isPackaged: options.isPackaged ?? true,
     resourcesPath: "/missing/resources",
     runningUnderArm64Translation: false,
   }).pipe(
@@ -261,6 +267,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     updateRestartMarkers,
     downloadCount: () => downloadCount,
     feedUrls: (): ElectronUpdater.ElectronUpdaterFeedUrl[] => feedUrls,
+    updaterChannels: () => updaterChannels,
     fullChangelog: () => fullChangelog,
     listenerCount: () =>
       Array.from(listeners.values()).reduce(

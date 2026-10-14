@@ -185,6 +185,11 @@ if ($version -match '-preview\.') {
 $stem = "t3-$version-win32-$arch"
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
+$commandName = if ($version -match '^[^-+]+-nightly\.') { "shuv2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "shuv2code-preview" } else { "shuv2code" }
+if (-not $env:T3CODE_HOME) {
+  if ($version -match '^[^-+]+-nightly\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-nightly" }
+  elseif ($version -match '^[^-+]+-(preview|pr)\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-preview" }
+}
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
@@ -253,14 +258,14 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
 
 Step "Setting up the shuv2code command..."
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$shim = Join-Path $binDir "shuv2code.cmd"
+$shim = Join-Path $binDir "$commandName.cmd"
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
 [System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
 if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
 [Console]::Error.WriteLine("  ${green}Installed shuv2code $version$reset`n")
 if (($env:PATH -split ";") -notcontains $binDir) {
-  Write-Host "  Add $binDir to your PATH, then run ${bold}shuv2code$reset.`n"
+  Write-Host "  Add $binDir to your PATH, then run $bold$commandName$reset.`n"
 } else {
-  Write-Host "  Run ${bold}shuv2code$reset to get started.`n"
+  Write-Host "  Run $bold$commandName$reset to get started.`n"
 }

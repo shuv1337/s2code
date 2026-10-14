@@ -85,6 +85,26 @@ update it with `git pull` and a rebuild.
 
 ## Desktop app
 
+### Fork release channels
+
+Stable and nightly shuv2code are separate installations and can run together.
+They keep separate settings, connections, browser profiles, local server data,
+background services, and update feeds. Stable uses `~/.shuv2code-v2`; nightly
+uses `~/.shuv2code-v2-nightly`. Install the other channel separately rather than
+switching an installed app's update feed. If you override the data home, choose
+a different directory for each channel.
+
+Preview (including PR builds) is a third, independent installation using
+`~/.shuv2code-v2-preview`. It does not update automatically; replace it manually.
+Channel links use `shuv2code://`, `shuv2code-nightly://`, or
+`shuv2code-preview://`, respectively. Development owns only `shuv2code-dev://`.
+
+Older local nightly builds used the shared stable home. A new nightly launch
+leaves that data untouched and logs its location; open stable to access it.
+Nothing is moved or copied automatically. To transfer data manually, stop both
+apps and their services first, back up the source, then copy into the separate
+nightly home while everything is offline. Do not share or link a live database.
+
 Download a release from [GitHub Releases](https://github.com/pingdotgg/t3code/releases),
 or use a package manager:
 

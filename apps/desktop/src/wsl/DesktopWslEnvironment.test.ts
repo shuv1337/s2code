@@ -166,6 +166,21 @@ describe("probeWslDistros", () => {
 });
 
 describe("WSL runtime cache", () => {
+  it.each(["nightly", "preview"])(
+    "never prunes or invalidates another channel's WSL cache from %s",
+    (channel) => {
+      const version = `1.2.3-${channel}.20261014.1`;
+      const scripts = [
+        buildWslRuntimeInstallScript("/runtime.tar.gz", "digest", "b".repeat(64), version),
+        buildWslRuntimePruneScript("digest", version),
+        buildWslRuntimeInvalidateScript("digest", version),
+      ];
+      for (const script of scripts) {
+        expect(script).toContain(`$HOME/.shuv2code-v2-${channel}/wsl-runtime`);
+        expect(script).not.toContain("$HOME/.shuv2code-v2/wsl-runtime");
+      }
+    },
+  );
   it.each([
     [
       "install",

@@ -19,6 +19,7 @@ import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
@@ -2697,7 +2698,7 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
 });
 
 export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" {
-  return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
+  return resolveChannelIdentity(version).updateChannel ?? "latest";
 }
 
 // Pull request builds (`-pr.<n>.`) and the maintainers' preview train
@@ -2708,7 +2709,7 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
 // install can be pointed at one of these releases, and the build itself
 // reports that no update feed is configured instead of polling.
 export function isDesktopPreviewVersion(version: string): boolean {
-  return /-pr\./.test(version) || /-preview\.\d{8}\.\d+$/.test(version);
+  return resolveChannelIdentity(version).channel === "preview";
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
@@ -2749,6 +2750,7 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(version: string): string {
+  if (resolveChannelIdentity(version).channel === "preview") return "shuv2code (Preview)";
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "shuv2code (Nightly)"
     : (desktopPackageJson.productName ?? "shuv2code");
@@ -2773,11 +2775,11 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
 ) {
+  const identity = resolveChannelIdentity(version);
   const buildConfig: Record<string, unknown> = {
-    appId:
-      resolveDesktopUpdateChannel(version) === "nightly"
-        ? `${DESKTOP_APP_ID}.nightly`
-        : DESKTOP_APP_ID,
+    appId: identity.appId,
+    extraMetadata: { name: identity.executableName },
+    protocols: [{ name: identity.executableName, schemes: [identity.scheme] }],
     productName: resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
@@ -2847,7 +2849,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "shuv2code",
-          schemes: ["shuv2code", "shuv2code-dev", "shuv2code-nightly"],
+          schemes: [identity.scheme],
         },
         // Lets people choose T3 Code as their default web browser, which opens
         // each link in a new thread's browser panel.
@@ -2902,7 +2904,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // resources/package-type into the .deb only, so electron-updater updates
       // each install in its own format.
       target: target === "AppImage" ? [target, "deb"] : [target],
-      executableName: "shuv2code",
+      executableName: identity.executableName,
       icon: "icons",
       category: "Development",
       synopsis: "Desktop GUI for coding agents",
@@ -2914,21 +2916,26 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "shuv2code",
-          schemes: ["shuv2code", "shuv2code-dev", "shuv2code-nightly"],
+          schemes: [identity.scheme],
         },
       ],
       desktop: {
         entry: {
-          StartupWMClass: "shuv2code",
+          StartupWMClass: identity.executableName,
         },
       },
     };
     buildConfig.deb = {
       // FPM runs outside the staged app directory, so source paths must be absolute.
-      // AppStream consumers associate this metadata with our t3code.desktop entry.
+      // Stable alone owns this optional catalog entry. Other channels must not
+      // overwrite its metadata (or the upstream app's catalog entry).
       fpm: [
-        `${path.join(repoRoot, "apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml")}=/usr/share/metainfo/com.t3tools.t3code.metainfo.xml`,
-        `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/t3code/copyright`,
+        ...(identity.channel === "stable"
+          ? [
+              `${path.join(repoRoot, "apps/desktop/resources/linux/dev.shuv.shuv2code.metainfo.xml")}=/usr/share/metainfo/dev.shuv.shuv2code.metainfo.xml`,
+            ]
+          : []),
+        `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/${identity.executableName}/copyright`,
       ],
       // Electron's runtime libraries. Debian 13 and Ubuntu 24.04 renamed some
       // for 64-bit time; the old name is the fallback for older releases.
@@ -3812,9 +3819,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
           try: () =>
             resolveMacPasskeySigningConfiguration(
               loadRepoEnv({ repoRoot }),
-              resolveDesktopUpdateChannel(appVersion) === "nightly"
-                ? `${DESKTOP_APP_ID}.nightly`
-                : DESKTOP_APP_ID,
+              resolveChannelIdentity(appVersion).appId,
             ),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
         })

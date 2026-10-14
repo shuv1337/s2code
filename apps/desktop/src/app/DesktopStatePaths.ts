@@ -1,5 +1,6 @@
 import * as Option from "effect/Option";
 import { DEFAULT_HOME_DIRECTORY } from "@t3tools/shared/productIdentity";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 export type JoinPath = (first: string, ...segments: string[]) => string;
 
@@ -15,9 +16,15 @@ export function resolveDesktopBaseDir(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly t3Home: Option.Option<string>;
+  readonly appVersion?: string;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, DEFAULT_HOME_DIRECTORY),
+    input.joinPath(
+      input.homeDirectory,
+      input.appVersion === undefined
+        ? DEFAULT_HOME_DIRECTORY
+        : resolveChannelIdentity(input.appVersion).homeDirectory,
+    ),
   );
 }
 

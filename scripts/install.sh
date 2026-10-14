@@ -198,6 +198,18 @@ esac
 
 stem="t3-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
+command_name=shuv2code
+prerelease="${version#*-}"
+case "$prerelease" in
+  nightly.*) command_name=shuv2code-nightly ;;
+  preview.*|pr.*) command_name=shuv2code-preview ;;
+esac
+if [ -z "${T3CODE_HOME:-}" ]; then
+  case "$prerelease" in
+    nightly.*) t3_home="$HOME/.shuv2code-v2-nightly" ;;
+    preview.*|pr.*) t3_home="$HOME/.shuv2code-v2-preview" ;;
+  esac
+fi
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail "Invalid release version."
@@ -256,10 +268,10 @@ fi
 
 step "Setting up the shuv2code command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/shuv2code"
+ln -sfn "${target_dir}/t3" "${bin_dir}/$command_name"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled shuv2code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %sshuv2code%s to get started.\n\n' "$bold" "$reset" ;;
-  *) printf '  Add %s to your PATH, then run %sshuv2code%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %s%s%s to get started.\n\n' "$bold" "$command_name" "$reset" ;;
+  *) printf '  Add %s to your PATH, then run %s%s%s.\n\n' "$bin_dir" "$bold" "$command_name" "$reset" ;;
 esac
