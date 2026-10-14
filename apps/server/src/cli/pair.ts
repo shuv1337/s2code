@@ -61,6 +61,7 @@ import {
 } from "../startupAccess.ts";
 import { authScopesFlag } from "./authScopes.ts";
 import { baseDirFlag, DurationFromString } from "./config.ts";
+import { forkCliCommand, resolveCliCommand } from "./invocation.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
 const encodeWatchPairingOutput = Schema.encodeEffect(
@@ -133,13 +134,14 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
   "NoRunningServerError",
   {
     checkedStatePaths: Schema.Array(Schema.String),
+    startCommand: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
     return [
       "No running T3 Code server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
-      "Start one with `npx shuv2code serve`.",
+      `Start one with \`${this.startCommand ?? forkCliCommand("serve")}\`.`,
     ].join("\n");
   }
 }
@@ -347,7 +349,10 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
       } satisfies DiscoveredPairTarget;
     }
   }
-  return yield* new NoRunningServerError({ checkedStatePaths });
+  return yield* new NoRunningServerError({
+    checkedStatePaths,
+    startCommand: yield* resolveCliCommand("serve", bases[0]),
+  });
 });
 
 /**

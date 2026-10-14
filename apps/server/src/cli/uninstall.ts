@@ -17,6 +17,9 @@ import * as BootService from "../cloud/bootService.ts";
 import { pinnedRuntimeVersionsDir } from "../cloud/pinnedRuntime.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
+import { resolveServerInstallation, resolveUninstallGuidance } from "./invocation.ts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import packageJson from "../../package.json" with { type: "json" };
 import { findWindowsShim, launcherOwnsVersionsDir, resolveLauncherPath } from "./update.ts";
 
 export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
@@ -51,13 +54,14 @@ export interface UninstallPlan {
 export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(function* (input: {
   readonly launchedAs: string | undefined;
   readonly versionsDir: string;
+  readonly version?: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return undefined;
   if (platform === "win32") {
-    const shimPath = yield* findWindowsShim(input.launchedAs);
+    const shimPath = yield* findWindowsShim(input.launchedAs, input.version);
     if (shimPath === undefined) return undefined;
     const contents = yield* fs.readFileString(shimPath).pipe(Effect.option);
     const target = Option.isSome(contents) ? /^"([^"]+)"/m.exec(contents.value)?.[1] : undefined;
@@ -65,6 +69,11 @@ export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(functi
       ? shimPath
       : undefined;
   }
+  if (
+    path.basename(input.launchedAs) !==
+    resolveChannelIdentity(input.version ?? packageJson.version).executableName
+  )
+    return undefined;
   const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
   if (Option.isNone(linkTarget)) return undefined;
   const resolved = path.resolve(path.dirname(input.launchedAs), linkTarget.value);
@@ -81,11 +90,17 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
   const servesThisHome =
     status.installedBaseDir !== undefined &&
     path.resolve(status.installedBaseDir) === path.resolve(input.baseDir);
+  const identity = resolveChannelIdentity(packageJson.version);
+  const ownsUnit =
+    status.unitPath !== undefined &&
+    [`${identity.serviceName}.service`, `${identity.serviceLabel}.plist`].includes(
+      path.basename(status.unitPath),
+    );
   const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
   const runtimeDir = path.dirname(versionsDir);
   const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
   const plan: UninstallPlan = {
-    service: status.supported && status.installed && servesThisHome,
+    service: status.supported && status.installed && servesThisHome && ownsUnit,
     launcher: yield* findOwnedLauncher({ launchedAs, versionsDir }),
     runtimeDir: (yield* fs.exists(runtimeDir).pipe(Effect.orElseSucceed(() => false)))
       ? runtimeDir
@@ -106,7 +121,7 @@ export const uninstallCommand = Command.make("uninstall", {
   ),
 }).pipe(
   Command.withDescription(
-    "Remove t3 from this machine: the background service, the launcher, and every downloaded version. Your projects and threads are kept.",
+    "Remove this fork installation: its background service, launcher, and downloaded versions. Your projects and threads are kept.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
@@ -119,7 +134,7 @@ export const uninstallCommand = Command.make("uninstall", {
   ),
 );
 
-const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
+export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   readonly baseDir: string;
   readonly assumeYes: boolean;
 }) {
@@ -130,12 +145,8 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   const plan = yield* planUninstall({ baseDir: input.baseDir });
 
   if (!plan.service && plan.launcher === undefined && plan.runtimeDir === undefined) {
-    yield* Console.log(`Nothing to remove: t3 is not installed for ${input.baseDir}.`);
-    if (!(yield* HostProcess.IsExecutable)) {
-      yield* Console.log(
-        "  This t3 runs from a Node script, so it was installed by npm or built from source. Remove it the same way (`npm uninstall -g t3`, or delete the checkout).",
-      );
-    }
+    yield* Console.log(`Nothing to remove: shuv2code is not installed for ${input.baseDir}.`);
+    yield* Console.log(`  ${yield* resolveUninstallGuidance}`);
     return;
   }
 
@@ -157,7 +168,10 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
       });
     }
     const confirmed = yield* Prompt.run(
-      Prompt.Confirm({ message: "Remove t3 from this machine?", initial: false }),
+      Prompt.Confirm({
+        message: "Remove this shuv2code installation from this machine?",
+        initial: false,
+      }),
     ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
     if (!confirmed) {
       yield* Console.log("Left as is.");
@@ -201,7 +215,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
             reason: `Could not schedule removal of ${runtimeDir}. Delete it yourself once this window is closed.`,
           }),
       });
-      yield* Console.log(`${runtimeDir} will be removed once t3 exits.`);
+      yield* Console.log(`${runtimeDir} will be removed once shuv2code exits.`);
     } else {
       yield* fs
         .remove(plan.runtimeDir, { recursive: true, force: true })
@@ -214,5 +228,12 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     }
   }
   yield* Console.log("");
-  yield* Console.log("t3 is uninstalled. Thanks for trying T3 Code.");
+  yield* Console.log(
+    "This shuv2code installation is uninstalled. Upstream and other channels are unchanged.",
+  );
+  if (
+    !(yield* HostProcess.IsExecutable) ||
+    (yield* resolveServerInstallation)?.kind === "npm-global"
+  )
+    yield* Console.log(yield* resolveUninstallGuidance);
 });

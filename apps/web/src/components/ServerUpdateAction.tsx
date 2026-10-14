@@ -97,7 +97,7 @@ export function useServerUpdate() {
         description:
           selfUpdate === "desktop-managed"
             ? `Desktop app relaunched on ${result.value.targetVersion}.`
-            : `Reconnected on t3@${result.value.targetVersion}.`,
+            : `Reconnected on shuv2code@${result.value.targetVersion}.`,
       });
     } catch (error) {
       toastManager.add({
@@ -376,7 +376,7 @@ export function OutdatedServerUpdateAction({
       toastManager.add({
         type: "success",
         title: `${serverLabel} updated`,
-        description: `Reconnected on t3@${result.value.targetVersion}.`,
+        description: `Reconnected on shuv2code@${result.value.targetVersion}.`,
       });
     } catch (error) {
       toastManager.add({

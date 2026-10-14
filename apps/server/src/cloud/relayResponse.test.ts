@@ -71,7 +71,7 @@ it.effect("makes revoked authorization actionable and non-retryable", () =>
 
     expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "unauthorized" });
     expect(error.message).toContain("invalid_bearer");
-    expect(error.message).toContain("t3 connect login");
+    expect(error.message).toMatch(/shuv2code(?:-nightly|-preview)? connect login/);
     expect(error.message).toContain("Trace ID: trace-auth");
   }),
 );

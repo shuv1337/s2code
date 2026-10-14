@@ -892,7 +892,9 @@ export function ServerBrowserSurface(props: {
           <p role="alert" className="max-w-sm text-sm text-muted-foreground">
             {previewStreamHostSetupMessage(hostSetup)}
           </p>
-          <CommandBlock command={hostSetup.command} className="w-full max-w-md text-left" />
+          {hostSetup.command ? (
+            <CommandBlock command={hostSetup.command} className="w-full max-w-md text-left" />
+          ) : null}
           <Button variant="outline" size="sm" onClick={() => setHostSetup(null)}>
             Try again
           </Button>

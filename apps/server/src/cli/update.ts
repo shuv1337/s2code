@@ -36,6 +36,11 @@ import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntim
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { createUpdateProgress } from "./updateProgress.ts";
 import * as CliService from "./service.ts";
+import { formatCliHomeFlag, resolveCliCommand } from "./invocation.ts";
+
+/** Use the launcher just repointed, not this process's old versioned executable. */
+export const formatUpdatedLauncherCommand = (launcher: string, baseDir: string) =>
+  `'${launcher.replaceAll("'", `'"'"'`)}' serve ${formatCliHomeFlag(baseDir)}`;
 
 export class CliUpdateError extends Schema.TaggedError<CliUpdateError>()("CliUpdateError", {
   reason: Schema.String,
@@ -295,6 +300,11 @@ const findForegroundServer = Effect.fn("cli.update.find_foreground_server")(func
   return state.value;
 });
 
+export const isForkBootServiceCgroup = (cgroup: string) =>
+  cgroup
+    .split("\n")
+    .some((line) => /\/shuv2code-v2(?:-nightly|-preview)?\.service(?:\/|$)/.test(line));
+
 const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(function* (
   pid: number,
 ) {
@@ -303,7 +313,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   const runner = yield* ProcessRunner.ProcessRunner;
   if (platform === "linux") {
     const cgroup = yield* fs.readFileString(`/proc/${pid}/cgroup`).pipe(Effect.option);
-    return Option.isSome(cgroup) && cgroup.value.includes("/t3code.service");
+    return Option.isSome(cgroup) && isForkBootServiceCgroup(cgroup.value);
   }
   if (platform === "darwin") {
     // The service server's parent is the launcher process.
@@ -454,7 +464,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
     } else {
       yield* Console.log(
-        "  Not a terminal, so the service keeps running its current version. Rerun with --yes to restart it now, or run `t3 service restart` later.",
+        `  Not a terminal, so the service keeps running its current version. Rerun with --yes to restart it now, or run \`${yield* resolveCliCommand("service restart", input.baseDir)}\` later.`,
       );
     }
   }
@@ -553,7 +563,9 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
 
   progress.success(`Installed T3 Code ${targetVersion}`);
   if (Option.isSome(repointed)) {
-    yield* Console.log("  Run t3 to get started.\n");
+    yield* Console.log(
+      `  Run \`${formatUpdatedLauncherCommand(repointed.value, input.baseDir)}\` to get started.\n`,
+    );
   } else {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);
   }
@@ -563,7 +575,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     yield* Console.log(`  Background service already on ${targetVersion}`);
   } else if (serviceInstalled) {
     yield* Console.log(
-      `  Background service still running ${serviceVersion ?? "an unknown version"}. Run \`t3 service restart\` when you are ready to switch it to ${targetVersion}.`,
+      `  Background service still running ${serviceVersion ?? "an unknown version"}. Run \`${yield* resolveCliCommand("service restart", input.baseDir)}\` when you are ready to switch it to ${targetVersion}.`,
     );
   } else if (status.installed && !servesThisHome) {
     yield* Console.log(

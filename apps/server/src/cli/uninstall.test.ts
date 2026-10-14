@@ -4,8 +4,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Console from "effect/Console";
+import * as BootService from "../cloud/bootService.ts";
 
-import { findOwnedLauncher } from "./uninstall.ts";
+import { findOwnedLauncher, runUninstall } from "./uninstall.ts";
 
 it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
   it.effect("claims only a launcher that points into this home's runtime tree", () =>
@@ -21,17 +23,82 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
         yield* fs.makeDirectory(path.dirname(file), { recursive: true });
         yield* fs.writeFileString(file, "");
       }
-      const ours = path.join(root, "bin/t3");
+      const ours = path.join(root, "bin/shuv2code");
       const theirs = path.join(root, "other/bin/t3");
       yield* fs.makeDirectory(path.dirname(ours), { recursive: true });
       yield* fs.makeDirectory(path.dirname(theirs), { recursive: true });
       yield* fs.symlink(exe, ours);
       yield* fs.symlink(otherExe, theirs);
 
-      assert.equal(yield* findOwnedLauncher({ launchedAs: ours, versionsDir }), ours);
+      assert.equal(
+        yield* findOwnedLauncher({ launchedAs: ours, versionsDir, version: "1.0.0" }),
+        ours,
+      );
       assert.isUndefined(yield* findOwnedLauncher({ launchedAs: theirs, versionsDir }));
       assert.isUndefined(yield* findOwnedLauncher({ launchedAs: copy, versionsDir }));
       assert.isUndefined(yield* findOwnedLauncher({ launchedAs: undefined, versionsDir }));
+      const upstreamName = path.join(root, "bin/t3");
+      yield* fs.symlink(exe, upstreamName);
+      assert.isUndefined(
+        yield* findOwnedLauncher({ launchedAs: upstreamName, versionsDir, version: "1.0.0" }),
+      );
     }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
+  );
+  it.effect(
+    "leaves upstream launchers and services untouched even when an upstream unit names this home",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const baseDir = path.join(root, "fork");
+        const upstream = path.join(root, "upstream");
+        const executable = path.join(upstream, "runtime/versions/1.0.0/t3");
+        const launcher = path.join(root, "bin/t3");
+        const unit = path.join(root, ".config/systemd/user/t3code.service");
+        for (const file of [executable, unit]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+          yield* fs.writeFileString(file, "upstream-sentinel");
+        }
+        yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
+        yield* fs.symlink(executable, launcher);
+        let removals = 0;
+        const service = BootService.BootService.of({
+          status: Effect.succeed({
+            supported: true,
+            installed: true,
+            current: true,
+            unitPath: unit,
+            installedBaseDir: baseDir,
+            logPath: path.join(root, "upstream.log"),
+          }),
+          install: () => Effect.die("not invoked"),
+          restart: Effect.succeed(false),
+          uninstall: Effect.sync(() => {
+            removals++;
+            return true;
+          }),
+        });
+        const messages: string[] = [];
+        yield* runUninstall({ baseDir, assumeYes: true }).pipe(
+          Effect.provideService(BootService.BootService, service),
+          Effect.provideService(HostProcess.IsExecutable, true),
+          Effect.provideService(HostProcess.InvokedAs, launcher),
+          Effect.provideService(HostProcess.ExecutablePath, executable),
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(Console.Console, {
+            ...globalThis.console,
+            log: (...args) => {
+              messages.push(args.join(" "));
+            },
+          }),
+        );
+        assert.equal(removals, 0);
+        assert.equal(yield* fs.readLink(launcher), executable);
+        assert.equal(yield* fs.readFileString(executable), "upstream-sentinel");
+        assert.equal(yield* fs.readFileString(unit), "upstream-sentinel");
+        assert.notMatch(messages.join("\n"), /npm uninstall[^`]*\bt3\b/);
+      }),
   );
 });

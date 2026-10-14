@@ -7,6 +7,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveCliCommand } from "../cli/invocation.ts";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -183,6 +184,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* (
   const runner = yield* ProcessRunner.ProcessRunner;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const serviceInstallCommand = yield* resolveCliCommand("service install", serverConfig.baseDir);
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
   // Archive-distributed targets download from GitHub Releases. The client is
@@ -221,7 +223,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* (
     }
     if (capability === null) {
       return yield* failWith(
-        "Remote updates require the T3 Code background service. Run `t3 service install` on the server machine.",
+        `Remote updates require the fork background service. Run \`${serviceInstallCommand}\` on the server machine.`,
       );
     }
 

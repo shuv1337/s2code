@@ -9,7 +9,22 @@ import { HttpClient } from "effect/http";
 import * as BootService from "../cloud/bootService.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
-import { repointLauncher, resolveLauncherPath, runUpdate } from "./update.ts";
+import {
+  repointLauncher,
+  resolveLauncherPath,
+  runUpdate,
+  isForkBootServiceCgroup,
+  formatUpdatedLauncherCommand,
+} from "./update.ts";
+
+it("recognizes only exact fork boot service cgroup components", () => {
+  for (const unit of ["shuv2code-v2", "shuv2code-v2-nightly", "shuv2code-v2-preview"]) {
+    assert.isTrue(isForkBootServiceCgroup(`0::/user.slice/${unit}.service\n`));
+    assert.isTrue(isForkBootServiceCgroup(`0::/user.slice/${unit}.service/child`));
+  }
+  for (const unit of ["t3code.service", "shuv2code-v2.service-other", "not-shuv2code-v2.service"])
+    assert.isFalse(isForkBootServiceCgroup(`0::/user.slice/${unit}`));
+});
 
 it.layer(NodeServices.layer)("t3 update launcher", (it) => {
   it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"])(
@@ -125,6 +140,10 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
 
       assert.deepStrictEqual(Option.getOrUndefined(repointed), launcher);
       assert.equal(yield* fs.readLink(launcher), newExe);
+      assert.equal(
+        formatUpdatedLauncherCommand(Option.getOrThrow(repointed), "/fork home"),
+        `'${launcher}' serve --base-dir '/fork home'`,
+      );
     }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
   );
 

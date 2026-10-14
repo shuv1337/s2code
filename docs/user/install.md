@@ -1,4 +1,4 @@
-# Install T3 Code
+# Install shuv2code
 
 T3 Code runs coding agents on your computer and lets you control them from its
 desktop, web, or mobile app. Set up the machine where the agents will work first.
@@ -10,17 +10,22 @@ launch T3 Code and configure providers afterwards.
 
 ## Command line
 
+The fork has no published release yet. Use a source checkout until fork artifacts
+are available; do not substitute upstream's `t3` package or installers.
+The following release-installer commands apply once fork releases are published.
+
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://t3.codes/install.ps1 | iex
+irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 ```
 
-This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
+This installs the fork command to `~/.local/bin`. Stable uses `shuv2code`, nightly
+uses `shuv2code-nightly`, and preview uses `shuv2code-preview`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
 line to add. Set `SHUV2CODE_CHANNEL=nightly` to install the nightly train, or
 `SHUV2CODE_VERSION` to pin an exact version.
@@ -39,8 +44,9 @@ without starting a server. Its log says **Service paused until reinstall** rathe
 than repeatedly restarting. Reinstall with `shuv2code service install` using the
 same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
 
-An empty custom home is claimed automatically. Existing installations in the
-exact default fork home remain usable; runtime caches without product metadata
+An empty custom home is claimed automatically. Historical installations in the
+exact stable default home remain usable; nightly/preview homes must be empty or
+already fork-marked. Runtime caches without product metadata
 are downloaded again, never reused based on their directory name.
 An existing custom home without product metadata is refused: verify offline
 that it belongs exclusively to this fork before adding `.product-identity`
@@ -53,38 +59,42 @@ Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` a
 an upstream home, live database, or shared runtime cache; use a separate home.
 Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 
-| Task                                             | Command                                                   |
-| ------------------------------------------------ | --------------------------------------------------------- |
-| Start the server and open the web app            | `t3`                                                      |
-| Start the server without a browser               | `t3 serve`                                                |
-| Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `t3 update`                                               |
-| Remove it again                                  | `t3 uninstall`                                            |
+| Task                                             | Command                                                          |
+| ------------------------------------------------ | ---------------------------------------------------------------- |
+| Start the server and open the web app            | `shuv2code`                                                      |
+| Start the server without a browser               | `shuv2code serve`                                                |
+| Keep it running in the background (macOS, Linux) | `shuv2code service install` ([details](./background-service.md)) |
+| Move to the newest release                       | `shuv2code update`                                               |
+| Remove it again                                  | `shuv2code uninstall`                                            |
 
-Run `t3 help` or `t3 --help` for the full reference. To start in a new working
-directory, use an explicit path such as `t3 ./my-project`. A bare directory name
+These examples use stable. Substitute the installed channel's command, or the
+exact Node/source invocation printed by your server. A published npm install uses
+the fork package `shuv2code`; uninstall only that proven package/prefix, never `t3`.
+
+Run `shuv2code help` or `shuv2code --help` for the full reference. To start in a new working
+directory, use an explicit path such as `shuv2code ./my-project`. A bare directory name
 is accepted only if it already exists.
 
-If `t3` or `t3 start` reports an already running server, connect to that server
+If `shuv2code` or `shuv2code start` reports an already running server, connect to that server
 instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
-To try T3 Code once without installing it, run `npx t3@latest` instead (needs
-Node.js for `npx`).
+Do not use `npx t3` to try this fork: it downloads upstream. When the fork npm
+package is published, its runner form will be `npx shuv2code@latest` (or `@nightly`).
 
 ### Intel Macs
 
-There is no `t3` executable for Intel Macs (the desktop app is available). To
+There is no standalone fork executable for Intel Macs. To
 run a server there, build it from source with Node.js 24 and `vp`
-([Install vp](https://github.com/pingdotgg/t3code#install-vp)):
+([Install vp](https://github.com/shuv1337/shuv2code#install-vp)):
 
 ```bash
-git clone https://github.com/pingdotgg/t3code
-cd t3code && vp i && vp run build:desktop
+git clone https://github.com/shuv1337/shuv2code
+cd shuv2code && vp i && vp run build:desktop
 node apps/server/dist/bin.mjs
 ```
 
-`t3 update` and the background service do not apply to a server run this way;
+Release self-update does not apply to a server run from source;
 update it with `git pull` and a rebuild.
 
 ## Desktop app
@@ -114,26 +124,42 @@ nightly home while everything is offline. Do not share or link a live database.
 When a verified fork release is published, download the intended channel from
 [shuv2code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
 available yet, build the fork from source rather than installing upstream as a
-substitute. Upstream Winget, Homebrew and AUR packages do not install these fork
-identities. No fork Winget or Homebrew registration is configured here.
+substitute. Artifacts keep the `T3-Code-<version>-<arch>` file naming, but the
+installed package identities, commands, icons and desktop entries are fork-owned
+and channel-specific. Upstream Winget, Homebrew, Scoop and AUR packages do not
+install these fork identities, and no fork Winget, Scoop or Homebrew registration
+is configured here.
 
-On Debian/Ubuntu, install a downloaded fork DEB with
-`sudo apt install ./T3-Code-<version>-<arch>.deb`. The fork AUR definitions use
-`shuv2code-bin` and `shuv2code-nightly-bin`; use the AUR
-only after maintainers confirm those packages and their release checksums are published.
+| Platform           | Install                                       |
+| ------------------ | --------------------------------------------- |
+| Windows, macOS     | Fork GitHub release installer                 |
+| Debian, Ubuntu     | `sudo apt install ./T3-Code-VERSION-ARCH.deb` |
+| Arch Linux stable  | `shuv2code-bin` recipe                        |
+| Arch Linux nightly | `shuv2code-nightly-bin` recipe                |
+
+Stable and nightly Linux packages can be installed side by side with each other
+and upstream. Their commands are `shuv2code` and `shuv2code-nightly`. Preview has
+its own Debian identity, but no AUR package. The fork AUR recipes are implemented;
+once published, install them with `yay -S shuv2code-bin` or
+`yay -S shuv2code-nightly-bin`. Until then, use GitHub Releases or build the recipes
+against an actual fork release.
+
+`brew install --cask t3-code`, `scoop install extras/t3code`, and
+`winget install T3Tools.T3Code` install **upstream T3 Code**, not this fork. No fork
+Homebrew, Scoop or Winget package is available.
 
 The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the
 update fails. Download the new `.deb` and install it the same way.
 
-### The `t3` command
+### The bundled command
 
-The desktop app includes the `t3` command-line tool. To run it from any
+The desktop app includes a fork command-line tool. To run it from any
 terminal, open **Settings → General → About** and choose **Install** next to
-**t3 command**. On macOS and Linux it adds a `t3` link to a folder on your
+the bundled command. On macOS and Linux it adds the installed channel's command to a folder on your
 `PATH`; on Windows it adds the app's command folder to your `PATH`. Open a new
-terminal afterwards. **Remove** takes it off again. If you already have `t3`
-from npm, it stays as it is.
+terminal afterwards. **Remove** takes only that fork command off again. Upstream
+and other fork channels remain separate.
 
 ### Windows Subsystem for Linux
 
@@ -147,29 +173,19 @@ take longer.
 With the desktop app already running on the same machine:
 
 ```bash
-t3 app
+shuv2code app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `t3 app ../my-project`, to open another directory. It requires
+Pass a path, such as `shuv2code app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 
 ## Mobile app
 
-Install T3 Code from the
-[App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
-[Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code).
-The phone connects to a server on another machine. Follow
-[remote access](./remote-access.md) to link it through T3 Connect or a pairing URL.
-
-Nightly builds need the beta app. The store apps cannot connect to them. A Nightly build also
-shows these links as QR codes in **Settings → General → Mobile app**.
-
-- **iPhone and iPad:** join the [TestFlight beta](https://testflight.apple.com/join/XgaxaRtd).
-- **Android:** join the [beta group](https://groups.google.com/g/t3-code-v2-beta). With the same
-  Google account, open the [Google Play testing page](https://play.google.com/apps/testing/com.t3tools.t3code)
-  and become a tester.
+Fork mobile apps are not available yet: there are no fork App Store, Google Play,
+TestFlight or beta-group destinations. Upstream store/beta apps are not a substitute
+for the fork. Use the connected web client until a fork mobile distribution exists.
 
 If the app crashes during launch, open Settings → Diagnostics on the next launch
 that succeeds. It lists startup crashes from the last 7 days with the error and
