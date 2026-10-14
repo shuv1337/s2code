@@ -49,7 +49,7 @@ function reconcile(settings: Record<string, string>) {
   try {
     const result = NodeChildProcess.spawnSync(
       "bash",
-      ["-eu", "-o", "pipefail", "-c", fixtures + script],
+      ["--norc", "-eu", "-o", "pipefail", "-c", fixtures + script],
       {
         encoding: "utf8",
         env: {
