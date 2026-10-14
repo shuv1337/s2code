@@ -67,6 +67,14 @@ describe("fork release contract", () => {
   });
   it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
     expect(FORK_DESKTOP_MATRIX).toHaveLength(6);
+    expect(FORK_DESKTOP_MATRIX.map((target) => target.runner)).toEqual([
+      "macos-15",
+      "macos-15-intel",
+      "ubuntu-24.04",
+      "ubuntu-24.04-arm",
+      "windows-2025",
+      "windows-11-arm",
+    ]);
     expect(FORK_DESKTOP_MATRIX.filter((target) => target.cli_archive)).toHaveLength(5);
     expect(CLI_ARCHIVE_PLATFORM_KEYS).not.toContain("darwin-x64");
     for (const target of FORK_DESKTOP_MATRIX.filter((target) => target.platform === "win"))

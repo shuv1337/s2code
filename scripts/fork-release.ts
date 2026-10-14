@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeModule from "node:module";
 import * as Effect from "effect/Effect";
 import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -32,27 +33,57 @@ const Path = NodePath;
 const URL = NodeURL;
 const Crypto = NodeCrypto;
 const CP = NodeChildProcess;
+const { isAllowedForkPublishRef } = NodeModule.createRequire(import.meta.url)(
+  "../.github/scripts/check-nightly-release.cjs",
+) as {
+  isAllowedForkPublishRef: (ref: string | undefined, defaultBranch: string | undefined) => boolean;
+};
 
-const run = (command: string, args: string[], cwd?: string) =>
-  CP.execFileSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+export function releaseCommandError(
+  command: string,
+  args: string[],
+  cause: unknown,
+  stderr?: string,
+) {
+  const failure = cause as { status?: unknown; code?: unknown; stderr?: unknown };
+  const text =
+    stderr ??
+    (typeof failure?.stderr === "string"
+      ? failure.stderr
+      : Buffer.isBuffer(failure?.stderr)
+        ? failure.stderr.toString("utf8")
+        : "");
+  const http = /\b(?:HTTP[\s/:]*|E)(\d{3})\b/i.exec(text)?.[1];
+  const exit = failure?.status ?? failure?.code ?? "unknown";
+  return new Error(
+    `${command} ${args.map((arg) => JSON.stringify(arg)).join(" ")} failed (exit ${String(exit)}${http ? `; HTTP ${http}` : ""}).`,
+  );
+}
+const run = (command: string, args: string[], cwd?: string) => {
+  try {
+    return CP.execFileSync(command, args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (error) {
+    throw releaseCommandError(command, args, error);
+  }
+};
 const runAsync = (command: string, args: string[]) =>
   new Promise<void>((resolve, reject) => {
-    const child = CP.spawn(command, args, { stdio: ["ignore", "inherit", "inherit"] });
-    child.once("error", () => reject(new Error("Release command could not start.")));
-    child.once("exit", (code) =>
-      code === 0
-        ? resolve()
-        : reject(
-            new Error(
-              "Fork npm publication failed. Check exact release.yml trusted-publisher configuration and allowed actions.",
-            ),
-          ),
-    );
+    CP.execFile(command, args, { encoding: "utf8" }, (error, _stdout, stderr) => {
+      if (error) reject(releaseCommandError(command, args, error, stderr));
+      else resolve();
+    });
   });
+const releaseFetch: typeof fetch = async (input, init) => {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(`${init?.method ?? "GET"} ${String(input)} failed (network error).`);
+  }
+};
 const digest = (file: string, algorithm = "sha256", encoding: "hex" | "base64" = "hex") =>
   Crypto.createHash(algorithm).update(FS.readFileSync(file)).digest(encoding);
 const writeJson = (file: string, value: unknown) =>
@@ -70,6 +101,8 @@ function assertCi() {
     )
   )
     throw new Error("Only the fork's canonical release.yml may publish.");
+  if (!isAllowedForkPublishRef(process.env.GITHUB_REF, process.env.GITHUB_DEFAULT_BRANCH))
+    throw new Error("Publication requires the default branch or a v*.*.* version tag.");
 }
 function assertPublishContext() {
   assertCi();
@@ -226,12 +259,15 @@ async function registryVersion(
   pkg: { manifest: { name: string }; integrity: string },
   version: string,
 ) {
-  const response = await fetch(
+  const response = await releaseFetch(
     `https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)}`,
     { signal: AbortSignal.timeout(30_000) },
   );
   if (response.status === 404) return false;
-  if (!response.ok) throw new Error("Could not verify fork npm publication.");
+  if (!response.ok)
+    throw new Error(
+      `GET https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)} failed (HTTP ${response.status}).`,
+    );
   const value = (await response.json()) as { dist?: { integrity?: string } };
   assertForkNpmManifest(value, version);
   if (value.dist?.integrity !== pkg.integrity)
@@ -248,12 +284,15 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const names = FS.readdirSync(assets).filter((name) => !name.startsWith("build-"));
   const packages = inspectForkNpmPackages("prepared/npm-packages", plan.version);
   const readTags = async (name: string) => {
-    const response = await fetch(
+    const response = await releaseFetch(
       `https://registry.npmjs.org/${encodeURIComponent(name)}/dist-tags`,
       { signal: AbortSignal.timeout(30_000) },
     );
     if (response.status === 404) return {} as Record<string, string>; // absence is not an ownership/readiness check
-    if (!response.ok) throw new Error("Cannot verify fork dist-tag state.");
+    if (!response.ok)
+      throw new Error(
+        `GET https://registry.npmjs.org/${encodeURIComponent(name)}/dist-tags failed (HTTP ${response.status}).`,
+      );
     return (await response.json()) as Record<string, string>;
   };
   const assertTagNotBackwards = async (name: string) => {
@@ -264,7 +303,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
   for (const pkg of packages) await assertTagNotBackwards(pkg.manifest.name);
   const gh = (...args: string[]) => run("gh", args);
   const verifyTag = async (required: boolean) => {
-    const response = await fetch(
+    const response = await releaseFetch(
       `https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/commits/${plan.tag}`,
       {
         headers: {
@@ -276,17 +315,49 @@ async function publishPrepared(plan: ForkReleasePlan) {
     );
     // A new draft's tag may not exist until GitHub publishes the draft.
     if (response.status === 404 && !required) return;
-    if (!response.ok || ((await response.json()) as { sha?: string }).sha !== plan.sha)
+    if (!response.ok)
+      throw new Error(
+        `GET https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/commits/${plan.tag} failed (HTTP ${response.status}).`,
+      );
+    if (((await response.json()) as { sha?: string }).sha !== plan.sha)
       throw new Error("Release tag does not resolve to the pinned source commit.");
   };
-  const getRelease = () =>
-    JSON.parse(gh("api", `repos/${FORK_RELEASE_REPOSITORY}/releases/tags/${plan.tag}`)) as {
-      id: number;
-      draft: boolean;
-      target_commitish: string;
-      assets: { name: string; digest?: string; size: number }[];
-    };
-  let release: ReturnType<typeof getRelease>;
+  type Release = {
+    id: number;
+    tag_name: string;
+    draft: boolean;
+    target_commitish: string;
+    assets: { name: string; digest?: string; size: number }[];
+  };
+  let releaseId: number | undefined;
+  const findRelease = () => {
+    const found =
+      releaseId === undefined
+        ? (
+            JSON.parse(
+              gh(
+                "api",
+                "--paginate",
+                "--slurp",
+                `repos/${FORK_RELEASE_REPOSITORY}/releases?per_page=100`,
+              ),
+            ) as Release[][]
+          )
+            .flat()
+            .find((entry) => entry.tag_name === plan.tag)
+        : (JSON.parse(
+            gh("api", `repos/${FORK_RELEASE_REPOSITORY}/releases/${releaseId}`),
+          ) as Release);
+    if (found && found.tag_name !== plan.tag) throw new Error("GitHub release tag mismatch.");
+    if (found) releaseId = found.id;
+    return found;
+  };
+  const getRelease = () => {
+    const found = findRelease();
+    if (!found) throw new Error("Expected fork release is missing, including drafts.");
+    return found;
+  };
+  let release: Release;
   const verifyAssets = (expected: string[]) => {
     release = getRelease();
     if (release.target_commitish !== plan.sha)
@@ -311,7 +382,16 @@ async function publishPrepared(plan: ForkReleasePlan) {
       }
       if (!release.draft)
         throw new Error("Refusing to repair an incomplete public release automatically.");
-      gh("release", "upload", plan.tag, Path.join(assets, name), "--repo", FORK_RELEASE_REPOSITORY);
+      gh(
+        "api",
+        "-X",
+        "POST",
+        `https://uploads.github.com/repos/${FORK_RELEASE_REPOSITORY}/releases/${release.id}/assets?name=${encodeURIComponent(name)}`,
+        "-H",
+        "Content-Type: application/octet-stream",
+        "--input",
+        Path.join(assets, name),
+      );
     }
   };
   const verifyNpm = async () => {
@@ -340,9 +420,8 @@ async function publishPrepared(plan: ForkReleasePlan) {
   await publishForkReleaseSequence({
     ensureDraft: async () => {
       await verifyTag(false);
-      try {
-        release = getRelease();
-      } catch {
+      const existing = findRelease();
+      if (!existing) {
         gh(
           "release",
           "create",
@@ -358,8 +437,8 @@ async function publishPrepared(plan: ForkReleasePlan) {
           "--notes",
           `${plan.signing.unsigned ? "UNSIGNED opt-in build: platform signatures/notarization may be absent. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}. Preview builds never enter automatic feeds.`,
         );
-        release = getRelease();
       }
+      release = existing ?? getRelease();
       if (release.target_commitish !== plan.sha)
         throw new Error("Existing release belongs to another source revision.");
     },
@@ -370,9 +449,10 @@ async function publishPrepared(plan: ForkReleasePlan) {
       const results = await Promise.allSettled(
         packages.filter((pkg) => pkg.manifest.name !== "shuv2code").map(publishPackage),
       );
-      if (results.some((result) => result.status === "rejected"))
+      const failures = results.filter((result) => result.status === "rejected");
+      if (failures.length)
         throw new Error(
-          "A fork platform package failed publication/verification; launcher publication was skipped. Check all six trusted publisher settings for release.yml.",
+          `A fork platform package failed publication/verification; launcher publication was skipped. ${failures.map((result) => (result.reason instanceof Error ? result.reason.message : "Unknown publication failure.")).join(" ")}`,
         );
       await publishPackage(packages.find((pkg) => pkg.manifest.name === "shuv2code")!);
     },
@@ -382,13 +462,14 @@ async function publishPrepared(plan: ForkReleasePlan) {
     publishRelease: async () => {
       if (getRelease().draft)
         gh(
-          "release",
-          "edit",
-          plan.tag,
-          "--repo",
-          FORK_RELEASE_REPOSITORY,
-          "--draft=false",
-          `--latest=${plan.channel === "stable"}`,
+          "api",
+          "-X",
+          "PATCH",
+          `repos/${FORK_RELEASE_REPOSITORY}/releases/${releaseId}`,
+          "-F",
+          "draft=false",
+          "-f",
+          `make_latest=${plan.channel === "stable"}`,
         );
       await verifyTag(true);
       if (getRelease().draft) throw new Error("GitHub release publication is not yet verifiable.");
@@ -418,7 +499,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
         throw new Error("New complete release is missing from the release index.");
       writeJson("prepared/index.json", index);
       const get = (path: string) =>
-        fetch(`https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/${path}`, {
+        releaseFetch(`https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/${path}`, {
           headers: {
             Authorization: `Bearer ${process.env.GH_TOKEN}`,
             Accept: "application/vnd.github+json",
@@ -437,14 +518,20 @@ async function publishPrepared(plan: ForkReleasePlan) {
           "-f",
           `sha=${plan.sha}`,
         );
-      else if (!branch.ok) throw new Error("Could not read the fork release index branch.");
+      else if (!branch.ok)
+        throw new Error(
+          `GET https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/git/ref/heads/${FORK_RELEASE_INDEX_BRANCH} failed (HTTP ${branch.status}).`,
+        );
       // GitHub Contents creates a commit and atomically advances the branch ref.
       // A failed write/CAS leaves the old file and its public raw URL untouched.
       await publishAtomicReleaseIndex(FS.readFileSync("prepared/index.json", "utf8"), {
         read: async () => {
           const response = await get(`contents/index.json?ref=${FORK_RELEASE_INDEX_BRANCH}`);
           if (response.status === 404) return null;
-          if (!response.ok) throw new Error("Could not read the current fork release index.");
+          if (!response.ok)
+            throw new Error(
+              `GET https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/contents/index.json failed (HTTP ${response.status}).`,
+            );
           const file = (await response.json()) as {
             sha: string;
             encoding: string;
@@ -589,7 +676,7 @@ async function main() {
 if (process.argv[1] && import.meta.url === URL.pathToFileURL(Path.resolve(process.argv[1])).href)
   main().catch((error) => {
     console.error(
-      error instanceof Error && !/Command failed|fetch failed/.test(error.message)
+      error instanceof Error && !(error instanceof SyntaxError)
         ? error.message
         : "Fork release operation failed; verify credentials, trusted-publisher allowed actions and the immutable prepared artifacts. Nothing should be inferred from a dry run.",
     );

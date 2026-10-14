@@ -30,6 +30,11 @@ the release title/body and `release.json` identify unsigned builds. Partial cred
 are not proof of signing. Signed jobs verify platform signatures; macOS verifies
 notarization and the configured team.
 
+Publication accepts only the repository's default branch or a `v*.*.*` version
+tag. Branch-only preview publication is intentionally unavailable. The scheduled
+due/source check runs without a protected environment; unchanged/not-due ticks
+skip signing preflight, builds and publication without requesting approval.
+
 Artifacts are first uploaded to a **draft** release and checked against their
 GitHub SHA-256 digests. All six npm packages use a temporary, non-default release
 dist-tag with `npm publish --provenance`. Registry names, versions, repository and
@@ -47,12 +52,11 @@ The Contents API publishes a commit with the previous blob SHA as a compare-and-
 there is no delete-before-upload window. A failed update leaves the last index available.
 The stable URL is
 `https://raw.githubusercontent.com/shuv1337/shuv2code/fork-release-index/index.json`.
-This is compatible with the server-only `SHUV2CODE_RELEASE_INDEX_URL`; mirrors
-may copy this index to their archive base's `index.json`. The normal fork server
-uses GitHub's release API, which omits drafts.
-No reader default changes are required. If explicitly configuring the rolling
-index, use the raw branch URL above, not the former release-asset URL. CDN caches
-may briefly serve the previous complete index after a successful publication.
+This index is available to mirrors or other consumers; publishing it does not
+add a runtime discovery protocol or mirror configuration. Current client update
+checks retain the fork npm/GitHub sources. Consumers of the rolling index should
+use the raw branch URL above, not the former release-asset URL. CDN caches may
+briefly serve the previous complete index after a successful publication.
 
 GitHub and npm cannot commit a release atomically. Exact npm versions become
 public during publication, but automatic tags remain unchanged until verification.
@@ -65,6 +69,11 @@ one published endpoint as delivery evidence.
 Use the protected GitHub environment `fork-release`, with appropriate default
 branch/tag protections and approvals. Repository variables:
 `FORK_NPM_TRUSTED_PUBLISHING_READY`, `APPLE_TEAM_ID`.
+
+Keep build-signing secrets available to the reusable desktop workflow through
+repository/organization secrets and the caller's secret list. The reusable build
+does not select `fork-release` or inherit its environment secrets/approvals; that
+environment is used only by the canonical release preflight and publish jobs.
 
 macOS secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`,
 `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`.

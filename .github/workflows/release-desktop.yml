@@ -108,17 +108,16 @@ permissions:
 jobs:
   build:
     if: github.repository == 'shuv1337/shuv2code'
-    environment: fork-release
     name: Build ${{ inputs.label }}
     runs-on: ${{ inputs.runner }}
     # Windows waits for the Linux CLI archive inside its own budget (see
     # "Wait for Linux CLI archive"), so it gets that wait on top of the usual 30.
     timeout-minutes: ${{ inputs.platform == 'win' && 70 || 30 }}
     env:
-      SHUV2CODE_CLERK_PUBLISHABLE_KEY: ${{ inputs.clerk_publishable_key }}
-      SHUV2CODE_CLERK_JWT_TEMPLATE: ${{ inputs.clerk_jwt_template }}
-      SHUV2CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
-      SHUV2CODE_RELAY_URL: ${{ inputs.relay_url }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ inputs.clerk_publishable_key }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ inputs.clerk_jwt_template }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
+      T3CODE_RELAY_URL: ${{ inputs.relay_url }}
       SHUV2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/shuv2code
     steps:
       # This repository is public, so Git needs no credentials. checkout's
@@ -449,7 +448,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
-          SHUV2CODE_CLERK_PASSKEY_RP_DOMAINS: ${{ vars.CLERK_PASSKEY_RP_DOMAINS }}
+          T3CODE_CLERK_PASSKEY_RP_DOMAINS: ${{ vars.CLERK_PASSKEY_RP_DOMAINS }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -699,7 +698,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Get-ChildItem release-publish/*.exe | ForEach-Object {
             $signature = Get-AuthenticodeSignature $_.FullName
-            if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate.Subject.Contains($env:EXPECTED_PUBLISHER)) {
+            $certificate = $signature.SignerCertificate
+            $publisherMatches = $certificate -and (
+              [string]::Equals($certificate.Subject, $env:EXPECTED_PUBLISHER, [StringComparison]::OrdinalIgnoreCase) -or
+              [string]::Equals($certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false), $env:EXPECTED_PUBLISHER, [StringComparison]::OrdinalIgnoreCase)
+            )
+            if ($signature.Status -ne 'Valid' -or -not $publisherMatches) {
               throw 'Installer signature or fork publisher mismatch.'
             }
           }

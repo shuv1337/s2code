@@ -33,18 +33,15 @@ permissions:
 # Hosted/relay, marketing and AUR deployment are intentionally not invoked.
 # Their accounts and fork-owned destinations are separate prerequisites (#276/#268).
 jobs:
-  preflight:
+  due:
     if: github.repository == 'shuv1337/shuv2code'
     runs-on: ubuntu-24.04
-    environment: fork-release
-    timeout-minutes: 15
+    timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
-      ref: ${{ steps.plan.outputs.ref }}
-      version: ${{ steps.plan.outputs.version }}
-      release_channel: ${{ steps.plan.outputs.release_channel }}
-      allow_unsigned: ${{ steps.plan.outputs.allow_unsigned }}
-      matrix: ${{ steps.plan.outputs.matrix }}
       due: ${{ steps.due.outputs.due }}
+      allowed_ref: ${{ steps.due.outputs.allowed_ref }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,19 +51,45 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const { assertReleaseSource, shouldReleaseNightly } = require('./.github/scripts/check-nightly-release.cjs');
+            const { assertReleaseSource, shouldReleaseNightly, isAllowedForkPublishRef } = require('./.github/scripts/check-nightly-release.cjs');
+            const allowed = isAllowedForkPublishRef(context.ref, context.payload.repository?.default_branch);
+            core.setOutput('allowed_ref', String(allowed));
+            if (!allowed) {
+              core.setOutput('due', 'false');
+              core.notice('Release skipped: publication requires the default branch or a version tag. No publisher token or protected environment requested.');
+              return;
+            }
             await assertReleaseSource({ github, context, releaseChannel: context.eventName === 'push' ? 'stable' : context.eventName === 'schedule' ? 'nightly' : context.payload.inputs?.channel || 'preview' });
             const due = context.eventName !== 'schedule' || await shouldReleaseNightly({ github, context, core });
             core.setOutput('due', String(due));
             if (!due) core.notice('No release needed: unchanged nightly source or release interval not elapsed. No delivery attempted.');
+
+  preflight:
+    needs: due
+    if: needs.due.outputs.due == 'true' && needs.due.outputs.allowed_ref == 'true'
+    runs-on: ubuntu-24.04
+    environment: fork-release
+    timeout-minutes: 15
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    outputs:
+      ref: ${{ steps.plan.outputs.ref }}
+      version: ${{ steps.plan.outputs.version }}
+      release_channel: ${{ steps.plan.outputs.release_channel }}
+      allow_unsigned: ${{ steps.plan.outputs.allow_unsigned }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      due: ${{ needs.due.outputs.due }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: voidzero-dev/setup-vp@v1
-        if: steps.due.outputs.due == 'true'
         with:
           node-version-file: package.json
           run-install: true
       - id: plan
         name: Require fork release accounts/signing and resolve one source/version
-        if: steps.due.outputs.due == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
@@ -91,10 +114,8 @@ jobs:
           export RELEASE_DATE
           node scripts/fork-release.ts preflight
       - name: Verify release logic
-        if: steps.due.outputs.due == 'true'
         run: vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/merge-update-manifests.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@v7
-        if: steps.due.outputs.due == 'true'
         with:
           name: release-plan
           path: release-plan.json
@@ -189,7 +210,10 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [preflight, prepare]
+    needs: [due, preflight, prepare]
+    if: >-
+      needs.due.outputs.allowed_ref == 'true' &&
+      (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-24.04 # npm trusted publishing requires GitHub-hosted runners.
     environment: fork-release
     timeout-minutes: 30
@@ -198,6 +222,7 @@ jobs:
       actions: read
       id-token: write
     env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
       FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
       NPM_TOKEN: ""
