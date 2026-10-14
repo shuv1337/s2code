@@ -9,7 +9,7 @@ import { FetchHttpClient } from "effect/http";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
-import type * as ServerConfig from "../config.ts";
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { forkCliCommand, resolveCliCommand, formatCliHomeFlag } from "./invocation.ts";
@@ -243,8 +243,16 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     yield* Console.log("T3 Code is already set up to run in the background on this machine.");
     return true;
   }
-  for (const problem of status.problems ?? []) {
-    yield* Console.warn(`[${problem}] ${BootService.formatBootServiceProblem(problem)}`);
+  if (status.problems?.length) {
+    const config = yield* ServerConfig.ServerConfig;
+    const prefix = (yield* resolveCliCommand("")).trimEnd();
+    const command = (subcommand: string) =>
+      `${prefix} ${subcommand} ${formatCliHomeFlag(config.baseDir)}`;
+    for (const problem of status.problems) {
+      yield* Console.warn(
+        `[${problem}] ${BootService.formatBootServiceProblem(problem, { version: packageJson.version, command })}`,
+      );
+    }
   }
   if (
     installed &&

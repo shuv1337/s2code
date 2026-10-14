@@ -3,6 +3,7 @@ import { assert, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -12,6 +13,8 @@ import { afterEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
+import * as ServerConfig from "../config.ts";
+import { formatCliCommand, formatCliHomeFlag, resolveCliCommand } from "./invocation.ts";
 import {
   formatServiceStatus,
   offerServiceDuringOnboarding,
@@ -252,12 +255,73 @@ it.effect("leaves a newer service unchanged during onboarding without prompting"
     const ready = yield* offerServiceDuringOnboarding.pipe(
       Effect.provideService(BootService.BootService, service),
       Effect.provideService(Terminal.Terminal, terminal),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        ServerConfig.layerTest("/test", { prefix: "service-onboarding-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
     );
 
     expect(ready).toBe(false);
     expect(installOptions).toEqual([]);
   }),
+);
+
+it.effect.each([
+  {
+    entry: "/fork source/apps/server/src/bin.ts",
+    prefix: "/runtime/node '/fork source/apps/server/src/bin.ts'",
+  },
+  { entry: "/home/me/.npm/_npx/fixture/node_modules/shuv2code/dist/bin.mjs", prefix: null },
+])(
+  "keeps onboarding repair instructions on the launching invocation and custom home ($entry)",
+  ({ entry, prefix }) =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const { service, installOptions } = makeTestService({
+        ...newerServiceStatus,
+        problems: ["service-disabled", "service-stopped", "restart-pending"],
+      });
+      const warnings: string[] = [];
+      const ready = yield* offerServiceDuringOnboarding.pipe(
+        Effect.provideService(BootService.BootService, service),
+        Effect.provideService(Console.Console, {
+          ...globalThis.console,
+          warn: (...args) => {
+            warnings.push(args.join(" "));
+          },
+        }),
+      );
+      const actualPrefix = (yield* resolveCliCommand("")).trimEnd();
+      expect(actualPrefix).toBe(
+        prefix ??
+          formatCliCommand({
+            entryPath: entry,
+            version: packageJson.version,
+            subcommand: "",
+          }).trimEnd(),
+      );
+      expect(warnings).toHaveLength(3);
+      expect(warnings[0]).toContain(
+        `\`${actualPrefix} service install ${formatCliHomeFlag(config.baseDir)}\``,
+      );
+      expect(warnings[1]).toContain(
+        `\`${actualPrefix} service install ${formatCliHomeFlag(config.baseDir)}\``,
+      );
+      expect(warnings[2]).toContain(
+        `\`${actualPrefix} service restart ${formatCliHomeFlag(config.baseDir)}\``,
+      );
+      expect(ready).toBe(false);
+      expect(installOptions).toEqual([]);
+    }).pipe(
+      Effect.provide(ServerConfig.layerTest("/fork source", { prefix: "custom service home " })),
+      Effect.provideService(HostProcess.Arguments, ["/runtime/node", entry]),
+      Effect.provideService(HostProcess.ExecutablePath, "/runtime/node"),
+      Effect.provideService(HostProcess.InvokedAs, ""),
+      Effect.provideService(HostProcess.IsExecutable, false),
+      Effect.provideService(HostProcess.Environment, {}),
+      Effect.provide(NodeServices.layer),
+    ),
 );
 
 it.effect("keeps onboarding successful when a newer version appears before install", () =>
