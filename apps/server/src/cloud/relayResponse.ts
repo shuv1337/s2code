@@ -1,4 +1,5 @@
 import { RelayProtectedError } from "@t3tools/contracts/relay";
+import { forkCliCommand } from "../cli/invocation.ts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -42,7 +43,7 @@ function recoveryHint(error: RelayProtectedError): string {
     case "RelayEnvironmentLinkLimitExceededError":
       return "Unlink an unused environment in T3 Connect, then restart T3 Code on this machine.";
     case "RelayAuthInvalidError":
-      return "Run `t3 connect login` to check this machine's authorization. If the stored credential was revoked, sign out with `t3 connect logout`, then run `t3 connect` again. Restart T3 Code after signing in.";
+      return `Run \`${forkCliCommand("connect login")}\` to check this machine's authorization. If the stored credential was revoked, sign out with \`${forkCliCommand("connect logout")}\`, then run \`${forkCliCommand("connect")}\` again. Restart the fork after signing in.`;
     case "RelayEnvironmentLinkProofExpiredError":
     case "RelayEnvironmentLinkProofInvalidError":
       return "Check this machine's date and time, update T3 Code, then restart it.";

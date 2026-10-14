@@ -1,5 +1,8 @@
 # Apple Watch
 
+Fork mobile/watch distributions are not available yet. These steps apply only
+to a fork app built from source; do not install an upstream app as a substitute.
+
 T3 Watch lets you record an instruction, review its transcript, and send it to an
 existing thread. The iPhone companion must include T3 Watch, and each connected
 server must support the Watch API.
@@ -7,7 +10,7 @@ server must support the Watch API.
 ## Connect a server
 
 Open T3 Watch and enter the server's URL. Choose **Pair**, then approve the code
-on that server with `t3 pair --watch --approve CODE`. Pairing creates a separate
+on that server with `shuv2code pair --watch --approve CODE`. Pairing creates a separate
 Watch session; removing the environment from Watch does not revoke that session
 on the server.
 

@@ -6,7 +6,8 @@ import * as Schema from "effect/Schema";
 
 import type { ServerInstallation } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isCommandAvailable } from "@t3tools/shared/shell";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import { PRODUCT_ID, PRODUCT_CLI_SHIM_MARKER } from "@t3tools/shared/productIdentity";
 
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -22,7 +23,7 @@ export type CliRunner = "npx" | "pnpm dlx" | "bunx";
  *   bunx     ~/.bun/install/cache/... or $TMPDIR/bunx-<uid>-<spec>/...
  *
  * Global installs and repo checkouts match none of these and return null.
- * Detection is best-effort; callers must fail closed to a plain `t3` command.
+ * Detection is best-effort; unknown installs never imply npm ownership.
  */
 function detectCliRunner(entryPath: string): CliRunner | null {
   const path = entryPath.replaceAll("\\", "/");
@@ -36,7 +37,7 @@ function detectCliRunner(entryPath: string): CliRunner | null {
   ) {
     return "pnpm dlx";
   }
-  if (path.includes("/.bun/install/cache/") || path.includes("/bunx-")) {
+  if (path.includes("/.bun/install/cache/") || /\/bunx-\d+-[^/]+\//.test(path)) {
     return "bunx";
   }
   return null;
@@ -105,21 +106,24 @@ export const resolveServerInstallation = Effect.gen(function* () {
 }).pipe(Effect.orElseSucceed(() => null));
 
 /**
- * The `t3` package spec to suggest. The literal spec the user typed (e.g.
- * `t3@nightly`) is resolved away before our process starts, so re-derive it
- * from the running version: nightly builds re-suggest the nightly channel,
- * anything else suggests the bare package.
+ * The fork package spec to suggest. The literal spec the user typed (e.g.
+ * `shuv2code@nightly`) is resolved away before our process starts, so re-derive it
+ * from the running version: nightly keeps its tag, stable uses the bare package,
+ * and preview/PR builds pin their installed version.
  */
 function suggestedPackageSpec(version: string): string {
-  const channel = /^[^-+]+-(nightly|preview)\./.exec(version)?.[1];
-  return channel === undefined ? "shuv2code" : `shuv2code@${channel}`;
+  const channel = resolveChannelIdentity(version).channel;
+  // Preview/PR recovery stays on the installed version, never a mutable tag or stable.
+  return channel === "preview"
+    ? `${PRODUCT_ID}@${version}`
+    : channel === "nightly"
+      ? `${PRODUCT_ID}@nightly`
+      : PRODUCT_ID;
 }
 
 /**
- * Render a `t3 <subcommand>` suggestion that matches how this process was
- * launched, so copy/pasting it actually works: `npx t3 connect` suggests
- * `npx t3 serve`, a global install suggests `t3 serve`, and a nightly build
- * keeps the `@nightly` tag.
+ * Render a context-free fork command: runner paths keep their package runner
+ * and channel tag; other paths use the channel-owned command name.
  */
 export function formatCliCommand(input: {
   readonly subcommand: string;
@@ -128,36 +132,90 @@ export function formatCliCommand(input: {
 }): string {
   const runner = detectCliRunner(input.entryPath);
   if (runner === null) {
-    return `shuv2code ${input.subcommand}`;
+    return forkCliCommand(input.subcommand, input.version);
   }
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }
 
-/** `formatCliCommand` against this process's real entry path and version. */
-export const resolveCliCommand = (subcommand: string) =>
-  Effect.map(HostProcess.Arguments, (processArguments) =>
-    formatCliCommand({
-      subcommand,
-      entryPath: processArguments[1] ?? "",
-      version: packageJson.version,
-    }),
-  );
+/** Safe fallback for messages that have no runtime invocation context. */
+export const forkCliCommand = (subcommand: string, version = packageJson.version) =>
+  `${resolveChannelIdentity(version).executableName} ${subcommand}`;
+
+/** Proven npm bin, current fork executable/shim, or source runtime and entry; never an unrelated PATH command. */
+export const resolveCliCommand = Effect.fnUntraced(function* (
+  subcommand: string,
+  baseDir?: string,
+) {
+  const commandArgs =
+    baseDir === undefined ? subcommand : `${subcommand} ${formatCliHomeFlag(baseDir)}`;
+  const args = yield* HostProcess.Arguments;
+  const entry = args[1] ?? "";
+  const installation = yield* resolveServerInstallation;
+  if (installation?.kind === "npm-global") {
+    const path = yield* Path.Path;
+    return `${shellWord(path.join(installation.prefix, "bin", PRODUCT_ID))} ${commandArgs}`;
+  }
+  const runner =
+    installation?.kind === "npx"
+      ? "npx"
+      : installation?.kind === "pnpm-dlx"
+        ? "pnpm dlx"
+        : installation?.kind === "bunx"
+          ? "bunx"
+          : detectCliRunner(entry);
+  if (runner !== null)
+    return `${runner} ${suggestedPackageSpec(packageJson.version)} ${commandArgs}`;
+  const launcher = yield* resolveInstallLauncher;
+  if (Option.isSome(launcher)) return `${shellWord(launcher.value)} ${commandArgs}`;
+  if (entry && !entry.includes(".asar")) {
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const absoluteEntry = path.resolve(yield* HostProcess.WorkingDirectory, entry);
+    const resolvedEntry = yield* fs
+      .realPath(absoluteEntry)
+      .pipe(Effect.orElseSucceed(() => absoluteEntry));
+    return `${shellWord(yield* HostProcess.ExecutablePath)} ${shellWord(resolvedEntry)} ${commandArgs}`;
+  }
+  return forkCliCommand(commandArgs);
+});
 
 /** Quotes `value` for a POSIX shell when it needs it. */
 const shellWord = (value: string) =>
   /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
+export const formatCliHomeFlag = (baseDir: string) => `--base-dir ${shellWord(baseDir)}`;
+
+/** Never offer a package removal command unless ownership of this npm prefix was proven. */
+export const resolveUninstallGuidance = Effect.gen(function* () {
+  const installation = yield* resolveServerInstallation;
+  if (installation?.kind === "npm-global")
+    return `Remove this fork's npm package with \`npm uninstall --global --prefix ${shellWord(installation.prefix)} ${PRODUCT_ID}\`. Your upstream installation is separate.`;
+  if (installation !== null)
+    return "This is a temporary fork package-runner launch, not a global install. Stop the process; there is no global package to uninstall.";
+  return (yield* HostProcess.IsExecutable)
+    ? "This standalone fork binary has no other managed installation to remove. Remove only the fork binary you installed if you no longer need it."
+    : "This server runs from source or an unrecognized Node installation. Stop that process and undo only its fork setup; keep your checkout and data unless you explicitly want to remove them.";
+});
 
 /**
- * The launcher a person can type to run this install when `t3` is not on
- * PATH: the desktop app's `t3` shim, which the app and the shim itself name in
- * `T3CODE_CLI_PATH`, or a standalone binary's own path. Script installs (a
- * repo checkout) have no single launcher and keep plain `t3`.
+ * A marked fork desktop shim named by internal T3CODE_CLI_PATH, or the running
+ * standalone fork binary. Source installs instead use their runtime and entry.
  */
 const resolveInstallLauncher = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const shim = (yield* HostProcess.Environment).T3CODE_CLI_PATH?.trim();
-  if (shim && (yield* fs.exists(shim).pipe(Effect.orElseSucceed(() => false)))) {
-    return Option.some(shim);
+  if (
+    shim &&
+    [
+      PRODUCT_ID,
+      `${PRODUCT_ID}.cmd`,
+      resolveChannelIdentity(packageJson.version).executableName,
+      `${resolveChannelIdentity(packageJson.version).executableName}.cmd`,
+    ].includes(path.basename(shim))
+  ) {
+    const content = yield* fs.readFileString(shim).pipe(Effect.option);
+    if (Option.isSome(content) && content.value.includes(PRODUCT_CLI_SHIM_MARKER))
+      return Option.some(shim);
   }
   return (yield* HostProcess.IsExecutable)
     ? Option.some(yield* HostProcess.ExecutablePath)
@@ -165,25 +223,22 @@ const resolveInstallLauncher = Effect.gen(function* () {
 });
 
 /**
- * `t3 <subcommand>` for a person to run on this host: `t3` when it is on PATH,
- * the package runner this process came from, or else the absolute path of the
- * launcher for this install, such as the one the desktop app installs.
+ * Track whether the rendered command is a self-contained launcher, so sudo
+ * need not preserve a user-installed Node's PATH for it.
  */
-const resolveHostCliCommand = (subcommand: string) =>
-  Effect.gen(function* () {
-    const command = yield* resolveCliCommand(subcommand);
-    if (command !== `shuv2code ${subcommand}`) return { command, launcher: false };
-    if (yield* isCommandAvailable("shuv2code")) return { command, launcher: false };
-    const launcher = yield* resolveInstallLauncher;
-    return Option.isSome(launcher)
-      ? { command: `${shellWord(launcher.value)} ${subcommand}`, launcher: true }
-      : { command, launcher: false };
-  });
+const resolveHostCliCommand = Effect.fnUntraced(function* (subcommand: string) {
+  const command = yield* resolveCliCommand(subcommand);
+  const launcher = yield* resolveInstallLauncher;
+  return {
+    command,
+    launcher: Option.isSome(launcher) && command === `${shellWord(launcher.value)} ${subcommand}`,
+  };
+});
 
 /**
- * `t3 <subcommand>` as root, for setup a person runs once on the host. `sudo`
+ * Fork setup as root, for an operation a person runs once on the host. `sudo`
  * resets PATH on most distributions, which drops a user-installed Node (nvm,
- * fnm, a tarball) and with it `npx` or a global `t3`, so the command carries
+ * fnm, a tarball) and with it package runners, so the command carries
  * PATH through unless Node is on root's PATH too. An absolute launcher needs
  * neither.
  */

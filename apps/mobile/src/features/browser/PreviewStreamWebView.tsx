@@ -510,7 +510,7 @@ function PreviewStreamDocumentView({
               {status === "error" ? error : "Connecting to browser..."}
             </AppText>
           )}
-          {status === "error" && hostSetup && !compact ? (
+          {status === "error" && hostSetup?.command && !compact ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Copy ${hostSetup.command}`}

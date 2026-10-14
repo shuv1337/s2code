@@ -17,6 +17,7 @@
  * provisioning command must not drop keys this version does not recognise.
  */
 import * as NodeFS from "node:fs";
+import { forkCliCommand } from "./invocation.ts";
 
 import {
   EnvironmentThemeFile,
@@ -174,7 +175,7 @@ export class ThemeTargetMissingError extends Schema.TaggedError<ThemeTargetMissi
   {},
 ) {
   override get message(): string {
-    return "Provide a theme id or file, or run `t3 theme clear` to remove the theme.";
+    return `Provide a theme id or file, or run \`${forkCliCommand("theme clear")}\` to remove the theme.`;
   }
 }
 

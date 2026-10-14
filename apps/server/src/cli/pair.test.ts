@@ -263,19 +263,29 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("directs to the fork server command when no server is running", () =>
+  it.effect("directs to the actual source invocation when no server is running", () =>
     Effect.gen(function* () {
       const baseDir = makeOwnedTempDirectory("t3-pair-none-test-");
 
       const error = yield* provideCliTestLayers(
-        runCli(["pair", "--base-dir", baseDir]).pipe(Effect.flip),
+        runCli(["pair", "--base-dir", baseDir]).pipe(
+          Effect.flip,
+          Effect.provideService(HostProcess.Arguments, [
+            "/usr/bin/node",
+            "/work/fork/apps/server/dist/bin.mjs",
+          ]),
+          Effect.provideService(HostProcess.ExecutablePath, "/usr/bin/node"),
+          Effect.provideService(HostProcess.IsExecutable, false),
+          Effect.provideService(HostProcess.Environment, {}),
+        ),
       );
 
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
       assert.include(rendered, "No running T3 Code server found.");
-      assert.include(rendered, "npx shuv2code serve");
+      assert.include(rendered, "/usr/bin/node /work/fork/apps/server/dist/bin.mjs serve");
+      assert.notInclude(rendered, "npx");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
