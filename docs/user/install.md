@@ -34,6 +34,10 @@ upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
 when a service-launcher context is inherited. Older maintainer-local fork
 services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
 updating; their old `T3CODE_HOME` setting is not adopted.
+If the binary was already updated, an old unit or unmarked active runtime pauses
+without starting a server. Its log says **Service paused until reinstall** rather
+than repeatedly restarting. Reinstall with `shuv2code service install` using the
+same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
 
 An empty custom home is claimed automatically. Existing installations in the
 exact default fork home remain usable; runtime caches without product metadata
@@ -107,16 +111,16 @@ Nothing is moved or copied automatically. To transfer data manually, stop both
 apps and their services first, back up the source, then copy into the separate
 nightly home while everything is offline. Do not share or link a live database.
 
-Download a release from [GitHub Releases](https://github.com/pingdotgg/t3code/releases),
-or use a package manager:
+When a verified fork release is published, download the intended channel from
+[shuv2code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
+available yet, build the fork from source rather than installing upstream as a
+substitute. Upstream Winget, Homebrew and AUR packages do not install these fork
+identities. No fork Winget or Homebrew registration is configured here.
 
-| Platform           | Install                            |
-| ------------------ | ---------------------------------- |
-| Windows            | `winget install T3Tools.T3Code`    |
-| macOS              | `brew install --cask t3-code`      |
-| Debian, Ubuntu     | `sudo apt install ./T3-Code-*.deb` |
-| Arch Linux         | `yay -S t3code-bin`                |
-| Arch Linux nightly | `yay -S t3code-nightly-bin`        |
+On Debian/Ubuntu, install a downloaded fork DEB with
+`sudo apt install ./T3-Code-<version>-<arch>.deb`. The fork AUR definitions use
+`shuv2code-bin` and `shuv2code-nightly-bin`; use the AUR
+only after maintainers confirm those packages and their release checksums are published.
 
 The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the

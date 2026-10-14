@@ -35,10 +35,11 @@ export interface EarlyLinuxElectronOptions {
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
 
+export const resolveLinuxDesktopId = (isDevelopment: boolean, version = ""): string =>
+  isDevelopment ? "dev.shuv.shuv2code.dev" : resolveChannelIdentity(version).appId;
+
 export const resolveLinuxDesktopEntryName = (isDevelopment: boolean, version = ""): string =>
-  isDevelopment
-    ? "dev.shuv.shuv2code.dev.desktop"
-    : `${resolveChannelIdentity(version).appId}.desktop`;
+  `${resolveLinuxDesktopId(isDevelopment, version)}.desktop`;
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();

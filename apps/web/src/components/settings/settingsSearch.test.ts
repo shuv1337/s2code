@@ -147,7 +147,7 @@ describe("searchSettings", () => {
   it("finds the About update rows", () => {
     expect(searchSettings("check for updates").map((item) => item.id)).toContain("app-version");
     expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "update-track")).toMatchObject({
-      title: "Update track",
+      title: "Installed channel",
       to: "/settings/general",
       releaseChannelOnly: true,
     });
