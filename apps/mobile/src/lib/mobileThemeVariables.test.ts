@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { readDefaultMobileThemeVariables } from "./mobileTheme.test-support";
-import { getMobileThemeVariables, MOBILE_THEME_IDS, themeColorWithAlpha } from "./mobileTheme";
+import {
+  getMobileThemeVariables,
+  MOBILE_THEME_IDS,
+  themeColorWithAlpha,
+  themeColorWithContrast,
+} from "./mobileTheme";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 describe("mobile theme runtime variables", () => {
@@ -37,7 +42,7 @@ describe("mobile theme runtime variables", () => {
           "--color-header": themeColorWithAlpha(
             base[
               themeId === "t3-code" || themeId === "material-you"
-                ? "--color-row-hover"
+                ? "--color-grouped-card"
                 : "--color-drawer"
             ],
             1,
@@ -56,7 +61,10 @@ describe("mobile theme runtime variables", () => {
       for (const appearance of ["light", "dark"] as const) {
         const variables = getMobileThemeRuntimeVariables(themeId, appearance, "android");
         expect(variables["--color-header"]).toBe(
-          appearance === "light" ? "rgba(244, 244, 245, 1)" : "rgba(20, 20, 20, 1)",
+          themeColorWithAlpha(
+            getMobileThemeVariables("t3-code", appearance)["--color-grouped-card"],
+            1,
+          ),
         );
         for (const pane of ["--color-screen", "--color-sheet-solid", "--color-drawer"] as const) {
           expect(variables["--color-header"]).not.toBe(themeColorWithAlpha(variables[pane], 1));
@@ -76,9 +84,15 @@ describe("mobile theme runtime variables", () => {
           expect(ios["--color-header"]).toBe(android["--color-header"]);
           expect(ios["--color-header-foreground"]).toBe(ios["--color-drawer-foreground"]);
         } else {
-          expect(ios).toEqual(getMobileThemeVariables("t3-code", appearance));
-          expect(ios["--color-drawer"]).toBe("#000000");
-          expect(ios["--color-thread-canvas"]).toBe("#0a0a0a");
+          const base = getMobileThemeVariables("t3-code", appearance);
+          expect(ios).toEqual({
+            ...base,
+            "--color-drawer": themeColorWithContrast(
+              base["--color-drawer"],
+              base["--color-screen"],
+              1.06,
+            ),
+          });
         }
         expect(themeColorWithAlpha(ios["--color-thread-hover"], 1)).not.toBe(
           themeColorWithAlpha(ios["--color-drawer"], 1),

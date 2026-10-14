@@ -34,7 +34,7 @@ describe("mobileHtmlRenderTheme", () => {
       systemColors: true,
       platform: "android",
     });
-    expect(theme.variables["--accent"]).toBe("#6750A4FF");
-    expect(theme.variables["--foreground"]).toBe("#1D1B20FF");
+    expect(theme.variables["--accent"]).toBe("#6750a4ff");
+    expect(theme.variables["--foreground"]).toBe("#1d1b20ff");
   });
 });

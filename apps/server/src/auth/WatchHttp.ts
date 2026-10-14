@@ -10,11 +10,12 @@ import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./http.ts";
 
 /** Populated only while the Watch HTTP middleware runs the handler. */
-export const CurrentWatchSession = Context.Reference<
-  EnvironmentAuth.WatchClientSession | undefined
->("t3/auth/CurrentWatchSession", {
-  defaultValue: (): EnvironmentAuth.WatchClientSession | undefined => undefined,
-});
+const CurrentWatchSession = Context.Reference<EnvironmentAuth.WatchClientSession | undefined>(
+  "t3/auth/CurrentWatchSession",
+  {
+    defaultValue: (): EnvironmentAuth.WatchClientSession | undefined => undefined,
+  },
+);
 
 export const requireWatchSession = Effect.gen(function* () {
   const session = yield* CurrentWatchSession;

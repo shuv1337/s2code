@@ -165,19 +165,19 @@ describe("ServerUpdateAction", () => {
   it.each([
     [
       { kind: "npm-global", prefix: "/opt/node" },
-      "npm install --global --prefix '/opt/node' t3@0.0.45",
+      "npm install --global --prefix '/opt/node' shuv2code@0.0.45",
       "Update command copied",
       "then restart t3",
     ],
     [
       { kind: "npx" },
-      "npx t3@0.0.45",
+      "npx shuv2code@0.0.45",
       "Relaunch command copied",
       "This does not update an installed t3 command.",
     ],
     [
       undefined,
-      "npx t3@0.0.45",
+      "npx shuv2code@0.0.45",
       "Relaunch command copied",
       "This does not update an installed t3 command.",
     ],
