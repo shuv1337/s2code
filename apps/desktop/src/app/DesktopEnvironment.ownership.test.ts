@@ -8,6 +8,8 @@ import { afterEach, vi } from "vite-plus/test";
 import { resolveProductEnvironment } from "@t3tools/shared/productIdentity";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+import { resolveUserDataPath } from "./DesktopUserData.ts";
+import * as Logger from "effect/Logger";
 
 afterEach(() => vi.unstubAllEnvs());
 const ownedEnvironment = (
@@ -37,6 +39,46 @@ const ownedEnvironment = (
       ),
     ),
   );
+
+it.effect.each(["nightly", "preview"])(
+  "logs shared data after layerOwned has already claimed the %s home",
+  (channel) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      vi.stubEnv("HOME", root);
+      vi.stubEnv("USERPROFILE", root);
+      const stable = path.join(root, ".shuv2code-v2");
+      yield* fs.makeDirectory(stable);
+      yield* fs.writeFileString(path.join(stable, "state.sqlite"), "old-shared-data");
+      const environment = yield* ownedEnvironment(root, channel);
+      expect(yield* fs.exists(path.join(environment.baseDir, ".product-identity"))).toBe(true);
+      const messages: string[] = [];
+      yield* resolveUserDataPath({
+        appDataDirectory: root,
+        homeDirectory: root,
+        baseDir: environment.baseDir,
+        appVersion: `1.2.3-${channel}.20261014.1`,
+        isDevelopment: false,
+        platform: "darwin",
+      }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make((options) => {
+              messages.push(String(options.message));
+            }),
+          ]),
+        ),
+      );
+      expect(
+        messages.some(
+          (message) => message.includes(stable) && message.includes("remains untouched"),
+        ),
+      ).toBe(true);
+      expect(yield* fs.readFileString(path.join(stable, "state.sqlite"))).toBe("old-shared-data");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.effect.each(["nightly", "preview"])(
   "validates the resolved %s home without claiming the stable home",
