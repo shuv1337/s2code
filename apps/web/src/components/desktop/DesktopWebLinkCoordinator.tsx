@@ -19,6 +19,9 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
+export const shouldMountDesktopWebLinkCoordinator = (status: string) =>
+  status === "authenticated" || status === "hosted-static";
+
 /**
  * The thread on screen when its browser panel is showing, so a link opens as
  * another tab there, the way a browser window takes new links. HTML files are
@@ -64,6 +67,7 @@ export function DesktopWebLinkCoordinator() {
   });
   const httpBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironment?.environmentId ?? null);
   const queueRef = useRef(Promise.resolve());
+  const pendingPrimaryLinksRef = useRef<string[]>([]);
   const webLinks = window.desktopBridge?.webLinks;
   const ready =
     webLinks !== undefined &&
@@ -97,6 +101,13 @@ export function DesktopWebLinkCoordinator() {
 
   const openLink = useEffectEvent(async (url: string) => {
     const appPath = promptLinkAppPath(url);
+    // Environment-qualified threads do not depend on the local primary.
+    // Other links retain the existing primary-readiness requirement.
+    const isThreadLink = appPath !== null && /^\/[^/]+\/[^/?]+(?:\?|$)/.test(appPath);
+    if (!isThreadLink && !ready) {
+      pendingPrimaryLinksRef.current.push(url);
+      return;
+    }
     if (appPath !== null) {
       await router.navigate({ href: appPath });
       return;
@@ -133,7 +144,14 @@ export function DesktopWebLinkCoordinator() {
   });
 
   useEffect(() => {
-    if (!ready || webLinks === undefined) return;
+    if (!ready) return;
+    for (const url of pendingPrimaryLinksRef.current.splice(0)) {
+      queueRef.current = queueRef.current.then(() => openLink(url)).catch(() => undefined);
+    }
+  }, [ready]);
+
+  useEffect(() => {
+    if (webLinks === undefined) return;
     let subscribed = true;
     // Links open one at a time, in the order they came.
     const unsubscribe = webLinks.onOpen((url) => {
@@ -148,7 +166,7 @@ export function DesktopWebLinkCoordinator() {
       void webLinks.setReady(false).catch(() => undefined);
       unsubscribe();
     };
-  }, [ready, webLinks]);
+  }, [webLinks]);
 
   return null;
 }

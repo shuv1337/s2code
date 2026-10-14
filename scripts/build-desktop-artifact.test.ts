@@ -1327,7 +1327,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             }).pipe(Effect.provide(spawner));
             const installed = path.join(
               stageResourcesDir,
-              `${backend}-capture/t3-${backend}-snap-shot`,
+              `${backend}-capture/${backend === "kde" ? "shuv2code" : "t3"}-${backend}-snap-shot`,
             );
             assert.equal(yield* fs.readFileString(installed), `helper-${arch}`);
             assert.equal((yield* fs.stat(installed)).mode & 0o777, 0o755);

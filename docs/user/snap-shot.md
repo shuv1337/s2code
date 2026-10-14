@@ -69,7 +69,7 @@ SnapShots work on Wayland sessions. Each desktop provides capture differently, a
 current desktop and shows only what it needs. Preferences carry across desktops, but each desktop's
 helper and shortcut approval are separate.
 
-**GNOME.** Install the bundled **T3 Code SnapShots** extension during setup. It is installed
+**GNOME.** Install the bundled **shuv2code SnapShots** extension during setup. It is installed
 per-user, offline, and needs no administrator password. Sign out and back in after the first
 install so GNOME discovers it, then enable it from setup or from GNOME's Extensions app. If GNOME
 has disabled all user extensions, turn them on there first. Disable or remove the extension in
@@ -79,6 +79,12 @@ GNOME's Extensions app to revoke access.
 shortcut does not fire, check T3 Code under **System Settings** > **Keyboard** > **Shortcuts**. If a
 shortcut using Shift and a number does not work on your keyboard layout, use a letter chord instead.
 Remove the helper from **Manage capture** > **Access** > **Advanced**.
+
+Setup warns if an upstream-named KDE helper or GNOME extension is still present.
+It may belong to upstream T3 Code or an older fork build. Fork setup leaves it
+untouched: removing or disabling the fork helper does not revoke the other
+installation's access. Review that installation separately if you no longer use
+it; use GNOME Extensions for an old GNOME extension.
 
 **Hyprland and Omarchy.** Install the bundled helper during setup, then choose a shortcut and select
 **Review changes**. T3 Code shows the exact change it will make to your Hyprland config. **Save

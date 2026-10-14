@@ -8,6 +8,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import type { DesktopAppActivationRequest } from "@t3tools/contracts";
 import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
+import { DEFAULT_HOME_DIRECTORY } from "@t3tools/shared/productIdentity";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -305,7 +306,7 @@ describe("t3 app", () => {
   it.effect("prefers the installed desktop app when a dev desktop is also running", () =>
     withTempDirectory("t3-app-preferred-test-", (root) =>
       Effect.gen(function* () {
-        const baseDir = NodePath.join(root, ".shuv2code-v2");
+        const baseDir = NodePath.join(root, DEFAULT_HOME_DIRECTORY);
         const desktop = yield* fakeDesktop({ baseDir });
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
@@ -361,7 +362,7 @@ describe("t3 app", () => {
   it.effect("finds the dev desktop when the default desktop socket is absent", () =>
     withTempDirectory("t3-app-dev-test-", (root) =>
       Effect.gen(function* () {
-        const baseDir = NodePath.join(root, ".shuv2code-v2");
+        const baseDir = NodePath.join(root, DEFAULT_HOME_DIRECTORY);
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
         yield* runCli(["app"]);
@@ -376,7 +377,7 @@ describe("t3 app", () => {
   it.effect("never searches a dev state directory for an explicit T3 home", () =>
     withTempDirectory("t3-app-explicit-test-", (root) =>
       Effect.gen(function* () {
-        const baseDir = NodePath.join(root, ".shuv2code-v2");
+        const baseDir = NodePath.join(root, DEFAULT_HOME_DIRECTORY);
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
         const flagError = yield* runCli(["app", "--base-dir", baseDir]).pipe(Effect.flip);
@@ -394,7 +395,7 @@ describe("t3 app", () => {
     (responseKind) =>
       withTempDirectory("t3-app-response-test-", (root) =>
         Effect.gen(function* () {
-          const baseDir = NodePath.join(root, ".shuv2code-v2");
+          const baseDir = NodePath.join(root, DEFAULT_HOME_DIRECTORY);
           const desktop = yield* fakeDesktop({
             baseDir,
             reply: (request) =>

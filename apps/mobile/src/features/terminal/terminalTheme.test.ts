@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { BUILT_IN_THEMES, getThemeColorsForAppearance } from "@t3tools/shared/themePalettes";
+import {
+  BUILT_IN_THEMES,
+  getThemeColorsForAppearance,
+  T3_CODE_LIGHT_THEME_COLORS,
+  T3_CODE_DARK_THEME_COLORS,
+} from "@t3tools/shared/themePalettes";
 
 import { themeColorToNativeColor } from "../../lib/mobileTheme";
 
@@ -8,19 +13,19 @@ import { buildGhosttyThemeConfig, getMobileTerminalTheme } from "./terminalTheme
 describe("getMobileTerminalTheme", () => {
   it("uses the shared default light terminal colors", () => {
     expect(getMobileTerminalTheme("t3-code", "light")).toMatchObject({
-      background: "#fcfcfc",
-      foreground: "#27272a",
+      background: T3_CODE_LIGHT_THEME_COLORS.terminalBackground.toLowerCase(),
+      foreground: T3_CODE_LIGHT_THEME_COLORS.terminalForeground.toLowerCase(),
       cursorForeground: "#26384e",
-      cursorBackground: "#fcfcfc",
+      cursorBackground: T3_CODE_LIGHT_THEME_COLORS.terminalBackground.toLowerCase(),
     });
   });
 
   it("uses the shared default dark terminal colors", () => {
     expect(getMobileTerminalTheme("t3-code", "dark")).toMatchObject({
-      background: "#0a0a0a",
-      foreground: "#f5f5f5",
+      background: T3_CODE_DARK_THEME_COLORS.terminalBackground.toLowerCase(),
+      foreground: T3_CODE_DARK_THEME_COLORS.terminalForeground.toLowerCase(),
       cursorForeground: "#b4cbff",
-      cursorBackground: "#0a0a0a",
+      cursorBackground: T3_CODE_DARK_THEME_COLORS.terminalBackground.toLowerCase(),
     });
   });
   it("applies the selected palette without replacing ANSI status colors", () => {
@@ -47,8 +52,12 @@ describe("buildGhosttyThemeConfig", () => {
   it("serializes theme colors into a ghostty config file", () => {
     const config = buildGhosttyThemeConfig(getMobileTerminalTheme("t3-code", "dark"));
 
-    expect(config).toContain("background = #0a0a0a");
-    expect(config).toContain("foreground = #f5f5f5");
+    expect(config).toContain(
+      `background = ${T3_CODE_DARK_THEME_COLORS.terminalBackground.toLowerCase()}`,
+    );
+    expect(config).toContain(
+      `foreground = ${T3_CODE_DARK_THEME_COLORS.terminalForeground.toLowerCase()}`,
+    );
     expect(config).toContain("cursor-color = #b4cbff");
     expect(config).toContain("palette = 0=#141415");
     expect(config).toContain("palette = 15=#c6c6c8");

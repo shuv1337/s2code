@@ -34,6 +34,10 @@ upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
 when a service-launcher context is inherited. Older maintainer-local fork
 services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
 updating; their old `T3CODE_HOME` setting is not adopted.
+If the binary was already updated, an old unit or unmarked active runtime pauses
+without starting a server. Its log says **Service paused until reinstall** rather
+than repeatedly restarting. Reinstall with `shuv2code service install` using the
+same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
 
 An empty custom home is claimed automatically. Existing installations in the
 exact default fork home remain usable; runtime caches without product metadata
@@ -107,7 +111,8 @@ Nothing is moved or copied automatically. To transfer data manually, stop both
 apps and their services first, back up the source, then copy into the separate
 nightly home while everything is offline. Do not share or link a live database.
 
-Download the intended channel from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
+When a verified fork release is published, download the intended channel from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
+If unavailable, build from source rather than installing upstream as a substitute.
 Artifacts retain the `T3-Code-<version>-<arch>` naming convention; installed package
 identities, commands, icons and desktop entries are fork-owned and channel-specific.
 
