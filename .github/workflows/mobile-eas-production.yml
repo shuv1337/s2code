@@ -98,6 +98,30 @@ jobs:
     env:
       APP_VARIANT: production
       NODE_OPTIONS: --max-old-space-size=8192
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+      EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_API_PRIVATE_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_PLAY_PROJECT_ID: ${{ vars.GOOGLE_PLAY_PROJECT_ID }}
+      GOOGLE_PLAY_TRACK: ${{ vars.GOOGLE_PLAY_TRACK }}
+      GOOGLE_PLAY_PREVIEW_TRACK: ${{ vars.GOOGLE_PLAY_PREVIEW_TRACK }}
+      MOBILE_UPDATES_ENABLED: ${{ vars.MOBILE_UPDATES_ENABLED || '0' }}
+      MOBILE_PUSH_ENABLED: ${{ vars.MOBILE_PUSH_ENABLED || '0' }}
+      MOBILE_AUTH_ENABLED: ${{ vars.MOBILE_AUTH_ENABLED || '0' }}
+      MOBILE_AUTH_DOMAIN: ${{ vars.MOBILE_AUTH_DOMAIN }}
+      MOBILE_RELAY_URL: ${{ vars.MOBILE_RELAY_URL }}
+      APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
+      APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+      MOBILE_BUILD_PROFILE: ${{ inputs.profile || 'production' }}
+      MOBILE_RELEASE_MODE: ${{ github.event_name == 'push' && 'build' || inputs.mode }}
+      MOBILE_RELEASE_PLATFORM: ${{ inputs.platform || 'all' }}
     steps:
       - name: Reject preview OTA updates
         if: github.event_name == 'workflow_dispatch' && inputs.profile == 'v2-preview' && inputs.mode == 'update'
@@ -106,15 +130,15 @@ jobs:
           exit 1
 
       - id: expo-token
-        name: Check for EXPO_TOKEN
+        name: Require release authorization (missing configuration is a failure)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           if [ -n "$EXPO_TOKEN" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "EXPO_TOKEN is not available; skipping EAS production job."
+            echo "::error::EXPO_TOKEN is required for release-intent workflows; no build or OTA was delivered."
+            exit 1
           fi
 
       - id: version_app_token
@@ -176,12 +200,20 @@ jobs:
           # ignored build script (no allowBuilds config outside the repo).
           packager: npm
 
+      - name: Verify fork Expo identity before the first environment pull
+        if: steps.expo-token.outputs.present == 'true'
+        run: node scripts/mobile-release-preflight.ts project --mode "$MOBILE_RELEASE_MODE" --profile "$MOBILE_BUILD_PROFILE" --platform "$MOBILE_RELEASE_PLATFORM"
+
       - name: Pull production environment variables
         if: steps.expo-token.outputs.present == 'true'
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas env:pull production --non-interactive
+
+      - name: Verify resolved fork identities, store access and enabled capabilities
+        if: steps.expo-token.outputs.present == 'true'
+        run: node scripts/mobile-release-preflight.ts prepare --mode "$MOBILE_RELEASE_MODE" --profile "$MOBILE_BUILD_PROFILE" --platform "$MOBILE_RELEASE_PLATFORM"
 
       - name: Apply manual version override
         if: steps.version_app_token.outcome == 'success'
@@ -258,6 +290,12 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
+          # Publishing into an unmatched runtime is not delivery. Require a finished fork binary.
+          for platform in $( [ "${{ inputs.platform }}" = all ] && echo 'ios android' || echo '${{ inputs.platform }}' ); do
+            hash="$(eas fingerprint:generate --platform "$platform" --environment production --json --non-interactive | sed -n '/^{/,$p' | jq -er '.hash')"
+            finished="$(eas build:list --platform "$platform" --build-profile production --fingerprint-hash "$hash" --json --non-interactive | jq '[.[] | select(.status == "FINISHED")] | length')"
+            [ "$finished" -gt 0 ] || { echo "::error::No finished fork $platform binary matches this OTA runtime."; exit 1; }
+          done
           eas update \
             --channel production \
             --environment production \
@@ -294,7 +332,7 @@ jobs:
             errored="$(jq '[.[] | select(.status == "ERRORED")] | length' <<<"$matches")"
             latest_version="$(eas build:list --platform "$platform" --build-profile production --limit 1 --json --non-interactive | jq -r '.[0].appVersion // "none"')"
 
-            if [ "$finished" -gt 0 ]; then
+            if [ "$finished" -gt 0 ] && [ "$MOBILE_UPDATES_ENABLED" = 1 ]; then
               if eas update \
                 --channel production \
                 --environment production \
@@ -306,6 +344,9 @@ jobs:
                 failed=1
                 echo ":x: $platform: OTA publish failed (fingerprint \`$hash\`)" >> "$GITHUB_STEP_SUMMARY"
               fi
+            fi
+            if [ "$finished" -gt 0 ] && [ "$MOBILE_UPDATES_ENABLED" != 1 ]; then
+              echo "$platform: OTA is explicitly disabled; no update published." >> "$GITHUB_STEP_SUMMARY"
             fi
 
             reason=""
@@ -336,3 +377,12 @@ jobs:
             fi
           done
           exit "$failed"
+
+      - name: Clean generated submission credentials
+        if: always()
+        run: |
+          case "${MOBILE_SUBMISSION_CREDENTIALS_DIR:-}" in
+            "$RUNNER_TEMP"/fork-mobile-submit-*) rm -rf -- "$MOBILE_SUBMISSION_CREDENTIALS_DIR" ;;
+            '') ;;
+            *) echo 'Unexpected credential directory; refusing cleanup.' >&2; exit 1 ;;
+          esac

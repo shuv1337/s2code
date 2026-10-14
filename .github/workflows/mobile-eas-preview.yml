@@ -21,6 +21,18 @@ jobs:
       APP_VARIANT: preview
       NODE_OPTIONS: --max-old-space-size=8192
       MOBILE_VERSION_POLICY: fingerprint
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+      EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      MOBILE_UPDATES_ENABLED: ${{ vars.MOBILE_UPDATES_ENABLED || '0' }}
+      MOBILE_PUSH_ENABLED: ${{ vars.MOBILE_PUSH_ENABLED || '0' }}
+      MOBILE_AUTH_ENABLED: ${{ vars.MOBILE_AUTH_ENABLED || '0' }}
+      MOBILE_AUTH_DOMAIN: ${{ vars.MOBILE_AUTH_DOMAIN }}
+      MOBILE_RELAY_URL: ${{ vars.MOBILE_RELAY_URL }}
+      APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
+      APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
     steps:
       - id: expo-token
         name: Check for EXPO_TOKEN
@@ -31,7 +43,8 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "EXPO_TOKEN is not available; skipping EAS preview."
+            echo "::notice::PR dry run: EXPO_TOKEN is unavailable; no EAS build or OTA delivery was attempted."
+            echo '## PR dry run — no EAS delivery attempted (EXPO_TOKEN unavailable)' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Checkout
@@ -76,6 +89,12 @@ jobs:
           # ignored build script (no allowBuilds config outside the repo).
           packager: npm
 
+      - name: Verify fork Expo identity before preview environment pull
+        if: steps.expo-token.outputs.present == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: node scripts/mobile-release-preflight.ts project --mode preview --profile preview:dev --platform all
+
       - name: Pull preview environment variables
         if: steps.expo-token.outputs.present == 'true'
         working-directory: apps/mobile
@@ -83,20 +102,24 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           eas env:pull preview --non-interactive
-          # EAS Update disables dotenv loading. Keep the downloaded native config
-          # in its process environment so Android build and OTA fingerprints match.
-          node --input-type=module <<'NODE'
-          import { appendFileSync, readFileSync } from "node:fs";
-          import { parseEnv } from "node:util";
-          const env = parseEnv(readFileSync(".env.local", "utf8"));
-          const googleServicesFile = env.T3CODE_ANDROID_GOOGLE_SERVICES_FILE;
-          if (googleServicesFile) {
-            appendFileSync(process.env.GITHUB_ENV, `T3CODE_ANDROID_GOOGLE_SERVICES_FILE=${googleServicesFile}\n`);
-          }
-          NODE
+
+      - name: Verify preview native identities and enabled capabilities
+        if: steps.expo-token.outputs.present == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: node scripts/mobile-release-preflight.ts prepare --mode preview --profile preview:dev --platform all
+
+      - name: Schedule preview binary when OTA is disabled
+        if: steps.expo-token.outputs.present == 'true' && env.MOBILE_UPDATES_ENABLED != '1'
+        working-directory: apps/mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --profile preview:dev --platform all --non-interactive --no-wait
+          echo '## Preview binary scheduled; OTA explicitly disabled. Scheduling is not device delivery.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy with fingerprint check
-        if: steps.expo-token.outputs.present == 'true'
+        if: steps.expo-token.outputs.present == 'true' && env.MOBILE_UPDATES_ENABLED == '1'
         uses: expo/expo-github-action/continuous-deploy-fingerprint@main
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -109,3 +132,12 @@ jobs:
           environment: preview
           working-directory: apps/mobile
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean generated submission directory
+        if: always()
+        run: |
+          case "${MOBILE_SUBMISSION_CREDENTIALS_DIR:-}" in
+            "$RUNNER_TEMP"/fork-mobile-submit-*) rm -rf -- "$MOBILE_SUBMISSION_CREDENTIALS_DIR" ;;
+            '') ;;
+            *) echo 'Unexpected credential directory; refusing cleanup.' >&2; exit 1 ;;
+          esac

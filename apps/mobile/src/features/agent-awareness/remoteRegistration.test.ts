@@ -516,6 +516,27 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     expect(appStateMock.listeners).toHaveLength(0);
   });
 
+  it.effect(
+    "does not request native push or Live Activity tokens when fork push is disabled",
+    () => {
+      Constants.expoConfig!.extra = { pushEnabled: false };
+      const activity = {
+        getPushToken: vi.fn(() => Promise.resolve("activity-token")),
+        addPushTokenListener: vi.fn(),
+      };
+      widgetMocks.getInstances.mockReturnValue([activity] as never);
+      registerAgentAwarenessConnection(savedConnection());
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+      return Effect.gen(function* () {
+        yield* runBackgroundOperations();
+        yield* refreshAgentAwarenessRegistration();
+        yield* refreshActiveLiveActivityRemoteRegistration();
+        expect(Notifications.getDevicePushTokenAsync).not.toHaveBeenCalled();
+        expect(activity.getPushToken).not.toHaveBeenCalled();
+      }).pipe(Effect.provide(layerRelayTest));
+    },
+  );
+
   it.effect("refreshes APNs registration for connected environments after settings changes", () => {
     registerAgentAwarenessConnection(savedConnection());
     return Effect.gen(function* () {
