@@ -113,7 +113,10 @@ export const resolveBaseDir = Effect.fn(function* (
   const { join, resolve } = yield* Path.Path;
   const directory =
     !raw || raw.trim().length === 0
-      ? join(yield* HostProcess.HomeDirectory, resolveChannelIdentity(packageJson.version).homeDirectory)
+      ? join(
+          yield* HostProcess.HomeDirectory,
+          resolveChannelIdentity(packageJson.version).homeDirectory,
+        )
       : resolve(yield* expandHomePath(raw.trim()));
   yield* Effect.try({
     try: () => ensureProductHome(directory, options.claim ?? false),
