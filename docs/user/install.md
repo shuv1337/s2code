@@ -121,21 +121,14 @@ Nothing is moved or copied automatically. To transfer data manually, stop both
 apps and their services first, back up the source, then copy into the separate
 nightly home while everything is offline. Do not share or link a live database.
 
-<<<<<<< HEAD
 When a verified fork release is published, download the intended channel from
 [shuv2code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
 available yet, build the fork from source rather than installing upstream as a
-substitute. Upstream Winget, Homebrew and AUR packages do not install these fork
-identities. Upstream Scoop packages are also not the fork. No fork Winget,
-Scoop or Homebrew registration is configured here.
-=======
-
-When a verified fork release is published, download the intended channel from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
-If unavailable, build from source rather than installing upstream as a substitute.
-Artifacts retain the `T3-Code-<version>-<arch>` naming convention; installed package
-identities, commands, icons and desktop entries are fork-owned and channel-specific.
-
-> > > > > > > origin/main
+substitute. Artifacts keep the `T3-Code-<version>-<arch>` file naming, but the
+installed package identities, commands, icons and desktop entries are fork-owned
+and channel-specific. Upstream Winget, Homebrew, Scoop and AUR packages do not
+install these fork identities, and no fork Winget, Scoop or Homebrew registration
+is configured here.
 
 | Platform           | Install                                       |
 | ------------------ | --------------------------------------------- |
