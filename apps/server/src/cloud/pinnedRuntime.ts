@@ -345,18 +345,6 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     yield* input.validate(paths);
     return paths;
   }
-  if (versionDirExists) {
-    yield* fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new PinnedRuntimeInstallError({
-            step: "removing an incomplete pinned runtime",
-            cause,
-          }),
-      ),
-    );
-  }
-
   const versionsDir = input.path.dirname(paths.versionDir);
   yield* fs.makeDirectory(versionsDir, { recursive: true }).pipe(
     Effect.mapError(
@@ -404,6 +392,78 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
             new PinnedRuntimeInstallError({ step: "recording the completed install", cause }),
         ),
       );
+    if (versionDirExists) {
+      // Nonempty directory replacement is not portable. Keep the old tree in a
+      // same-filesystem backup until publication succeeds, and mask cancellation
+      // across the two renames so an ordinary failure always restores it.
+      const backupDir = yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const currentProduct = yield* fs.exists(productPath).pipe(
+            Effect.flatMap((exists) =>
+              exists ? fs.readFileString(productPath) : Effect.succeed(PRODUCT_ID),
+            ),
+            Effect.mapError(
+              (cause) =>
+                new PinnedRuntimeInstallError({
+                  step: "checking runtime ownership before replacement",
+                  cause,
+                }),
+            ),
+          );
+          if (currentProduct.trim() !== PRODUCT_ID)
+            return yield* new PinnedRuntimeInstallError({
+              step: "refusing a foreign runtime cache",
+            });
+          const backup = yield* fs
+            .makeTempDirectory({ directory: versionsDir, prefix: ".previous-" })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PinnedRuntimeInstallError({ step: "preparing the runtime backup", cause }),
+              ),
+            );
+          // Windows requires the rename destination not to exist.
+          yield* fs
+            .remove(backup, { recursive: true })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PinnedRuntimeInstallError({ step: "preparing the runtime backup", cause }),
+              ),
+            );
+          yield* fs.rename(paths.versionDir, backup).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PinnedRuntimeInstallError({
+                  step: "preserving the previous pinned runtime",
+                  cause,
+                }),
+            ),
+          );
+          yield* fs.rename(stagingDir, paths.versionDir).pipe(
+            Effect.catch((cause) =>
+              fs.rename(backup, paths.versionDir).pipe(
+                Effect.mapError(
+                  (restoreCause) =>
+                    new PinnedRuntimeInstallError({
+                      step: `restoring the previous pinned runtime preserved at ${backup}`,
+                      cause: restoreCause,
+                    }),
+                ),
+                Effect.andThen(
+                  Effect.fail(
+                    new PinnedRuntimeInstallError({ step: "publishing the pinned runtime", cause }),
+                  ),
+                ),
+              ),
+            ),
+          );
+          return backup;
+        }),
+      );
+      yield* fs.remove(backupDir, { recursive: true, force: true }).pipe(Effect.ignore);
+      return paths;
+    }
     const published = yield* fs.rename(stagingDir, paths.versionDir).pipe(
       Effect.as(true),
       Effect.catch((cause) =>

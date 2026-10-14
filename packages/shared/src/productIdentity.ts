@@ -81,13 +81,7 @@ export function resolveProductEnvironment(env: Readonly<Record<string, string | 
   }
   for (const key of PUBLIC_CONFIG_KEYS) {
     const internal = `T3CODE_${key}`;
-    // Updates replace the child, not its fork launcher. Keep that launcher's
-    // transaction home; an upstream launcher never launches a fork executable.
-    const value =
-      readEnvironmentValue(env, `SHUV2CODE_${key}`)?.trim() ||
-      (key === "HOME" && readEnvironmentValue(env, "T3_SERVICE_LAUNCHER_CONTEXT")?.trim()
-        ? readEnvironmentValue(env, "T3CODE_HOME")?.trim()
-        : undefined);
+    const value = readEnvironmentValue(env, `SHUV2CODE_${key}`)?.trim();
     if (value) {
       resolved[`SHUV2CODE_${key}`] = value;
       resolved[internal] = value;
@@ -99,8 +93,8 @@ export function resolveProductEnvironment(env: Readonly<Record<string, string | 
 export function applyProductEnvironment(env: Record<string, string | undefined>) {
   if (
     readEnvironmentValue(env, "T3CODE_HOME")?.trim() &&
-    !readEnvironmentValue(env, "SHUV2CODE_HOME")?.trim() &&
-    !readEnvironmentValue(env, "T3_SERVICE_LAUNCHER_CONTEXT")?.trim()
+    readEnvironmentValue(env, "T3CODE_HOME")?.trim() !==
+      readEnvironmentValue(env, "SHUV2CODE_HOME")?.trim()
   ) {
     // @effect-diagnostics-next-line globalConsole:off - Runs before the Effect/logger runtime is initialized.
     console.error(

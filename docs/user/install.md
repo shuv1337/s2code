@@ -30,9 +30,10 @@ line to add. Set `SHUV2CODE_CHANNEL=nightly` to install the nightly train, or
 shuv2code uses `~/.shuv2code-v2` by default. Set `SHUV2CODE_HOME` for a different
 home, `SHUV2CODE_PORT` for a server port, and `SHUV2CODE_RELEASE_BASE_URL` for a
 release-download mirror. Public settings use the `SHUV2CODE_` prefix; inherited
-upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`. A child
-started by an older fork service launcher preserves that launcher's configured
-home during an update. Reinstall source-installed services to save fork-owned configuration.
+upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
+when a service-launcher context is inherited. Older maintainer-local fork
+services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
+updating; their old `T3CODE_HOME` setting is not adopted.
 
 An empty custom home is claimed automatically. Existing installations in the
 exact default fork home remain usable; runtime caches without product metadata

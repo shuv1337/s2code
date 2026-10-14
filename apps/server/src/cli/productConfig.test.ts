@@ -76,7 +76,7 @@ it.effect("honors explicit fork settings and keeps CLI flags above them", () =>
     expect(overridden.port).toBe(5773);
   }),
 );
-it.effect("keeps the old launcher transaction's custom home in the new child", () =>
+it.effect("does not open inherited upstream state even with a launcher context", () =>
   Effect.gen(function* () {
     const home = NodePath.join(root, "service-home");
     NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
@@ -86,10 +86,11 @@ it.effect("keeps the old launcher transaction's custom home in the new child", (
       T3CODE_HOME: home,
       T3_SERVICE_LAUNCHER_CONTEXT: JSON.stringify({ version: "1.2.3" }),
     });
-    expect(config.baseDir).toBe(home);
-    expect(config.dbPath).toBe(NodePath.join(home, "userdata", "statev2.sqlite"));
-    expect(NodeFS.existsSync(NodePath.join(root, ".shuv2code-v2"))).toBe(false);
-    expect(NodeFS.readFileSync(config.dbPath, "utf8")).toBe("original-db");
+    expect(config.baseDir).toBe(NodePath.join(root, ".shuv2code-v2"));
+    expect(config.dbPath).not.toBe(NodePath.join(home, "userdata", "statev2.sqlite"));
+    expect(NodeFS.readFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "utf8")).toBe(
+      "original-db",
+    );
   }),
 );
 it.effect("refuses an explicit upstream home before opening or creating state", () =>

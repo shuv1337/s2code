@@ -4,14 +4,16 @@ import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import * as PlatformError from "effect/PlatformError";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import { HttpClient, HttpClientResponse, HttpClientError } from "effect/http";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "@effect/vitest";
-import { ensurePinnedRuntimeInstalled } from "./pinnedRuntime.ts";
+import { ensurePinnedRuntimeInstalled, PinnedRuntimeInstallError } from "./pinnedRuntime.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 let root: string;
@@ -20,7 +22,19 @@ beforeEach(() => {
 });
 afterEach(() => NodeFS.rmSync(root, { recursive: true, force: true }));
 const version = "1.2.3";
-function install(baseDir: string, validate = vi.fn()) {
+function install(
+  baseDir: string,
+  validate = vi.fn(),
+  failure?:
+    | "offline"
+    | "checksums"
+    | "download"
+    | "checksum"
+    | "extract"
+    | "validate"
+    | "publish"
+    | "rollback",
+) {
   const archive = new TextEncoder().encode("fixture archive");
   const digest = NodeCrypto.createHash("sha256").update(archive).digest("hex");
   const requests: string[] = [];
@@ -30,20 +44,54 @@ function install(baseDir: string, validate = vi.fn()) {
     return yield* ensurePinnedRuntimeInstalled({
       baseDir,
       version,
-      fs: filesystem,
+      fs:
+        failure === "publish" || failure === "rollback"
+          ? {
+              ...filesystem,
+              rename: (source, destination) =>
+                (source.includes(".staging-") ||
+                  (failure === "rollback" && source.includes(".previous-"))) &&
+                destination.endsWith(version)
+                  ? Effect.fail(
+                      PlatformError.systemError({
+                        _tag: "PermissionDenied",
+                        module: "FileSystem",
+                        method: "rename",
+                        pathOrDescriptor: destination,
+                      }),
+                    )
+                  : filesystem.rename(source, destination),
+            }
+          : filesystem,
       path: paths,
       platform: "linux",
       arch: "x64",
       releaseBaseUrl: "https://fork.invalid/releases/download",
       httpClient: HttpClient.make((request) => {
         requests.push(request.url);
+        if (failure === "offline")
+          return Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request,
+                cause: new Error("Network is offline"),
+              }),
+            }),
+          );
         return Effect.succeed(
           HttpClientResponse.fromWeb(
             request,
             new Response(
               request.url.endsWith("SHA256SUMS")
-                ? `${digest}  t3-${version}-linux-x64.tar.gz\n`
+                ? `${failure === "checksum" ? "0".repeat(64) : digest}  t3-${version}-linux-x64.tar.gz\n`
                 : archive,
+              {
+                status:
+                  (failure === "checksums" && request.url.endsWith("SHA256SUMS")) ||
+                  (failure === "download" && !request.url.endsWith("SHA256SUMS"))
+                    ? 503
+                    : 200,
+              },
             ),
           ),
         );
@@ -58,7 +106,7 @@ function install(baseDir: string, validate = vi.fn()) {
             return {
               stdout: "",
               stderr: "",
-              code: ChildProcessSpawner.ExitCode(0),
+              code: ChildProcessSpawner.ExitCode(failure === "extract" ? 1 : 0),
               timedOut: false,
               stdoutTruncated: false,
               stderrTruncated: false,
@@ -68,9 +116,11 @@ function install(baseDir: string, validate = vi.fn()) {
           }),
       }),
       validate: (runtime) =>
-        Effect.sync(() => {
-          validate(runtime);
-        }),
+        failure === "validate"
+          ? Effect.fail(new PinnedRuntimeInstallError({ step: "validating the staged runtime" }))
+          : Effect.sync(() => {
+              validate(runtime);
+            }),
     });
   });
   return {
@@ -121,10 +171,66 @@ it.effect("refetches unmarked metadata even under a fork-named directory", () =>
     NodeFS.mkdirSync(cache, { recursive: true });
     NodeFS.writeFileSync(NodePath.join(cache, ".install-complete"), `${version}\n`);
     NodeFS.writeFileSync(NodePath.join(cache, "t3"), "legacy-fork-runtime");
-    const attempt = install(home);
+    const attempt = install(
+      home,
+      vi.fn(() => {
+        // Publication must not remove the old tree while staging is validated.
+        expect(NodeFS.readFileSync(NodePath.join(cache, "t3"), "utf8")).toBe("legacy-fork-runtime");
+      }),
+    );
     yield* attempt.result;
     expect(attempt.requests).toHaveLength(2);
     expect(attempt.validate).toHaveBeenCalledTimes(1);
+    expect(NodeFS.readFileSync(NodePath.join(cache, "t3"), "utf8")).toBe("fork-runtime");
+    expect(NodeFS.readdirSync(NodePath.dirname(cache))).toEqual([version]);
+  }),
+);
+
+it.effect.each([
+  "offline",
+  "checksums",
+  "download",
+  "checksum",
+  "extract",
+  "validate",
+  "publish",
+] as const)("preserves an unmarked cache and installed link when refetch fails at %s", (failure) =>
+  Effect.gen(function* () {
+    const home = NodePath.join(root, "custom");
+    ensureProductHome(home);
+    const cache = NodePath.join(home, "runtime", "versions", version);
+    NodeFS.mkdirSync(cache, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(cache, ".install-complete"), `${version}\n`);
+    const executable = NodePath.join(cache, "t3");
+    NodeFS.writeFileSync(executable, "previous-executable");
+    const link = NodePath.join(home, "installed-cli");
+    if (symlinksSupported) NodeFS.symlinkSync(executable, link);
+    const attempt = install(home, vi.fn(), failure);
+    yield* attempt.result.pipe(Effect.flip);
+    expect(NodeFS.readFileSync(executable, "utf8")).toBe("previous-executable");
+    if (symlinksSupported) expect(NodeFS.readFileSync(link, "utf8")).toBe("previous-executable");
+    expect(NodeFS.readFileSync(NodePath.join(cache, ".install-complete"), "utf8")).toBe(
+      `${version}\n`,
+    );
+    expect(NodeFS.existsSync(NodePath.join(cache, ".install-product"))).toBe(false);
+    expect(NodeFS.readdirSync(NodePath.dirname(cache))).toEqual([version]);
+  }),
+);
+
+it.effect("keeps the previous executable in its reported backup if rollback also fails", () =>
+  Effect.gen(function* () {
+    const home = NodePath.join(root, "custom");
+    ensureProductHome(home);
+    const cache = NodePath.join(home, "runtime", "versions", version);
+    NodeFS.mkdirSync(cache, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(cache, "t3"), "previous-executable");
+    const error = yield* install(home, vi.fn(), "rollback").result.pipe(Effect.flip);
+    const backups = NodeFS.readdirSync(NodePath.dirname(cache));
+    expect(backups).toHaveLength(1);
+    expect(backups[0]).toMatch(/^\.previous-/);
+    const backup = NodePath.join(NodePath.dirname(cache), backups[0]!);
+    expect(error.message).toContain(backup);
+    expect(NodeFS.readFileSync(NodePath.join(backup, "t3"), "utf8")).toBe("previous-executable");
   }),
 );
 

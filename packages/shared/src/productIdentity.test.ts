@@ -55,19 +55,31 @@ describe("fork public configuration", () => {
       }),
     ).toEqual({ SHUV2CODE_HOME: "/fork", T3CODE_HOME: "/fork" });
   });
-  it("bridges an old fork launcher child home without importing other upstream inputs", () => {
-    const env = {
-      T3CODE_HOME: "/custom-fork",
-      T3CODE_PORT: "3773",
-      T3_SERVICE_LAUNCHER_CONTEXT: "{}",
-    };
-    applyProductEnvironment(env);
-    expect(env).toMatchObject({ T3CODE_HOME: "/custom-fork", SHUV2CODE_HOME: "/custom-fork" });
-    expect(env).not.toHaveProperty("T3CODE_PORT");
-    expect(resolveProductEnvironment({ ...env, SHUV2CODE_HOME: "/explicit" }).T3CODE_HOME).toBe(
-      "/explicit",
-    );
-  });
+  it.each(["arbitrary-context", "{}", '{"version":"1.2.3"}'])(
+    "never adopts inherited upstream homes through launcher context %s",
+    (context) => {
+      const notice = vi.spyOn(console, "error").mockImplementation(() => {});
+      const env = {
+        T3CODE_HOME: "/upstream/custom-home",
+        T3CODE_PORT: "3773",
+        T3_SERVICE_LAUNCHER_CONTEXT: context,
+      };
+      try {
+        applyProductEnvironment(env);
+        expect(env).not.toHaveProperty("T3CODE_HOME");
+        expect(env).not.toHaveProperty("SHUV2CODE_HOME");
+        expect(env).not.toHaveProperty("T3CODE_PORT");
+        expect(notice).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining("ignoring T3CODE_HOME; use SHUV2CODE_HOME"),
+        );
+        expect(resolveProductEnvironment({ ...env, SHUV2CODE_HOME: "/explicit" }).T3CODE_HOME).toBe(
+          "/explicit",
+        );
+      } finally {
+        notice.mockRestore();
+      }
+    },
+  );
   it("notices ignored upstream homes without breaking coexistence", () => {
     const notice = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -77,6 +89,23 @@ describe("fork public configuration", () => {
       expect(notice).toHaveBeenCalledExactlyOnceWith(
         expect.stringContaining("ignoring T3CODE_HOME; use SHUV2CODE_HOME"),
       );
+    } finally {
+      notice.mockRestore();
+    }
+  });
+  it("keeps an explicit fork home authoritative under inherited launcher context without repeated notices", () => {
+    const notice = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const env = {
+        T3CODE_HOME: "/upstream/custom-home",
+        SHUV2CODE_HOME: "/fork",
+        T3_SERVICE_LAUNCHER_CONTEXT: "arbitrary-context",
+      };
+      applyProductEnvironment(env);
+      applyProductEnvironment(env);
+      expect(env.T3CODE_HOME).toBe("/fork");
+      expect(env.SHUV2CODE_HOME).toBe("/fork");
+      expect(notice).toHaveBeenCalledTimes(1);
     } finally {
       notice.mockRestore();
     }
