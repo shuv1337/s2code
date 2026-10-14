@@ -394,7 +394,7 @@ export function getMobileThemeVariables(
   const groupedCard =
     themeId === DEFAULT_MOBILE_THEME_ID
       ? appearance === "light"
-        ? colors.toolbarControlHover
+        ? colors.sidebar
         : colors.sidebarRowActive
       : themeId === "t3-chat"
         ? appearance === "light"

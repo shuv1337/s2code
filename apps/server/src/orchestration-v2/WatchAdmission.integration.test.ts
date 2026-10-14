@@ -406,6 +406,7 @@ it.effect(
           for (const changed of [
             { ...input, text: "different" },
             { ...input, principal: "watch-session-two" },
+            { ...input, admission: undefined, principal: undefined },
             s.command("same", "queue"),
           ]) {
             const error = yield* Effect.flip(s.orchestrator.dispatch(changed));

@@ -239,9 +239,10 @@ describe("mobile themes", () => {
           runtime["--color-screen"],
         );
         if (platform === "ios") {
-          expect(relativeLuminance(sidebar)).toBeLessThan(
-            relativeLuminance(runtime["--color-thread-canvas"]),
-          );
+          const canvasLuminance = relativeLuminance(runtime["--color-thread-canvas"]);
+          if (appearance === "light")
+            expect(relativeLuminance(sidebar)).toBeLessThan(canvasLuminance);
+          else expect(relativeLuminance(sidebar)).toBeGreaterThan(canvasLuminance);
         }
         expect(contrastRatio(chrome, runtime["--color-screen"])).toBeGreaterThanOrEqual(1.06);
         const foregroundRoles =
