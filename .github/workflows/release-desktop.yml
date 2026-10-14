@@ -687,7 +687,8 @@ jobs:
           test -n "$app"
           codesign --verify --deep --strict "$app"
           codesign -dv --verbose=4 "$app" 2>&1 | grep -F "TeamIdentifier=$EXPECTED_TEAM"
-          for dmg in release-publish/*.dmg; do xcrun stapler validate "$dmg"; done
+          # electron-builder notarizes and staples the app bundle, not the DMG container.
+          xcrun stapler validate "$app"
 
       - name: Verify Windows installer signatures before declaring a signed receipt
         if: inputs.release_publication && inputs.platform == 'win' && steps.signing_policy.outputs.win_signed == 'true'

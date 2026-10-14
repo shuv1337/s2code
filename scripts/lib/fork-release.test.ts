@@ -13,6 +13,8 @@ import {
   forkReleaseIndex,
   publishForkReleaseSequence,
   desktopAssetGroups,
+  publishAtomicReleaseIndex,
+  FORK_RELEASE_INDEX_URL,
 } from "./fork-release.ts";
 import serverPackage from "../../apps/server/package.json" with { type: "json" };
 const sha = "ab".repeat(20);
@@ -41,6 +43,28 @@ const manifests = (version = "1.2.3") =>
       : {}),
   }));
 describe("fork release contract", () => {
+  it("keeps the last public index when atomic publication fails and uses a stable reader URL", async () => {
+    const previous = { sha: "old-blob", content: '[{"tag_name":"v1.2.2","draft":false}]\n' };
+    let current = previous;
+    const next = '[{"tag_name":"v1.2.3","draft":false}]\n';
+    let fail = true;
+    const store = {
+      read: async () => current,
+      write: async (content: string, sha: string | undefined) => {
+        expect(sha).toBe(current.sha);
+        if (fail) throw new Error("injected upload failure");
+        current = { sha: "new-blob", content };
+      },
+    };
+    await expect(publishAtomicReleaseIndex(next, store)).rejects.toThrow("injected upload failure");
+    expect(current).toEqual(previous);
+    fail = false;
+    await publishAtomicReleaseIndex(next, store);
+    expect(current.content).toBe(next);
+    expect(FORK_RELEASE_INDEX_URL).toBe(
+      "https://raw.githubusercontent.com/shuv1337/shuv2code/fork-release-index/index.json",
+    );
+  });
   it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
     expect(FORK_DESKTOP_MATRIX).toHaveLength(6);
     expect(FORK_DESKTOP_MATRIX.filter((target) => target.cli_archive)).toHaveLength(5);

@@ -41,11 +41,18 @@ manifests/blockmaps and never enters the automatic release index.
 
 `SHA256SUMS` covers final desktop and CLI bytes. Stable/nightly feeds use their
 channel-specific Electron manifest names, including both architectures. The
-rolling `release-index` asset `index.json` is written last, using
+rolling `index.json` on the dedicated `fork-release-index` branch is written last, using
 `[{"tag_name":"v1.2.3","draft":false}]` records for complete non-preview releases.
+The Contents API publishes a commit with the previous blob SHA as a compare-and-swap;
+there is no delete-before-upload window. A failed update leaves the last index available.
+The stable URL is
+`https://raw.githubusercontent.com/shuv1337/shuv2code/fork-release-index/index.json`.
 This is compatible with the server-only `SHUV2CODE_RELEASE_INDEX_URL`; mirrors
 may copy this index to their archive base's `index.json`. The normal fork server
 uses GitHub's release API, which omits drafts.
+No reader default changes are required. If explicitly configuring the rolling
+index, use the raw branch URL above, not the former release-asset URL. CDN caches
+may briefly serve the previous complete index after a successful publication.
 
 GitHub and npm cannot commit a release atomically. Exact npm versions become
 public during publication, but automatic tags remain unchanged until verification.

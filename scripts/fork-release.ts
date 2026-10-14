@@ -9,6 +9,8 @@ import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/c
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   FORK_RELEASE_REPOSITORY,
+  FORK_RELEASE_INDEX_BRANCH,
+  publishAtomicReleaseIndex,
   FORK_DESKTOP_MATRIX,
   FORK_NPM_PACKAGES,
   releaseSigningPolicy,
@@ -415,42 +417,64 @@ async function publishPrepared(plan: ForkReleasePlan) {
       if (!index.some((entry) => entry.tag_name === plan.tag))
         throw new Error("New complete release is missing from the release index.");
       writeJson("prepared/index.json", index);
-      try {
-        gh("release", "view", "release-index", "--repo", FORK_RELEASE_REPOSITORY);
-      } catch {
+      const get = (path: string) =>
+        fetch(`https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/${path}`, {
+          headers: {
+            Authorization: `Bearer ${process.env.GH_TOKEN}`,
+            Accept: "application/vnd.github+json",
+          },
+          signal: AbortSignal.timeout(30_000),
+        });
+      const branch = await get(`git/ref/heads/${FORK_RELEASE_INDEX_BRANCH}`);
+      if (branch.status === 404)
         gh(
-          "release",
-          "create",
-          "release-index",
-          "--repo",
-          FORK_RELEASE_REPOSITORY,
-          "--target",
-          plan.sha,
-          "--prerelease",
-          "--latest=false",
-          "--title",
-          "Fork release index",
-          "--notes",
-          "Only complete non-preview fork releases. This is not an application release.",
+          "api",
+          "-X",
+          "POST",
+          `repos/${FORK_RELEASE_REPOSITORY}/git/refs`,
+          "-f",
+          `ref=refs/heads/${FORK_RELEASE_INDEX_BRANCH}`,
+          "-f",
+          `sha=${plan.sha}`,
         );
-      }
-      gh(
-        "release",
-        "upload",
-        "release-index",
-        "prepared/index.json",
-        "--repo",
-        FORK_RELEASE_REPOSITORY,
-        "--clobber",
-      );
-      const indexRelease = JSON.parse(
-        gh("api", `repos/${FORK_RELEASE_REPOSITORY}/releases/tags/release-index`),
-      ) as { assets: { name: string; digest?: string }[] };
-      if (
-        indexRelease.assets.find((asset) => asset.name === "index.json")?.digest !==
-        `sha256:${digest("prepared/index.json")}`
-      )
-        throw new Error("Published release index digest mismatch.");
+      else if (!branch.ok) throw new Error("Could not read the fork release index branch.");
+      // GitHub Contents creates a commit and atomically advances the branch ref.
+      // A failed write/CAS leaves the old file and its public raw URL untouched.
+      await publishAtomicReleaseIndex(FS.readFileSync("prepared/index.json", "utf8"), {
+        read: async () => {
+          const response = await get(`contents/index.json?ref=${FORK_RELEASE_INDEX_BRANCH}`);
+          if (response.status === 404) return null;
+          if (!response.ok) throw new Error("Could not read the current fork release index.");
+          const file = (await response.json()) as {
+            sha: string;
+            encoding: string;
+            content: string;
+          };
+          if (
+            file.encoding !== "base64" ||
+            typeof file.sha !== "string" ||
+            typeof file.content !== "string"
+          )
+            throw new Error("Invalid release index storage response.");
+          return { sha: file.sha, content: Buffer.from(file.content, "base64").toString("utf8") };
+        },
+        write: async (content, sha) => {
+          writeJson("prepared/index-publication.json", {
+            message: `chore(release): index ${plan.tag}`,
+            branch: FORK_RELEASE_INDEX_BRANCH,
+            content: Buffer.from(content).toString("base64"),
+            ...(sha ? { sha } : {}),
+          });
+          gh(
+            "api",
+            "-X",
+            "PUT",
+            `repos/${FORK_RELEASE_REPOSITORY}/contents/index.json`,
+            "--input",
+            "prepared/index-publication.json",
+          );
+        },
+      });
     },
   });
 }

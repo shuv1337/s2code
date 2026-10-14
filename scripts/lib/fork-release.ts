@@ -3,6 +3,23 @@ import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 export const FORK_RELEASE_REPOSITORY = "shuv1337/shuv2code";
 export const FORK_RELEASE_WORKFLOW = "release.yml";
+export const FORK_RELEASE_INDEX_BRANCH = "fork-release-index";
+export const FORK_RELEASE_INDEX_URL = `https://raw.githubusercontent.com/${FORK_RELEASE_REPOSITORY}/${FORK_RELEASE_INDEX_BRANCH}/index.json`;
+
+/** The backing store must publish with compare-and-swap, never delete before write. */
+export async function publishAtomicReleaseIndex(
+  content: string,
+  store: {
+    read: () => Promise<{ sha: string; content: string } | null>;
+    write: (content: string, previousSha: string | undefined) => Promise<void>;
+  },
+) {
+  const previous = await store.read();
+  if (previous?.content === content) return;
+  await store.write(content, previous?.sha);
+  if ((await store.read())?.content !== content)
+    throw new Error("Published release index content mismatch.");
+}
 export const FORK_NPM_PACKAGES = [
   ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@shuv2code/t3-${key}`),
   "shuv2code",
