@@ -2913,7 +2913,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "Development",
       synopsis: "Desktop GUI for coding agents",
       // Required by the .deb control file.
-      maintainer: "T3 Tools <hello@t3.codes>",
+      maintainer: "shuv1337 <shuv1337@users.noreply.github.com>",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
       // t3code:// OAuth callbacks to the app.
@@ -2930,15 +2930,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
     };
     buildConfig.deb = {
+      packageName: identity.executableName,
       // FPM runs outside the staged app directory, so source paths must be absolute.
-      // Stable alone owns this optional catalog entry. Other channels must not
-      // overwrite its metadata (or the upstream app's catalog entry).
       fpm: [
-        ...(identity.channel === "stable"
-          ? [
-              `${path.join(repoRoot, "apps/desktop/resources/linux/dev.shuv.shuv2code.metainfo.xml")}=/usr/share/metainfo/dev.shuv.shuv2code.metainfo.xml`,
-            ]
-          : []),
+        `${path.join(repoRoot, "apps/desktop/resources/linux", `${identity.appId}.metainfo.xml`)}=/usr/share/metainfo/${identity.appId}.metainfo.xml`,
         `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/${identity.executableName}/copyright`,
       ],
       // Electron's runtime libraries. Debian 13 and Ubuntu 24.04 renamed some

@@ -1,11 +1,11 @@
-# Maintainer: maria-rcks <maria at kuuro dot net>
+# Maintained in https://github.com/shuv1337/shuv2code/tree/main/packaging/aur
 
-pkgname=t3code-bin
-pkgver=0.0.33
+pkgname=shuv2code-nightly-bin
+pkgver=0.0.0_nightly.19700101.0
 pkgrel=1
-pkgdesc='Desktop control surface for local coding agents'
+pkgdesc='Nightly desktop control surface for local coding agents'
 arch=('x86_64')
-url='https://github.com/pingdotgg/t3code'
+url='https://github.com/shuv1337/shuv2code'
 license=('MIT')
 depends=(
   'alsa-lib'
@@ -39,18 +39,18 @@ depends=(
   'zlib'
 )
 optdepends=('openai-codex: use the system-installed Codex CLI')
-provides=("t3code=$pkgver")
-conflicts=('t3code')
 options=('!debug' '!strip')
 
-_appimage="T3-Code-${pkgver}-x86_64.AppImage"
+_release_version="${pkgver/_nightly./-nightly.}"
+_appimage="T3-Code-${_release_version}-x86_64.AppImage"
 source=(
-  "$_appimage::https://github.com/pingdotgg/t3code/releases/download/v${pkgver}/$_appimage"
-  "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/pingdotgg/t3code/v${pkgver}/LICENSE"
+  "$_appimage::https://github.com/shuv1337/shuv2code/releases/download/v${_release_version}/$_appimage"
+  "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/shuv2code/v${_release_version}/LICENSE"
 )
 sha256sums=(
-  '415c8648f43c3d22d572f27f2c50fdc8c310ea7fcde9537b903e1e2f1c8775a1' # AppImage
-  '935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43' # upstream license
+  # The publisher replaces these placeholders with verified fork release digests.
+  'UNRELEASED' # AppImage
+  'UNRELEASED' # release license
 )
 
 prepare() {
@@ -71,32 +71,31 @@ package() {
   chmod -R u=rwX,go=rX "$pkgdir/opt/$pkgname"
   chmod 4755 "$pkgdir/opt/$pkgname/chrome-sandbox"
 
-  install -Dm755 /dev/stdin "$pkgdir/usr/bin/t3code" <<'EOF'
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/shuv2code-nightly" <<'EOF'
 #!/bin/sh
-exec /opt/t3code-bin/AppRun "$@"
+exec /opt/shuv2code-nightly-bin/AppRun "$@"
 EOF
-  ln -s t3code "$pkgdir/usr/bin/t3-code-desktop"
 
   # Icon lookup only sees sizes registered in hicolor's index.theme (max 512x512).
   local icon size_dir
-  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/t3code.png; do
-    size_dir="${icon%/apps/t3code.png}"
+  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/shuv2code-nightly.png; do
+    size_dir="${icon%/apps/shuv2code-nightly.png}"
     install -Dm644 "$icon" \
-      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/t3code.png"
+      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/shuv2code-nightly.png"
   done
 
-  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/t3code.desktop" <<'EOF'
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/shuv2code-nightly.desktop" <<'EOF'
 [Desktop Entry]
-Name=T3 Code
-Comment=Desktop control surface for local coding agents
-Exec=t3code %U
-TryExec=t3code
+Name=shuv2code (Nightly)
+Comment=Nightly desktop control surface for local coding agents
+Exec=shuv2code-nightly %U
+TryExec=shuv2code-nightly
 Terminal=false
 Type=Application
-Icon=t3code
-StartupWMClass=t3code
+Icon=shuv2code-nightly
+StartupWMClass=shuv2code-nightly
 Categories=Development;
-MimeType=x-scheme-handler/t3code;
+MimeType=x-scheme-handler/shuv2code-nightly;
 EOF
 
   install -Dm644 "$srcdir/${pkgname}-${pkgver}-LICENSE" \
