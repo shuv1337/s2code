@@ -130,3 +130,5 @@ export const isProductRuntimeVersion = (version: string) =>
 export function isProductRuntimeComplete(marker: string, version: string, product: string) {
   return product.trim() === PRODUCT_ID && marker.trim() === version;
 }
+export const PRODUCT_DBUS_PREFIX = "io.github.shuv1337.shuv2code";
+export const KDE_CAPTURE_HELPER_EXECUTABLE = `${PRODUCT_ID}-kde-snap-shot`;
