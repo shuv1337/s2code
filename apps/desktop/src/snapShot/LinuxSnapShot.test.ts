@@ -13,6 +13,7 @@ import {
   type MessageBus,
 } from "dbus-next";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { resolveLinuxDesktopEntryName } from "../app/DesktopEarlyElectronStartup.ts";
 
 const { connect, resize, imageSize } = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -361,10 +362,10 @@ it.each([false, true])(
 );
 
 it.each([
-  ["com.t3tools.T3Code", ""],
+  [resolveLinuxDesktopEntryName(false).replace(/\.desktop$/, ""), ""],
   ["dev.shuv.shuv2code.nightly", ".nightly"],
   ["dev.shuv.shuv2code.preview", ".preview"],
-  ["dev.shuv.shuv2code.Development", ".Development"],
+  [resolveLinuxDesktopEntryName(true).replace(/\.desktop$/, ""), ".Development"],
 ])(
   "uses only the fork GNOME service for %s and preserves window identity",
   async (client, suffix) => {

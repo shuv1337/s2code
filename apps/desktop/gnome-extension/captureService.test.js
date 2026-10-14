@@ -10,6 +10,7 @@ import bundle from "./bundle.json" with { type: "json" };
 import metadata from "./metadata.json" with { type: "json" };
 import { PRODUCT_DBUS_PREFIX } from "../../../packages/shared/src/productIdentity.ts";
 import { gnomeCaptureClientName } from "../src/snapShot/gnomeCaptureBundle.ts";
+import { resolveLinuxDesktopEntryName } from "../src/app/DesktopEarlyElectronStartup.ts";
 
 it("ships matching fork extension, service and channel-client identities", () => {
   expect(metadata.uuid).toBe(bundle.uuid);
@@ -19,12 +20,13 @@ it("ships matching fork extension, service and channel-client identities", () =>
   expect(bundle.dbusPath).toBe(DBUS_PATH);
   expect(DBUS_PATH).toBe(`/${DBUS_NAME.replaceAll(".", "/")}`);
   const callers = [
-    "dev.shuv.shuv2code",
-    "dev.shuv.shuv2code.Development",
+    resolveLinuxDesktopEntryName(false).replace(/\.desktop$/, ""),
+    resolveLinuxDesktopEntryName(true).replace(/\.desktop$/, ""),
     "dev.shuv.shuv2code.nightly",
     "dev.shuv.shuv2code.preview",
   ];
   expect(callers.map(gnomeCaptureClientName)).toEqual(CLIENT_NAMES);
+  expect(gnomeCaptureClientName(callers[0])).not.toBe(gnomeCaptureClientName(callers[1]));
 });
 
 it.each(["com.t3tools.T3Code.SnapShot", "com.t3tools.T3Code.Development.SnapShot"])(
