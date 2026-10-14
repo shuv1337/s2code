@@ -109,8 +109,8 @@ function closeServer(server: NodeNet.Server): Promise<void> {
 /**
  * Serves `t3 app` requests on the local control address until `close`.
  *
- * Two desktop apps can share one state dir, for example nightly and a preview
- * build. They share one socket path, so on Unix:
+ * Explicitly configured apps can share one state dir (release channels have
+ * separate defaults). They then share one socket path, so on Unix:
  * - The newest app takes the path over.
  * - `close` removes the socket file only while it is still this app's socket.
  * - An app binds the path again when it is gone, for example after the app that

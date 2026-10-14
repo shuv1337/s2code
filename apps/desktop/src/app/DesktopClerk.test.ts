@@ -57,12 +57,14 @@ const layerDesktopClerk = (
     openSystemSettings: () => Effect.succeed(false),
     copyText: () => Effect.void,
   },
+  appVersion = "1.2.3",
 ) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
     platform,
+    appVersion,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
   const electronApp = {
@@ -86,6 +88,32 @@ const layerDesktopClerk = (
 };
 
 describe("DesktopClerk", () => {
+  it.effect.each(["nightly", "preview"])(
+    "selects the %s profile before the SDK acquires its single-instance lock",
+    (channel) => {
+      const events: string[] = [];
+      storageMock.mockReturnValue(storageAdapter);
+      createClerkBridgeMock.mockImplementation(() => {
+        assert.deepEqual(events, [`setPath:userData:/tmp/app-data/shuv2code-v2-${channel}`]);
+        events.push("lock-acquired-by-bridge");
+        return { cleanup: vi.fn(), isPrimaryInstance: true };
+      });
+      return DesktopClerk.DesktopClerk.pipe(
+        Effect.provide(
+          layerDesktopClerk(
+            false,
+            events,
+            "darwin",
+            undefined,
+            undefined,
+            `1.2.3-${channel}.20261014.1`,
+          ),
+        ),
+        Effect.scoped,
+        Effect.tap(() => Effect.sync(() => assert.equal(events[1], "lock-acquired-by-bridge"))),
+      );
+    },
+  );
   beforeEach(() => {
     createClerkBridgeMock.mockReset();
     storageMock.mockReset();
@@ -424,8 +452,11 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.strictEqual(open("https://example.com/page"), 1);
       assert.strictEqual(open("http://localhost:3000/"), 1);
       // Prompt and thread links ride the same queue; the renderer routes them in the app.
-      assert.strictEqual(open("t3code://new?prompt=hi"), 1);
-      assert.strictEqual(open("t3code://threads/env-1/thread-1"), 1);
+      assert.strictEqual(open("shuv2code-dev://new?prompt=hi"), 1);
+      assert.strictEqual(open("shuv2code-dev://threads/env-1/thread-1"), 1);
+      assert.strictEqual(open("t3code://new?prompt=hi"), 0);
+      assert.strictEqual(open("shuv2code-nightly://new?prompt=hi"), 0);
+      assert.strictEqual(open("shuv2code://new?prompt=hi"), 0);
       // Anything else is not a web page; Electron keeps its own handling.
       assert.strictEqual(open("mailto:hello@example.com"), 0);
       assert.strictEqual(open("t3code://somewhere-else"), 0);
@@ -433,8 +464,8 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.deepStrictEqual(received, [
         "https://example.com/page",
         "http://localhost:3000/",
-        "t3code://new?prompt=hi",
-        "t3code://threads/env-1/thread-1",
+        "shuv2code-dev://new?prompt=hi",
+        "shuv2code-dev://threads/env-1/thread-1",
       ]);
     }).pipe(
       Effect.provide(layerDesktopClerk(true, [], "darwin")),
@@ -453,4 +484,65 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       ),
     );
   }).pipe(Effect.scoped),
+);
+
+it.effect.each(["stable", "nightly", "preview"])(
+  "routes only %s app links from startup and OS delivery",
+  (channel) =>
+    Effect.gen(function* () {
+      storageMock.mockReturnValue(storageAdapter);
+      createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
+      const scheme = channel === "stable" ? "shuv2code" : `shuv2code-${channel}`;
+      const version = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
+      const received: string[] = [];
+      const listeners = new Map<string, (...args: unknown[]) => void>();
+      const electronApp = {
+        on: (name: string, listener: (...args: unknown[]) => void) =>
+          Effect.sync(() => {
+            listeners.set(name, listener);
+          }),
+      } as unknown as ElectronApp.ElectronApp["Service"];
+      const own = `${scheme}://threads/remote/thread`;
+      yield* Effect.gen(function* () {
+        const clerk = yield* DesktopClerk.DesktopClerk;
+        yield* clerk.configure;
+        const open = listeners.get("open-url")!;
+        let prevented = 0;
+        const event = {
+          preventDefault: () => {
+            prevented += 1;
+          },
+        };
+        open(event, "t3code://threads/remote/thread");
+        open(event, "shuv2code-dev://threads/remote/thread");
+        open(
+          event,
+          `${channel === "stable" ? "shuv2code-nightly" : "shuv2code"}://threads/remote/thread`,
+        );
+        assert.equal(prevented, 0);
+        open(event, own);
+        yield* Effect.yieldNow;
+        assert.equal(prevented, 1);
+        assert.deepEqual(received, [own, own]);
+      }).pipe(
+        Effect.provide(layerDesktopClerk(false, [], "darwin", undefined, undefined, version)),
+        Effect.provideService(HostProcess.Arguments, [
+          "shuv2code",
+          own,
+          "t3code://new?prompt=ignored",
+        ]),
+        Effect.provideService(ElectronApp.ElectronApp, electronApp),
+        Effect.provideService(
+          ElectronWindow.ElectronWindow,
+          {} as ElectronWindow.ElectronWindow["Service"],
+        ),
+        Effect.provideService(DesktopWebLinks.DesktopWebLinks, {
+          receive: (url) =>
+            Effect.sync(() => {
+              received.push(url);
+            }),
+          setRendererReady: () => Effect.void,
+        }),
+      );
+    }).pipe(Effect.scoped),
 );

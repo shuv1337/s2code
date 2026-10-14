@@ -16,7 +16,22 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { Command } from "effect/cli";
-import { describe, expect } from "vite-plus/test";
+import { describe, expect, vi, beforeEach } from "vite-plus/test";
+const testVersion = vi.hoisted(() => ({ value: "1.2.3" }));
+vi.mock("../../package.json", async (importOriginal) => {
+  const actual = await importOriginal<{ default: typeof import("../../package.json") }>();
+  return {
+    default: {
+      ...actual.default,
+      get version() {
+        return testVersion.value;
+      },
+    },
+  };
+});
+beforeEach(() => {
+  testVersion.value = "1.2.3";
+});
 
 import { makeCli } from "../binCli.ts";
 import { PersistedServerRuntimeState } from "../serverRuntimeState.ts";
@@ -301,6 +316,47 @@ describe("t3 app", () => {
         expect(development.received).toHaveLength(0);
       }).pipe(Effect.provideService(HostProcess.HomeDirectory, root), Effect.scoped),
     ),
+  );
+
+  it.effect.each(["stable", "nightly", "preview"])(
+    "activates only the default %s desktop",
+    (channel) =>
+      withTempDirectory("channel-app-", (root) =>
+        Effect.gen(function* () {
+          testVersion.value = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
+          const suffix = channel === "stable" ? "" : `-${channel}`;
+          const desktop = yield* fakeDesktop({
+            baseDir: NodePath.join(root, `.shuv2code-v2${suffix}`),
+          });
+          const other = yield* fakeDesktop({
+            baseDir: NodePath.join(
+              root,
+              channel === "stable" ? ".shuv2code-v2-nightly" : ".shuv2code-v2",
+            ),
+          });
+          yield* runCli(["app"]);
+          expect(desktop.received).toHaveLength(1);
+          expect(other.received).toHaveLength(0);
+        }).pipe(Effect.provideService(HostProcess.HomeDirectory, root), Effect.scoped),
+      ),
+  );
+
+  it.effect.each(["nightly", "preview"])(
+    "falls back only to the %s development desktop",
+    (channel) =>
+      withTempDirectory("channel-app-fallback-", (root) =>
+        Effect.gen(function* () {
+          testVersion.value = `1.2.3-${channel}.20261014.1`;
+          const development = yield* fakeDesktop({
+            baseDir: NodePath.join(root, `.shuv2code-v2-${channel}`),
+            stateSubdirectory: "dev",
+          });
+          const stable = yield* fakeDesktop({ baseDir: NodePath.join(root, ".shuv2code-v2") });
+          yield* runCli(["app"]);
+          expect(development.received).toHaveLength(1);
+          expect(stable.received).toHaveLength(0);
+        }).pipe(Effect.provideService(HostProcess.HomeDirectory, root), Effect.scoped),
+      ),
   );
 
   it.effect("finds the dev desktop when the default desktop socket is absent", () =>

@@ -36,6 +36,7 @@ export const resolveEarlyLinuxElectronOptionsFromProcess = (
 ): DesktopEarlyElectronStartup.EarlyLinuxElectronOptions =>
   DesktopEarlyElectronStartup.resolveEarlyLinuxElectronOptions({
     env: process.env,
+    appVersion: Electron.app.getVersion(),
     homeDirectory,
     joinPath: NodePath.posix.join,
     readFileString: (path) => NodeFS.readFileSync(path, "utf8"),
@@ -101,7 +102,10 @@ export const make = Effect.gen(function* () {
               appVersion: Electron.app.getVersion(),
             }).displayName,
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
-            scheme: ElectronProtocol.getDesktopScheme(linux.isDevelopment),
+            scheme: ElectronProtocol.getDesktopScheme(
+              linux.isDevelopment,
+              Electron.app.getVersion(),
+            ),
             ...(iconPath === undefined ? {} : { iconPath }),
           }),
           "utf8",

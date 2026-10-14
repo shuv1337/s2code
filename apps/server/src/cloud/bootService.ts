@@ -31,12 +31,15 @@ import {
   type ServiceState,
 } from "./serviceProtocol.ts";
 
-const BOOT_SERVICE_NAME = "shuv2code-v2";
-const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
-// `.service` suffix keeps the label distinct from the desktop app's bundle id
-// (com.t3tools.t3code), so launchd and TCC records never collide.
-const BOOT_SERVICE_LAUNCHD_LABEL = "dev.shuv.shuv2code.v2.service";
-const BOOT_SERVICE_PLIST_FILE = `${BOOT_SERVICE_LAUNCHD_LABEL}.plist`;
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+const serviceIdentity = (version = "") => {
+  const identity = resolveChannelIdentity(version);
+  return {
+    unitFile: `${identity.serviceName}.service`,
+    label: identity.serviceLabel,
+    plistFile: `${identity.serviceLabel}.plist`,
+  };
+};
 const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
 /** File in the logs dir that receives the service's stdout and stderr. `t3 triage` points agents at it. */
 export const BOOT_SERVICE_LOG_FILE = "boot-service.log";
@@ -89,6 +92,7 @@ export interface BootServicePlan {
   readonly baseDir: string;
   readonly logPath: string;
   readonly unitPath: string;
+  readonly version?: string;
 }
 
 /** Pure renderer: service units cannot rely on the user's shell or PATH. */
@@ -104,7 +108,7 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
     "Type=simple",
     "WorkingDirectory=%h",
     `Environment=SHUV2CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
-    `Environment=${BOOT_SERVICE_UNIT_ENV}=${BOOT_SERVICE_UNIT_FILE}`,
+    `Environment=${BOOT_SERVICE_UNIT_ENV}=${serviceIdentity(plan.version).unitFile}`,
     `ExecStart=${plan.program.map(quoteSystemdValue).join(" ")}`,
     // Let the launcher mark an explicit stop before it signals the server.
     // systemd still SIGKILLs the whole cgroup if graceful shutdown times out.
@@ -162,7 +166,7 @@ export function renderBootServicePlist(
     `<plist version="1.0">`,
     `<dict>`,
     `  <key>Label</key>`,
-    `  <string>${BOOT_SERVICE_LAUNCHD_LABEL}</string>`,
+    `  <string>${serviceIdentity(plan.version).label}</string>`,
     `  <key>ProgramArguments</key>`,
     `  <array>`,
     ...plan.program.map((argument) => `    <string>${escapeXmlText(argument)}</string>`),
@@ -174,7 +178,7 @@ export function renderBootServicePlist(
     `    <key>SHUV2CODE_HOME</key>`,
     `    <string>${escapeXmlText(plan.baseDir)}</string>`,
     `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
-    `    <string>${BOOT_SERVICE_PLIST_FILE}</string>`,
+    `    <string>${serviceIdentity(plan.version).plistFile}</string>`,
     `  </dict>`,
     `  <key>WorkingDirectory</key>`,
     `  <string>${escapeXmlText(options.homeDir)}</string>`,
@@ -244,7 +248,9 @@ export interface BootServiceManager {
 function systemdManager(input: {
   readonly path: Path.Path;
   readonly homeDir: string;
+  readonly version: string;
 }): BootServiceManager {
+  const BOOT_SERVICE_UNIT_FILE = serviceIdentity(input.version).unitFile;
   const unitPath = input.path.join(
     input.homeDir,
     ".config",
@@ -312,7 +318,11 @@ function launchdManager(input: {
   readonly homeDir: string;
   readonly uid: number;
   readonly environmentPath: string;
+  readonly version: string;
 }): BootServiceManager {
+  const { plistFile: BOOT_SERVICE_PLIST_FILE, label: BOOT_SERVICE_LAUNCHD_LABEL } = serviceIdentity(
+    input.version,
+  );
   const unitPath = input.path.join(
     input.homeDir,
     "Library",
@@ -395,15 +405,17 @@ function selectBootServiceManager(input: {
   readonly uid: number | undefined;
   readonly path: Path.Path;
   readonly environmentPath: string;
+  readonly version: string;
 }): BootServiceManager | undefined {
   if (input.homeDir === "") {
     return undefined;
   }
   if (input.platform === "linux") {
-    return systemdManager({ path: input.path, homeDir: input.homeDir });
+    return systemdManager({ path: input.path, homeDir: input.homeDir, version: input.version });
   }
   if (input.platform === "darwin" && input.uid !== undefined) {
     return launchdManager({
+      version: input.version,
       path: input.path,
       homeDir: input.homeDir,
       uid: input.uid,
@@ -601,12 +613,14 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   ).join(":");
 
   const detectedManager = selectBootServiceManager({
+    version: input.cliVersion,
     platform,
     homeDir,
     uid,
     path,
     environmentPath,
   });
+  const BOOT_SERVICE_UNIT_FILE = serviceIdentity(input.cliVersion).unitFile;
   const unitPath = detectedManager?.unitPath ?? "";
   const logPath = path.join(input.logsDir, BOOT_SERVICE_LOG_FILE);
   const statePath = path.join(input.baseDir, "runtime", SERVICE_STATE_FILE);
@@ -634,6 +648,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   // The executable hosts the launcher as a hidden subcommand of itself, so
   // the unit runs the pinned runtime directly.
   const plan: BootServicePlan = {
+    version: input.cliVersion,
     program: [runtimePaths.entryPath, "__service-launcher"],
     baseDir: input.baseDir,
     logPath,

@@ -1,14 +1,20 @@
 import bundle from "../../gnome-extension/bundle.json" with { type: "json" };
-import { resolveLinuxDesktopEntryName } from "../app/DesktopEarlyElectronStartup.ts";
+import { resolveLinuxDesktopId } from "../app/DesktopEarlyElectronStartup.ts";
 
 export const GNOME_CAPTURE_UUID = bundle.uuid;
 export const GNOME_CAPTURE_FILES = bundle.files;
 export const GNOME_CAPTURE_DBUS_NAME = bundle.dbusName;
 export const GNOME_CAPTURE_DBUS_PATH = bundle.dbusPath;
 
-/** Match the packaged/development identities currently returned by the desktop entry resolver. */
+/** Match the channel identities used by Electron and the installed desktop entries. */
 export function gnomeCaptureClientName(appId: string) {
-  const developmentAppId = resolveLinuxDesktopEntryName(true).replace(/\.desktop$/, "");
-  const suffix = appId === developmentAppId ? ".Development" : "";
+  const suffix =
+    appId === resolveLinuxDesktopId(true)
+      ? ".Development"
+      : appId === resolveLinuxDesktopId(false, "0.0.0-nightly.1")
+        ? ".Nightly"
+        : appId === resolveLinuxDesktopId(false, "0.0.0-preview.1")
+          ? ".Preview"
+          : "";
   return `${GNOME_CAPTURE_DBUS_NAME}.Client${suffix}`;
 }

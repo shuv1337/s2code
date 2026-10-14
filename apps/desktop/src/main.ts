@@ -1,7 +1,5 @@
 import * as MacPermissions from "./permissions/MacPermissions.ts";
-import { applyProductEnvironment, DEFAULT_HOME_DIRECTORY } from "@t3tools/shared/productIdentity";
-import { ensureProductHome } from "@t3tools/shared/productHome";
-import * as Path from "effect/Path";
+import { applyProductEnvironment } from "@t3tools/shared/productIdentity";
 applyProductEnvironment(process.env);
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (err: NodeJS.ErrnoException) => {
@@ -92,18 +90,12 @@ if (process.argv.includes("--version")) {
 
 const layerDesktopEnvironment = Layer.unwrap(
   Effect.gen(function* () {
-    const path = yield* Path.Path;
-    yield* Effect.try(() =>
-      ensureProductHome(
-        process.env.T3CODE_HOME || path.join(NodeOS.homedir(), DEFAULT_HOME_DIRECTORY),
-      ),
-    );
     const metadata = yield* Effect.service(ElectronApp.ElectronApp).pipe(
       Effect.flatMap((app) => app.metadata),
     );
     const platform = yield* HostProcess.Platform;
     const processArch = yield* HostProcess.Architecture;
-    return DesktopEnvironment.layer({
+    return DesktopEnvironment.layerOwned({
       dirname: __dirname,
       homeDirectory: NodeOS.homedir(),
       platform,
@@ -123,6 +115,7 @@ const resolveDesktopSshCliRunner = (
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
     return {
       nodeScriptPath: devRemoteEntryPath,
+      version: environment.appVersion,
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }

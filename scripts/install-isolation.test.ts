@@ -54,6 +54,9 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$url" in *SHA256SUMS) file=SHA256SUMS ;; *.tar.gz) file="${stem}.tar.gz" ;; *) file=releases ;; esac
+if [ -n "\${FIXTURE_PRODUCT_HOME:-}" ]; then
+  [ "$(cat "$FIXTURE_PRODUCT_HOME/.product-identity" 2>/dev/null)" = shuv2code ] || exit 91
+fi
 cp "$FIXTURE_ASSETS/$file" "$out"
 printf '%s\\n' "$url" >> "$FIXTURE_REQUESTS"
 printf 200
@@ -108,6 +111,7 @@ if ($env:FIXTURE_FAIL_PUBLISH) {
   }
 }
 function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
+  if ($env:FIXTURE_PRODUCT_HOME -and [IO.File]::ReadAllText((Join-Path $env:FIXTURE_PRODUCT_HOME '.product-identity')).Trim() -ne 'shuv2code') { throw 'Missing home ownership before download' }
   Add-Content $env:FIXTURE_REQUESTS $Uri
   if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, '${digest}  t3-1.2.3-win32-x64.zip') }
   else { Copy-Item ${psQuote(NodePath.join(assets, "windows.zip"))} $OutFile }
@@ -139,6 +143,44 @@ function seedCache(directory: string, marker: string, kind: "sh" | "pwsh") {
 describe
   .skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))
   .each(["sh", "pwsh"] as const)("%s installer isolation", (kind) => {
+  it.skipIf(kind === "pwsh" && !hasPwsh).each(["nightly", "preview"])(
+    "claims a fresh %s home before downloading or populating runtime state",
+    (channel) => {
+      env.SHUV2CODE_HOME = NodePath.join(home, `.shuv2code-v2-${channel}`);
+      env.FIXTURE_PRODUCT_HOME = env.SHUV2CODE_HOME;
+      const result = runInstaller(kind);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(
+        NodeFS.readFileSync(NodePath.join(env.SHUV2CODE_HOME, ".product-identity"), "utf8").trim(),
+      ).toBe("shuv2code");
+      expect(
+        NodeFS.readFileSync(
+          NodePath.join(env.SHUV2CODE_HOME, "runtime", "versions", version, ".install-product"),
+          "utf8",
+        ).trim(),
+      ).toBe("shuv2code");
+    },
+  );
+  it.skipIf(kind === "pwsh" && !hasPwsh).each(["nightly", "preview"])(
+    "rejects unmarked upstream-like state at the exact %s default before changing any files",
+    (channel) => {
+      env.SHUV2CODE_VERSION = `1.2.3-${channel}.20261014.1`;
+      const channelHome = NodePath.join(home, `.shuv2code-v2-${channel}`);
+      const userdata = NodePath.join(channelHome, "userdata");
+      NodeFS.mkdirSync(userdata, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(userdata, "statev2.sqlite"), "upstream-state");
+      env.T3CODE_HOME = channelHome;
+      const result = runInstaller(kind);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Cannot establish product ownership");
+      expect(NodeFS.readFileSync(NodePath.join(userdata, "statev2.sqlite"), "utf8")).toBe(
+        "upstream-state",
+      );
+      expect(NodeFS.readdirSync(channelHome)).toEqual(["userdata"]);
+      expect(NodeFS.existsSync(NodePath.join(home, ".shuv2code-v2"))).toBe(false);
+      expect(NodeFS.existsSync(env.FIXTURE_REQUESTS!)).toBe(false);
+    },
+  );
   it.skipIf(kind === "pwsh" && !hasPwsh)(
     "restores the old cache and installed command when publication fails",
     () => {

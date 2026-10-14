@@ -34,6 +34,7 @@ import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -151,7 +152,17 @@ export class DesktopUpdateUnexpectedActionError extends Schema.TaggedError<Deskt
 
 export type DesktopUpdateConfigureError = never;
 
+export class DesktopUpdateChannelOwnershipError extends Schema.TaggedError<DesktopUpdateChannelOwnershipError>()(
+  "DesktopUpdateChannelOwnershipError",
+  { requestedChannel: DesktopUpdateChannelSchema },
+) {
+  override get message() {
+    return "Release channels are separate installations. Install the other channel separately instead of changing this app's updater feed.";
+  }
+}
+
 export const DesktopUpdateSetChannelError = Schema.Union([
+  DesktopUpdateChannelOwnershipError,
   DesktopUpdateActionInProgressError,
   DesktopUpdateChannelPersistenceError,
 ]);
@@ -350,6 +361,10 @@ export const make = Effect.gen(function* () {
   );
 
   const resolveDisabledReason = Effect.gen(function* () {
+    if (resolveChannelIdentity(environment.appVersion).channel === "preview")
+      return Option.some(
+        "Preview builds do not receive automatic updates. Install a newer preview manually.",
+      );
     const hasFeedConfig = yield* hasUpdateFeedConfig;
     return Option.fromNullishOr(
       getAutoUpdateDisabledReason({
@@ -741,7 +756,7 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(
         Effect.fn("desktop.updates.applyUpdateAvailable")(function* (info) {
           const state = yield* Ref.get(updateStateRef);
-          if (resolveDefaultDesktopUpdateChannel(info.version) !== state.channel) {
+          if (resolveChannelIdentity(info.version).updateChannel !== state.channel) {
             yield* logUpdaterInfo("ignoring update that does not match selected channel", {
               version: info.version,
               channel: state.channel,
@@ -874,6 +889,13 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(
         Effect.fn("desktop.updates.applyUpdateDownloaded")(function* (info) {
           const state = yield* Ref.get(updateStateRef);
+          if (resolveChannelIdentity(info.version).updateChannel !== state.channel) {
+            yield* logUpdaterWarning(
+              "ignoring downloaded update for another installation channel",
+              { version: info.version },
+            );
+            return;
+          }
           yield* setState(reduceDesktopUpdateStateOnDownloadComplete(state, info.version));
           yield* logUpdaterInfo("update downloaded", { version: info.version });
         }),
@@ -923,8 +945,12 @@ export const make = Effect.gen(function* () {
       }
 
       const settings = yield* desktopSettings.get;
+      const channel =
+        environment.isPackaged && !environment.isDevelopment
+          ? resolveDefaultDesktopUpdateChannel(environment.appVersion)
+          : settings.updateChannel;
       const enabled = yield* shouldEnableAutoUpdates;
-      yield* setState(createBaseUpdateState(settings.updateChannel, enabled, environment));
+      yield* setState(createBaseUpdateState(channel, enabled, environment));
       if (!enabled) {
         return;
       }
@@ -932,7 +958,7 @@ export const make = Effect.gen(function* () {
 
       yield* electronUpdater.setAutoDownload(false);
       yield* electronUpdater.setAutoInstallOnAppQuit(false);
-      yield* applyAutoUpdaterChannel(settings.updateChannel);
+      yield* applyAutoUpdaterChannel(channel);
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
       );
@@ -972,6 +998,13 @@ export const make = Effect.gen(function* () {
       nextChannel: DesktopUpdateChannel,
     ) {
       yield* Effect.annotateCurrentSpan({ channel: nextChannel });
+      if (
+        environment.isPackaged &&
+        !environment.isDevelopment &&
+        (resolveChannelIdentity(environment.appVersion).channel === "preview" ||
+          nextChannel !== resolveDefaultDesktopUpdateChannel(environment.appVersion))
+      )
+        return yield* new DesktopUpdateChannelOwnershipError({ requestedChannel: nextChannel });
       const activeAction = yield* tryStartChannelChange;
       if (Option.isSome(activeAction)) {
         return yield* new DesktopUpdateActionInProgressError({

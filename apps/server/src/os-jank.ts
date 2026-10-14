@@ -12,6 +12,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as CliError from "effect/cli/CliError";
 import * as NodeOS from "node:os";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import packageJson from "../package.json" with { type: "json" };
 
 function logPathHydrationWarning(message: string, error?: unknown): void {
   process.stderr.write(
@@ -111,7 +113,10 @@ export const resolveBaseDir = Effect.fn(function* (
   const { join, resolve } = yield* Path.Path;
   const directory =
     !raw || raw.trim().length === 0
-      ? join(yield* HostProcess.HomeDirectory, ".shuv2code-v2")
+      ? join(
+          yield* HostProcess.HomeDirectory,
+          resolveChannelIdentity(packageJson.version).homeDirectory,
+        )
       : resolve(yield* expandHomePath(raw.trim()));
   yield* Effect.try({
     try: () => ensureProductHome(directory, options.claim ?? false),

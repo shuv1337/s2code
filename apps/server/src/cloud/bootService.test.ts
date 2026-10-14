@@ -126,6 +126,26 @@ it("escapes XML in host paths", () => {
   expect(plist).toContain("<string>/Users/theo/Tools &amp; &lt;Scripts&gt;:/usr/bin</string>");
 });
 
+it.each(["nightly", "preview"])(
+  "renders the %s service ownership into both manager configurations",
+  (channel) => {
+    const plan = {
+      ...linuxPlan,
+      version: `1.2.3-${channel}.20261014.1`,
+      baseDir: `/home/theo/.shuv2code-v2-${channel}`,
+    };
+    const unit = BootService.renderBootServiceUnit(plan);
+    expect(unit).toContain(`T3_BOOT_SERVICE_UNIT=shuv2code-v2-${channel}.service`);
+    expect(unit).toContain(`SHUV2CODE_HOME=/home/theo/.shuv2code-v2-${channel}`);
+    const plist = BootService.renderBootServicePlist(plan, {
+      homeDir: "/home/theo",
+      environmentPath: "/usr/bin",
+    });
+    expect(plist).toContain(`<string>dev.shuv.shuv2code.v2.${channel}.service</string>`);
+    expect(plist).toContain(`<string>dev.shuv.shuv2code.v2.${channel}.service.plist</string>`);
+  },
+);
+
 const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   platform: NodeJS.Platform = "linux",
   installerPath = macInstallerPath,
@@ -252,6 +272,24 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("boot service install", (it) => {
+  it.effect.each(["linux", "darwin"] as const)(
+    "keeps channel service paths separate on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        const { service, makeService } = yield* makeHarness(platform);
+        const stable = yield* service.status;
+        for (const channel of ["nightly", "preview"]) {
+          const channelService = yield* makeService(undefined, `1.2.3-${channel}.20261014.1`);
+          const status = yield* channelService.status;
+          expect(status.unitPath).not.toBe(stable.unitPath);
+          expect(status.unitPath).toContain(
+            platform === "linux"
+              ? `shuv2code-v2-${channel}.service`
+              : `dev.shuv.shuv2code.v2.${channel}.service.plist`,
+          );
+        }
+      }),
+  );
   it.effect(
     "fails before installing files or validating a runtime when lingering needs an administrator",
     () =>

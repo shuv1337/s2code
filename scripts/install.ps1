@@ -57,31 +57,6 @@ function Assert-ProductPath([string] $directory) {
     $current = $parent
   }
 }
-$t3Home = [IO.Path]::GetFullPath($t3Home)
-Assert-ProductPath $t3Home
-if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
-$defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
-$homeMarker = Join-Path $t3Home ".product-identity"
-Assert-ProductPath $homeMarker
-if (Test-Path -LiteralPath $homeMarker) {
-  $homeProduct = [IO.File]::ReadAllText($homeMarker).Trim()
-  if (-not "shuv2code".StartsWith($homeProduct, [StringComparison]::Ordinal)) { Fail "Home belongs to another product." }
-} else { $homeProduct = "" }
-if ($homeProduct -cne "shuv2code" -and (Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0 -and -not [string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) {
-  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
-}
-foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
-New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
-$homeMarkerTemp = Join-Path $t3Home (".product-identity." + [Guid]::NewGuid().ToString() + ".tmp")
-try {
-  Set-Content -LiteralPath $homeMarkerTemp -Value "shuv2code"
-  if (Test-Path -LiteralPath $homeMarker) { [IO.File]::Replace($homeMarkerTemp, $homeMarker, "$homeMarkerTemp.previous") }
-  else { [IO.File]::Move($homeMarkerTemp, $homeMarker) }
-} finally {
-  foreach ($temporary in @($homeMarkerTemp, "$homeMarkerTemp.previous")) {
-    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
-  }
-}
 
 $terminal = -not [Console]::IsErrorRedirected -and $env:TERM -ne "dumb"
 $interactive = $terminal -and $Host.UI.SupportsVirtualTerminal
@@ -211,6 +186,36 @@ if ($version -match '-preview\.') {
 $stem = "t3-$version-win32-$arch"
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
+$commandName = if ($version -match '^[^-+]+-nightly\.') { "shuv2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "shuv2code-preview" } else { "shuv2code" }
+if (-not $env:SHUV2CODE_HOME) {
+  if ($version -match '^[^-+]+-nightly\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-nightly" }
+  elseif ($version -match '^[^-+]+-(preview|pr)\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-preview" }
+}
+$t3Home = [IO.Path]::GetFullPath($t3Home)
+Assert-ProductPath $t3Home
+if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
+$defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
+$homeMarker = Join-Path $t3Home ".product-identity"
+Assert-ProductPath $homeMarker
+if (Test-Path -LiteralPath $homeMarker) {
+  $homeProduct = [IO.File]::ReadAllText($homeMarker).Trim()
+  if (-not "shuv2code".StartsWith($homeProduct, [StringComparison]::Ordinal)) { Fail "Home belongs to another product." }
+} else { $homeProduct = "" }
+if ($homeProduct -cne "shuv2code" -and (Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0 -and -not [string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) {
+  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+}
+foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
+New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
+$homeMarkerTemp = Join-Path $t3Home (".product-identity." + [Guid]::NewGuid().ToString() + ".tmp")
+try {
+  Set-Content -LiteralPath $homeMarkerTemp -Value "shuv2code"
+  if (Test-Path -LiteralPath $homeMarker) { [IO.File]::Replace($homeMarkerTemp, $homeMarker, "$homeMarkerTemp.previous") }
+  else { [IO.File]::Move($homeMarkerTemp, $homeMarker) }
+} finally {
+  foreach ($temporary in @($homeMarkerTemp, "$homeMarkerTemp.previous")) {
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+  }
+}
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
@@ -310,14 +315,14 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
 
 Step "Setting up the shuv2code command..."
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$shim = Join-Path $binDir "shuv2code.cmd"
+$shim = Join-Path $binDir "$commandName.cmd"
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
 [System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
 if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
 [Console]::Error.WriteLine("  ${green}Installed shuv2code $version$reset`n")
 if (($env:PATH -split ";") -notcontains $binDir) {
-  Write-Host "  Add $binDir to your PATH, then run ${bold}shuv2code$reset.`n"
+  Write-Host "  Add $binDir to your PATH, then run $bold$commandName$reset.`n"
 } else {
-  Write-Host "  Run ${bold}shuv2code$reset to get started.`n"
+  Write-Host "  Run $bold$commandName$reset to get started.`n"
 }

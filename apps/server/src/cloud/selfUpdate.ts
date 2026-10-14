@@ -11,6 +11,11 @@ import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
+import {
+  isSameInstallationChannel,
+  SEPARATE_CHANNEL_INSTALL_MESSAGE,
+} from "@t3tools/shared/channelIdentity";
+import packageJson from "../../package.json" with { type: "json" };
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
@@ -169,7 +174,9 @@ export const withRunningThreadContinuation = Effect.fn(
   });
 });
 
-export const make = Effect.fn("cloud.server_self_update.make")(function* () {
+export const make = Effect.fn("cloud.server_self_update.make")(function* (
+  options: { readonly currentVersion?: string } = {},
+) {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const desktopAppUpdate = yield* DesktopAppUpdate.DesktopAppUpdate;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
@@ -196,10 +203,15 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
   )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
+    const targetVersion = input.targetVersion.trim();
+    if (
+      isExactServiceVersion(targetVersion) &&
+      !isSameInstallationChannel(options.currentVersion ?? packageJson.version, targetVersion)
+    )
+      return yield* failWith(SEPARATE_CHANNEL_INSTALL_MESSAGE);
     if (capability === "desktop-managed") {
-      // input.targetVersion is meaningless here: the desktop app's own
-      // update feed decides what it downloads, and the result carries what
-      // it actually got.
+      // The desktop feed selects the exact same-channel release to download;
+      // the result carries what it actually got.
       if (desktopAppUpdate.available) {
         return yield* desktopAppUpdate.run(reportProgress);
       }
@@ -213,7 +225,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
       );
     }
 
-    const targetVersion = input.targetVersion.trim();
     if (!isExactServiceVersion(targetVersion)) {
       return yield* failWith(`'${targetVersion}' is not an exact t3 version.`);
     }

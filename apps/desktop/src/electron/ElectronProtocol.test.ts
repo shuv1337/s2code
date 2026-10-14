@@ -8,15 +8,24 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
-  handleMock: vi.fn(),
-  netFetchMock: vi.fn(),
-  unhandleMock: vi.fn(),
-}));
+const { handleMock, netFetchMock, unhandleMock, registerSchemesMock, appVersionMock } = vi.hoisted(
+  () => ({
+    handleMock: vi.fn(),
+    netFetchMock: vi.fn(),
+    unhandleMock: vi.fn(),
+    registerSchemesMock: vi.fn(),
+    appVersionMock: vi.fn(() => "1.2.3"),
+  }),
+);
 
 vi.mock("electron", () => ({
+  app: { getVersion: appVersionMock },
   net: { fetch: netFetchMock },
-  protocol: { handle: handleMock, unhandle: unhandleMock },
+  protocol: {
+    handle: handleMock,
+    unhandle: unhandleMock,
+    registerSchemesAsPrivileged: registerSchemesMock,
+  },
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
@@ -24,6 +33,27 @@ import * as ElectronProtocol from "./ElectronProtocol.ts";
 const layerProtocol = ElectronProtocol.layer.pipe(Layer.provide(NodeServices.layer));
 
 describe("ElectronProtocol", () => {
+  it.effect.each(["stable", "nightly", "preview"])(
+    "registers only the %s renderer origin",
+    (channel) => {
+      const version = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
+      appVersionMock.mockReturnValue(version);
+      registerSchemesMock.mockClear();
+      vi.stubEnv("VITE_DEV_SERVER_URL", "");
+      const scheme = channel === "stable" ? "shuv2code" : `shuv2code-${channel}`;
+      return Effect.scoped(
+        Effect.gen(function* () {
+          yield* Layer.build(ElectronProtocol.layerSchemePrivileges);
+          assert.deepEqual(
+            registerSchemesMock.mock.calls[0]?.[0].map((entry: { scheme: string }) => entry.scheme),
+            [scheme],
+          );
+          assert.equal(ElectronProtocol.getDesktopUrl(false, version), `${scheme}://app/`);
+          assert.equal(ElectronProtocol.getDesktopUrl(true, version), "shuv2code-dev://app/");
+        }),
+      ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+    },
+  );
   beforeEach(() => {
     handleMock.mockReset();
     netFetchMock.mockReset();

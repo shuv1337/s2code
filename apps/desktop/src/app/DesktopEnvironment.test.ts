@@ -39,6 +39,25 @@ const makeEnvironment = (
 ) => DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(layerEnvironment(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect.each(["nightly", "preview"])(
+    "partitions %s home, settings and platform identity",
+    (channel) =>
+      Effect.gen(function* () {
+        const environment = yield* makeEnvironment({
+          appVersion: `1.2.3-${channel}.20261014.1`,
+          isPackaged: true,
+        });
+        assert.equal(environment.baseDir, `/Users/alice/.shuv2code-v2-${channel}`);
+        assert.equal(environment.stateDir, `/Users/alice/.shuv2code-v2-${channel}/userdata`);
+        assert.equal(environment.appUserModelId, `dev.shuv.shuv2code.${channel}`);
+        assert.equal(environment.linuxDesktopEntryName, `dev.shuv.shuv2code.${channel}.desktop`);
+        assert.equal(environment.linuxWmClass, `shuv2code-${channel}`);
+        assert.equal(
+          environment.branding.stageLabel,
+          channel === "nightly" ? "Nightly" : "Preview",
+        );
+      }),
+  );
   it.effect("derives state paths and development identity inside Effect", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(

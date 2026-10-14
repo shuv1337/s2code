@@ -17,4 +17,5 @@ export const DESKTOP_RENDERER_ORIGINS = [
   "shuv2code://app",
   "shuv2code-dev://app",
   "shuv2code-nightly://app",
+  "shuv2code-preview://app",
 ] as const;

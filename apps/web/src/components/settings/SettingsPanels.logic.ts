@@ -7,7 +7,9 @@ import type {
   ServerSettings,
   SidebarProjectGroupingMode,
   UnifiedSettings,
+  DesktopUpdateState,
 } from "@t3tools/contracts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import {
   getBackgroundActivityBaseProfile,
@@ -17,6 +19,18 @@ import {
 } from "@t3tools/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
+
+/** The installed version owns the channel, not its stored/cosmetic updater preference. */
+export function resolveInstalledDesktopChannel(
+  update: Pick<DesktopUpdateState, "currentVersion" | "channel"> | null,
+  fallbackVersion: string,
+) {
+  const channel = resolveChannelIdentity(update?.currentVersion ?? fallbackVersion).channel;
+  return {
+    channel,
+    label: channel === "preview" ? "Preview" : channel === "nightly" ? "Nightly" : "Stable",
+  };
+}
 
 export function isProjectGroupingEnabled(mode: SidebarProjectGroupingMode): boolean {
   return mode !== "separate";

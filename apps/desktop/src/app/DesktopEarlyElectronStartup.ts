@@ -3,6 +3,7 @@ import { resolveProductEnvironment } from "@t3tools/shared/productIdentity";
 import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 import {
   DEFAULT_LINUX_PASSWORD_STORE,
@@ -22,6 +23,7 @@ interface EarlyDesktopSettingsInput {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly readFileString: (path: string) => string;
+  readonly appVersion?: string;
 }
 
 type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
@@ -33,8 +35,11 @@ export interface EarlyLinuxElectronOptions {
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
 
-export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
-  isDevelopment ? "dev.shuv.shuv2code.dev.desktop" : "dev.shuv.shuv2code.desktop";
+export const resolveLinuxDesktopId = (isDevelopment: boolean, version = ""): string =>
+  isDevelopment ? "dev.shuv.shuv2code.dev" : resolveChannelIdentity(version).appId;
+
+export const resolveLinuxDesktopEntryName = (isDevelopment: boolean, version = ""): string =>
+  `${resolveLinuxDesktopId(isDevelopment, version)}.desktop`;
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -55,12 +60,14 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
+  readonly appVersion?: string;
 }): string {
   const t3Home = Option.fromUndefinedOr(resolveProductEnvironment(input.env).T3CODE_HOME);
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
     t3Home,
+    ...(input.appVersion === undefined ? {} : { appVersion: input.appVersion }),
   });
   const stateDir = resolveDesktopStateDir({
     baseDir,
@@ -163,8 +170,10 @@ export function resolveEarlyLinuxElectronOptions(
   const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
     isDevelopment,
-    linuxWmClass: isDevelopment ? "shuv2code-dev" : "shuv2code",
-    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
+    linuxWmClass: isDevelopment
+      ? "shuv2code-dev"
+      : resolveChannelIdentity(input.appVersion ?? "").executableName,
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment, input.appVersion),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

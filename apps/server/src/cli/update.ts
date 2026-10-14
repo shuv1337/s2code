@@ -1,9 +1,13 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
+  isSameInstallationChannel,
+  resolveChannelIdentity,
+  SEPARATE_CHANNEL_INSTALL_MESSAGE,
+} from "@t3tools/shared/channelIdentity";
+import {
   CLI_RELEASE_BASE_URL_ENV,
   CLI_RELEASE_CHANNELS,
   cliReleaseIndexPageUrl,
-  cliReleaseChannelOf,
   newestCliReleaseVersion,
   type CliReleaseChannel,
 } from "@t3tools/shared/cliRelease";
@@ -99,8 +103,8 @@ export function launcherOwnsVersionsDir(
 }
 
 /**
- * The launcher the install scripts leave behind: a symlink at `<bin>/t3` on
- * POSIX, a `t3.cmd` shim on Windows. `t3 update` repoints it so the next `t3`
+ * The launcher the install scripts leave behind: a channel-named shuv2code
+ * symlink on POSIX or `.cmd` shim on Windows. Update repoints it so the next
  * invocation is the new version. Only a launcher that already points into
  * this home's `runtime/versions` tree is touched; a plain copy of the
  * executable, or a launcher for some other install, is left alone.
@@ -111,6 +115,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   /** `<baseDir>/runtime/versions` of the home being updated. */
   readonly versionsDir: string;
   readonly targetEntryPath: string;
+  readonly currentVersion?: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -121,10 +126,10 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
 
   if (platform === "win32") {
     // The shim runs the executable by absolute path, so the executable sees
-    // itself as argv0; the shim is the `t3.cmd` next to it only when launched
+    // itself as argv0; the channel's shim is found only when launched
     // from an install script's bin directory. Find it by searching the
-    // directories that would resolve `t3` on this shell's PATH.
-    const shimPath = yield* findWindowsShim(input.launchedAs);
+    // directories that would resolve its command on this shell's PATH.
+    const shimPath = yield* findWindowsShim(input.launchedAs, input.currentVersion);
     if (shimPath === undefined) return Option.none<string>();
     const current = yield* fs.readFileString(shimPath).pipe(Effect.option);
     const quoted = Option.isSome(current) ? /^"([^"]+)"/m.exec(current.value)?.[1] : undefined;
@@ -183,11 +188,12 @@ export const resolveLauncherPath = Effect.gen(function* () {
 
 /**
  * On Windows a `.cmd` shim is what PATH resolves, but the executable it runs
- * only ever sees its own path. Walk PATH for a `t3.cmd` whose target is the
+ * only ever sees its own path. Walk PATH for the channel's shim whose target is the
  * running executable; that is the launcher the install script wrote.
  */
 export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(function* (
   executablePath: string,
+  version = packageJson.version,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -197,7 +203,7 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(";"),
   ].filter((entry) => entry.trim().length > 0);
   for (const directory of candidates) {
-    const shimPath = path.join(directory, "shuv2code.cmd");
+    const shimPath = path.join(directory, `${resolveChannelIdentity(version).executableName}.cmd`);
     const contents = yield* fs.readFileString(shimPath).pipe(Effect.option);
     if (Option.isNone(contents)) continue;
     const target = /^"([^"]+)"/m.exec(contents.value)?.[1];
@@ -215,7 +221,7 @@ const updateFlags = {
   ...projectLocationFlags,
   channel: Flag.Literals("channel", CLI_RELEASE_CHANNELS).pipe(
     Flag.withDescription(
-      "Release channel to follow. Defaults to the channel this t3 was published on.",
+      "The installed release channel. Install other channels separately; updates cannot switch channels.",
     ),
     Flag.optional,
   ),
@@ -321,7 +327,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   return false;
 });
 
-const runUpdate = Effect.fn("cli.update.run")(function* (input: {
+export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
   readonly logsDir: string;
   readonly serverRuntimeStatePath: string;
@@ -329,6 +335,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly requestedVersion: string | undefined;
   readonly allowDowngrade: boolean;
   readonly assumeYes: boolean;
+  readonly currentVersion?: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -339,8 +346,13 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const httpClient = yield* HttpClient.HttpClient;
   const service = yield* BootService.BootService;
 
-  const currentVersion = packageJson.version;
-  const channel = input.channel ?? cliReleaseChannelOf(currentVersion);
+  const currentVersion = input.currentVersion ?? packageJson.version;
+  if (
+    input.channel !== undefined &&
+    input.channel !== resolveChannelIdentity(currentVersion).channel
+  )
+    return yield* new CliUpdateError({ reason: SEPARATE_CHANNEL_INSTALL_MESSAGE });
+  const channel = input.channel ?? resolveChannelIdentity(currentVersion).channel;
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {
     return yield* new CliUpdateError({
       reason: `'${input.requestedVersion}' is not an exact t3 version.`,
@@ -353,41 +365,14 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ? resolveNewestVersion(channel)
       : Effect.succeed(input.requestedVersion)
   ).pipe(Effect.ensuring(Effect.sync(progress.finish)));
-  const targetChannel = cliReleaseChannelOf(targetVersion);
-
-  // Preview is a maintainers' dogfooding train: it is cut by hand from
-  // unmerged branches, receives no fixes, and is never offered to anyone.
-  // Reaching it from stable or nightly takes an explicit ask and an explicit
-  // acknowledgement; the flag alone is not enough from a script.
-  const currentChannel = cliReleaseChannelOf(currentVersion);
-  if (targetChannel === "preview" && currentChannel !== "preview") {
-    yield* Console.log(
-      [
-        `t3@${targetVersion} is a preview build.`,
-        "  Preview builds are cut by maintainers from unreleased branches to exercise the release",
-        "  pipeline. They can be broken, receive no fixes, and are never offered as updates; you",
-        `  will have to switch back to ${currentChannel} yourself with \`t3 update --channel ${currentChannel} --allow-downgrade\`.`,
-      ].join("\n"),
-    );
-    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
-      return yield* new CliUpdateError({
-        reason:
-          "Refusing to install a preview build without confirmation. Run this from a terminal to confirm, or pass --channel preview from an interactive shell.",
-      });
-    }
-    const confirmed = yield* Prompt.run(
-      Prompt.Confirm({ message: "Install the preview build anyway?", initial: false }),
-    ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
-    if (!confirmed) {
-      yield* Console.log("Left as is.");
-      return;
-    }
-  }
+  const targetChannel = resolveChannelIdentity(targetVersion).channel;
+  if (!isSameInstallationChannel(currentVersion, targetVersion))
+    return yield* new CliUpdateError({ reason: SEPARATE_CHANNEL_INSTALL_MESSAGE });
 
   // Work out everything that will be touched before touching anything, so the
   // user sees one plan and one question rather than a surprise restart.
   const status = yield* service.status;
-  // The unit name is per user, not per T3 home. Only touch the service when it
+  // The unit name is per channel and user, not per home. Only touch the service when it
   // serves the home this update targets; otherwise it belongs to another
   // install on this machine and restarting it would take that server down.
   const servesThisHome =
@@ -526,6 +511,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
 
   const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
   const repointed = yield* repointLauncher({
+    currentVersion,
     launchedAs,
     versionsDir: path.dirname(runtime.versionDir),
     targetEntryPath: runtime.entryPath,

@@ -85,17 +85,32 @@ export function codexCallbackUrl(value: string, redirectUri: string, state: stri
 }
 
 export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false) {
-  const url = new URL(`${development ? "shuv2code-dev" : "shuv2code"}://auth/codex`);
+  const returnProtocol = URL.canParse(input.returnUrl) ? new URL(input.returnUrl).protocol : "";
+  const scheme = [
+    "shuv2code:",
+    "shuv2code-dev:",
+    "shuv2code-nightly:",
+    "shuv2code-preview:",
+  ].includes(returnProtocol)
+    ? returnProtocol.slice(0, -1)
+    : development
+      ? "shuv2code-dev"
+      : "shuv2code";
+  const url = new URL(`${scheme}://auth/codex`);
   url.searchParams.set("request", encodeHandoff(input));
   return url.toString();
 }
 
-export function readCodexAuthHandoff(value: string, development: boolean) {
+export function readCodexAuthHandoff(
+  value: string,
+  development: boolean,
+  scheme = development ? "shuv2code-dev" : "shuv2code",
+) {
   try {
     const url = new URL(value);
     if (
       value.length > 32_768 ||
-      url.protocol !== (development ? "shuv2code-dev:" : "shuv2code:") ||
+      url.protocol !== `${scheme}:` ||
       url.host !== "auth" ||
       url.pathname !== "/codex" ||
       url.username ||

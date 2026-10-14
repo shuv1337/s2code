@@ -20,6 +20,7 @@ import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 import * as ServerSelfUpdate from "./selfUpdate.ts";
 
 interface HarnessOptions {
+  readonly currentVersion?: string;
   readonly mode?: "web" | "desktop";
   readonly managed?: boolean;
   readonly preflight?: "ready" | "blocked";
@@ -111,7 +112,9 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   const config = yield* ServerConfig.ServerConfig.pipe(
     Effect.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
   );
-  const selfUpdate = yield* ServerSelfUpdate.make().pipe(
+  const selfUpdate = yield* ServerSelfUpdate.make({
+    currentVersion: options.currentVersion ?? "1.0.0",
+  }).pipe(
     Effect.provideService(ProcessRunner.ProcessRunner, runner),
     Effect.provideService(ServiceLauncherClient.ServiceLauncherClient, launcher),
     Effect.provideService(
@@ -130,6 +133,51 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
+  it.effect("rejects an explicit cross-channel desktop-managed request before delegating", () =>
+    Effect.gen(function* () {
+      const { selfUpdate, order } = yield* makeHarness({
+        currentVersion: "1.0.0-nightly.20261014.1",
+        mode: "desktop",
+        desktopAppUpdate: {
+          available: true,
+          run: () => Effect.die("must not delegate a cross-channel request"),
+          commit: () => Effect.never,
+        },
+      });
+      const error = yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip);
+      expect(error.reason).toContain("Install the other channel separately");
+      expect(order).toEqual([]);
+    }),
+  );
+  it.effect.each(["1.0.0", "1.0.0-nightly.20261014.1", "1.0.0-preview.20261014.1"])(
+    "rejects cross-channel server requests from %s before download or launcher handoff",
+    (currentVersion) =>
+      Effect.gen(function* () {
+        const { selfUpdate, order } = yield* makeHarness({ currentVersion });
+        for (const targetVersion of [
+          "1.1.0",
+          "1.1.0-nightly.20261014.2",
+          "1.1.0-preview.20261014.2",
+        ]) {
+          if (
+            currentVersion.includes("-nightly.") === targetVersion.includes("-nightly.") &&
+            currentVersion.includes("-preview.") === targetVersion.includes("-preview.")
+          )
+            continue;
+          const progress: string[] = [];
+          const error = yield* selfUpdate
+            .update({ targetVersion }, (stage) =>
+              Effect.sync(() => {
+                progress.push(stage);
+              }),
+            )
+            .pipe(Effect.flip);
+          expect(error.reason).toContain("Install the other channel separately");
+          expect(order).toEqual([]);
+          expect(progress).toEqual([]);
+        }
+      }),
+  );
   it.effect("marks running threads at the boot-service handoff", () =>
     Effect.gen(function* () {
       const events: string[] = [];

@@ -11,21 +11,21 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 export const DESKTOP_HOST = "app";
-const DESKTOP_PRODUCTION_SCHEME = "shuv2code";
 const DESKTOP_DEVELOPMENT_SCHEME = "shuv2code-dev";
 
-export function getDesktopScheme(isDevelopment: boolean): string {
-  return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
+export function getDesktopScheme(isDevelopment: boolean, version = ""): string {
+  return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : resolveChannelIdentity(version).scheme;
 }
 
-function getDesktopOrigin(isDevelopment: boolean): string {
-  return `${getDesktopScheme(isDevelopment)}://${DESKTOP_HOST}`;
+function getDesktopOrigin(isDevelopment: boolean, version: string): string {
+  return `${getDesktopScheme(isDevelopment, version)}://${DESKTOP_HOST}`;
 }
 
-export function getDesktopUrl(isDevelopment: boolean): string {
-  return `${getDesktopOrigin(isDevelopment)}/`;
+export function getDesktopUrl(isDevelopment: boolean, version = ""): string {
+  return `${getDesktopOrigin(isDevelopment, version)}/`;
 }
 
 export class ElectronProtocolRegistrationError extends Schema.TaggedError<ElectronProtocolRegistrationError>()(
@@ -117,9 +117,10 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
  * Must run synchronously during process bootstrap, before Electron emits `ready`.
  */
 function registerDesktopSchemePrivilegesSync(): void {
+  const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL?.trim());
   Electron.protocol.registerSchemesAsPrivileged([
     {
-      scheme: DESKTOP_PRODUCTION_SCHEME,
+      scheme: getDesktopScheme(isDevelopment, Electron.app.getVersion()),
       privileges: {
         standard: true,
         secure: true,
@@ -128,17 +129,7 @@ function registerDesktopSchemePrivilegesSync(): void {
         stream: true,
         // Custom schemes skip Chromium's V8 code cache unless they opt in.
         // Dev stays off: Vite serves changing code at stable URLs.
-        codeCache: true,
-      },
-    },
-    {
-      scheme: DESKTOP_DEVELOPMENT_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-        stream: true,
+        codeCache: !isDevelopment,
       },
     },
   ]);

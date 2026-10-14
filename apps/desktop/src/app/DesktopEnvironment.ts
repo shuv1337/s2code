@@ -5,6 +5,7 @@ import type {
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
 import * as Config from "effect/Config";
+import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,8 +16,8 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
-import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -103,7 +104,8 @@ function resolveDesktopAppStageLabel(input: {
     return "Dev";
   }
 
-  return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Alpha";
+  const channel = resolveChannelIdentity(input.appVersion).channel;
+  return channel === "preview" ? "Preview" : channel === "nightly" ? "Nightly" : "Alpha";
 }
 
 export function resolveDesktopAppBranding(input: {
@@ -168,6 +170,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     homeDirectory,
     joinPath: path.join,
     t3Home: config.t3Home,
+    appVersion: input.appVersion,
   });
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
@@ -236,14 +239,12 @@ const make = Effect.fn("desktop.environment.make")(function* (
     branding,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment
-        ? "dev.shuv.shuv2code.dev"
-        : isNightlyDesktopVersion(input.appVersion)
-          ? "dev.shuv.shuv2code.nightly"
-          : "dev.shuv.shuv2code",
+      isDevelopment ? "dev.shuv.shuv2code.dev" : resolveChannelIdentity(input.appVersion).appId,
     ),
-    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
-    linuxWmClass: isDevelopment ? "shuv2code-dev" : "shuv2code",
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment, input.appVersion),
+    linuxWmClass: isDevelopment
+      ? "shuv2code-dev"
+      : resolveChannelIdentity(input.appVersion).executableName,
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
@@ -288,3 +289,11 @@ const make = Effect.fn("desktop.environment.make")(function* (
 
 export const layer = (input: MakeDesktopEnvironmentInput) =>
   Layer.effect(DesktopEnvironment, make(input));
+
+/** Startup validates the final channel/configured home before any state is opened. */
+export const layerOwned = (input: MakeDesktopEnvironmentInput) =>
+  layer(input).pipe(
+    Layer.tap((context) =>
+      Effect.try(() => ensureProductHome(Context.get(context, DesktopEnvironment).baseDir)),
+    ),
+  );

@@ -89,16 +89,38 @@ update it with `git pull` and a rebuild.
 
 ## Desktop app
 
-Download a release from [GitHub Releases](https://github.com/pingdotgg/t3code/releases),
-or use a package manager:
+### Fork release channels
 
-| Platform           | Install                            |
-| ------------------ | ---------------------------------- |
-| Windows            | `winget install T3Tools.T3Code`    |
-| macOS              | `brew install --cask t3-code`      |
-| Debian, Ubuntu     | `sudo apt install ./T3-Code-*.deb` |
-| Arch Linux         | `yay -S t3code-bin`                |
-| Arch Linux nightly | `yay -S t3code-nightly-bin`        |
+Stable and nightly shuv2code are separate installations and can run together.
+They keep separate settings, connections, browser profiles, local server data,
+background services, and update feeds. Stable uses `~/.shuv2code-v2`; nightly
+uses `~/.shuv2code-v2-nightly`. Install the other channel separately rather than
+switching an installed app's update feed. If you override the data home, choose
+a different directory for each channel.
+
+Preview (including PR builds) is a third, independent installation using
+`~/.shuv2code-v2-preview`. It does not update automatically; replace it manually.
+Channel links use `shuv2code://`, `shuv2code-nightly://`, or
+`shuv2code-preview://`, respectively. Development owns only `shuv2code-dev://`.
+Stream Deck and other automation must use the intended channel's scheme, for
+example `shuv2code-nightly://threads/<environment-id>/<thread-id>` for nightly.
+
+Older local nightly builds used the shared stable home. A new nightly launch
+leaves that data untouched and logs its location; open stable to access it.
+Nothing is moved or copied automatically. To transfer data manually, stop both
+apps and their services first, back up the source, then copy into the separate
+nightly home while everything is offline. Do not share or link a live database.
+
+When a verified fork release is published, download the intended channel from
+[shuv2code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
+available yet, build the fork from source rather than installing upstream as a
+substitute. Upstream Winget, Homebrew and AUR packages do not install these fork
+identities. No fork Winget or Homebrew registration is configured here.
+
+On Debian/Ubuntu, install a downloaded fork DEB with
+`sudo apt install ./T3-Code-<version>-<arch>.deb`. The fork AUR definitions use
+`shuv2code-bin` and `shuv2code-nightly-bin`; use the AUR
+only after maintainers confirm those packages and their release checksums are published.
 
 The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the

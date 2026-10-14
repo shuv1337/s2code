@@ -30,6 +30,17 @@ const input = {
 const callbackUrl = `http://127.0.0.1:54213/auth/callback?state=${"a".repeat(43)}&code=one-time-code&client_id=oaiapp_test`;
 
 describe("Codex desktop handoff", () => {
+  it.each(["shuv2code", "shuv2code-nightly", "shuv2code-preview", "shuv2code-dev"])(
+    "returns OAuth handoffs to the owning %s installation",
+    (scheme) => {
+      const request = { ...input, returnUrl: `${scheme}://app/settings/providers` };
+      const link = codexAuthHandoffUrl(request);
+      expect(new URL(link).protocol).toBe(`${scheme}:`);
+      expect(readCodexAuthHandoff(link, false, scheme)).toEqual(request);
+      expect(readCodexAuthHandoff(link, false, "t3code")).toBeUndefined();
+      if (scheme !== "shuv2code") expect(readCodexAuthHandoff(link, false)).toBeUndefined();
+    },
+  );
   it("keeps the hosted return route, account, and environment with the code in a fragment", () => {
     expect(readCodexAuthHandoff(codexAuthHandoffUrl(input), false)).toEqual(input);
     const delivery = codexAuthDeliveryUrl(input, callbackUrl);

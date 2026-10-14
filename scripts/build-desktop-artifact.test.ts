@@ -267,6 +267,56 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
 });
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"])(
+    "packages only the channel-owned identities and schemes for %s",
+    (version) =>
+      Effect.gen(function* () {
+        const suffix = version.includes("-nightly.")
+          ? "nightly"
+          : version.includes("-preview.")
+            ? "preview"
+            : "";
+        const scheme = `shuv2code${suffix ? `-${suffix}` : ""}`;
+        for (const platform of ["mac", "linux", "win"] as const) {
+          const config = yield* createBuildConfig(
+            platform,
+            platform === "mac" ? "dmg" : platform === "linux" ? "AppImage" : "nsis",
+            version,
+            false,
+            false,
+            undefined,
+            undefined,
+          );
+          assert.equal(config.appId, `dev.shuv.shuv2code${suffix ? `.${suffix}` : ""}`);
+          assert.deepEqual(config.extraMetadata, { name: scheme });
+          const platformConfig = config[
+            platform === "linux" ? "linux" : platform === "mac" ? "mac" : "win"
+          ] as Record<string, unknown>;
+          const protocols = (
+            platform === "win" ? config.protocols : platformConfig.protocols
+          ) as Array<{ schemes: string[] }>;
+          assert.deepEqual(
+            protocols
+              .flatMap((entry) => entry.schemes)
+              .filter((entry) => entry !== "http" && entry !== "https"),
+            [scheme],
+          );
+          if (platform === "linux") {
+            assert.equal(platformConfig.executableName, scheme);
+            const files = (config.deb as { fpm: string[] }).fpm;
+            assert.isTrue(files.every((file) => !file.includes("com.t3tools")));
+            assert.isTrue(
+              files.some((file) => file.endsWith(`/usr/share/doc/${scheme}/copyright`)),
+            );
+            assert.equal(
+              files.filter((file) => file.includes("/usr/share/metainfo/")).length,
+              suffix === "" ? 1 : 0,
+            );
+          }
+          if (suffix === "preview") assert.notProperty(config, "publish");
+        }
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
@@ -724,11 +774,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       // Linux must register the renderer schemes so the generated .desktop
       // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "shuv2code", schemes: ["shuv2code", "shuv2code-dev", "shuv2code-nightly"] },
+        { name: "shuv2code", schemes: ["shuv2code"] },
       ]);
       // macOS also offers itself as a web browser, so it can be chosen as the default.
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).protocols, [
-        { name: "shuv2code", schemes: ["shuv2code", "shuv2code-dev", "shuv2code-nightly"] },
+        { name: "shuv2code", schemes: ["shuv2code"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
       // macOS lists a default browser only when it also opens web pages as documents.
@@ -2147,7 +2197,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
       assert.deepStrictEqual(mac.protocols, [
-        { name: "shuv2code", schemes: ["shuv2code", "shuv2code-dev", "shuv2code-nightly"] },
+        { name: "shuv2code", schemes: ["shuv2code"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),

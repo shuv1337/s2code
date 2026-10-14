@@ -6,6 +6,44 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 
 import { resolveUserDataPath } from "./DesktopUserData.ts";
+import * as Logger from "effect/Logger";
+
+it.effect.each(["nightly", "preview"])(
+  "uses a separate %s profile and leaves the old shared home untouched",
+  (channel) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "desktop-channel-home-" });
+      const shared = path.join(home, ".shuv2code-v2");
+      yield* fs.makeDirectory(shared);
+      yield* fs.writeFileString(path.join(shared, "statev2.sqlite"), "original-db");
+      const warnings: string[] = [];
+      const baseDir = path.join(home, `.shuv2code-v2-${channel}`);
+      const profile = yield* resolveUserDataPath({
+        appDataDirectory: home,
+        homeDirectory: home,
+        baseDir,
+        isDevelopment: false,
+        platform: "darwin",
+        appVersion: `1.2.3-${channel}.20261014.1`,
+      }).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make((options) => {
+              warnings.push(String(options.message));
+            }),
+          ]),
+        ),
+      );
+      assert.equal(profile, path.join(home, `shuv2code-v2-${channel}`));
+      assert.isFalse(yield* fs.exists(baseDir));
+      assert.equal(yield* fs.readFileString(path.join(shared, "statev2.sqlite")), "original-db");
+      assert.isTrue(
+        warnings.some((message) => message.includes("Existing shared data remains untouched")),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 it.effect("identifies a failed profile inspection and preserves its cause", () => {
   const sourceState = "/profiles/shuv2code-v2";

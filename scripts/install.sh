@@ -36,26 +36,6 @@ canonical_dir() (
   else printf '%s/%s\n' "$(canonical_dir "$(dirname "$1")")" "$(basename "$1")"
   fi
 )
-t3_home="$(canonical_dir "$t3_home")"
-case "$(printf '%s/' "$t3_home" | tr '[:upper:]' '[:lower:]')" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
-default_fork_home="$(canonical_dir "$HOME")/.shuv2code-v2"
-[ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
-[ ! -e "$t3_home/.product-identity" ] || [ -f "$t3_home/.product-identity" ] || fail "Product metadata must be a regular file."
-if [ -f "$t3_home/.product-identity" ]; then
-  home_product="$(tr -d '\r\n' < "$t3_home/.product-identity")"
-  case shuv2code in "$home_product"*) ;; *) fail "Home belongs to another product." ;; esac
-else home_product=
-fi
-if [ "$home_product" != shuv2code ] && [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home" | grep -v '^\.product-identity$')" ] && [ "$t3_home" != "$default_fork_home" ]; then
-  fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
-fi
-for child in userdata dev runtime; do
-  case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
-done
-mkdir -p "$t3_home"
-home_marker_tmp="$(mktemp "$t3_home/.product-identity.XXXXXX")"
-printf '%s\n' shuv2code > "$home_marker_tmp"
-mv "$home_marker_tmp" "$t3_home/.product-identity"
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
@@ -204,6 +184,40 @@ esac
 
 stem="t3-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
+command_name=shuv2code
+prerelease="${version#*-}"
+case "$prerelease" in
+  nightly.*) command_name=shuv2code-nightly ;;
+  preview.*|pr.*) command_name=shuv2code-preview ;;
+esac
+if [ -z "${SHUV2CODE_HOME:-}" ]; then
+  case "$prerelease" in
+    nightly.*) t3_home="$HOME/.shuv2code-v2-nightly" ;;
+    preview.*|pr.*) t3_home="$HOME/.shuv2code-v2-preview" ;;
+  esac
+fi
+t3_home="$(canonical_dir "$t3_home")"
+case "$(printf '%s/' "$t3_home" | tr '[:upper:]' '[:lower:]')" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
+user_home="$(canonical_dir "$HOME")"
+default_fork_home=false
+case "$t3_home" in "$user_home/.shuv2code-v2") default_fork_home=true ;; esac
+[ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
+[ ! -e "$t3_home/.product-identity" ] || [ -f "$t3_home/.product-identity" ] || fail "Product metadata must be a regular file."
+if [ -f "$t3_home/.product-identity" ]; then
+  home_product="$(tr -d '\r\n' < "$t3_home/.product-identity")"
+  case shuv2code in "$home_product"*) ;; *) fail "Home belongs to another product." ;; esac
+else home_product=
+fi
+if [ "$home_product" != shuv2code ] && [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home" | grep -v '^\.product-identity$')" ] && ! "$default_fork_home"; then
+  fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+fi
+for child in userdata dev runtime; do
+  case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
+done
+mkdir -p "$t3_home"
+home_marker_tmp="$(mktemp "$t3_home/.product-identity.XXXXXX")"
+printf '%s\n' shuv2code > "$home_marker_tmp"
+mv "$home_marker_tmp" "$t3_home/.product-identity"
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail "Invalid release version."
@@ -284,10 +298,10 @@ fi
 
 step "Setting up the shuv2code command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/shuv2code"
+ln -sfn "${target_dir}/t3" "${bin_dir}/$command_name"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled shuv2code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %sshuv2code%s to get started.\n\n' "$bold" "$reset" ;;
-  *) printf '  Add %s to your PATH, then run %sshuv2code%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %s%s%s to get started.\n\n' "$bold" "$command_name" "$reset" ;;
+  *) printf '  Add %s to your PATH, then run %s%s%s.\n\n' "$bin_dir" "$bold" "$command_name" "$reset" ;;
 esac
