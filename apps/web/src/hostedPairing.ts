@@ -79,8 +79,9 @@ export function buildHostedPairingUrl(input: {
 }): string {
   const hostOrigin = /^https?:\/\//.test(input.host) ? input.host : `http://${input.host}`;
   // Without a fork hosted client, pair against the destination's own web app.
-  const url = new URL("/pair", configuredHostedAppUrl() || hostOrigin);
-  url.searchParams.set("host", input.host);
+  const hostedOrigin = configuredHostedAppUrl();
+  const url = new URL("/pair", hostedOrigin || hostOrigin);
+  if (hostedOrigin) url.searchParams.set("host", input.host);
 
   const label = input.label?.trim();
   if (label) {

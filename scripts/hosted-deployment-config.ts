@@ -1,6 +1,8 @@
 import { forkHostedOrigin, forkClerkPublishableKey } from "../packages/shared/src/hostedConfig.ts";
 
 type Environment = Readonly<Record<string, string | undefined>>;
+export const RELAY_DEPLOYMENT_UNAVAILABLE_MESSAGE =
+  "Relay deployment is disabled until read-only PlanetScale and Axiom organization identity verification is implemented. Credentials and opt-in alone do not permit deployment.";
 export const HOSTED_DEPLOYMENT_VARIABLES = [
   "SHUV2CODE_HOSTED_APP_URL",
   "SHUV2CODE_WEB_LATEST_DOMAIN",
@@ -71,13 +73,14 @@ const record = (value: unknown) => {
   return value as Record<string, unknown>;
 };
 
-/** Read-only account/application/zone checks. Never deploy, create resources or log responses. */
+/** Read-only web identity checks. Relay stays unavailable; never mutate resources or log responses. */
 export async function verifyHostedDeploymentIdentities(
   env: Environment,
   target: "web" | "relay",
   request: (url: string, authorization: string) => Promise<unknown>,
 ) {
   const config = hostedDeploymentConfiguration(env);
+  if (target === "relay") throw new Error(RELAY_DEPLOYMENT_UNAVAILABLE_MESSAGE);
   const permittedRedirectOrigins = new Set(
     JSON.parse(env.FORK_HOSTED_REDIRECT_ORIGINS!) as string[],
   );
@@ -85,10 +88,6 @@ export async function verifyHostedDeploymentIdentities(
     if (!env[name]) throw new Error(`Hosted identity verification requires ${name}.`);
     return env[name]!;
   };
-  if (target === "relay") {
-    for (const name of ["PLANETSCALE_API_TOKEN_ID", "PLANETSCALE_API_TOKEN", "AXIOM_TOKEN"])
-      secret(name);
-  }
   const oauth = record(
     await request(
       `https://api.clerk.com/v1/oauth_applications/${encodeURIComponent(env.CLERK_OAUTH_APPLICATION_ID!)}`,
@@ -132,20 +131,6 @@ export async function verifyHostedDeploymentIdentities(
       const link = record(project.link);
       if (link.type !== "github" || link.org !== "shuv1337" || link.repo !== "shuv2code")
         throw new Error("Vercel project is linked to another repository; no deployment attempted.");
-    }
-  } else {
-    for (const name of new Set([config.apiZone, config.tunnelZone])) {
-      const zones = record(
-        await request(
-          `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(name)}`,
-          `Bearer ${secret("CLOUDFLARE_API_TOKEN")}`,
-        ),
-      );
-      if (zones.success !== true || !Array.isArray(zones.result) || zones.result.length !== 1)
-        throw new Error("Fork relay zone must exist and be uniquely accessible.");
-      const zone = record(zones.result[0]);
-      if (zone.name !== name || record(zone.account).id !== env.CLOUDFLARE_ACCOUNT_ID)
-        throw new Error("Relay zone/account identity does not match the fork configuration.");
     }
   }
   return config;

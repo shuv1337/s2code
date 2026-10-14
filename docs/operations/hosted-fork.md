@@ -5,6 +5,13 @@ clients or deployment jobs at upstream accounts, domains, resource state or OAut
 applications. CLI/desktop publication is independent: the #270 release pipeline
 does not invoke hosted jobs. No external setup is performed by these guards.
 
+**Relay deployment is currently refused even with complete configuration and
+opt-in.** Read-only PlanetScale and Axiom organization identity verification is
+not implemented. Credential presence is not ownership proof. Do not enable the
+relay until those checks (alongside Clerk and Cloudflare verification) exist;
+adding them requires separate maintainer direction. The guard reports this
+limitation and leaves deployment disabled. Web-preview verification is separate.
+
 Before enabling deployment, supply these **repository variables** (not values
 in the inherited upstream `production` environment):
 
@@ -36,13 +43,14 @@ redirects in that same fork auth instance before enabling clients.
 
 The reusable hosted preflight skips missing or upstream configuration with a
 notice and step summary, before any deployment job starts. For configured jobs it
-performs read-only Clerk OAuth, Vercel project/team or Cloudflare zone/account
-identity checks. Mismatch or lookup failure blocks deployment. Tokens and remote
+performs read-only Clerk OAuth and Vercel project/team identity checks for web
+previews. Relay jobs remain refused as described above. Mismatch or lookup failure blocks deployment. Tokens and remote
 responses are never printed. The relay stack/database/tunnel namespace is
 fork-owned; legacy tunnel cleanup is disabled. No upstream state is migrated.
 
-Use the guarded relay and web-preview workflows only after provisioning the
-declared resources and confirming permissions. Automatic upstream Vercel Git
+Use the guarded web-preview workflow only after provisioning the declared
+resources and confirming permissions; the relay workflow cannot currently deploy.
+Automatic upstream Vercel Git
 deployments remain disabled. Production web publication is not part of the fork
 release pipeline and requires a separately approved deployment workflow.
 

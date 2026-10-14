@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { installEnvironmentHttpTest } from "../test/environmentHttpTest";
 import { __setPrimaryHttpRunnerForTests, type PrimaryHttpEffectRunner } from "./lib/runtime";
+import { buildHostedPairingUrl, hasHostedPairingRequest, isHostedStaticApp } from "./hostedPairing";
 
 type TestWindow = {
   location: URL;
@@ -432,6 +433,48 @@ describe("resolveInitialServerAuthGateState", () => {
       }
     },
   );
+
+  it("opens the same-origin app with a cookie session after an unconfigured-hosted pairing fallback", async () => {
+    vi.stubEnv("VITE_HOSTED_APP_URL", "");
+    vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "");
+    vi.stubEnv("VITE_HTTP_URL", "");
+    vi.stubEnv("VITE_WS_URL", "");
+    const testWindow = installTestBrowser(
+      buildHostedPairingUrl({ host: "https://machine.tailnet.ts.net", token: "direct-token" }),
+    );
+    // The root route must choose primary cookie auth, not saved-bearer pairing.
+    expect(hasHostedPairingRequest(testWindow.location)).toBe(false);
+    expect(isHostedStaticApp(testWindow.location)).toBe(false);
+    let cookieSession = false;
+    const testApi = await installAuthApi({
+      session: () =>
+        cookieSession ? authenticatedSession(LOOPBACK_AUTH) : unauthenticatedSession(LOOPBACK_AUTH),
+      browserSession: () =>
+        Effect.sync(() => {
+          cookieSession = true;
+          return browserSession(["orchestration:read"]);
+        }),
+    });
+    const {
+      resolveInitialServerAuthGateState,
+      submitServerAuthCredential,
+      peekPairingTokenFromUrl,
+      __resetServerAuthBootstrapForTests,
+    } = await import("./environments/primary");
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "requires-auth",
+      auth: LOOPBACK_AUTH,
+    });
+    await submitServerAuthCredential(peekPairingTokenFromUrl()!);
+    expect(testApi.calls.browserSession).toEqual([{ credential: "direct-token" }]);
+    expect(testWindow.location.hash).toBe("");
+    // Match the existing pair route's navigation/reload, with no cached auth gate.
+    testWindow.history.replaceState({}, "", "/");
+    __resetServerAuthBootstrapForTests();
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({ status: "authenticated" });
+    expect(testApi.calls.browserSession).toHaveLength(1);
+    expect(testApi.calls.session).toBe(3);
+  });
 
   it("allows manual token submission after the initial auth check requires pairing", async () => {
     const nextSession = sequence(

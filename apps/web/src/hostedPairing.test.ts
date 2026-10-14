@@ -16,6 +16,7 @@ describe("hostedPairing", () => {
     );
     expect(url.origin).toBe("https://machine.tailnet.ts.net");
     expect(url.pathname).toBe("/pair");
+    expect(url.searchParams.has("host")).toBe(false);
     expect(url.hash).toBe("#token=fixture");
     expect(() => buildHostedChannelSelectionUrl({ channel: "nightly" })).toThrow("unavailable");
   });

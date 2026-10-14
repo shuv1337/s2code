@@ -8,6 +8,7 @@ import {
   hostedDeploymentConfiguration,
   verifyHostedDeploymentIdentities,
   HOSTED_DEPLOYMENT_VARIABLES,
+  RELAY_DEPLOYMENT_UNAVAILABLE_MESSAGE,
 } from "./hosted-deployment-config.ts";
 
 const env = {
@@ -49,20 +50,12 @@ const oauth = {
   authorize_url: "https://auth.fork.test/oauth/authorize",
   redirect_uris: ["http://127.0.0.1:34338/callback"],
 };
-const request = async (url: string) =>
-  url.includes("api.clerk.com")
-    ? oauth
-    : url.includes("api.vercel.com")
-      ? { id: env.VERCEL_PROJECT_ID, accountId: env.VERCEL_ORG_ID, rootDirectory: "apps/web" }
-      : {
-          success: true,
-          result: [
-            {
-              name: new URL(url).searchParams.get("name"),
-              account: { id: env.CLOUDFLARE_ACCOUNT_ID },
-            },
-          ],
-        };
+const request = async (url: string) => {
+  if (url.includes("api.clerk.com")) return oauth;
+  if (url.includes("api.vercel.com"))
+    return { id: env.VERCEL_PROJECT_ID, accountId: env.VERCEL_ORG_ID, rootDirectory: "apps/web" };
+  throw new Error("Unexpected identity request");
+};
 
 describe("hosted deployment gate", () => {
   it.each(HOSTED_DEPLOYMENT_VARIABLES)("requires explicit %s", (name) => {
@@ -94,7 +87,7 @@ describe("hosted deployment gate", () => {
     ).rejects.toThrow("not enabled");
     expect(calls).toBe(0);
   });
-  it.each(["web", "relay"] as const)(
+  it.each(["web"] as const)(
     "permits configured %s only after exact read-only identity checks",
     async (target) => {
       const urls: string[] = [];
@@ -103,7 +96,7 @@ describe("hosted deployment gate", () => {
         return request(url);
       });
       expect(urls[0]).toContain("/oauth_applications/oauthapp_fork");
-      expect(urls).toHaveLength(target === "web" ? 2 : 3);
+      expect(urls).toHaveLength(2);
     },
   );
   it.each([
@@ -117,24 +110,14 @@ describe("hosted deployment gate", () => {
       verifyHostedDeploymentIdentities(env, "web", async () => response),
     ).rejects.toThrow();
   });
-  it.each(["web", "relay"] as const)(
+  it.each(["web"] as const)(
     "refuses an accessible but differently owned %s destination",
     async (target) => {
       await expect(
         verifyHostedDeploymentIdentities(env, target, async (url) =>
           url.includes("api.clerk.com")
             ? oauth
-            : target === "web"
-              ? { id: env.VERCEL_PROJECT_ID, accountId: "upstream-team" }
-              : {
-                  success: true,
-                  result: [
-                    {
-                      name: new URL(url).searchParams.get("name"),
-                      account: { id: "upstream-account" },
-                    },
-                  ],
-                },
+            : { id: env.VERCEL_PROJECT_ID, accountId: "upstream-team" },
         ),
       ).rejects.toThrow();
     },
@@ -153,35 +136,53 @@ describe("hosted deployment gate", () => {
       ),
     ).rejects.toThrow("another repository");
   });
-  it("does not attempt identity requests without relay provisioning credentials", async () => {
-    let calls = 0;
-    await expect(
-      verifyHostedDeploymentIdentities({ ...env, PLANETSCALE_API_TOKEN: "" }, "relay", async () => {
-        calls++;
-        return {};
-      }),
-    ).rejects.toThrow("requires PLANETSCALE_API_TOKEN");
-    expect(calls).toBe(0);
-  });
-  it("skips unconfigured CI with a visible notice and false deployment output", () => {
-    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hosted-gate-"));
-    try {
-      const output = NodePath.join(directory, "output");
-      const summary = NodePath.join(directory, "summary");
-      const result = NodeChildProcess.spawnSync(
-        process.execPath,
-        [new URL("./hosted-deployment-preflight.ts", import.meta.url).pathname, "relay"],
-        {
-          env: { PATH: process.env.PATH, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary },
-          encoding: "utf8",
-        },
-      );
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain("::notice::Hosted deployment skipped");
-      expect(NodeFS.readFileSync(output, "utf8")).toBe("allowed=false\n");
-      expect(NodeFS.readFileSync(summary, "utf8")).toContain("CLI/desktop releases are unaffected");
-    } finally {
-      NodeFS.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+  it.each(["fixture", ""])(
+    "refuses relay deployment regardless of provisioning credentials (%s)",
+    async (token) => {
+      let calls = 0;
+      await expect(
+        verifyHostedDeploymentIdentities(
+          { ...env, PLANETSCALE_API_TOKEN: token },
+          "relay",
+          async () => {
+            calls++;
+            return {};
+          },
+        ),
+      ).rejects.toThrow(RELAY_DEPLOYMENT_UNAVAILABLE_MESSAGE);
+      expect(calls).toBe(0);
+    },
+  );
+  it.each([false, true])(
+    "keeps relay CI gated off with a visible reason, even when configured=%s",
+    (configured) => {
+      const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hosted-gate-"));
+      try {
+        const output = NodePath.join(directory, "output");
+        const summary = NodePath.join(directory, "summary");
+        const result = NodeChildProcess.spawnSync(
+          process.execPath,
+          [new URL("./hosted-deployment-preflight.ts", import.meta.url).pathname, "relay"],
+          {
+            env: {
+              ...(configured ? env : {}),
+              PATH: process.env.PATH,
+              GITHUB_OUTPUT: output,
+              GITHUB_STEP_SUMMARY: summary,
+            },
+            encoding: "utf8",
+          },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("::notice::Hosted deployment skipped");
+        expect(result.stdout).toContain(RELAY_DEPLOYMENT_UNAVAILABLE_MESSAGE);
+        expect(NodeFS.readFileSync(output, "utf8")).toBe("allowed=false\n");
+        expect(NodeFS.readFileSync(summary, "utf8")).toContain(
+          "CLI/desktop releases are unaffected",
+        );
+      } finally {
+        NodeFS.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });
