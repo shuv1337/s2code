@@ -114,7 +114,7 @@ export function makeDevelopmentEnvironmentScript(environment) {
     ["T3CODE_PORT", environment.T3CODE_PORT],
     ["T3CODE_HOME", environment.T3CODE_HOME],
     ["SHUV2CODE_PORT", environment.SHUV2CODE_PORT ?? environment.T3CODE_PORT],
-    ["SHUV2CODE_HOME", environment.SHUV2CODE_HOME ?? environment.T3CODE_HOME],
+    ["SHUV2CODE_HOME", environment.SHUV2CODE_HOME],
     ["T3CODE_COMMIT_HASH", environment.T3CODE_COMMIT_HASH],
     ["T3CODE_OTLP_TRACES_URL", environment.T3CODE_OTLP_TRACES_URL],
     ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],

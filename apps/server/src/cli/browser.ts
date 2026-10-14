@@ -25,6 +25,14 @@ import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
 import { resolveRootCliCommand } from "./invocation.ts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import packageJson from "../../package.json" with { type: "json" };
+
+export const browserSetupHomeForUser = (
+  path: Path.Path,
+  home: string,
+  version = packageJson.version,
+) => path.join(home, resolveChannelIdentity(version).homeDirectory);
 
 export class BrowserSetupStepError extends Schema.TaggedError<BrowserSetupStepError>()(
   "BrowserSetupStepError",
@@ -54,7 +62,7 @@ const runStep = Effect.fn("browserSetup.runStep")(function* (
 
 /**
  * The T3 home to check. Under `sudo` the process home is root's, so an
- * unspecified home falls back to the invoking user's `~/.t3`.
+ * unspecified home follows the running binary's channel in the invoking user's home.
  */
 const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Option.Option<string>) {
   const env = yield* HostProcess.Environment;
@@ -68,7 +76,7 @@ const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Opti
     .pipe(Effect.orElseSucceed(() => ""));
   const home = entry.trim().split(":")[5];
   const path = yield* Path.Path;
-  return yield* resolveBaseDir(home ? path.join(home, ".shuv2code-v2") : undefined);
+  return yield* resolveBaseDir(home ? browserSetupHomeForUser(path, home) : undefined);
 });
 
 /** Whether apt has an installable candidate for `name`. */

@@ -739,11 +739,7 @@ export const make = Effect.gen(function* () {
   const kdeCapturePaths = {
     bundle: environment.isPackaged
       ? path.join(environment.resourcesPath, "kde-capture", KDE_CAPTURE_EXECUTABLE)
-      : path.join(
-          environment.appRoot,
-          "native/kde-snap-shot/target/release",
-          KDE_CAPTURE_EXECUTABLE,
-        ),
+      : path.join(environment.appRoot, "native/kde-snap-shot/target/release", "t3-kde-snap-shot"),
     dataHome: path.dirname(environment.linuxApplicationsDir),
   };
   const hasGnomeSetup = () =>

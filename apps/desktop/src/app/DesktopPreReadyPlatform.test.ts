@@ -60,6 +60,11 @@ vi.mock("node:child_process", () => ({
   execFileSync: execFileSyncMock,
 }));
 
+// Home ownership has its own filesystem tests; this suite isolates Electron setup.
+vi.mock("@t3tools/shared/productHome", () => ({
+  ensureProductHome: vi.fn(),
+}));
+
 import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 
 describe("DesktopPreReadyPlatform", () => {

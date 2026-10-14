@@ -20,7 +20,11 @@ vi.mock("electron", () => ({
 import { LinuxCaptureConnection } from "./LinuxSnapShot.ts";
 import { startNiriCaptureShortcut } from "./NiriCaptureShortcut.ts";
 import { GnomeCaptureSetup } from "./GnomeCaptureSetup.ts";
-import { GNOME_CAPTURE_UUID } from "./gnomeCaptureBundle.ts";
+import {
+  GNOME_CAPTURE_UUID,
+  GNOME_CAPTURE_DBUS_NAME,
+  gnomeCaptureClientName,
+} from "./gnomeCaptureBundle.ts";
 
 const hasDbus =
   NodeChildProcess.spawnSync("dbus-daemon", ["--version"]).status === 0 &&
@@ -58,7 +62,7 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
     server = sessionBus({ busAddress: String(address) });
     server.on("error", () => undefined);
     await server.requestName("org.freedesktop.portal.Desktop", NameFlag.DO_NOT_QUEUE);
-    await server.requestName("org.gnome.Shell.Extensions.T3SnapShot", NameFlag.DO_NOT_QUEUE);
+    await server.requestName(GNOME_CAPTURE_DBUS_NAME, NameFlag.DO_NOT_QUEUE);
     await server.requestName("org.gnome.Shell", NameFlag.DO_NOT_QUEUE);
     await server.requestName("org.kde.KWin.ScreenShot2", NameFlag.DO_NOT_QUEUE);
     const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
@@ -181,7 +185,7 @@ it.runIf(hasDbus)("captures through real D-Bus marshalling on a private bus", as
         interface: "org.freedesktop.DBus",
         member: "GetNameOwner",
         signature: "s",
-        body: ["com.t3tools.T3Code.SnapShot"],
+        body: [gnomeCaptureClientName("com.t3tools.T3Code")],
       }),
     );
     expect(owner?.body[0]).toBe(clientName);

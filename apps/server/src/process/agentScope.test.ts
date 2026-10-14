@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -60,6 +61,8 @@ const withFakeSystemd = <A, E>(
   body: (input: {
     readonly scope: Effect.Success<typeof make>;
     readonly units: Map<string, { activeState: string; result: string }>;
+    readonly calls: Array<{ command: string; args: ReadonlyArray<string> }>;
+    readonly awaitReset: (unit: string) => Effect.Effect<void>;
   }) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
@@ -68,6 +71,13 @@ const withFakeSystemd = <A, E>(
       NodeFS.writeFileSync(NodePath.join(bin, name), "", { mode: 0o755 });
     }
     const units = new Map<string, { activeState: string; result: string }>();
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    const resetSignals = new Map<string, Deferred.Deferred<void>>();
+    const resetSignal = (unit: string) => {
+      const signal = resetSignals.get(unit) ?? Deferred.makeUnsafe<void>();
+      resetSignals.set(unit, signal);
+      return signal;
+    };
     const output = (stdout: string): ProcessRunner.ProcessRunOutput => ({
       stdout,
       stderr: "",
@@ -79,10 +89,14 @@ const withFakeSystemd = <A, E>(
       stderrInvalidUtf8: false,
     });
     const runner = ProcessRunner.ProcessRunner.of({
-      run: ({ args }) =>
-        Effect.sync(() => {
+      run: ({ command, args }) =>
+        Effect.gen(function* () {
+          calls.push({ command, args });
           const [, verb, unit = ""] = args;
-          if (verb === "reset-failed") units.delete(unit);
+          if (verb === "reset-failed") {
+            units.delete(unit);
+            yield* Deferred.succeed(resetSignal(unit), undefined);
+          }
           if (verb !== "show") return output("");
           const state = units.get(unit);
           return output(
@@ -97,7 +111,12 @@ const withFakeSystemd = <A, E>(
       Effect.provideService(HostProcess.Platform, "linux"),
       Effect.provideService(HostProcess.Environment, { PATH: bin, XDG_RUNTIME_DIR: "/run/user/1" }),
     );
-    return yield* body({ scope, units }).pipe(
+    return yield* body({
+      scope,
+      units,
+      calls,
+      awaitReset: (unit) => Deferred.await(resetSignal(unit)),
+    }).pipe(
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(bin, { recursive: true, force: true }))),
     );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -106,6 +125,92 @@ const unitOf = (launch: { readonly args: ReadonlyArray<string> }) =>
   launch.args.find((arg) => arg.startsWith("--unit="))?.slice("--unit=".length) ?? "";
 
 describe("AgentScope service", () => {
+  it.effect("creates and limits the fork slice for both agents and terminals", () =>
+    withFakeSystemd(({ scope, calls }) =>
+      Effect.gen(function* () {
+        const agent = yield* scope.wrap({
+          command: "agent",
+          args: [],
+          name: "claude",
+          threadId: "thread",
+        });
+        const terminal = yield* scope.wrap({ command: "agent", args: [], name: "terminal" });
+        for (const launch of [agent, terminal]) {
+          expect(launch.args).toContain("--slice=app-shuv2code-agents.slice");
+          expect(unitOf(launch)).toMatch(/^shuv2code-(claude|terminal)-[0-9a-f]{8}\.scope$/);
+        }
+        const probe = calls.find(({ args }) => args.includes("--scope"));
+        expect(probe?.args).toContain("--slice=app-shuv2code-agents.slice");
+        const limits = calls.filter(({ args }) => args.includes("set-property"));
+        expect(limits).toHaveLength(1);
+        expect(limits[0]?.args).toEqual([
+          "--user",
+          "set-property",
+          "--runtime",
+          "app-shuv2code-agents.slice",
+          expect.stringMatching(/^MemoryHigh=\d+$/),
+          expect.stringMatching(/^MemoryMax=\d+$/),
+        ]);
+        expect(calls.every(({ args }) => args.every((arg) => !arg.includes("t3code")))).toBe(true);
+      }),
+    ),
+  );
+
+  it.effect(
+    "inspects and cleans only its exact tracked scopes, never upstream or other fork scopes",
+    () =>
+      withFakeSystemd(({ scope, units, calls, awaitReset }) =>
+        Effect.gen(function* () {
+          const foreign = new Map([
+            ["app-t3code-agents.slice", { activeState: "failed", result: "oom-kill" }],
+            ["t3code-claude-deadbeef.scope", { activeState: "failed", result: "oom-kill" }],
+            ["t3code-terminal-deadbeef.scope", { activeState: "failed", result: "exit-code" }],
+            ["shuv2code-terminal-deadbeef.scope", { activeState: "failed", result: "oom-kill" }],
+          ]);
+          for (const [unit, state] of foreign) units.set(unit, state);
+          const own: string[] = [];
+          const launch = () =>
+            Effect.gen(function* () {
+              const wrapped = yield* scope.wrap({
+                command: "agent",
+                args: [],
+                name: "claude",
+                threadId: "thread",
+              });
+              const unit = unitOf(wrapped);
+              own.push(unit);
+              units.set(unit, { activeState: "failed", result: "oom-kill" });
+              return unit;
+            });
+          const first = yield* launch();
+          expect(yield* scope.oomKilled("thread")).toBe(true);
+          yield* awaitReset(first);
+          const second = yield* launch();
+          const third = yield* launch(); // Replacement schedules cleanup of the second scope.
+          yield* awaitReset(second);
+          yield* scope.clear("thread");
+          yield* awaitReset(third);
+          for (const unit of foreign.keys()) {
+            yield* scope.clear(unit);
+            expect(yield* scope.oomKilled(unit)).toBe(false);
+          }
+          expect(units).toEqual(foreign);
+          const cleanup = calls.filter(({ args }) => args[1] === "reset-failed");
+          expect(cleanup.map(({ args }) => args[2]).sort()).toEqual([...own].sort());
+          const inspection = calls.filter(({ args }) => args[1] === "show");
+          expect(inspection.length).toBeGreaterThan(0);
+          expect(inspection.every(({ args }) => own.includes(args[2] ?? ""))).toBe(true);
+          expect(
+            calls.some(
+              ({ args }) =>
+                args.includes("stop") ||
+                args.includes("list-units") ||
+                args.some((arg) => arg.includes("*")),
+            ),
+          ).toBe(false);
+        }),
+      ),
+  );
   it.effect("labels a thread from its newest scope until its next session clears it", () =>
     withFakeSystemd(({ scope, units }) =>
       Effect.gen(function* () {
