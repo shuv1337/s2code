@@ -1135,25 +1135,6 @@ export function EnvironmentProviderSettings({
       <SettingsSection
         {...searchableSetting("providers")}
         variant="plain"
-        titleAction={
-          !readOnly ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                    aria-label="Add provider"
-                  >
-                    <PlusIcon />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Add provider</TooltipPopup>
-            </Tooltip>
-          ) : null
-        }
         headerAction={
           <div className="flex min-w-0 items-center gap-2">
             <ProviderUpdatesAction />
@@ -1186,6 +1167,18 @@ export function EnvironmentProviderSettings({
       >
         {deviceTabs ? (
           <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">{deviceTabs}</div>
+        ) : null}
+        {!readOnly ? (
+          <div className="flex justify-end px-3 pb-3 sm:px-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsAddInstanceDialogOpen(true)}
+              aria-label="Add provider"
+            >
+              <PlusIcon aria-hidden="true" />
+              Add provider
+            </Button>
+          </div>
         ) : null}
         {readOnly ? (
           <SettingsGroup divided={false} className="overflow-hidden">
