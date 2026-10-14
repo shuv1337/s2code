@@ -18,6 +18,19 @@ import { createBuildConfig } from "./build-desktop-artifact.ts";
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "..");
 const aurRoot = NodePath.join(repoRoot, "packaging/aur");
+
+it("ignores downloaded fork AUR licenses without hiding recipes", () => {
+  for (const name of ["shuv2code-bin", "shuv2code-nightly-bin"]) {
+    const license = `packaging/aur/${name}/${name}-1.2.3-LICENSE`;
+    const ignored = NodeChildProcess.spawnSync("git", ["check-ignore", "--no-index", "--stdin"], {
+      cwd: repoRoot,
+      input: `${license}\npackaging/aur/${name}/PKGBUILD\n`,
+      encoding: "utf8",
+    });
+    expect(ignored.status).toBe(0);
+    expect(ignored.stdout.trim()).toBe(license);
+  }
+});
 const versions = ["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"];
 const windowsHost = HostProcess.Platform.defaultValue() === "win32";
 const shellIt = it.skipIf(windowsHost);
@@ -74,13 +87,17 @@ it.effect(
           expect(deb).not.toHaveProperty(claim);
         // electron-builder 26.15.6 FpmTarget maps the app tree to /opt/<sanitizedProductName>,
         // executableName to desktop/icons, and the after-install script creates its command link.
+        // This reconstructed inventory is not proof of final package contents:
+        // inspect real DEBs with dpkg-deb --contents and Arch packages with
+        // pacman -Qlp before release, including the extracted AppImage layout.
         // These product names contain no filename characters that need sanitizing.
         const files = [
           `/opt/${String(config.productName)}/resources/app.asar`,
           `/opt/${String(config.productName)}/${linux.executableName}`,
           `/usr/bin/${linux.executableName}`,
           `/usr/share/applications/${linux.executableName}.desktop`,
-          ...[16, 32, 48, 64, 128, 256, 512].map(
+          `/etc/apparmor.d/${linux.executableName}`,
+          ...[16, 22, 24, 32, 48, 64, 128, 256, 512].map(
             (size) => `/usr/share/icons/hicolor/${size}x${size}/apps/${linux.executableName}.png`,
           ),
           ...deb.fpm.map((mapping) => mapping.slice(mapping.indexOf("=") + 1)),
