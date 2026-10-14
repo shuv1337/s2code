@@ -42,20 +42,6 @@ function Assert-ProductPath([string] $directory) {
     $current = $parent
   }
 }
-$t3Home = [IO.Path]::GetFullPath($t3Home)
-Assert-ProductPath $t3Home
-if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
-$defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
-$homeMarker = Join-Path $t3Home ".product-identity"
-Assert-ProductPath $homeMarker
-if (Test-Path -LiteralPath $homeMarker) {
-  if ((Get-Content -LiteralPath $homeMarker -Raw).Trim() -ne "shuv2code") { Fail "Home belongs to another product." }
-} elseif ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force).Count -gt 0 -and $t3Home -ne $defaultForkHome) {
-  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
-}
-foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
-New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
-Set-Content -LiteralPath $homeMarker -Value "shuv2code"
 
 $terminal = -not [Console]::IsErrorRedirected -and $env:TERM -ne "dumb"
 $interactive = $terminal -and $Host.UI.SupportsVirtualTerminal
@@ -186,10 +172,24 @@ $stem = "t3-$version-win32-$arch"
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
 $commandName = if ($version -match '^[^-+]+-nightly\.') { "shuv2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "shuv2code-preview" } else { "shuv2code" }
-if (-not $env:T3CODE_HOME) {
+if (-not $env:SHUV2CODE_HOME) {
   if ($version -match '^[^-+]+-nightly\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-nightly" }
   elseif ($version -match '^[^-+]+-(preview|pr)\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-preview" }
 }
+$t3Home = [IO.Path]::GetFullPath($t3Home)
+Assert-ProductPath $t3Home
+if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
+$defaultForkHomes = @(".shuv2code-v2", ".shuv2code-v2-nightly", ".shuv2code-v2-preview") | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $HOME $_)) }
+$homeMarker = Join-Path $t3Home ".product-identity"
+Assert-ProductPath $homeMarker
+if (Test-Path -LiteralPath $homeMarker) {
+  if ((Get-Content -LiteralPath $homeMarker -Raw).Trim() -ne "shuv2code") { Fail "Home belongs to another product." }
+} elseif ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force).Count -gt 0 -and $defaultForkHomes -notcontains $t3Home) {
+  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+}
+foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
+New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
+Set-Content -LiteralPath $homeMarker -Value "shuv2code"
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"

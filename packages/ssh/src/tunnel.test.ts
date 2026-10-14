@@ -827,7 +827,7 @@ describe("archive runner script", () => {
           SshTunnel.buildRemoteT3RunnerScript({ archiveVersion, releaseBaseUrl }),
         );
         const home = `${root}/home`;
-        const cache = `${home}/.shuv2code-v2/runtime/versions/${archiveVersion}`;
+        const cache = `${home}/.shuv2code-v2-preview/runtime/versions/${archiveVersion}`;
         yield* fs.makeDirectory(cache, { recursive: true });
         const sentinel = "#!/bin/sh\necho upstream-sentinel\nexit 1\n";
         yield* fs.writeFileString(`${cache}/t3`, sentinel);

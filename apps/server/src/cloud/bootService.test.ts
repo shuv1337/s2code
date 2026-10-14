@@ -136,7 +136,7 @@ it.each(["nightly", "preview"])(
     };
     const unit = BootService.renderBootServiceUnit(plan);
     expect(unit).toContain(`T3_BOOT_SERVICE_UNIT=shuv2code-v2-${channel}.service`);
-    expect(unit).toContain(`T3CODE_HOME=/home/theo/.shuv2code-v2-${channel}`);
+    expect(unit).toContain(`SHUV2CODE_HOME=/home/theo/.shuv2code-v2-${channel}`);
     const plist = BootService.renderBootServicePlist(plan, {
       homeDir: "/home/theo",
       environmentPath: "/usr/bin",

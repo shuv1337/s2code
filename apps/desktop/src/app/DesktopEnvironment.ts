@@ -5,6 +5,7 @@ import type {
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
 import * as Config from "effect/Config";
+import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -288,3 +289,11 @@ const make = Effect.fn("desktop.environment.make")(function* (
 
 export const layer = (input: MakeDesktopEnvironmentInput) =>
   Layer.effect(DesktopEnvironment, make(input));
+
+/** Startup validates the final channel/configured home before any state is opened. */
+export const layerOwned = (input: MakeDesktopEnvironmentInput) =>
+  layer(input).pipe(
+    Layer.tap((context) =>
+      Effect.try(() => ensureProductHome(Context.get(context, DesktopEnvironment).baseDir)),
+    ),
+  );

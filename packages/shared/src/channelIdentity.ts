@@ -1,4 +1,9 @@
 import { DEFAULT_HOME_DIRECTORY } from "./productIdentity.ts";
+export const CHANNEL_HOME_DIRECTORIES = {
+  stable: DEFAULT_HOME_DIRECTORY,
+  nightly: `${DEFAULT_HOME_DIRECTORY}-nightly`,
+  preview: `${DEFAULT_HOME_DIRECTORY}-preview`,
+} as const;
 export const SEPARATE_CHANNEL_INSTALL_MESSAGE =
   "Release channels are separate installations. Install the other channel separately instead of updating this installation across channels.";
 
@@ -18,7 +23,7 @@ export function resolveChannelIdentity(version: string) {
   const suffix = channel === "stable" ? "" : `-${channel}`;
   return {
     channel,
-    homeDirectory: `${DEFAULT_HOME_DIRECTORY}${suffix}`,
+    homeDirectory: CHANNEL_HOME_DIRECTORIES[channel],
     profileDirectory: `shuv2code-v2${suffix}`,
     scheme: `shuv2code${suffix}`,
     appId: `dev.shuv.shuv2code${channel === "stable" ? "" : `.${channel}`}`,

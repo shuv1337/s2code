@@ -36,20 +36,6 @@ canonical_dir() (
   else printf '%s/%s\n' "$(canonical_dir "$(dirname "$1")")" "$(basename "$1")"
   fi
 )
-t3_home="$(canonical_dir "$t3_home")"
-case "$t3_home/" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
-default_fork_home="$(canonical_dir "$HOME")/.shuv2code-v2"
-[ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
-if [ -f "$t3_home/.product-identity" ]; then
-  [ "$(tr -d '\r' < "$t3_home/.product-identity")" = shuv2code ] || fail "Home belongs to another product."
-elif [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home")" ] && [ "$t3_home" != "$default_fork_home" ]; then
-  fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
-fi
-for child in userdata dev runtime; do
-  case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
-done
-mkdir -p "$t3_home"
-printf '%s\n' shuv2code > "$t3_home/.product-identity"
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
@@ -204,12 +190,28 @@ case "$prerelease" in
   nightly.*) command_name=shuv2code-nightly ;;
   preview.*|pr.*) command_name=shuv2code-preview ;;
 esac
-if [ -z "${T3CODE_HOME:-}" ]; then
+if [ -z "${SHUV2CODE_HOME:-}" ]; then
   case "$prerelease" in
     nightly.*) t3_home="$HOME/.shuv2code-v2-nightly" ;;
     preview.*|pr.*) t3_home="$HOME/.shuv2code-v2-preview" ;;
   esac
 fi
+t3_home="$(canonical_dir "$t3_home")"
+case "$t3_home/" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
+user_home="$(canonical_dir "$HOME")"
+default_fork_home=false
+case "$t3_home" in "$user_home/.shuv2code-v2"|"$user_home/.shuv2code-v2-nightly"|"$user_home/.shuv2code-v2-preview") default_fork_home=true ;; esac
+[ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
+if [ -f "$t3_home/.product-identity" ]; then
+  [ "$(tr -d '\r' < "$t3_home/.product-identity")" = shuv2code ] || fail "Home belongs to another product."
+elif [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home")" ] && ! "$default_fork_home"; then
+  fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+fi
+for child in userdata dev runtime; do
+  case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
+done
+mkdir -p "$t3_home"
+printf '%s\n' shuv2code > "$t3_home/.product-identity"
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail "Invalid release version."

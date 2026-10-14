@@ -30,6 +30,15 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
       NodeFS.mkdirSync(shared, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(shared, "statev2.sqlite"), "original-state");
       for (const channel of ["stable", "nightly", "preview"]) {
+        const suffix = channel === "stable" ? "" : `-${channel}`;
+        const channelHome = NodePath.join(home, `.shuv2code-v2${suffix}`);
+        if (channel !== "stable") {
+          NodeFS.mkdirSync(NodePath.join(channelHome, "userdata"), { recursive: true });
+          NodeFS.writeFileSync(
+            NodePath.join(channelHome, "userdata", "statev2.sqlite"),
+            "existing-channel-state",
+          );
+        }
         const version = `1.2.3${channel === "stable" ? "" : `-${channel}.20261014.1`}`;
         const stem = `t3-${version}-${platform}-${arch}`;
         const source = NodePath.join(root, stem);
@@ -48,11 +57,12 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
         const env = {
           ...process.env,
           HOME: home,
-          T3CODE_HOME: "",
-          T3CODE_CHANNEL: channel,
-          T3CODE_VERSION: version,
-          T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-          T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+          T3CODE_HOME: NodePath.join(root, ".t3"),
+          SHUV2CODE_HOME: "",
+          SHUV2CODE_CHANNEL: channel,
+          SHUV2CODE_VERSION: version,
+          SHUV2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+          SHUV2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
         };
         const child = NodeChildProcess.spawn(
           "sh",
@@ -71,7 +81,19 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
           child.on("error", reject);
         });
         expect(code, output).toBe(0);
-        const suffix = channel === "stable" ? "" : `-${channel}`;
+        expect(
+          NodeFS.readFileSync(NodePath.join(channelHome, ".product-identity"), "utf8").trim(),
+        ).toBe("shuv2code");
+        expect(
+          NodeFS.readFileSync(
+            NodePath.join(channelHome, "runtime", "versions", version, ".install-product"),
+            "utf8",
+          ).trim(),
+        ).toBe("shuv2code");
+        if (channel !== "stable")
+          expect(
+            NodeFS.readFileSync(NodePath.join(channelHome, "userdata", "statev2.sqlite"), "utf8"),
+          ).toBe("existing-channel-state");
         expect(
           NodeFS.readFileSync(
             NodePath.join(

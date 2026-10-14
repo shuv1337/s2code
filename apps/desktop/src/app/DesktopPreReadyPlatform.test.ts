@@ -45,7 +45,12 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("node:fs", () => ({
-  readFileSync: () => "{}",
+  readFileSync: (file: string) => (file.endsWith(".product-identity") ? "shuv2code\n" : "{}"),
+  realpathSync: (file: string) => file,
+  statSync: () => {
+    throw Object.assign(new Error("Missing fixture path"), { code: "ENOENT" });
+  },
+  existsSync: () => false,
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
   copyFileSync: copyFileSyncMock,

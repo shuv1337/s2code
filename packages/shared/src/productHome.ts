@@ -2,7 +2,8 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
-import { DEFAULT_HOME_DIRECTORY, PRODUCT_HOME_MARKER, PRODUCT_ID } from "./productIdentity.ts";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "./productIdentity.ts";
+import { CHANNEL_HOME_DIRECTORIES } from "./channelIdentity.ts";
 
 /** Resolve existing ancestors too, so a new child of an upstream symlink is not adopted. */
 export function canonicalProductPath(directory: string): string {
@@ -77,8 +78,10 @@ export function ensureProductHome(directory: string, claim = true): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     const entries = NodeFS.existsSync(canonical) ? NodeFS.readdirSync(canonical) : [];
-    const defaultHome =
-      canonical === NodePath.join(canonicalProductPath(NodeOS.homedir()), DEFAULT_HOME_DIRECTORY);
+    const userHome = canonicalProductPath(NodeOS.homedir());
+    const defaultHome = Object.values(CHANNEL_HOME_DIRECTORIES).some(
+      (name) => canonical === NodePath.join(userHome, name),
+    );
     if (entries.length && !defaultHome && !developmentHome) {
       throw new Error(
         `Cannot establish product ownership of ${directory}. Choose an empty SHUV2CODE_HOME. For an existing fork installation, verify it offline before adding ${PRODUCT_HOME_MARKER} containing ${PRODUCT_ID}; this is not an upstream import.`,

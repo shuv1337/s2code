@@ -11,6 +11,11 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, expect, it } from "@effect/vitest";
 import { resolveServerConfig, type CliServerFlags } from "./config.ts";
+import { vi } from "vite-plus/test";
+vi.mock("../../package.json", async (importOriginal) => {
+  const actual = await importOriginal<{ default: typeof import("../../package.json") }>();
+  return { default: { ...actual.default, version: "1.2.3" } };
+});
 
 let root: string;
 beforeEach(() => {
