@@ -97,6 +97,16 @@ function runInstaller(kind: "sh" | "pwsh") {
     powershell,
     `
 Set-Variable HOME ${psQuote(home)} -Force
+if ($env:FIXTURE_FAIL_PUBLISH) {
+  function Move-Item {
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)] $InputObject, $Path, $LiteralPath, $Destination)
+    process {
+      $source = if ($LiteralPath) { $LiteralPath } elseif ($Path) { $Path } else { $InputObject.FullName }
+      if ([string]$source -match '[\\\\/]\\.staging-' -and [IO.Path]::GetFileName($Destination) -eq '1.2.3') { throw 'injected publish failure' }
+      Microsoft.PowerShell.Management\\Move-Item -LiteralPath $source -Destination $Destination -ErrorAction Stop
+    }
+  }
+}
 function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
   Add-Content $env:FIXTURE_REQUESTS $Uri
   if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, '${digest}  t3-1.2.3-win32-x64.zip') }
@@ -129,6 +139,53 @@ function seedCache(directory: string, marker: string, kind: "sh" | "pwsh") {
 describe
   .skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))
   .each(["sh", "pwsh"] as const)("%s installer isolation", (kind) => {
+  it.skipIf(kind === "pwsh" && !hasPwsh)(
+    "restores the old cache and installed command when publication fails",
+    () => {
+      const cache = seedCache(NodePath.join(home, ".shuv2code-v2"), version, kind);
+      NodeFS.mkdirSync(env.SHUV2CODE_INSTALL_BIN_DIR!, { recursive: true });
+      const command = NodePath.join(
+        env.SHUV2CODE_INSTALL_BIN_DIR!,
+        kind === "sh" ? "shuv2code" : "shuv2code.cmd",
+      );
+      if (kind === "sh") NodeFS.symlinkSync(NodePath.join(cache, "t3"), command);
+      else NodeFS.writeFileSync(command, "previous-windows-shim");
+      env.FIXTURE_FAIL_PUBLISH = "true";
+      if (kind === "sh")
+        NodeFS.writeFileSync(
+          NodePath.join(fixtureBin, "mv"),
+          '#!/bin/sh\ncase "$1" in */.staging-*) exit 55 ;; esac\nexec /bin/mv "$@"\n',
+          { mode: 0o755 },
+        );
+      const result = runInstaller(kind);
+      expect(result.status, result.stdout + result.stderr).not.toBe(0);
+      expect(
+        NodeFS.readFileSync(NodePath.join(cache, kind === "sh" ? "t3" : "t3.exe"), "utf8"),
+      ).toBe("upstream-sentinel");
+      expect(NodeFS.readFileSync(NodePath.join(cache, ".install-complete"), "utf8")).toBe(version);
+      expect(NodeFS.readdirSync(NodePath.dirname(cache))).toEqual([version]);
+      expect(NodeFS.readFileSync(command, "utf8")).toBe(
+        kind === "sh" ? "upstream-sentinel" : "previous-windows-shim",
+      );
+    },
+  );
+  it.skipIf(kind === "pwsh" && !hasPwsh).each(["", "shuv", "shuv2cod"])(
+    "recovers an incomplete marker %j only inside the known default home",
+    (marker) => {
+      const directory = NodePath.join(home, ".shuv2code-v2");
+      const cache = seedCache(directory, version, kind);
+      NodeFS.writeFileSync(NodePath.join(directory, ".product-identity"), marker);
+      NodeFS.writeFileSync(NodePath.join(cache, ".install-product"), marker);
+      const result = runInstaller(kind);
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      expect(
+        NodeFS.readFileSync(NodePath.join(directory, ".product-identity"), "utf8").trim(),
+      ).toBe("shuv2code");
+      expect(NodeFS.readFileSync(NodePath.join(cache, ".install-product"), "utf8").trim()).toBe(
+        "shuv2code",
+      );
+    },
+  );
   it.skipIf(kind === "pwsh" && !hasPwsh)(
     "ignores inherited upstream home, version and release origin",
     () => {
@@ -211,16 +268,16 @@ describe
       );
     },
   );
-  it.skipIf(kind === "pwsh" && !hasPwsh)(
-    "refuses an explicit upstream home without altering it",
-    () => {
-      env.SHUV2CODE_HOME = env.T3CODE_HOME;
-      const cache = seedCache(env.T3CODE_HOME!, version, kind);
+  it.skipIf(kind === "pwsh" && !hasPwsh).each([".t3", ".T3"])(
+    "refuses an explicit upstream home %s without altering it",
+    (name) => {
+      env.SHUV2CODE_HOME = NodePath.join(home, name);
+      const cache = seedCache(env.SHUV2CODE_HOME, version, kind);
       const result = runInstaller(kind);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("upstream .t3 home");
       expect(NodeFS.readFileSync(NodePath.join(cache, ".install-complete"), "utf8")).toBe(version);
-      expect(NodeFS.existsSync(NodePath.join(env.T3CODE_HOME!, ".product-identity"))).toBe(false);
+      expect(NodeFS.existsSync(NodePath.join(env.SHUV2CODE_HOME, ".product-identity"))).toBe(false);
     },
   );
 });

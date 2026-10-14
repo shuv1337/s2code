@@ -1,8 +1,14 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Isolated launcher migration subprocesses and fixtures, never a live service.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { Launcher, readServiceState, writeServiceState } from "./serviceLauncher.ts";
 import {
@@ -13,6 +19,67 @@ import {
   SERVICE_RESTART_PENDING_FILE,
   SERVICE_STOP_MARKER_FILE,
 } from "./cloud/serviceProtocol.ts";
+
+it
+  .skipIf(HostProcess.Platform.defaultValue() === "win32")
+  .each(["legacy-unit", "unmarked-runtime"])(
+  "pauses %s with actionable reinstall guidance instead of exiting into a restart loop",
+  async (kind) => {
+    const directory = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "fork-paused-launcher-"),
+    );
+    if (kind === "unmarked-runtime") {
+      await NodeFSP.writeFile(NodePath.join(directory, ".product-identity"), "shuv2code\n");
+      await writeServiceState(NodePath.join(directory, "runtime", "service-state.json"), {
+        protocol: SERVICE_LAUNCHER_PROTOCOL,
+        activeVersion: "1.2.3",
+      });
+      const cache = NodePath.join(directory, "runtime", "versions", "1.2.3");
+      await NodeFSP.mkdir(cache, { recursive: true });
+      await NodeFSP.writeFile(
+        NodePath.join(cache, HostProcess.Platform.defaultValue() === "win32" ? "t3.exe" : "t3"),
+        "must not execute",
+      );
+      await NodeFSP.writeFile(NodePath.join(cache, ".install-complete"), "1.2.3\n");
+    }
+    const env = {
+      ...process.env,
+      T3CODE_HOME: "/unowned-upstream-home",
+      SHUV2CODE_HOME: kind === "legacy-unit" ? undefined : directory,
+    };
+    const child = NodeChildProcess.spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        "import { main } from './apps/server/src/serviceLauncher.ts'; await main();",
+      ],
+      { cwd: process.cwd(), env, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", resolve);
+    });
+    try {
+      let message = "";
+      await new Promise<void>((resolve, reject) => {
+        child.stderr!.on("data", (chunk) => {
+          message += chunk.toString();
+          if (message.includes("Service paused")) resolve();
+        });
+        child.once("exit", () => reject(new Error(`Launcher exited before pausing: ${message}`)));
+      });
+      assert.include(message, "shuv2code service install");
+      assert.include(message, "SHUV2CODE_HOME");
+      assert.isNull(child.exitCode);
+    } finally {
+      child.kill("SIGTERM");
+      await exited;
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+    assert.equal(child.exitCode, 0);
+  },
+);
 
 it("accepts only exact semantic versions", () => {
   for (const version of ["0.0.0", "1.2.3", "1.2.3-alpha.1", "1.2.3-0", "1.2.3+001"]) {

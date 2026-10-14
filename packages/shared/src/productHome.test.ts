@@ -40,6 +40,30 @@ it("keeps maintainer state in the exact default home", () => {
     "fork-state",
   );
 });
+
+it.each(["", "shuv", "shuv2cod"])(
+  "recovers partial default marker %j atomically without claiming ambiguous custom data",
+  (marker) => {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("USERPROFILE", root);
+    const home = NodePath.join(root, ".shuv2code-v2");
+    NodeFS.mkdirSync(home);
+    NodeFS.writeFileSync(NodePath.join(home, ".product-identity"), marker);
+    NodeFS.writeFileSync(NodePath.join(home, "settings.json"), "retained");
+    ensureProductHome(home);
+    expect(NodeFS.readFileSync(NodePath.join(home, ".product-identity"), "utf8")).toBe(
+      "shuv2code\n",
+    );
+    expect(NodeFS.readFileSync(NodePath.join(home, "settings.json"), "utf8")).toBe("retained");
+    expect(NodeFS.readdirSync(home).sort()).toEqual([".product-identity", "settings.json"]);
+    const custom = NodePath.join(root, "custom");
+    NodeFS.mkdirSync(custom);
+    NodeFS.writeFileSync(NodePath.join(custom, ".product-identity"), marker);
+    NodeFS.writeFileSync(NodePath.join(custom, "state.sqlite"), "unproven");
+    expect(() => ensureProductHome(custom)).toThrow("Cannot establish product ownership");
+    expect(NodeFS.readFileSync(NodePath.join(custom, ".product-identity"), "utf8")).toBe(marker);
+  },
+);
 it("rejects foreign and ambiguous existing homes without changing their files", () => {
   NodeFS.writeFileSync(NodePath.join(root, "statev2.sqlite"), "upstream-state");
   expect(() => ensureProductHome(root)).toThrow("Cannot establish product ownership");

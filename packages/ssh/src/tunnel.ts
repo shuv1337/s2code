@@ -452,15 +452,17 @@ T3_RUNTIME_DIR="$HOME/.shuv2code-v2/runtime/versions/$T3_ARCHIVE_VERSION"
 for T3_PATH in "$HOME/.shuv2code-v2" "$HOME/.shuv2code-v2/.product-identity" "$HOME/.shuv2code-v2/runtime" "$HOME/.shuv2code-v2/runtime/versions" "$T3_RUNTIME_DIR" "$T3_RUNTIME_DIR/t3" "$T3_RUNTIME_DIR/.install-complete" "$T3_RUNTIME_DIR/.install-product"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing a linked runtime cache.\\n' >&2; exit 1; fi
 done
-if [ -f "$HOME/.shuv2code-v2/.product-identity" ] && [ "$(cat "$HOME/.shuv2code-v2/.product-identity")" != shuv2code ]; then
-  printf 'Home belongs to another product.\\n' >&2; exit 1
+if [ -f "$HOME/.shuv2code-v2/.product-identity" ]; then
+  T3_HOME_PRODUCT="$(cat "$HOME/.shuv2code-v2/.product-identity")"
+  case shuv2code in "$T3_HOME_PRODUCT"*) ;; *) printf 'Home belongs to another product.\\n' >&2; exit 1 ;; esac
 fi
 t3_runtime_ready() {
   T3_MARKER="$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null || true)"
   [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$T3_MARKER" = "$T3_ARCHIVE_VERSION" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-product" 2>/dev/null || true)" = shuv2code ]
 }
-if [ -e "$T3_RUNTIME_DIR/.install-product" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-product")" != shuv2code ]; then
-  printf 'Refusing to reuse or replace a foreign runtime cache.\\n' >&2; exit 1
+if [ -e "$T3_RUNTIME_DIR/.install-product" ]; then
+  T3_PRODUCT="$(cat "$T3_RUNTIME_DIR/.install-product")"
+  case shuv2code in "$T3_PRODUCT"*) ;; *) printf 'Refusing to reuse or replace a foreign runtime cache.\\n' >&2; exit 1 ;; esac
 fi
 if ! t3_runtime_ready; then
   mkdir -p "$HOME/.shuv2code-v2/runtime/versions"
@@ -515,7 +517,26 @@ if ! t3_runtime_ready; then
   esac
   T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
   T3_STAGING="$(mktemp -d "$HOME/.shuv2code-v2/runtime/versions/.staging-XXXXXX")"
-  trap 'rm -rf "$T3_STAGING" "$T3_LOCK"' EXIT
+  T3_PREVIOUS_PARENT= T3_PREVIOUS= T3_VALIDATED=false T3_PUBLISHED=false
+  t3_runtime_cleanup() {
+    if [ "$T3_PUBLISHED" != true ] && [ -n "$T3_PREVIOUS" ] && [ -d "$T3_PREVIOUS" ]; then
+      if [ -e "$T3_RUNTIME_DIR" ] || ! mv "$T3_PREVIOUS" "$T3_RUNTIME_DIR"; then
+        printf 'Could not restore runtime. Previous copy: %s; validated replacement: %s\\n' "$T3_PREVIOUS" "$T3_STAGING" >&2
+        rm -rf "$T3_LOCK"
+        return
+      fi
+    fi
+    if [ "$T3_VALIDATED" = true ] && [ ! -d "$T3_RUNTIME_DIR" ]; then
+      printf 'Validated runtime retained at %s; retry installation or recover it manually.\\n' "$T3_STAGING" >&2
+    else
+      rm -rf "$T3_STAGING"
+      [ -z "$T3_PREVIOUS_PARENT" ] || rm -rf "$T3_PREVIOUS_PARENT" || printf 'Could not remove previous backup: %s\\n' "$T3_PREVIOUS_PARENT" >&2
+    fi
+    rm -rf "$T3_LOCK"
+  }
+  trap t3_runtime_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   t3_fetch() {
     if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 30 --max-time "$3" "$1" -o "$2"
     elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=1 "$1" -O "$2"
@@ -542,8 +563,15 @@ if ! t3_runtime_ready; then
   fi
   printf '%s\\n' "$T3_ARCHIVE_VERSION" > "$T3_STAGING/.install-complete"
   printf 'shuv2code\\n' > "$T3_STAGING/.install-product"
-  rm -rf "$T3_RUNTIME_DIR"
-  mv "$T3_STAGING" "$T3_RUNTIME_DIR"
+  T3_VALIDATED=true
+  if [ -e "$T3_RUNTIME_DIR" ]; then
+    T3_PREVIOUS_PARENT="$(mktemp -d "$HOME/.shuv2code-v2/runtime/versions/.previous-XXXXXX")"
+    T3_PREVIOUS="$T3_PREVIOUS_PARENT/runtime"
+    mv "$T3_RUNTIME_DIR" "$T3_PREVIOUS"
+  fi
+  mv "$T3_STAGING" "$T3_RUNTIME_DIR" || { printf 'Could not publish the runtime; restoring the previous copy.\\n' >&2; exit 1; }
+  T3_PUBLISHED=true
+  t3_runtime_cleanup
 fi
 if [ -n "\${T3_LOCK:-}" ]; then
   rm -rf "$T3_LOCK"
@@ -561,8 +589,9 @@ DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
 for T3_PATH in "$DEFAULT_SERVER_HOME" "$DEFAULT_SERVER_HOME/.product-identity" "$DEFAULT_SERVER_HOME/userdata" "$DEFAULT_RUNTIME_FILE"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing linked server state.\\n' >&2; exit 1; fi
 done
-if [ -f "$DEFAULT_SERVER_HOME/.product-identity" ] && [ "$(cat "$DEFAULT_SERVER_HOME/.product-identity")" != shuv2code ]; then
-  printf 'Home belongs to another product.\\n' >&2; exit 1
+if [ -f "$DEFAULT_SERVER_HOME/.product-identity" ]; then
+  T3_HOME_PRODUCT="$(cat "$DEFAULT_SERVER_HOME/.product-identity")"
+  case shuv2code in "$T3_HOME_PRODUCT"*) ;; *) printf 'Home belongs to another product.\\n' >&2; exit 1 ;; esac
 fi
 PORT_FILE="$STATE_DIR/port"
 PID_FILE="$STATE_DIR/pid"

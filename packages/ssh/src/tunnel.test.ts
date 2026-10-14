@@ -705,12 +705,12 @@ describe("archive runner script", () => {
   const windowsHost = hostPlatform === "win32";
   const archiveVersion = "1.2.3-preview.20260911.4";
 
-  const runRunner = (home: string, runner: string) =>
+  const runRunner = (home: string, runner: string, path = process.env.PATH ?? "") =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const child = yield* spawner.spawn(
         ChildProcess.make("sh", [runner, "--version"], {
-          env: { PATH: process.env.PATH ?? "", HOME: home },
+          env: { PATH: path, HOME: home },
           extendEnv: false,
         }),
       );
@@ -759,6 +759,53 @@ describe("archive runner script", () => {
     assert.equal(Number(yield* child.exitCode), 0);
     return `file://${root}/mirror`;
   });
+
+  it.effect.skipIf(windowsHost)(
+    "restores the old remote cache after a failed publish, or retains both copies when restoration fails",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        for (const failRestore of [false, true]) {
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "fork-ssh-publish-" });
+          const releaseBaseUrl = yield* makeMirror(root);
+          const runner = `${root}/run.sh`;
+          yield* fs.writeFileString(
+            runner,
+            SshTunnel.buildRemoteT3RunnerScript({ archiveVersion, releaseBaseUrl }),
+          );
+          const home = `${root}/home`;
+          const versions = `${home}/.shuv2code-v2/runtime/versions`;
+          const cache = `${versions}/${archiveVersion}`;
+          yield* fs.makeDirectory(cache, { recursive: true });
+          yield* fs.writeFileString(`${cache}/t3`, "old-runtime");
+          yield* fs.writeFileString(`${cache}/.install-complete`, archiveVersion);
+          yield* fs.makeDirectory(`${root}/bin`);
+          yield* fs.writeFileString(
+            `${root}/bin/mv`,
+            `#!/bin/sh\ncase "$1" in */.staging-*${failRestore ? "|*/.previous-*" : ""}) exit 55 ;; esac\nexec /bin/mv "$@"\n`,
+          );
+          yield* fs.chmod(`${root}/bin/mv`, 0o755);
+          const result = yield* runRunner(home, runner, `${root}/bin:${process.env.PATH ?? ""}`);
+          assert.notEqual(result.exitCode, 0);
+          const entries = yield* fs.readDirectory(versions);
+          if (!failRestore) {
+            assert.equal(yield* fs.readFileString(`${cache}/t3`), "old-runtime");
+            assert.deepEqual(entries, [archiveVersion]);
+          } else {
+            const backup = entries.find((name) => name.startsWith(".previous-"));
+            const staging = entries.find((name) => name.startsWith(".staging-"));
+            assert.isDefined(backup);
+            assert.isDefined(staging);
+            assert.equal(
+              yield* fs.readFileString(`${versions}/${backup}/runtime/t3`),
+              "old-runtime",
+            );
+            assert.include(yield* fs.readFileString(`${versions}/${staging}/t3`), archiveVersion);
+            assert.include(result.stderr, "Could not restore runtime");
+          }
+        }
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it.effect.skipIf(windowsHost)(
     "refetches unmarked caches and refuses foreign-marked caches without executing them",

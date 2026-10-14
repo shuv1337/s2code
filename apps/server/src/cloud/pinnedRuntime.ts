@@ -1,5 +1,6 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -334,7 +335,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
       (cause) => new PinnedRuntimeInstallError({ step: "reading runtime product metadata", cause }),
     ),
   );
-  if ((yield* fs.exists(productPath)) && product.trim() !== PRODUCT_ID)
+  if ((yield* fs.exists(productPath)) && !PRODUCT_ID.startsWith(product.trim()))
     return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign runtime cache" });
   const alreadyPinned =
     entryExists &&
@@ -374,6 +375,14 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     entryPath: input.path.join(stagingDir, input.path.relative(paths.versionDir, paths.entryPath)),
     sentinelPath: input.path.join(stagingDir, ".install-complete"),
   };
+  let retainStaging = false;
+  const renameRuntime = (source: string, destination: string) =>
+    Effect.suspend(() => fs.rename(source, destination)).pipe(
+      Effect.retry({
+        times: input.platform === "win32" ? 4 : 0,
+        schedule: Schedule.spaced("50 millis"),
+      }),
+    );
 
   return yield* Effect.gen(function* () {
     yield* installFromArchive(input, stagingDir);
@@ -392,10 +401,12 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
             new PinnedRuntimeInstallError({ step: "recording the completed install", cause }),
         ),
       );
+    retainStaging = true;
     if (versionDirExists) {
       // Nonempty directory replacement is not portable. Keep the old tree in a
       // same-filesystem backup until publication succeeds, and mask cancellation
-      // across the two renames so an ordinary failure always restores it.
+      // across the two renames. If rollback also fails, retain and report both
+      // the old backup and the validated staging tree rather than deleting either.
       const backupDir = yield* Effect.uninterruptible(
         Effect.gen(function* () {
           const currentProduct = yield* fs.exists(productPath).pipe(
@@ -410,11 +421,11 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
                 }),
             ),
           );
-          if (currentProduct.trim() !== PRODUCT_ID)
+          if (!PRODUCT_ID.startsWith(currentProduct.trim()))
             return yield* new PinnedRuntimeInstallError({
               step: "refusing a foreign runtime cache",
             });
-          const backup = yield* fs
+          const backupParent = yield* fs
             .makeTempDirectory({ directory: versionsDir, prefix: ".previous-" })
             .pipe(
               Effect.mapError(
@@ -422,16 +433,9 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
                   new PinnedRuntimeInstallError({ step: "preparing the runtime backup", cause }),
               ),
             );
-          // Windows requires the rename destination not to exist.
-          yield* fs
-            .remove(backup, { recursive: true })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new PinnedRuntimeInstallError({ step: "preparing the runtime backup", cause }),
-              ),
-            );
-          yield* fs.rename(paths.versionDir, backup).pipe(
+          // A fresh child avoids Windows renames onto a just-deleted temp name.
+          const backup = input.path.join(backupParent, "runtime");
+          yield* renameRuntime(paths.versionDir, backup).pipe(
             Effect.mapError(
               (cause) =>
                 new PinnedRuntimeInstallError({
@@ -440,15 +444,23 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
                 }),
             ),
           );
-          yield* fs.rename(stagingDir, paths.versionDir).pipe(
+          yield* renameRuntime(stagingDir, paths.versionDir).pipe(
             Effect.catch((cause) =>
-              fs.rename(backup, paths.versionDir).pipe(
+              renameRuntime(backup, paths.versionDir).pipe(
                 Effect.mapError(
                   (restoreCause) =>
                     new PinnedRuntimeInstallError({
-                      step: `restoring the previous pinned runtime preserved at ${backup}`,
+                      step: `restoring the previous pinned runtime preserved at ${backup}; validated replacement retained at ${stagingDir}`,
                       cause: restoreCause,
                     }),
+                ),
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    retainStaging = false;
+                  }),
+                ),
+                Effect.andThen(
+                  fs.remove(backupParent, { recursive: true, force: true }).pipe(Effect.ignore),
                 ),
                 Effect.andThen(
                   Effect.fail(
@@ -458,13 +470,14 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
               ),
             ),
           );
-          return backup;
+          retainStaging = false;
+          return backupParent;
         }),
       );
       yield* fs.remove(backupDir, { recursive: true, force: true }).pipe(Effect.ignore);
       return paths;
     }
-    const published = yield* fs.rename(stagingDir, paths.versionDir).pipe(
+    const published = yield* renameRuntime(stagingDir, paths.versionDir).pipe(
       Effect.as(true),
       Effect.catch((cause) =>
         Effect.all([
@@ -495,9 +508,16 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
       ),
     );
     if (!published) yield* input.validate(paths);
+    retainStaging = false;
     return paths;
   }).pipe(
-    Effect.ensuring(fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore)),
+    Effect.ensuring(
+      Effect.suspend(() =>
+        retainStaging
+          ? Effect.void
+          : fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore),
+      ),
+    ),
   );
 });
 

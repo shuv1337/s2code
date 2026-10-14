@@ -639,10 +639,37 @@ export async function main(): Promise<void> {
   applyProductEnvironment(process.env);
   const baseDir = process.env.T3CODE_HOME?.trim();
   if (baseDir === undefined || baseDir === "") {
-    throw new Error("SHUV2CODE_HOME is required by the shuv2code service launcher.");
+    await pauseForServiceReinstall(
+      "This service unit does not provide SHUV2CODE_HOME. Inherited T3CODE_HOME is not fork ownership proof.",
+    );
+    return;
   }
   ensureProductHome(baseDir);
   const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
   const state = await readServiceState(statePath);
+  if (!(await runtimeExists(baseDir, state.activeVersion))) {
+    await pauseForServiceReinstall(
+      "The active service runtime is missing or has no complete fork ownership marker.",
+    );
+    return;
+  }
   await new Launcher(baseDir, state).run();
+}
+
+/** Old Restart=always/KeepAlive units must not repeatedly execute an unowned runtime. */
+async function pauseForServiceReinstall(reason: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const keepAlive = setInterval(() => {}, 60_000);
+    const stop = () => {
+      clearInterval(keepAlive);
+      process.removeListener("SIGINT", stop);
+      process.removeListener("SIGTERM", stop);
+      resolve();
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    process.stderr.write(
+      `${reason} Reinstall with shuv2code service install using the same explicit SHUV2CODE_HOME. Service paused until reinstall; no server was started.\n`,
+    );
+  });
 }
