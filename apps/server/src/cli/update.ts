@@ -36,7 +36,11 @@ import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntim
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { createUpdateProgress } from "./updateProgress.ts";
 import * as CliService from "./service.ts";
-import { resolveCliCommand } from "./invocation.ts";
+import { formatCliHomeFlag, resolveCliCommand } from "./invocation.ts";
+
+/** Use the launcher just repointed, not this process's old versioned executable. */
+export const formatUpdatedLauncherCommand = (launcher: string, baseDir: string) =>
+  `'${launcher.replaceAll("'", `'"'"'`)}' serve ${formatCliHomeFlag(baseDir)}`;
 
 export class CliUpdateError extends Schema.TaggedError<CliUpdateError>()("CliUpdateError", {
   reason: Schema.String,
@@ -560,7 +564,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   progress.success(`Installed T3 Code ${targetVersion}`);
   if (Option.isSome(repointed)) {
     yield* Console.log(
-      `  Run \`${yield* resolveCliCommand("serve", input.baseDir)}\` to get started.\n`,
+      `  Run \`${formatUpdatedLauncherCommand(repointed.value, input.baseDir)}\` to get started.\n`,
     );
   } else {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);

@@ -14,6 +14,7 @@ import {
   resolveLauncherPath,
   runUpdate,
   isForkBootServiceCgroup,
+  formatUpdatedLauncherCommand,
 } from "./update.ts";
 
 it("recognizes only exact fork boot service cgroup components", () => {
@@ -139,6 +140,10 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
 
       assert.deepStrictEqual(Option.getOrUndefined(repointed), launcher);
       assert.equal(yield* fs.readLink(launcher), newExe);
+      assert.equal(
+        formatUpdatedLauncherCommand(Option.getOrThrow(repointed), "/fork home"),
+        `'${launcher}' serve --base-dir '/fork home'`,
+      );
     }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
   );
 
