@@ -228,7 +228,16 @@ describe("merged pull request cleanup", () => {
 
 const cleanupFixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const config = yield* ServerConfig.ServerConfig;
+  const rawConfig = yield* ServerConfig.ServerConfig;
+  // Cleanup deliberately rejects symlink roots. macOS's temporary directory
+  // starts at /var, an alias of /private/var, so use canonical fixture roots.
+  yield* fs.makeDirectory(rawConfig.browserArtifactsDir, { recursive: true });
+  yield* fs.makeDirectory(rawConfig.logsDir, { recursive: true });
+  const config = {
+    ...rawConfig,
+    browserArtifactsDir: yield* fs.realPath(rawConfig.browserArtifactsDir),
+    logsDir: yield* fs.realPath(rawConfig.logsDir),
+  };
   const git = yield* GitVcsDriver.GitVcsDriver;
   const repo = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-repo-" });
   const command = (cwd: string, args: string[]) =>
@@ -252,6 +261,7 @@ const cleanupFixture = Effect.gen(function* () {
   let openSessionCwd: string | null = null;
   let fullStatusCalls = 0;
   const context = yield* Layer.build(StorageCleanup.layer).pipe(
+    Effect.provideService(ServerConfig.ServerConfig, config),
     Effect.provideService(GitVcsDriver.GitVcsDriver, {
       ...git,
       execute: (input) =>

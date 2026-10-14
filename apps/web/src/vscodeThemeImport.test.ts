@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { getThemeColorsForMode, themeColorToHex, THEME_FILE_VERSION } from "./themePalette";
+import {
+  getStandardThemeColors,
+  getThemeColorsForMode,
+  themeColorToHex,
+  THEME_FILE_VERSION,
+} from "./themePalette";
 import {
   isVsCodeThemeFile,
   pairVsCodeThemes,
@@ -228,7 +233,7 @@ describe("VS Code theme import", () => {
       type: "dark",
       colors: {
         "editor.background": "#121212",
-        "editorWidget.background": "#346bf1",
+        "editorWidget.background": asHex(getStandardThemeColors("dark").accent),
       },
     });
     expect(asHex(theme.colors.focus)).toBe("#ffffff");

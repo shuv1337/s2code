@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ServerSelfUpdateError, ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -55,7 +56,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-self-update-test-" });
-  yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "shuv2code\n");
+  yield* fs.writeFileString(path.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
   const order: string[] = [];
   const runner = ProcessRunner.ProcessRunner.of({
     run: (input) =>

@@ -60,7 +60,9 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
               DesktopUserDataInitializationError.fromFileSystem(cause, "inspect", resourcePath),
             ),
           );
-      if (!(yield* inspect(input.baseDir)) && (yield* inspect(sharedHome)))
+      // layerOwned has already created the channel home/marker by this point.
+      // The old shared location remains worth disclosing on every such startup.
+      if (yield* inspect(sharedHome))
         yield* Effect.logWarning(
           `Starting ${identity.channel} with a separate home at ${input.baseDir}. Existing shared data remains untouched at ${sharedHome}; open stable to access it. No live database is copied or moved.`,
         );

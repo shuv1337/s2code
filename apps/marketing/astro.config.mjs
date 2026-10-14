@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: process.env.T3CODE_MARKETING_URL,
+  site: process.env.SHUV2CODE_MARKETING_URL?.trim() || undefined,
   server: {
     port: Number(process.env.PORT ?? 4173),
   },

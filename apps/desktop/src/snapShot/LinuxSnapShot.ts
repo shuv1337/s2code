@@ -19,13 +19,18 @@ import { isKdeCaptureSession, type KdeCapturePaths } from "./KdeSnapShot.ts";
 import { isGnomeCaptureSession, readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
 export { readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
 import { isHyprlandCaptureSession, type HyprlandCapturePaths } from "./HyprlandSnapShot.ts";
+import {
+  GNOME_CAPTURE_DBUS_NAME,
+  GNOME_CAPTURE_DBUS_PATH,
+  gnomeCaptureClientName,
+} from "./gnomeCaptureBundle.ts";
 
 const PORTAL = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH = "/org/freedesktop/portal/desktop";
 const SCREENSHOT = "org.freedesktop.portal.Screenshot";
 const REQUEST = "org.freedesktop.portal.Request";
-const EXTENSION = "org.gnome.Shell.Extensions.T3SnapShot";
-const EXTENSION_PATH = "/org/gnome/Shell/Extensions/T3SnapShot";
+const EXTENSION = GNOME_CAPTURE_DBUS_NAME;
+const EXTENSION_PATH = GNOME_CAPTURE_DBUS_PATH;
 const DBUS = "org.freedesktop.DBus";
 const DBUS_PATH = "/org/freedesktop/DBus";
 const UInt = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffff_ffff }));
@@ -303,7 +308,7 @@ export class LinuxCaptureConnection {
 
   async captureExtension(appId: string, options?: FeedbackOptions): Promise<LinuxWindowSnapshot> {
     const result = await this.wait(
-      this.bus.requestName(`${appId}.SnapShot`, NameFlag.DO_NOT_QUEUE),
+      this.bus.requestName(gnomeCaptureClientName(appId), NameFlag.DO_NOT_QUEUE),
     );
     if (result !== RequestNameReply.PRIMARY_OWNER) {
       throw new Error("Another T3 Code instance is capturing a window. Try again.");

@@ -7,6 +7,9 @@ import * as Path from "effect/Path";
 import { vi } from "vite-plus/test";
 import { formatServiceStatus } from "./service.ts";
 import { formatBootServiceProblem } from "../cloud/bootService.ts";
+
+// Root-command tests exercise PATH handling with a stable install; channel
+// selection is covered separately with explicit versions below.
 vi.mock("../../package.json", async (importOriginal) => {
   const actual = await importOriginal<{ default: typeof import("../../package.json") }>();
   return { default: { ...actual.default, version: "1.2.3" } };
