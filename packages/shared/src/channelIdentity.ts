@@ -1,5 +1,5 @@
 import { DEFAULT_HOME_DIRECTORY } from "./productIdentity.ts";
-export const CHANNEL_HOME_DIRECTORIES = {
+const CHANNEL_HOME_DIRECTORIES = {
   stable: DEFAULT_HOME_DIRECTORY,
   nightly: `${DEFAULT_HOME_DIRECTORY}-nightly`,
   preview: `${DEFAULT_HOME_DIRECTORY}-preview`,

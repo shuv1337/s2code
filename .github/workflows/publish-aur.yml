@@ -62,4 +62,6 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           PKGREL: ${{ inputs.pkgrel || '1' }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          SHUV2CODE_AUR_PRODUCT_ID: shuv2code
+          SHUV2CODE_AUR_RELEASE_REPO: ${{ github.repository }}
         run: packaging/aur/scripts/release.sh

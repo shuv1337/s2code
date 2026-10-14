@@ -121,17 +121,39 @@ Nothing is moved or copied automatically. To transfer data manually, stop both
 apps and their services first, back up the source, then copy into the separate
 nightly home while everything is offline. Do not share or link a live database.
 
+<<<<<<< HEAD
 When a verified fork release is published, download the intended channel from
 [shuv2code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
 available yet, build the fork from source rather than installing upstream as a
 substitute. Upstream Winget, Homebrew and AUR packages do not install these fork
 identities. Upstream Scoop packages are also not the fork. No fork Winget,
 Scoop or Homebrew registration is configured here.
+=======
 
-On Debian/Ubuntu, install a downloaded fork DEB with
-`sudo apt install ./T3-Code-<version>-<arch>.deb`. The fork AUR definitions use
-`shuv2code-bin` and `shuv2code-nightly-bin`; use the AUR
-only after maintainers confirm those packages and their release checksums are published.
+When a verified fork release is published, download the intended channel from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
+If unavailable, build from source rather than installing upstream as a substitute.
+Artifacts retain the `T3-Code-<version>-<arch>` naming convention; installed package
+identities, commands, icons and desktop entries are fork-owned and channel-specific.
+
+> > > > > > > origin/main
+
+| Platform           | Install                                       |
+| ------------------ | --------------------------------------------- |
+| Windows, macOS     | Fork GitHub release installer                 |
+| Debian, Ubuntu     | `sudo apt install ./T3-Code-VERSION-ARCH.deb` |
+| Arch Linux stable  | `shuv2code-bin` recipe                        |
+| Arch Linux nightly | `shuv2code-nightly-bin` recipe                |
+
+Stable and nightly Linux packages can be installed side by side with each other
+and upstream. Their commands are `shuv2code` and `shuv2code-nightly`. Preview has
+its own Debian identity, but no AUR package. The fork AUR recipes are implemented;
+once published, install them with `yay -S shuv2code-bin` or
+`yay -S shuv2code-nightly-bin`. Until then, use GitHub Releases or build the recipes
+against an actual fork release.
+
+`brew install --cask t3-code`, `scoop install extras/t3code`, and
+`winget install T3Tools.T3Code` install **upstream T3 Code**, not this fork. No fork
+Homebrew, Scoop or Winget package is available.
 
 The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the

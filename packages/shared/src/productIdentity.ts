@@ -4,7 +4,7 @@ export const DEFAULT_HOME_DIRECTORY = ".shuv2code-v2";
 export const PRODUCT_ID = "shuv2code";
 export const PRODUCT_HOME_MARKER = ".product-identity";
 export const PRODUCT_CLI_SHIM_MARKER = `Written by ${PRODUCT_ID}: runs the desktop app's bundled CLI.`;
-export const PRODUCT_RELEASES_URL = "https://github.com/shuv1337/shuv2code/releases";
+const PRODUCT_RELEASES_URL = "https://github.com/shuv1337/shuv2code/releases";
 
 /** No fork mobile distribution exists yet; never substitute an upstream store listing. */
 export const resolveProductDownload = (mobile: boolean) =>
