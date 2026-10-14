@@ -167,8 +167,15 @@ export const resolveCliCommand = Effect.fnUntraced(function* (
     return `${runner} ${suggestedPackageSpec(packageJson.version)} ${commandArgs}`;
   const launcher = yield* resolveInstallLauncher;
   if (Option.isSome(launcher)) return `${shellWord(launcher.value)} ${commandArgs}`;
-  if (entry && !entry.includes(".asar"))
-    return `${shellWord(yield* HostProcess.ExecutablePath)} ${shellWord(entry)} ${commandArgs}`;
+  if (entry && !entry.includes(".asar")) {
+    const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const absoluteEntry = path.resolve(yield* HostProcess.WorkingDirectory, entry);
+    const resolvedEntry = yield* fs
+      .realPath(absoluteEntry)
+      .pipe(Effect.orElseSucceed(() => absoluteEntry));
+    return `${shellWord(yield* HostProcess.ExecutablePath)} ${shellWord(resolvedEntry)} ${commandArgs}`;
+  }
   return forkCliCommand(commandArgs);
 });
 

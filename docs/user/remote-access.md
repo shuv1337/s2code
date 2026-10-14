@@ -329,7 +329,8 @@ when SSH closes, see [background-service troubleshooting](./background-service.m
 | HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                                  |
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart t3code.service` for the background service. For a
+`systemctl --user restart shuv2code-v2.service` for the stable background service
+(use `shuv2code-v2-nightly.service` or `shuv2code-v2-preview.service` for those channels). For a
 foreground server, stop it and run `shuv2code serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 

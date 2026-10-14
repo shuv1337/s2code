@@ -79,7 +79,7 @@ describe("preview stream control", () => {
       }),
       "sudo /usr/bin/node '/work/my fork/apps/server/dist/bin.mjs' browser setup",
     ],
-    ["malformed", "sudo shuv2code browser setup"],
+    ["malformed", ""],
   ])(
     "preserves server-provided fork setup instructions or falls back without installing upstream: %s",
     (reason, command) => {

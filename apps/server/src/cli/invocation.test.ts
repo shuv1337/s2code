@@ -400,15 +400,16 @@ it.layer(NodeServices.layer)("fork recovery instructions", (it) => {
         const entry = path.join(root, "bunx-tools source", "apps/server/dist/bin.mjs");
         yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
         yield* fs.writeFileString(entry, "source fixture");
+        const resolvedEntry = yield* fs.realPath(entry);
         yield* Effect.gen(function* () {
           const command = yield* resolveRootCliCommand("browser setup");
-          expect(command).toBe(`sudo /usr/bin/node '${entry}' browser setup`);
+          expect(command).toBe(`sudo /usr/bin/node '${resolvedEntry}' browser setup`);
           expect(yield* resolveUninstallGuidance).toContain("source");
           expect(yield* resolveUninstallGuidance).not.toContain("npm uninstall");
           const install = yield* resolveCliCommand("service install");
-          expect(install).toBe(`/usr/bin/node '${entry}' service install`);
+          expect(install).toBe(`/usr/bin/node '${resolvedEntry}' service install`);
           expect(yield* resolveCliCommand("service install", "/work/fork home")).toBe(
-            `/usr/bin/node '${entry}' service install --base-dir '/work/fork home'`,
+            `/usr/bin/node '${resolvedEntry}' service install --base-dir '/work/fork home'`,
           );
           expect(
             formatBootServiceProblem("service-stopped", {
@@ -416,7 +417,13 @@ it.layer(NodeServices.layer)("fork recovery instructions", (it) => {
               command: () => install,
             }),
           ).toContain("systemctl --user status shuv2code-v2-nightly.service");
-        }).pipe(Effect.provideService(HostProcess.Arguments, ["node", entry]));
+        }).pipe(
+          Effect.provideService(HostProcess.Arguments, [
+            "node",
+            "bunx-tools source/apps/server/dist/bin.mjs",
+          ]),
+          Effect.provideService(HostProcess.WorkingDirectory, root),
+        );
       }).pipe(
         Effect.provideService(HostProcess.ExecutablePath, "/usr/bin/node"),
         Effect.provideService(HostProcess.IsExecutable, false),

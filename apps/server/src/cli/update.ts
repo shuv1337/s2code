@@ -296,6 +296,11 @@ const findForegroundServer = Effect.fn("cli.update.find_foreground_server")(func
   return state.value;
 });
 
+export const isForkBootServiceCgroup = (cgroup: string) =>
+  cgroup
+    .split("\n")
+    .some((line) => /\/shuv2code-v2(?:-nightly|-preview)?\.service(?:\/|$)/.test(line));
+
 const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(function* (
   pid: number,
 ) {
@@ -304,7 +309,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   const runner = yield* ProcessRunner.ProcessRunner;
   if (platform === "linux") {
     const cgroup = yield* fs.readFileString(`/proc/${pid}/cgroup`).pipe(Effect.option);
-    return Option.isSome(cgroup) && cgroup.value.includes("/t3code.service");
+    return Option.isSome(cgroup) && isForkBootServiceCgroup(cgroup.value);
   }
   if (platform === "darwin") {
     // The service server's parent is the launcher process.
@@ -554,7 +559,9 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
 
   progress.success(`Installed T3 Code ${targetVersion}`);
   if (Option.isSome(repointed)) {
-    yield* Console.log("  Run t3 to get started.\n");
+    yield* Console.log(
+      `  Run \`${yield* resolveCliCommand("serve", input.baseDir)}\` to get started.\n`,
+    );
   } else {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);
   }

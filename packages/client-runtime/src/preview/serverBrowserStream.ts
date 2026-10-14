@@ -461,7 +461,7 @@ export function createPreviewFramePainter(
   };
 }
 
-/** A malformed reason still stops the viewer and offers the usual command. */
+/** A malformed reason cannot identify the destination's channel or invocation. */
 const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   try {
     const value = JSON.parse(reason) as Partial<PreviewStreamHostSetup>;
@@ -472,11 +472,13 @@ const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
       return { need: value.need, command: value.command };
     }
   } catch {}
-  return { need: "sandbox", command: "sudo shuv2code browser setup" };
+  return { need: "sandbox", command: "" };
 };
 
 /** What a viewer tells the person; `command` is shown beside it, ready to copy. */
 export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
-  setup.need === "sandbox"
-    ? "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:"
-    : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";
+  !setup.command
+    ? "This server needs browser host setup, but did not provide a valid repair command. Reconnect to get the command for that server's installed channel."
+    : setup.need === "sandbox"
+      ? "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:"
+      : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";
