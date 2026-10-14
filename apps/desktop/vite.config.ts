@@ -95,6 +95,7 @@ export default defineConfig({
       entry: ["src/boot.ts", "src/compileCache.ts"],
       clean: false,
       deps: {
+        alwaysBundle: (id) => id === "@t3tools/shared/productIdentity",
         neverBundle: (id) => id === "./main.cjs" || id === "./compileCache.cjs",
       },
     },

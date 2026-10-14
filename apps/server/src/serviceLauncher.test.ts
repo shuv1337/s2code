@@ -52,7 +52,7 @@ it
       [
         "--input-type=module",
         "-e",
-        "import { main } from './apps/server/src/serviceLauncher.ts'; await main();",
+        `import { main } from ${JSON.stringify(new URL("./serviceLauncher.ts", import.meta.url).href)}; await main();`,
       ],
       { cwd: process.cwd(), env, stdio: ["ignore", "ignore", "pipe"] },
     );
