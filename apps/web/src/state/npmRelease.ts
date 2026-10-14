@@ -4,7 +4,7 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 /**
- * Whether `t3@<version>` is published on npm. A 404 is false; network and
+ * Whether `shuv2code@<version>` is published on npm. A 404 is false; network and
  * registry errors stay unknown. Both re-check every few minutes, so a release
  * that lands later shows up without a reload.
  */
@@ -12,7 +12,7 @@ const npmReleasePublishedAtom = Atom.family((version: string) =>
   Atom.make(
     Effect.gen(function* () {
       const response = yield* HttpClient.get(
-        `https://registry.npmjs.org/t3/${encodeURIComponent(version)}`,
+        `https://registry.npmjs.org/shuv2code/${encodeURIComponent(version)}`,
       );
       if (response.status === 404) return false;
       const body = yield* HttpClientResponse.filterStatusOk(response).pipe(

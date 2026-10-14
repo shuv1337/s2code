@@ -176,6 +176,10 @@ describe("environment release checks", () => {
     expect(await findEnvironmentUpdate("1.0.0", signal)).toBe("1.1.0");
     expect(await findEnvironmentUpdate("1.1.0", signal)).toBeNull();
     expect(await findEnvironmentUpdate("1.3.0", signal)).toBeNull();
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.github.com/repos/shuv1337/shuv2code/releases?per_page=100&page=1",
+      { signal },
+    );
   });
 
   it("walks release pages to find the host's channel", async () => {
