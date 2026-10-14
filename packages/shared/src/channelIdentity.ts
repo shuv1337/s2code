@@ -1,4 +1,12 @@
 import { DEFAULT_HOME_DIRECTORY } from "./productIdentity.ts";
+export const SEPARATE_CHANNEL_INSTALL_MESSAGE =
+  "Release channels are separate installations. Install the other channel separately instead of updating this installation across channels.";
+
+export function isSameInstallationChannel(currentVersion: string, targetVersion: string) {
+  return (
+    resolveChannelIdentity(currentVersion).channel === resolveChannelIdentity(targetVersion).channel
+  );
+}
 
 /** Installation identity follows the built version, never a mutable updater preference. */
 export function resolveChannelIdentity(version: string) {

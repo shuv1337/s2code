@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { resolveChannelIdentity } from "./channelIdentity.ts";
+import { resolveChannelIdentity, isSameInstallationChannel } from "./channelIdentity.ts";
 
 it("keeps stable identity and partitions every channel-owned namespace", () => {
   const stable = resolveChannelIdentity("1.2.3");
@@ -29,4 +29,12 @@ it("keeps stable identity and partitions every channel-owned namespace", () => {
   expect(resolveChannelIdentity("1.2.3-pr.275.1")).toEqual(preview);
   expect(resolveChannelIdentity("1.2.3-alpha.1")).toEqual(stable);
   expect(resolveChannelIdentity("1.2.3-foo-preview.1")).toEqual(stable);
+});
+it("permits updates within a channel but never crosses installation ownership", () => {
+  expect(isSameInstallationChannel("1.2.3", "1.3.0")).toBe(true);
+  expect(isSameInstallationChannel("1.2.3-nightly.20261014.1", "1.3.0-nightly.20261015.1")).toBe(
+    true,
+  );
+  expect(isSameInstallationChannel("1.2.3-preview.20261014.1", "1.3.0-pr.275.1")).toBe(true);
+  expect(isSameInstallationChannel("1.2.3", "1.3.0-nightly.20261014.1")).toBe(false);
 });

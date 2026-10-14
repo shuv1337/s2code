@@ -123,6 +123,7 @@ const resolveDesktopSshCliRunner = (
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
     return {
       nodeScriptPath: devRemoteEntryPath,
+      version: environment.appVersion,
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }

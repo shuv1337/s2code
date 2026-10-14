@@ -98,6 +98,8 @@ Preview (including PR builds) is a third, independent installation using
 `~/.shuv2code-v2-preview`. It does not update automatically; replace it manually.
 Channel links use `shuv2code://`, `shuv2code-nightly://`, or
 `shuv2code-preview://`, respectively. Development owns only `shuv2code-dev://`.
+Stream Deck and other automation must use the intended channel's scheme, for
+example `shuv2code-nightly://threads/<environment-id>/<thread-id>` for nightly.
 
 Older local nightly builds used the shared stable home. A new nightly launch
 leaves that data untouched and logs its location; open stable to access it.
