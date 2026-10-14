@@ -12,12 +12,12 @@ Connections**, sign in, and enable **T3 Connect** for that environment.
 For a command-line host, run:
 
 ```bash
-t3 connect
+shuv2code connect
 ```
 
 Follow the sign-in instructions. Setup offers a
 [background service](./background-service.md); if you decline it, start the
-server with `t3 serve`. Saving your sign-in alone does not make the machine
+server with `shuv2code serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same T3 Connect account and choose the
@@ -42,13 +42,13 @@ For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
 address:
 
 ```bash
-t3 serve --host <private-ip>
+shuv2code serve --host <private-ip>
 ```
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-t3 pair
+shuv2code pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -127,13 +127,13 @@ HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
 To start a command-line server with Tailscale HTTPS:
 
 ```bash
-t3 serve --tailscale-serve
+shuv2code serve --tailscale-serve
 ```
 
 For an already-running server:
 
 ```bash
-t3 pair --tailscale
+shuv2code pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
@@ -145,7 +145,7 @@ tailscale serve --https=443 off
 ```
 
 If that port is already in use, choose another with
-`--tailscale-serve-port`. See `t3 pair --help` for other pairing options.
+`--tailscale-serve-port`. See `shuv2code pair --help` for other pairing options.
 
 ### Hosted web app
 
@@ -166,7 +166,7 @@ credentials, and agent work stay on the remote machine.
 
 The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
 `tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
-The first launch downloads T3 Code's server to `~/.t3/runtime` on the host, so
+The first launch downloads the fork server to its channel home (stable: `~/.shuv2code-v2/runtime`) on the host, so
 it takes longer than later ones.
 Provider CLIs must be on the `PATH` of a non-interactive login shell there;
 check with:
@@ -218,13 +218,15 @@ the server says so at startup, and browser tabs and HTML previews show the
 command to run on the host:
 
 ```sh
-sudo t3 browser setup
+sudo shuv2code browser setup
 ```
 
 The server shows the exact line for how you started it, such as
-`sudo npx t3 browser setup`, and keeps your `PATH` when Node is installed only
-for your user. Where `t3` is not on your `PATH`, such as with only the
-desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
+the fork package runner or the exact Node/source invocation, and keeps your `PATH`
+when Node is installed only for your user. With only the desktop app installed,
+it names the full path of the app's own fork launcher. Use the command printed
+by that server, including its channel; never replace it with an upstream `t3`
+invocation. It allows Chrome's sandbox with an AppArmor profile and installs
 any missing libraries with apt. It is safe to run again. Without `sudo`, it
 only reports what it would change.
 
@@ -242,7 +244,7 @@ threads on an environment through its MCP server. See
 On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `t3 auth --help`.
+management is available through `shuv2code auth --help`.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -250,11 +252,11 @@ expires.
 To choose a token's permissions, pass `--scope` once for each scope you want:
 
 ```sh
-npx t3 pair --scope orchestration:read --scope relay:read
+shuv2code pair --scope orchestration:read --scope relay:read
 ```
 
 The selected scopes replace the default permissions. The same option works with
-`npx t3 auth pairing create` and `npx t3 auth session issue`; each command's
+`shuv2code auth pairing create` and `shuv2code auth session issue`; each command's
 `--help` lists the available scopes. Without `--scope`, pairing tokens retain
 standard client permissions and issued bearer sessions retain administrative
 permissions.
@@ -304,8 +306,8 @@ T3 Code once it has been offline for seven days. That environment shows a messag
 asking you to update. Start T3 Code on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
 
-On a command-line host, `t3 connect unlink` disables exposure while retaining
-your login; `t3 connect logout` also clears that login. Background-service
+On a command-line host, `shuv2code connect unlink` disables exposure while retaining
+your login; `shuv2code connect logout` also clears that login. Background-service
 [removal](./background-service.md#manage-the-service) is separate.
 
 Treat pairing URLs and authorization codes as passwords. Do not include them in
@@ -313,22 +315,22 @@ screenshots, logs, or bug reports.
 
 ## T3 Connect troubleshooting
 
-Run `t3 connect status` on the host to inspect saved authorization and link
+Run `shuv2code connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
-offline, run `t3 service status` and read the displayed log. If it disappears
+offline, run `shuv2code service status` and read the displayed log. If it disappears
 when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
 
-| Error                                                     | Recovery                                                                                                                                    |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart T3 Code on the host.                                                                         |
-| `auth_invalid` or `invalid_bearer`                        | Run `t3 connect login`. If credentials were revoked, run `t3 connect logout`, then `t3 connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update T3 Code, then restart it.                                                                            |
-| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                               |
-| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                             |
+| Error                                                     | Recovery                                                                                                                                                         |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart T3 Code on the host.                                                                                              |
+| `auth_invalid` or `invalid_bearer`                        | Run `shuv2code connect login`. If credentials were revoked, run `shuv2code connect logout`, then `shuv2code connect` again. Restart the server after signing in. |
+| Expired or invalid link proof                             | Check the host's date and time, update T3 Code, then restart it.                                                                                                 |
+| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                                    |
+| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                                  |
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
 `systemctl --user restart t3code.service` for the background service. For a
-foreground server, stop it and run `t3 serve` again with your usual options.
+foreground server, stop it and run `shuv2code serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both

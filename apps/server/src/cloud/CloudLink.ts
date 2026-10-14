@@ -6,6 +6,7 @@
  */
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no createPublicKey.
 import * as NodeCrypto from "node:crypto";
+import { forkCliCommand } from "../cli/invocation.ts";
 import {
   AuthStandardClientScopes,
   type EnvironmentCloudLinkStateResult,
@@ -198,7 +199,7 @@ export class CloudLinkAuthorizationMissingError extends Schema.TaggedError<Cloud
   {},
 ) {
   override get message(): string {
-    return "Run `t3 connect link` to authorize this environment.";
+    return `Run \`${forkCliCommand("connect link")}\` to authorize this environment.`;
   }
 }
 

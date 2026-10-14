@@ -4,11 +4,20 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { vi } from "vite-plus/test";
+import { formatServiceStatus } from "./service.ts";
+import { formatBootServiceProblem } from "../cloud/bootService.ts";
+vi.mock("../../package.json", async (importOriginal) => {
+  const actual = await importOriginal<{ default: typeof import("../../package.json") }>();
+  return { default: { ...actual.default, version: "1.2.3" } };
+});
 
 import {
   formatCliCommand,
   resolveRootCliCommand,
   resolveServerInstallation,
+  resolveCliCommand,
+  resolveUninstallGuidance,
 } from "./invocation.ts";
 
 it("formats package runner commands from their cache entry paths", () => {
@@ -55,7 +64,8 @@ it("treats stable installs as direct invocations", () => {
 it("re-suggests the prerelease channel only for prerelease builds", () => {
   for (const [version, expected] of [
     ["0.0.31-nightly.20260729", "npx shuv2code@nightly serve"],
-    ["0.0.31-preview.20260729.1", "npx shuv2code@preview serve"],
+    ["0.0.31-preview.20260729.1", "npx shuv2code@0.0.31-preview.20260729.1 serve"],
+    ["0.0.31-pr.42.1", "npx shuv2code@0.0.31-pr.42.1 serve"],
     ["0.0.31-foo-preview.20260729.1", "npx shuv2code serve"],
     ["0.0.31", "npx shuv2code serve"],
   ] as const) {
@@ -93,7 +103,7 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/usr/local/lib/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "shuv2code serve",
+    "shuv2code-nightly serve",
   );
 });
 
@@ -140,7 +150,9 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
           entry: "/home/theo/.local/lib/node_modules/t3/dist/bin.mjs",
           path: yield* pathWithT3,
         }),
-      ).toBe('sudo env "PATH=$PATH" shuv2code browser setup');
+      ).toBe(
+        'sudo env "PATH=$PATH" /home/theo/.local/node/bin/node /home/theo/.local/lib/node_modules/t3/dist/bin.mjs browser setup',
+      );
     }).pipe(Effect.scoped),
   );
 
@@ -149,9 +161,13 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped();
-      const shim = path.join(home, ".local bin", "t3");
+      const shim = path.join(home, ".local bin", "shuv2code");
       yield* fs.makeDirectory(path.dirname(shim), { recursive: true });
-      yield* fs.writeFileString(shim, "#!/bin/sh\n", { mode: 0o755 });
+      yield* fs.writeFileString(
+        shim,
+        "#!/bin/sh\n# Written by shuv2code: runs the desktop app's bundled CLI.\n",
+        { mode: 0o755 },
+      );
       const desktop = {
         node: "/tmp/.mount_T3abc/t3code",
         entry: "/tmp/.mount_T3abc/resources/app.asar/apps/server/dist/bin.mjs",
@@ -159,9 +175,9 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       };
       // The desktop app's shim, quoted for the shell and run as root as is.
       expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
-      // A `t3` the person put on PATH still wins.
+      // Another command on PATH must not redirect this install's recovery action.
       expect(yield* rootCommand({ ...desktop, path: yield* pathWithT3 })).toBe(
-        'sudo env "PATH=$PATH" shuv2code browser setup',
+        `sudo '${shim}' browser setup`,
       );
       // A standalone binary names itself.
       expect(
@@ -175,6 +191,13 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       expect(
         yield* rootCommand({ ...desktop, env: { T3CODE_CLI_PATH: path.join(home, "gone") } }),
       ).toBe('sudo env "PATH=$PATH" shuv2code browser setup');
+      const upstreamShim = path.join(home, "t3");
+      yield* fs.writeFileString(upstreamShim, "#!/bin/sh\n# Written by T3 Code: bundled CLI\n", {
+        mode: 0o755,
+      });
+      expect(yield* rootCommand({ ...desktop, env: { T3CODE_CLI_PATH: upstreamShim } })).toBe(
+        'sudo env "PATH=$PATH" shuv2code browser setup',
+      );
     }).pipe(Effect.scoped),
   );
 });
@@ -200,6 +223,22 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
           Effect.provideService(HostProcess.IsExecutable, entry.endsWith("/t3")),
         );
         expect(installation).toEqual({ kind });
+        const guidance = yield* resolveUninstallGuidance.pipe(
+          Effect.provideService(HostProcess.Arguments, ["node", entry]),
+          Effect.provideService(HostProcess.ExecutablePath, entry),
+          Effect.provideService(HostProcess.IsExecutable, entry.endsWith("/t3")),
+        );
+        expect(guidance).toContain("temporary fork package-runner");
+        expect(guidance).not.toContain("npm uninstall");
+        if (entry.endsWith("/t3")) {
+          expect(
+            yield* resolveCliCommand("service install").pipe(
+              Effect.provideService(HostProcess.Arguments, [entry, "serve"]),
+              Effect.provideService(HostProcess.ExecutablePath, entry),
+              Effect.provideService(HostProcess.IsExecutable, true),
+            ),
+          ).toBe("npx shuv2code service install");
+        }
       }
     }),
   );
@@ -228,6 +267,35 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
       expect(yield* resolve).toBeNull();
       yield* fs.symlink(entry, globalBin);
       expect(yield* resolve).toEqual({ kind: "npm-global", prefix: yield* fs.realPath(prefix) });
+      const guidance = yield* resolveUninstallGuidance.pipe(
+        Effect.provideService(HostProcess.Arguments, ["node", entry]),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      expect(guidance).toContain(
+        `npm uninstall --global --prefix ${yield* fs.realPath(prefix)} shuv2code`,
+      );
+      expect(guidance).not.toMatch(/npm uninstall[^`]*\bt3\b/);
+      const command = yield* resolveCliCommand("service install").pipe(
+        Effect.provideService(HostProcess.Arguments, ["node", entry]),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provideService(HostProcess.Environment, {}),
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      expect(command).toBe(`${yield* fs.realPath(prefix)}/bin/shuv2code service install`);
+      expect(
+        formatServiceStatus(
+          {
+            supported: true,
+            installed: false,
+            current: false,
+            unitPath: "fork.service",
+            logPath: "fork.log",
+          },
+          "1.2.3",
+          () => command,
+        ),
+      ).toContain(command);
       yield* fs.remove(globalBin);
       yield* fs.writeFileString(globalBin, "an unrelated t3 command");
       expect(yield* resolve).toBeNull();
@@ -296,5 +364,63 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
         ).toBeNull();
       }
     }),
+  );
+});
+
+it.layer(NodeServices.layer)("fork recovery instructions", (it) => {
+  it.effect(
+    "uses the installed standalone channel binary and never offers npm removal for it",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const exe = path.join(root, "shuv2code-nightly");
+        yield* fs.writeFileString(exe, "binary fixture");
+        yield* Effect.gen(function* () {
+          expect(yield* resolveRootCliCommand("browser setup")).toBe(`sudo ${exe} browser setup`);
+          expect(yield* resolveCliCommand("service install")).toBe(`${exe} service install`);
+          expect(yield* resolveUninstallGuidance).toContain("standalone fork binary");
+          expect(yield* resolveUninstallGuidance).not.toContain("npm uninstall");
+        }).pipe(
+          Effect.provideService(HostProcess.ExecutablePath, exe),
+          Effect.provideService(HostProcess.Arguments, [exe]),
+          Effect.provideService(HostProcess.IsExecutable, true),
+          Effect.provideService(HostProcess.Environment, {}),
+        );
+      }),
+  );
+  it.effect(
+    "keeps source commands on their exact runtime and checkout without global removal advice",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const entry = path.join(root, "bunx-tools source", "apps/server/dist/bin.mjs");
+        yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+        yield* fs.writeFileString(entry, "source fixture");
+        yield* Effect.gen(function* () {
+          const command = yield* resolveRootCliCommand("browser setup");
+          expect(command).toBe(`sudo /usr/bin/node '${entry}' browser setup`);
+          expect(yield* resolveUninstallGuidance).toContain("source");
+          expect(yield* resolveUninstallGuidance).not.toContain("npm uninstall");
+          const install = yield* resolveCliCommand("service install");
+          expect(install).toBe(`/usr/bin/node '${entry}' service install`);
+          expect(yield* resolveCliCommand("service install", "/work/fork home")).toBe(
+            `/usr/bin/node '${entry}' service install --base-dir '/work/fork home'`,
+          );
+          expect(
+            formatBootServiceProblem("service-stopped", {
+              version: "1.2.3-nightly.20261014.1",
+              command: () => install,
+            }),
+          ).toContain("systemctl --user status shuv2code-v2-nightly.service");
+        }).pipe(Effect.provideService(HostProcess.Arguments, ["node", entry]));
+      }).pipe(
+        Effect.provideService(HostProcess.ExecutablePath, "/usr/bin/node"),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provideService(HostProcess.Environment, {}),
+      ),
   );
 });

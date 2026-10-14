@@ -12,6 +12,11 @@ import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
 import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { forkCliCommand, resolveCliCommand, formatCliHomeFlag } from "./invocation.ts";
+import {
+  isSameInstallationChannel,
+  SEPARATE_CHANNEL_INSTALL_MESSAGE,
+} from "@t3tools/shared/channelIdentity";
 
 export const layer = (config: ServerConfig.ServerConfig["Service"]) =>
   BootService.layer({
@@ -66,16 +71,23 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
+  command = (subcommand: string) => forkCliCommand(subcommand, cliVersion),
 ): string {
   if (!status.supported) {
     return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return `shuv2code service\n  Status: not installed\n  Next: Run \`${command("service install")}\`.`;
   }
+  if (
+    status.installedVersion !== undefined &&
+    !isSameInstallationChannel(cliVersion, status.installedVersion)
+  )
+    return `shuv2code service\n  Installed version: ${status.installedVersion}\n  Unit: ${status.unitPath}\n  Logs: ${status.logPath}\n  ${SEPARATE_CHANNEL_INSTALL_MESSAGE}`;
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
-    (problem) => `  [${problem}] ${BootService.formatBootServiceProblem(problem)}`,
+    (problem) =>
+      `  [${problem}] ${BootService.formatBootServiceProblem(problem, { version: cliVersion, command })}`,
   );
   if (
     !status.current &&
@@ -88,7 +100,7 @@ export function formatServiceStatus(
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Run \`t3 update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`t3 service install\` explicitly.`,
+      `  Next: Run \`${command(`update ${installedVersion}`)}\` to match it, or pass \`--allow-downgrade\` to \`${command("service install")}\` explicitly.`,
     ].join("\n");
   }
   return [
@@ -97,17 +109,19 @@ export function formatServiceStatus(
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : ["  Next: Run `t3 service install` to repair it."]),
+    ...(status.current ? [] : [`  Next: Run \`${command("service install")}\` to repair it.`]),
   ].join("\n");
 }
 
-const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
+const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E, R>(
   flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
-  run: Effect.Effect<A, E, BootService.BootService>,
+  run: (
+    config: ServerConfig.ServerConfig["Service"],
+  ) => Effect.Effect<A, E, R | BootService.BootService>,
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
-  return yield* run.pipe(Effect.provide(layer(config)));
+  return yield* run(config).pipe(Effect.provide(layer(config)));
 });
 
 const serviceReconcileFlags = {
@@ -121,8 +135,7 @@ const serviceReconcileFlags = {
 const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
   Command.withDescription("Install T3 Code as a background service for this user."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
@@ -142,14 +155,15 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
 // Kept one release for muscle memory and old docs. It did what `t3 service
 // install` does; the way to move to a newer release is `t3 update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
-  Command.withDescription("Deprecated. Run `t3 update` to move to a newer release."),
+  Command.withDescription(
+    `Deprecated. Run \`${forkCliCommand("update")}\` to move to a newer release.`,
+  ),
   Command.unlisted,
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, (config) =>
       Effect.gen(function* () {
         yield* Console.log(
-          "`t3 service update` is deprecated: run `t3 update` to move to a newer release, or `t3 service install` to repair the service. Repairing now.",
+          `\`${yield* resolveCliCommand("service update", config.baseDir)}\` is deprecated: run \`${yield* resolveCliCommand("update", config.baseDir)}\` to move to a newer release, or \`${yield* resolveCliCommand("service install", config.baseDir)}\` to repair the service. Repairing now.`,
         );
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
@@ -166,11 +180,10 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
 
 const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe(
   Command.withDescription(
-    "Restart the background service. Picks up a version installed by `t3 update` that was not restarted at the time.",
+    `Restart the background service. Picks up a version installed by \`${forkCliCommand("update")}\` that was not restarted at the time.`,
   ),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
         const status = yield* service.status;
@@ -188,8 +201,7 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
   Command.withDescription("Stop and remove the T3 Code background service."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
         const removed = yield* service.uninstall;
@@ -204,11 +216,17 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
   Command.withDescription("Show whether the T3 Code background service is installed."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, (config) =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
-        yield* Console.log(formatServiceStatus(yield* service.status, packageJson.version));
+        const prefix = (yield* resolveCliCommand("")).trimEnd();
+        yield* Console.log(
+          formatServiceStatus(
+            yield* service.status,
+            packageJson.version,
+            (subcommand) => `${prefix} ${subcommand} ${formatCliHomeFlag(config.baseDir)}`,
+          ),
+        );
       }),
     ),
   ),

@@ -45,7 +45,7 @@ it("reports the installed service version and host paths", () => {
 it("gives a direct repair command for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `t3 service install` to repair it.",
+    "Next: Run `shuv2code service install` to repair it.",
   );
 });
 
@@ -64,7 +64,7 @@ it("explains an incomplete nightly installation and keeps repair on its installe
   expect(output).toContain("last login session ends");
   expect(output).toContain('sudo loginctl enable-linger "$(id -un)"');
   expect(output).toContain("[service-stopped]");
-  expect(output).toContain("Run `t3 service install` to repair it.");
+  expect(output).toContain("Run `shuv2code-nightly service install` to repair it.");
   expect(output).not.toContain("npx");
 });
 
@@ -73,7 +73,7 @@ it("points an older service at a repair, never at npx", () => {
     { ...status, current: false, installedVersion: "0.0.28" },
     "0.0.29",
   );
-  expect(output).toContain("Run `t3 service install` to repair it.");
+  expect(output).toContain("Run `shuv2code service install` to repair it.");
   expect(output).not.toContain("npx");
 });
 
@@ -87,12 +87,21 @@ it("explains where the service is supported", () => {
 it("reports a newer installed service and tells the CLI to catch up to it", () => {
   const output = formatServiceStatus(
     { ...status, current: false, installedVersion: "0.0.32-nightly.1" },
-    "0.0.31",
+    "0.0.31-nightly.1",
   );
 
-  assert.include(output, "t3@0.0.32-nightly.1 (newer than this t3@0.0.31 CLI)");
-  assert.include(output, "Run `t3 update 0.0.32-nightly.1` to match it");
+  assert.include(output, "t3@0.0.32-nightly.1 (newer than this t3@0.0.31-nightly.1 CLI)");
+  assert.include(output, "Run `shuv2code-nightly update 0.0.32-nightly.1` to match it");
   assert.notInclude(output, "npx");
+});
+
+it("does not suggest cross-channel update commands as service recovery", () => {
+  const output = formatServiceStatus(
+    { ...status, current: false, installedVersion: "0.0.32-nightly.1" },
+    "0.0.31",
+  );
+  expect(output).toContain("Install the other channel separately");
+  expect(output).not.toContain("shuv2code update");
 });
 
 const newerServiceStatus = { ...status, current: false, installedVersion: "999.0.0" };

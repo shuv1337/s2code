@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { createPreviewStreamClient, type PreviewStreamControl } from "./serverBrowserStream.ts";
+import { PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE } from "@t3tools/contracts";
 
 class FakeSocket extends EventTarget {
   static readonly OPEN = 1;
@@ -62,6 +63,41 @@ describe("preview stream control", () => {
     generation: 1,
     dialog: null,
   };
+
+  it.each([
+    [
+      JSON.stringify({
+        need: "sandbox",
+        command: "sudo /home/fork/bin/shuv2code-nightly browser setup",
+      }),
+      "sudo /home/fork/bin/shuv2code-nightly browser setup",
+    ],
+    [
+      JSON.stringify({
+        need: "sandbox",
+        command: "sudo /usr/bin/node '/work/my fork/apps/server/dist/bin.mjs' browser setup",
+      }),
+      "sudo /usr/bin/node '/work/my fork/apps/server/dist/bin.mjs' browser setup",
+    ],
+    ["malformed", "sudo shuv2code browser setup"],
+  ])(
+    "preserves server-provided fork setup instructions or falls back without installing upstream: %s",
+    (reason, command) => {
+      const onHostSetup = vi.fn();
+      const client = createPreviewStreamClient(target, {
+        onFrame: vi.fn(),
+        onViewport: vi.fn(),
+        onConnectedChange: vi.fn(),
+        onUnauthorized: vi.fn(),
+        onHostSetup,
+      });
+      FakeSocket.current.dispatchEvent(
+        Object.assign(new Event("close"), { code: PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE, reason }),
+      );
+      expect(onHostSetup).toHaveBeenCalledWith({ need: "sandbox", command });
+      client.stop();
+    },
+  );
 
   it("marks passive viewers without changing active viewer URLs", () => {
     const { client, socket } = connect();

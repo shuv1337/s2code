@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_DISPLAY_NAME } from "~/branding";
+import { resolveProductDownload } from "@t3tools/shared/productIdentity";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { isHostedStaticApp } from "~/hostedPairing";
 import { useEnvironments } from "~/state/environments";
@@ -21,7 +22,6 @@ import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
 
 const OPENER_STORAGE_KEY = "t3code:prompt-link-opener";
 const Opener = Schema.NullOr(Schema.Literals(["app", "browser"]));
-const DOWNLOAD_URL = "https://t3.codes/download";
 
 interface LinkSummary {
   readonly prompt: LinkedPrompt | null;
@@ -112,6 +112,7 @@ function HostedPromptLinkLanding({
   const [remember, setRemember] = useState(false);
   const deepLink = promptLinkDeepLink(appPath);
   const onPhone = /android|iphone|ipad/i.test(navigator.userAgent);
+  const download = resolveProductDownload(onPhone);
   const autoOpenedRef = useRef(false);
 
   // After "remember", later links hand straight to the app. The page stays as the way back
@@ -166,9 +167,13 @@ function HostedPromptLinkLanding({
             Continue here
           </Button>
         ) : null}
-        <Button variant="ghost" render={<a href={DOWNLOAD_URL} />}>
-          Get T3 Code
-        </Button>
+        {download.url === null ? (
+          <p className="text-sm text-muted-foreground">{download.label}</p>
+        ) : (
+          <Button variant="ghost" render={<a href={download.url} />}>
+            {download.label}
+          </Button>
+        )}
       </div>
       <label className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
         <Checkbox checked={remember} onCheckedChange={(checked) => setRemember(checked === true)} />

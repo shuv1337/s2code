@@ -19,6 +19,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Argument, Command } from "effect/cli";
+import { forkCliCommand } from "./invocation.ts";
 
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
@@ -32,7 +33,7 @@ export class DesktopAppSshUnsupportedError extends Schema.TaggedError<DesktopApp
   {},
 ) {
   override get message(): string {
-    return "`t3 app` only controls a desktop app on the same machine. It cannot run over SSH.";
+    return `\`${forkCliCommand("app")}\` only controls a desktop app on the same machine. It cannot run over SSH.`;
   }
 }
 
@@ -41,7 +42,7 @@ export class DesktopAppPlatformUnsupportedError extends Schema.TaggedError<Deskt
   { platform: Schema.String },
 ) {
   override get message(): string {
-    return `\`t3 app\` is not supported on ${this.platform}.`;
+    return `\`${forkCliCommand("app")}\` is not supported on ${this.platform}.`;
   }
 }
 
@@ -55,7 +56,7 @@ export class DesktopAppUnreachableError extends Schema.TaggedError<DesktopAppUnr
   },
 ) {
   override get message(): string {
-    return "Could not reach the T3 Code desktop app. Start or update the desktop app on this machine, then run `t3 app` again. A running T3 Code server is not enough.";
+    return `Could not reach the fork desktop app. Start or update it on this machine, then run \`${forkCliCommand("app")}\` again. A running server is not enough.`;
   }
 }
 

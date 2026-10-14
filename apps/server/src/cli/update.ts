@@ -36,6 +36,7 @@ import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntim
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { createUpdateProgress } from "./updateProgress.ts";
 import * as CliService from "./service.ts";
+import { resolveCliCommand } from "./invocation.ts";
 
 export class CliUpdateError extends Schema.TaggedError<CliUpdateError>()("CliUpdateError", {
   reason: Schema.String,
@@ -454,7 +455,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
     } else {
       yield* Console.log(
-        "  Not a terminal, so the service keeps running its current version. Rerun with --yes to restart it now, or run `t3 service restart` later.",
+        `  Not a terminal, so the service keeps running its current version. Rerun with --yes to restart it now, or run \`${yield* resolveCliCommand("service restart", input.baseDir)}\` later.`,
       );
     }
   }
@@ -563,7 +564,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     yield* Console.log(`  Background service already on ${targetVersion}`);
   } else if (serviceInstalled) {
     yield* Console.log(
-      `  Background service still running ${serviceVersion ?? "an unknown version"}. Run \`t3 service restart\` when you are ready to switch it to ${targetVersion}.`,
+      `  Background service still running ${serviceVersion ?? "an unknown version"}. Run \`${yield* resolveCliCommand("service restart", input.baseDir)}\` when you are ready to switch it to ${targetVersion}.`,
     );
   } else if (status.installed && !servesThisHome) {
     yield* Console.log(

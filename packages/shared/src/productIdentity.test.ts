@@ -5,7 +5,19 @@ import {
   runtimeCompletionMarker,
   applyDevelopmentProductOverrides,
   applyProductEnvironment,
+  resolveProductDownload,
 } from "./productIdentity.ts";
+
+it("routes desktop downloads only to the fork and makes mobile distribution explicitly unavailable", () => {
+  expect(resolveProductDownload(false)).toEqual({
+    url: "https://github.com/shuv1337/shuv2code/releases",
+    label: "Fork releases",
+  });
+  expect(resolveProductDownload(true)).toEqual({
+    url: null,
+    label: "Fork mobile apps are not available yet.",
+  });
+});
 
 describe("fork public configuration", () => {
   it("preserves explicit managed dev inputs while preferring fork overrides", () => {

@@ -2,6 +2,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import { PRODUCT_CLI_SHIM_MARKER } from "@t3tools/shared/productIdentity";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
@@ -14,7 +15,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // so its launcher mounts the AppImage itself instead of pointing into it.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = "Written by shuv2code: runs the desktop app's bundled CLI.";
+export const MARKER = PRODUCT_CLI_SHIM_MARKER;
 
 /** Server entry inside the app, relative to its server root (an asar archive when packaged). */
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";

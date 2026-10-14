@@ -472,7 +472,7 @@ const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
       return { need: value.need, command: value.command };
     }
   } catch {}
-  return { need: "sandbox", command: "sudo npx t3 browser setup" };
+  return { need: "sandbox", command: "sudo shuv2code browser setup" };
 };
 
 /** What a viewer tells the person; `command` is shown beside it, ready to copy. */
