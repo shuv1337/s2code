@@ -115,7 +115,7 @@ identities. No fork Winget or Homebrew registration is configured here.
 
 On Debian/Ubuntu, install a downloaded fork DEB with
 `sudo apt install ./T3-Code-<version>-<arch>.deb`. The fork AUR definitions use
-`shuv2code-bin`, `shuv2code-nightly-bin`, and `shuv2code-preview-bin`; use the AUR
+`shuv2code-bin` and `shuv2code-nightly-bin`; use the AUR
 only after maintainers confirm those packages and their release checksums are published.
 
 The `.deb` updates itself like the other desktop builds. It asks for your
