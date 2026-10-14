@@ -9,6 +9,7 @@ import {
   type AgentSystemdScope,
 } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -18,11 +19,12 @@ import * as Path from "effect/Path";
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
- * Agents and terminals share this slice. It sits in app.slice next to the
- * server's own unit, so the server's CPUWeight and IOWeight compete with the
- * agents directly.
+ * Agents and terminals share this slice under app.slice, separate from the
+ * server's own unit and its CPUWeight/IOWeight protections.
+ * All fork environments and release channels share this machine-level agents
+ * budget (within the user's systemd manager), never the upstream product's slice.
  */
-const AGENT_SLICE = "app-t3code-agents.slice";
+const AGENT_SLICE = `app-${PRODUCT_ID}-agents.slice`;
 
 const GiB = 1024 ** 3;
 
@@ -297,7 +299,7 @@ export const make = Effect.gen(function* () {
       if (resolved._tag === "None") return { command, args };
       const scope = yield* systemd;
       if (scope === undefined) return agentScopeCommand({ command: resolved.value, args });
-      const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
+      const unit = `${PRODUCT_ID}-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       if (threadId !== undefined) yield* track(scope.systemctl, threadId, unit);
       const systemdScope: AgentSystemdScope = {
         systemdRun: scope.systemdRun,
