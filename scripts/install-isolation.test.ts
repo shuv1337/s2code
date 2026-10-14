@@ -148,7 +148,7 @@ describe
           NodePath.join(home, ".shuv2code-v2", "runtime", "versions", version, ".install-complete"),
           "utf8",
         ).trim(),
-      ).toBe("shuv2code\n1.2.3");
+      ).toBe(version);
     },
   );
   it.skipIf(kind === "pwsh" && !hasPwsh)(
@@ -159,6 +159,7 @@ describe
       NodeFS.mkdirSync(custom);
       NodeFS.writeFileSync(NodePath.join(custom, ".product-identity"), "shuv2code");
       const cache = seedCache(custom, version, kind);
+      NodeFS.writeFileSync(NodePath.join(cache, ".install-product"), "t3code\n");
       const result = runInstaller(kind);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("foreign runtime cache");
@@ -166,13 +167,24 @@ describe
     },
   );
   it.skipIf(kind === "pwsh" && !hasPwsh)(
-    "keeps version-only legacy caches in the canonical fork home",
+    "refetches unmarked caches without executing the upstream sentinel",
     () => {
       const cache = seedCache(NodePath.join(home, ".shuv2code-v2"), version, kind);
       const result = runInstaller(kind);
       expect(result.status, result.stderr + result.stdout).toBe(0);
-      expect(result.stderr).toContain("already downloaded");
-      expect(NodeFS.readFileSync(NodePath.join(cache, ".install-complete"), "utf8")).toBe(version);
+      expect(result.stderr).not.toContain("already downloaded");
+      expect(NodeFS.readFileSync(NodePath.join(cache, ".install-complete"), "utf8").trim()).toBe(
+        version,
+      );
+      expect(NodeFS.readFileSync(NodePath.join(cache, ".install-product"), "utf8").trim()).toBe(
+        "shuv2code",
+      );
+      expect(
+        NodeFS.readFileSync(NodePath.join(cache, kind === "sh" ? "t3" : "t3.exe"), "utf8"),
+      ).not.toBe("upstream-sentinel");
+      const repeat = runInstaller(kind);
+      expect(repeat.status, repeat.stderr).toBe(0);
+      expect(repeat.stderr).toContain("already downloaded");
     },
   );
   it.skipIf(kind === "pwsh" && !hasPwsh)("installs into an empty explicit fork home", () => {
@@ -184,12 +196,13 @@ describe
         NodePath.join(env.SHUV2CODE_HOME, "runtime", "versions", version, ".install-complete"),
         "utf8",
       ).trim(),
-    ).toBe("shuv2code\n1.2.3");
+    ).toBe(version);
   });
   it.skipIf(kind === "pwsh" && !hasPwsh)(
     "refuses foreign product metadata even in the default fork namespace",
     () => {
       const cache = seedCache(NodePath.join(home, ".shuv2code-v2"), "t3code\n1.2.3\n", kind);
+      NodeFS.writeFileSync(NodePath.join(cache, ".install-product"), "t3code\n");
       const result = runInstaller(kind);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("foreign runtime cache");

@@ -81,7 +81,13 @@ export function resolveProductEnvironment(env: Readonly<Record<string, string | 
   }
   for (const key of PUBLIC_CONFIG_KEYS) {
     const internal = `T3CODE_${key}`;
-    const value = readEnvironmentValue(env, `SHUV2CODE_${key}`)?.trim();
+    // Updates replace the child, not its fork launcher. Keep that launcher's
+    // transaction home; an upstream launcher never launches a fork executable.
+    const value =
+      readEnvironmentValue(env, `SHUV2CODE_${key}`)?.trim() ||
+      (key === "HOME" && readEnvironmentValue(env, "T3_SERVICE_LAUNCHER_CONTEXT")?.trim()
+        ? readEnvironmentValue(env, "T3CODE_HOME")?.trim()
+        : undefined);
     if (value) {
       resolved[`SHUV2CODE_${key}`] = value;
       resolved[internal] = value;
@@ -91,6 +97,16 @@ export function resolveProductEnvironment(env: Readonly<Record<string, string | 
 }
 
 export function applyProductEnvironment(env: Record<string, string | undefined>) {
+  if (
+    readEnvironmentValue(env, "T3CODE_HOME")?.trim() &&
+    !readEnvironmentValue(env, "SHUV2CODE_HOME")?.trim() &&
+    !readEnvironmentValue(env, "T3_SERVICE_LAUNCHER_CONTEXT")?.trim()
+  ) {
+    // @effect-diagnostics-next-line globalConsole:off - Runs before the Effect/logger runtime is initialized.
+    console.error(
+      "shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home.",
+    );
+  }
   const resolved = resolveProductEnvironment(env);
   for (const name of Object.keys(env)) {
     if (publicInternalNames.has(name.toUpperCase()) || publicForkNames.has(name.toUpperCase()))
@@ -111,15 +127,12 @@ export function applyDevelopmentProductOverrides(env: Record<string, string | un
   }
 }
 
-export const runtimeCompletionMarker = (version: string) => `${PRODUCT_ID}\n${version}\n`;
+export const PRODUCT_RUNTIME_MARKER = ".install-product";
+export const runtimeCompletionMarker = (version: string) => `${version}\n`;
 export const isProductRuntimeVersion = (version: string) =>
   /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(version);
 
-/** Version-only metadata is accepted only in a demonstrably fork-owned legacy home. */
-export function isProductRuntimeComplete(marker: string, version: string, legacyForkHome: boolean) {
-  const normalized = marker.trim().replaceAll("\r\n", "\n");
-  return (
-    normalized === runtimeCompletionMarker(version).trim() ||
-    (legacyForkHome && normalized === version)
-  );
+/** Keep completion compatible with retained launchers; ownership is independent. */
+export function isProductRuntimeComplete(marker: string, version: string, product: string) {
+  return product.trim() === PRODUCT_ID && marker.trim() === version;
 }

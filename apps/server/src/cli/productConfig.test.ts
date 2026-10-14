@@ -76,6 +76,22 @@ it.effect("honors explicit fork settings and keeps CLI flags above them", () =>
     expect(overridden.port).toBe(5773);
   }),
 );
+it.effect("keeps the old launcher transaction's custom home in the new child", () =>
+  Effect.gen(function* () {
+    const home = NodePath.join(root, "service-home");
+    NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(home, ".product-identity"), "shuv2code\n");
+    NodeFS.writeFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "original-db");
+    const config = yield* resolve({
+      T3CODE_HOME: home,
+      T3_SERVICE_LAUNCHER_CONTEXT: JSON.stringify({ version: "1.2.3" }),
+    });
+    expect(config.baseDir).toBe(home);
+    expect(config.dbPath).toBe(NodePath.join(home, "userdata", "statev2.sqlite"));
+    expect(NodeFS.existsSync(NodePath.join(root, ".shuv2code-v2"))).toBe(false);
+    expect(NodeFS.readFileSync(config.dbPath, "utf8")).toBe("original-db");
+  }),
+);
 it.effect("refuses an explicit upstream home before opening or creating state", () =>
   Effect.gen(function* () {
     const upstream = NodePath.join(root, ".t3");

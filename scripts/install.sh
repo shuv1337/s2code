@@ -28,6 +28,9 @@ fail() {
 }
 
 [ -z "${SHUV2CODE_IMPORT_UPSTREAM:-}" ] || fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME."
+if [ -n "${T3CODE_HOME:-}" ] && [ -z "${SHUV2CODE_HOME:-}" ]; then
+  printf '%s\n' "shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home." >&2
+fi
 canonical_dir() (
   if [ -d "$1" ]; then cd -P "$1" && pwd -P
   else printf '%s/%s\n' "$(canonical_dir "$(dirname "$1")")" "$(basename "$1")"
@@ -35,12 +38,11 @@ canonical_dir() (
 )
 t3_home="$(canonical_dir "$t3_home")"
 case "$t3_home/" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
-legacy_fork_home=false
-case "$t3_home/" in */.shuv2code-v2/*) legacy_fork_home=true ;; esac
+default_fork_home="$(canonical_dir "$HOME")/.shuv2code-v2"
 [ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
 if [ -f "$t3_home/.product-identity" ]; then
   [ "$(tr -d '\r' < "$t3_home/.product-identity")" = shuv2code ] || fail "Home belongs to another product."
-elif [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home")" ] && ! "$legacy_fork_home"; then
+elif [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home")" ] && [ "$t3_home" != "$default_fork_home" ]; then
   fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
 fi
 for child in userdata dev runtime; do
@@ -202,16 +204,17 @@ printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\
 case "$(canonical_dir "$target_dir")/" in "$t3_home/"*) ;; *) fail "Refusing foreign runtime cache path." ;; esac
 [ ! -L "$target_dir/t3" ] || fail "Refusing a linked runtime executable."
 [ ! -L "$target_dir/.install-complete" ] || fail "Refusing linked runtime metadata."
-completion="$(printf 'shuv2code\n%s' "$version")"
+[ ! -L "$target_dir/.install-product" ] || fail "Refusing linked runtime product metadata."
+product=
+if [ -e "$target_dir/.install-product" ]; then
+  product="$(tr -d '\r' < "$target_dir/.install-product")" || fail "Could not read runtime product metadata."
+  [ "$product" = shuv2code ] || fail "Refusing to reuse or replace a foreign runtime cache."
+fi
 marker=
 if [ -e "${target_dir}/.install-complete" ]; then
   marker="$(tr -d '\r' < "${target_dir}/.install-complete")" || fail "Could not read runtime metadata; refusing to replace the cache."
 fi
-if [ -n "$marker" ] && [ "$marker" != "$completion" ] && { ! "$legacy_fork_home" || [ "$marker" != "$version" ]; }; then
-  fail "Refusing to reuse or replace a foreign runtime cache."
-fi
-
-if [ -x "${target_dir}/t3" ] && { [ "$marker" = "$completion" ] || { "$legacy_fork_home" && [ "$marker" = "$version" ]; }; }; then
+if [ -x "${target_dir}/t3" ] && [ "$product" = shuv2code ] && [ "$marker" = "$version" ]; then
   step "Version ${version} is already downloaded."
 else
   mkdir -p "$versions_dir"
@@ -243,7 +246,8 @@ else
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
   "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
-  printf 'shuv2code\n%s\n' "$version" > "${staging}/.install-complete"
+  printf '%s\n' "$version" > "${staging}/.install-complete"
+  printf '%s\n' shuv2code > "${staging}/.install-product"
 
   rm -rf "$target_dir"
   mv "$staging" "$target_dir"

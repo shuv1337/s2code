@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveProductEnvironment,
   isProductRuntimeComplete,
   runtimeCompletionMarker,
   applyDevelopmentProductOverrides,
+  applyProductEnvironment,
 } from "./productIdentity.ts";
 
 describe("fork public configuration", () => {
@@ -54,11 +55,38 @@ describe("fork public configuration", () => {
       }),
     ).toEqual({ SHUV2CODE_HOME: "/fork", T3CODE_HOME: "/fork" });
   });
-  it("requires product identity on custom-path caches, with a narrow legacy migration", () => {
-    expect(isProductRuntimeComplete(runtimeCompletionMarker("1.2.3"), "1.2.3", false)).toBe(true);
-    expect(isProductRuntimeComplete("shuv2code\r\n1.2.3\r\n", "1.2.3", false)).toBe(true);
-    expect(isProductRuntimeComplete("t3code\n1.2.3\n", "1.2.3", true)).toBe(false);
-    expect(isProductRuntimeComplete("1.2.3", "1.2.3", false)).toBe(false);
-    expect(isProductRuntimeComplete("1.2.3", "1.2.3", true)).toBe(true);
+  it("bridges an old fork launcher child home without importing other upstream inputs", () => {
+    const env = {
+      T3CODE_HOME: "/custom-fork",
+      T3CODE_PORT: "3773",
+      T3_SERVICE_LAUNCHER_CONTEXT: "{}",
+    };
+    applyProductEnvironment(env);
+    expect(env).toMatchObject({ T3CODE_HOME: "/custom-fork", SHUV2CODE_HOME: "/custom-fork" });
+    expect(env).not.toHaveProperty("T3CODE_PORT");
+    expect(resolveProductEnvironment({ ...env, SHUV2CODE_HOME: "/explicit" }).T3CODE_HOME).toBe(
+      "/explicit",
+    );
+  });
+  it("notices ignored upstream homes without breaking coexistence", () => {
+    const notice = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const env = { T3CODE_HOME: "/upstream" };
+      applyProductEnvironment(env);
+      expect(env).not.toHaveProperty("T3CODE_HOME");
+      expect(notice).toHaveBeenCalledExactlyOnceWith(
+        expect.stringContaining("ignoring T3CODE_HOME; use SHUV2CODE_HOME"),
+      );
+    } finally {
+      notice.mockRestore();
+    }
+  });
+  it("requires a separate product marker while retaining old-launcher completion compatibility", () => {
+    const marker = runtimeCompletionMarker("1.2.3");
+    expect(marker.trim() === "1.2.3").toBe(true); // Retained launcher's exact reader.
+    expect(isProductRuntimeComplete(marker, "1.2.3", "shuv2code\n")).toBe(true);
+    expect(isProductRuntimeComplete("1.2.3\r\n", "1.2.3", "shuv2code\r\n")).toBe(true);
+    expect(isProductRuntimeComplete(marker, "1.2.3", "t3code")).toBe(false);
+    expect(isProductRuntimeComplete(marker, "1.2.3", "")).toBe(false);
   });
 });

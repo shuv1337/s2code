@@ -93,7 +93,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
         `https://releases.example/download/v${version}/${archiveName}`,
       ]);
       assert.deepEqual(commands, ["tar"]);
-      assert.equal(yield* fs.readFileString(paths.sentinelPath), `shuv2code\n${version}\n`);
+      assert.equal(yield* fs.readFileString(paths.sentinelPath), `${version}\n`);
       assert.isFalse(yield* fs.exists(path.join(paths.versionDir, "t3-runtime-archive")));
     }),
   );
@@ -161,7 +161,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
           { stage: "extract" },
           { stage: "validate" },
         ]);
-        assert.equal(yield* fs.readFileString(installed.sentinelPath), `shuv2code\n${version}\n`);
+        assert.equal(yield* fs.readFileString(installed.sentinelPath), `${version}\n`);
       }),
   );
 
@@ -270,7 +270,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       assert.notEqual(validatedDirectory, finalPaths.versionDir);
       assert.deepEqual(installed, finalPaths);
       assert.isTrue(yield* fs.exists(finalPaths.entryPath));
-      assert.equal(yield* fs.readFileString(finalPaths.sentinelPath), `shuv2code\n${version}\n`);
+      assert.equal(yield* fs.readFileString(finalPaths.sentinelPath), `${version}\n`);
     }),
   );
 
@@ -340,7 +340,11 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
       yield* fs.writeFileString(finalPaths.entryPath, "broken\n");
-      yield* fs.writeFileString(finalPaths.sentinelPath, `shuv2code\n${version}\n`);
+      yield* fs.writeFileString(finalPaths.sentinelPath, `${version}\n`);
+      yield* fs.writeFileString(
+        path.join(finalPaths.versionDir, ".install-product"),
+        "shuv2code\n",
+      );
 
       let validations = 0;
       const requests: string[] = [];

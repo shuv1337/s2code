@@ -23,12 +23,10 @@ import {
   isProductRuntimeComplete,
   isProductRuntimeVersion,
   runtimeCompletionMarker,
+  PRODUCT_RUNTIME_MARKER,
+  PRODUCT_ID,
 } from "@t3tools/shared/productIdentity";
-import {
-  canonicalProductPath,
-  ensureProductHome,
-  isLegacyProductHome,
-} from "@t3tools/shared/productHome";
+import { canonicalProductPath, ensureProductHome } from "@t3tools/shared/productHome";
 
 /**
  * A pinned runtime is an exact t3 release archive unpacked into
@@ -285,6 +283,12 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     try: () => {
       ensureProductHome(input.baseDir);
       if (
+        !canonicalProductPath(input.path.join(paths.versionDir, PRODUCT_RUNTIME_MARKER)).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime product metadata points outside the fork home.");
+      if (
         !canonicalProductPath(paths.versionDir).startsWith(
           `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
         )
@@ -323,22 +327,25 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
       (cause) => new PinnedRuntimeInstallError({ step: "checking the pinned runtime", cause }),
     ),
   );
+  const productPath = input.path.join(paths.versionDir, PRODUCT_RUNTIME_MARKER);
+  const product = yield* fs.exists(productPath).pipe(
+    Effect.flatMap((exists) => (exists ? fs.readFileString(productPath) : Effect.succeed(""))),
+    Effect.mapError(
+      (cause) => new PinnedRuntimeInstallError({ step: "reading runtime product metadata", cause }),
+    ),
+  );
+  if ((yield* fs.exists(productPath)) && product.trim() !== PRODUCT_ID)
+    return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign runtime cache" });
   const alreadyPinned =
     entryExists &&
     Option.isSome(sentinel) &&
-    isProductRuntimeComplete(sentinel.value, input.version, isLegacyProductHome(input.baseDir));
+    isProductRuntimeComplete(sentinel.value, input.version, product);
   if (alreadyPinned) {
     input.onProgress?.({ stage: "cached" });
     yield* input.validate(paths);
     return paths;
   }
   if (versionDirExists) {
-    if (
-      Option.isSome(sentinel) &&
-      !isProductRuntimeComplete(sentinel.value, input.version, isLegacyProductHome(input.baseDir))
-    ) {
-      return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign runtime cache" });
-    }
     yield* fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(
       Effect.mapError(
         (cause) =>
@@ -385,6 +392,10 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
 
     input.onProgress?.({ stage: "validate" });
     yield* input.validate(stagingPaths);
+    yield* fs.writeFileString(
+      input.path.join(stagingDir, PRODUCT_RUNTIME_MARKER),
+      `${PRODUCT_ID}\n`,
+    );
     yield* fs
       .writeFileString(stagingPaths.sentinelPath, runtimeCompletionMarker(input.version))
       .pipe(
@@ -399,6 +410,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
         Effect.all([
           fs.exists(paths.entryPath),
           fs.readFileString(paths.sentinelPath).pipe(Effect.option),
+          fs.readFileString(productPath).pipe(Effect.orElseSucceed(() => "")),
         ]).pipe(
           Effect.mapError(
             (checkCause) =>
@@ -407,14 +419,10 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
                 cause: checkCause,
               }),
           ),
-          Effect.flatMap(([publishedEntryExists, publishedSentinel]) =>
+          Effect.flatMap(([publishedEntryExists, publishedSentinel, publishedProduct]) =>
             publishedEntryExists &&
             Option.isSome(publishedSentinel) &&
-            isProductRuntimeComplete(
-              publishedSentinel.value,
-              input.version,
-              isLegacyProductHome(input.baseDir),
-            )
+            isProductRuntimeComplete(publishedSentinel.value, input.version, publishedProduct)
               ? Effect.succeed(false)
               : Effect.fail(
                   new PinnedRuntimeInstallError({

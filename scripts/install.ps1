@@ -20,6 +20,9 @@ $repo = "shuv1337/shuv2code"
 $baseUrl = if ($env:SHUV2CODE_RELEASE_BASE_URL) { $env:SHUV2CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
 $t3Home = if ($env:SHUV2CODE_HOME) { $env:SHUV2CODE_HOME } else { Join-Path $HOME ".shuv2code-v2" }
 $binDir = if ($env:SHUV2CODE_INSTALL_BIN_DIR) { $env:SHUV2CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
+if ($env:T3CODE_HOME -and -not $env:SHUV2CODE_HOME) {
+  [Console]::Error.WriteLine("shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home.")
+}
 
 function Fail([string] $message) {
   Write-Error "t3 install: $message"
@@ -42,12 +45,12 @@ function Assert-ProductPath([string] $directory) {
 $t3Home = [IO.Path]::GetFullPath($t3Home)
 Assert-ProductPath $t3Home
 if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
-$legacyForkHome = $t3Home -match '(^|[\\/])\.shuv2code-v2([\\/]|$)'
+$defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
 $homeMarker = Join-Path $t3Home ".product-identity"
 Assert-ProductPath $homeMarker
 if (Test-Path -LiteralPath $homeMarker) {
   if ((Get-Content -LiteralPath $homeMarker -Raw).Trim() -ne "shuv2code") { Fail "Home belongs to another product." }
-} elseif ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force).Count -gt 0 -and -not $legacyForkHome) {
+} elseif ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force).Count -gt 0 -and $t3Home -ne $defaultForkHome) {
   Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
 }
 foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
@@ -188,11 +191,14 @@ $marker = Join-Path $targetDir ".install-complete"
 Assert-ProductPath $targetDir
 Assert-ProductPath (Join-Path $targetDir "t3.exe")
 Assert-ProductPath $marker
-$completion = "shuv2code`n$version"
+$productMarker = Join-Path $targetDir ".install-product"
+Assert-ProductPath $productMarker
+$product = if (Test-Path -LiteralPath $productMarker) { (Get-Content -LiteralPath $productMarker -Raw).Trim() } else { "" }
+if ((Test-Path -LiteralPath $productMarker) -and $product -ne "shuv2code") { Fail "Refusing to reuse or replace a foreign runtime cache." }
+$completion = $version
 $installedMarker = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -Raw).Trim().Replace("`r`n", "`n") } else { "" }
-if ($installedMarker -and $installedMarker -ne $completion -and -not ($legacyForkHome -and $installedMarker -eq $version)) { Fail "Refusing to reuse or replace a foreign runtime cache." }
 
-if ((Test-Path (Join-Path $targetDir "t3.exe")) -and ($installedMarker -eq $completion -or ($legacyForkHome -and $installedMarker -eq $version))) {
+if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -and $installedMarker -eq $completion) {
   Step "Version $version is already downloaded."
 } else {
   New-Item -ItemType Directory -Force -Path $versionsDir | Out-Null
@@ -235,6 +241,7 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and ($installedMarker -eq $comp
     & (Join-Path $staging "t3.exe") --version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "the downloaded executable does not run" }
     Set-Content -Path (Join-Path $staging ".install-complete") -Value "$completion`n" -NoNewline
+    Set-Content -Path (Join-Path $staging ".install-product") -Value "shuv2code`n" -NoNewline
 
     if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force }
     Move-Item $staging $targetDir

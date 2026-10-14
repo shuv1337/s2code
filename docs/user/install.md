@@ -30,18 +30,19 @@ line to add. Set `SHUV2CODE_CHANNEL=nightly` to install the nightly train, or
 shuv2code uses `~/.shuv2code-v2` by default. Set `SHUV2CODE_HOME` for a different
 home, `SHUV2CODE_PORT` for a server port, and `SHUV2CODE_RELEASE_BASE_URL` for a
 release-download mirror. Public settings use the `SHUV2CODE_` prefix; inherited
-upstream `T3CODE_` settings are ignored. Existing services should be reinstalled
-to save the fork-owned configuration.
+upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`. A child
+started by an older fork service launcher preserves that launcher's configured
+home during an update. Reinstall source-installed services to save fork-owned configuration.
 
 An empty custom home is claimed automatically. Existing installations in the
-default fork home remain usable, including older version-only runtime markers.
+exact default fork home remain usable; runtime caches without product metadata
+are downloaded again, never reused based on their directory name.
 An existing custom home without product metadata is refused: verify offline
 that it belongs exclusively to this fork before adding `.product-identity`
 containing `shuv2code`. Do not use this to adopt upstream state.
-Old caches in a custom home also need verification: reinstall into an empty home,
-or mark each verified fork cache's `.install-complete` with two lines,
-`shuv2code` followed by its exact version. Unidentified caches outside the default
-fork home are never reused or replaced automatically.
+Runtime installs write `.install-product` containing `shuv2code` and a separate
+version-only `.install-complete`, compatible with retained service launchers.
+Foreign-marked caches and paths outside the owned home are never replaced.
 
 Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` at
 an upstream home, live database, or shared runtime cache; use a separate home.

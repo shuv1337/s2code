@@ -449,19 +449,17 @@ printf '%s\\n' "$T3_ARCHIVE_VERSION" | grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9
 # Unpacked into the pinned-runtime layout so \`t3 service install\` reuses it.
 T3_RELEASE_BASE_URL=@@T3_RELEASE_BASE_URL@@
 T3_RUNTIME_DIR="$HOME/.shuv2code-v2/runtime/versions/$T3_ARCHIVE_VERSION"
-for T3_PATH in "$HOME/.shuv2code-v2" "$HOME/.shuv2code-v2/.product-identity" "$HOME/.shuv2code-v2/runtime" "$HOME/.shuv2code-v2/runtime/versions" "$T3_RUNTIME_DIR" "$T3_RUNTIME_DIR/t3" "$T3_RUNTIME_DIR/.install-complete"; do
+for T3_PATH in "$HOME/.shuv2code-v2" "$HOME/.shuv2code-v2/.product-identity" "$HOME/.shuv2code-v2/runtime" "$HOME/.shuv2code-v2/runtime/versions" "$T3_RUNTIME_DIR" "$T3_RUNTIME_DIR/t3" "$T3_RUNTIME_DIR/.install-complete" "$T3_RUNTIME_DIR/.install-product"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing a linked runtime cache.\\n' >&2; exit 1; fi
 done
 if [ -f "$HOME/.shuv2code-v2/.product-identity" ] && [ "$(cat "$HOME/.shuv2code-v2/.product-identity")" != shuv2code ]; then
   printf 'Home belongs to another product.\\n' >&2; exit 1
 fi
-T3_COMPLETION="$(printf 'shuv2code\\n%s' "$T3_ARCHIVE_VERSION")"
 t3_runtime_ready() {
   T3_MARKER="$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null || true)"
-  [ -x "$T3_RUNTIME_DIR/t3" ] && { [ "$T3_MARKER" = "$T3_COMPLETION" ] || [ "$T3_MARKER" = "$T3_ARCHIVE_VERSION" ]; }
+  [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$T3_MARKER" = "$T3_ARCHIVE_VERSION" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-product" 2>/dev/null || true)" = shuv2code ]
 }
-T3_MARKER="$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null || true)"
-if [ -n "$T3_MARKER" ] && [ "$T3_MARKER" != "$T3_COMPLETION" ] && [ "$T3_MARKER" != "$T3_ARCHIVE_VERSION" ]; then
+if [ -e "$T3_RUNTIME_DIR/.install-product" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-product")" != shuv2code ]; then
   printf 'Refusing to reuse or replace a foreign runtime cache.\\n' >&2; exit 1
 fi
 if ! t3_runtime_ready; then
@@ -542,7 +540,8 @@ if ! t3_runtime_ready; then
   if ! "$T3_STAGING/t3" --version >/dev/null 2>&1; then
     printf 'The t3 %s executable does not run on this host.\\n' "$T3_ARCHIVE_VERSION" >&2; exit 1
   fi
-  printf 'shuv2code\\n%s\\n' "$T3_ARCHIVE_VERSION" > "$T3_STAGING/.install-complete"
+  printf '%s\\n' "$T3_ARCHIVE_VERSION" > "$T3_STAGING/.install-complete"
+  printf 'shuv2code\\n' > "$T3_STAGING/.install-product"
   rm -rf "$T3_RUNTIME_DIR"
   mv "$T3_STAGING" "$T3_RUNTIME_DIR"
 fi

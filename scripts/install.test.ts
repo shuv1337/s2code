@@ -96,7 +96,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           expect(output).toContain("Installed shuv2code 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
-          ).toBe("shuv2code\n1.2.3\n");
+          ).toBe("1.2.3\n");
+          expect(
+            await NodeFSP.readFile(NodePath.join(versions, version, ".install-product"), "utf8"),
+          ).toBe("shuv2code\n");
           expect(
             NodeChildProcess.execFileSync(NodePath.join(root, "bin/shuv2code"), ["--version"], {
               encoding: "utf8",

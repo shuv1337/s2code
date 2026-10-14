@@ -17,10 +17,6 @@ export function canonicalProductPath(directory: string): string {
   }
 }
 
-export function isLegacyProductHome(directory: string): boolean {
-  return canonicalProductPath(directory).split(NodePath.sep).includes(DEFAULT_HOME_DIRECTORY);
-}
-
 /** Refuse foreign state before creating anything. Empty custom homes can be claimed. */
 export function ensureProductHome(directory: string, claim = true): void {
   const canonical = canonicalProductPath(directory);
@@ -81,7 +77,9 @@ export function ensureProductHome(directory: string, claim = true): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     const entries = NodeFS.existsSync(canonical) ? NodeFS.readdirSync(canonical) : [];
-    if (entries.length && !isLegacyProductHome(canonical) && !developmentHome) {
+    const defaultHome =
+      canonical === NodePath.join(canonicalProductPath(NodeOS.homedir()), DEFAULT_HOME_DIRECTORY);
+    if (entries.length && !defaultHome && !developmentHome) {
       throw new Error(
         `Cannot establish product ownership of ${directory}. Choose an empty SHUV2CODE_HOME. For an existing fork installation, verify it offline before adding ${PRODUCT_HOME_MARKER} containing ${PRODUCT_ID}; this is not an upstream import.`,
         { cause: error },

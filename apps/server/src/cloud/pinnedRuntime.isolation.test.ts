@@ -84,7 +84,10 @@ it.effect("records identity and reuses only a complete owned cache", () =>
     const home = NodePath.join(root, "custom");
     const first = install(home);
     const runtime = yield* first.result;
-    expect(NodeFS.readFileSync(runtime.sentinelPath, "utf8")).toBe("shuv2code\n1.2.3\n");
+    expect(NodeFS.readFileSync(runtime.sentinelPath, "utf8").trim()).toBe(version);
+    expect(
+      NodeFS.readFileSync(NodePath.join(runtime.versionDir, ".install-product"), "utf8").trim(),
+    ).toBe("shuv2code");
     expect(first.requests).toHaveLength(2);
     const second = install(home);
     expect(yield* second.result).toEqual(runtime);
@@ -100,6 +103,7 @@ it.effect.each(["1.2.3\n", "t3code\n1.2.3\n"])(
       const cache = NodePath.join(home, "runtime", "versions", version);
       NodeFS.mkdirSync(cache, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(cache, ".install-complete"), marker);
+      NodeFS.writeFileSync(NodePath.join(cache, ".install-product"), "t3code\n");
       NodeFS.writeFileSync(NodePath.join(cache, "t3"), "upstream-sentinel");
       const attempt = install(home);
       const failure = yield* attempt.result.pipe(Effect.flip);
@@ -109,16 +113,17 @@ it.effect.each(["1.2.3\n", "t3code\n1.2.3\n"])(
       expect(NodeFS.readFileSync(NodePath.join(cache, "t3"), "utf8")).toBe("upstream-sentinel");
     }),
 );
-it.effect("keeps version-only metadata in an existing default fork home", () =>
+it.effect("refetches unmarked metadata even under a fork-named directory", () =>
   Effect.gen(function* () {
     const home = NodePath.join(root, ".shuv2code-v2");
+    ensureProductHome(home);
     const cache = NodePath.join(home, "runtime", "versions", version);
     NodeFS.mkdirSync(cache, { recursive: true });
     NodeFS.writeFileSync(NodePath.join(cache, ".install-complete"), `${version}\n`);
     NodeFS.writeFileSync(NodePath.join(cache, "t3"), "legacy-fork-runtime");
     const attempt = install(home);
     yield* attempt.result;
-    expect(attempt.requests).toEqual([]);
+    expect(attempt.requests).toHaveLength(2);
     expect(attempt.validate).toHaveBeenCalledTimes(1);
   }),
 );

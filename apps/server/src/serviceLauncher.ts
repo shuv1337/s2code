@@ -10,11 +10,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { applyProductEnvironment, isProductRuntimeComplete } from "@t3tools/shared/productIdentity";
-import {
-  canonicalProductPath,
-  ensureProductHome,
-  isLegacyProductHome,
-} from "@t3tools/shared/productHome";
+import { canonicalProductPath, ensureProductHome } from "@t3tools/shared/productHome";
 
 import type {
   PendingServiceUpdate,
@@ -228,13 +224,12 @@ async function runtimeExists(baseDir: string, version: string): Promise<boolean>
       )
     )
       return false;
-    const [entry, sentinel] = await Promise.all([
+    const [entry, sentinel, product] = await Promise.all([
       NodeFSP.stat(paths.entryPath),
       NodeFSP.readFile(paths.sentinelPath, "utf8"),
+      NodeFSP.readFile(NodePath.join(paths.versionDir, ".install-product"), "utf8"),
     ]);
-    return (
-      entry.isFile() && isProductRuntimeComplete(sentinel, version, isLegacyProductHome(baseDir))
-    );
+    return entry.isFile() && isProductRuntimeComplete(sentinel, version, product);
   } catch {
     return false;
   }

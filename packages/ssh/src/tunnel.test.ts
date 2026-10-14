@@ -761,6 +761,43 @@ describe("archive runner script", () => {
   });
 
   it.effect.skipIf(windowsHost)(
+    "refetches unmarked caches and refuses foreign-marked caches without executing them",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-archive-ownership-" });
+        const releaseBaseUrl = yield* makeMirror(root);
+        const runner = `${root}/run-t3.sh`;
+        yield* fs.writeFileString(
+          runner,
+          SshTunnel.buildRemoteT3RunnerScript({ archiveVersion, releaseBaseUrl }),
+        );
+        const home = `${root}/home`;
+        const cache = `${home}/.shuv2code-v2/runtime/versions/${archiveVersion}`;
+        yield* fs.makeDirectory(cache, { recursive: true });
+        const sentinel = "#!/bin/sh\necho upstream-sentinel\nexit 1\n";
+        yield* fs.writeFileString(`${cache}/t3`, sentinel);
+        yield* fs.chmod(`${cache}/t3`, 0o755);
+        yield* fs.writeFileString(`${cache}/.install-complete`, archiveVersion);
+        const installed = yield* runRunner(home, runner);
+        assert.equal(installed.exitCode, 0, installed.stderr);
+        assert.notInclude(installed.stdout + installed.stderr, "upstream-sentinel");
+        assert.equal((yield* fs.readFileString(`${cache}/.install-product`)).trim(), "shuv2code");
+        // This is the exact retained launcher's completion predicate.
+        assert.equal(
+          (yield* fs.readFileString(`${cache}/.install-complete`)).trim(),
+          archiveVersion,
+        );
+        yield* fs.writeFileString(`${cache}/t3`, sentinel);
+        yield* fs.writeFileString(`${cache}/.install-product`, "t3code\n");
+        const refused = yield* runRunner(home, runner);
+        assert.notEqual(refused.exitCode, 0);
+        assert.include(refused.stderr, "foreign runtime cache");
+        assert.equal(yield* fs.readFileString(`${cache}/t3`), sentinel);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.skipIf(windowsHost)(
     "installs once when several launches race, and reclaims stale locks",
     () =>
       Effect.gen(function* () {
@@ -787,7 +824,7 @@ describe("archive runner script", () => {
         assert.deepEqual(yield* fs.readDirectory(versionsDir), [archiveVersion]);
         assert.equal(
           (yield* fs.readFileString(`${versionsDir}/${archiveVersion}/.install-complete`)).trim(),
-          `shuv2code\n${archiveVersion}`,
+          archiveVersion,
         );
 
         // A lock left by a crashed installer (dead pid) must not block the

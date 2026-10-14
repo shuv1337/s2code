@@ -139,6 +139,8 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   // it and never downloads a release archive.
   const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3", platform);
   yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
+  yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "shuv2code\n");
+  yield* fs.writeFileString(path.join(runtime.versionDir, ".install-product"), "shuv2code\n");
   yield* fs.writeFileString(runtime.entryPath, "#!/bin/sh\n");
   yield* fs.writeFileString(runtime.sentinelPath, "1.2.3\n");
 
@@ -214,6 +216,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       yield* fs.makeDirectory(path.dirname(paths.entryPath), { recursive: true });
       yield* fs.writeFileString(paths.entryPath, "#!/bin/sh\n");
       yield* fs.writeFileString(paths.sentinelPath, `${cliVersion}\n`);
+      yield* fs.writeFileString(path.join(paths.versionDir, ".install-product"), "shuv2code\n");
       return yield* BootService.make({
         baseDir: serviceBaseDir,
         logsDir: path.join(serviceBaseDir, "userdata", "logs"),

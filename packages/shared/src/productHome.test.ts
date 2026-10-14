@@ -14,7 +14,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   NodeFS.rmSync(root, { recursive: true, force: true });
 });
-it("claims empty custom homes and keeps existing default fork homes", () => {
+it("claims empty custom homes but directory spelling never adopts existing custom state", () => {
   const custom = NodePath.join(root, "custom");
   ensureProductHome(custom);
   expect(NodeFS.readFileSync(NodePath.join(custom, ".product-identity"), "utf8")).toBe(
@@ -23,8 +23,20 @@ it("claims empty custom homes and keeps existing default fork homes", () => {
   const legacy = NodePath.join(root, ".shuv2code-v2");
   NodeFS.mkdirSync(NodePath.join(legacy, "userdata"), { recursive: true });
   NodeFS.writeFileSync(NodePath.join(legacy, "userdata", "statev2.sqlite"), "fork-state");
-  ensureProductHome(legacy);
+  expect(() => ensureProductHome(legacy)).toThrow("Cannot establish product ownership");
+  expect(NodeFS.existsSync(NodePath.join(legacy, ".product-identity"))).toBe(false);
   expect(NodeFS.readFileSync(NodePath.join(legacy, "userdata", "statev2.sqlite"), "utf8")).toBe(
+    "fork-state",
+  );
+});
+it("keeps maintainer state in the exact default home", () => {
+  vi.stubEnv("HOME", root);
+  vi.stubEnv("USERPROFILE", root);
+  const home = NodePath.join(root, ".shuv2code-v2");
+  NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "fork-state");
+  ensureProductHome(home);
+  expect(NodeFS.readFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "utf8")).toBe(
     "fork-state",
   );
 });
@@ -34,6 +46,18 @@ it("rejects foreign and ambiguous existing homes without changing their files", 
   expect(NodeFS.readdirSync(root)).toEqual(["statev2.sqlite"]);
   NodeFS.writeFileSync(NodePath.join(root, ".product-identity"), "t3code\n");
   expect(() => ensureProductHome(root)).toThrow("another product");
+});
+it.skipIf(!symlinksSupported)("does not adopt foreign state via a default-home symlink", () => {
+  vi.stubEnv("HOME", root);
+  vi.stubEnv("USERPROFILE", root);
+  const foreign = NodePath.join(root, "foreign");
+  NodeFS.mkdirSync(foreign);
+  NodeFS.writeFileSync(NodePath.join(foreign, "statev2.sqlite"), "untouched-upstream");
+  NodeFS.symlinkSync(foreign, NodePath.join(root, ".shuv2code-v2"), "dir");
+  expect(() => ensureProductHome(NodePath.join(root, ".shuv2code-v2"))).toThrow(
+    "Cannot establish product ownership",
+  );
+  expect(NodeFS.readdirSync(foreign)).toEqual(["statev2.sqlite"]);
 });
 it.skipIf(!symlinksSupported)("rejects upstream homes and paths that alias them", () => {
   const upstream = NodePath.join(root, ".t3");
