@@ -13,6 +13,20 @@ import {
 const provideEnv = (env: Readonly<Record<string, string>>) =>
   Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })));
 
+it.effect("has no upstream hosted default and rejects upstream runtime relay overrides", () =>
+  Effect.gen(function* () {
+    assert.isTrue(Result.isFailure(yield* hostedAppUrlConfig.pipe(provideEnv({}), Effect.result)));
+    assert.isTrue(
+      Result.isFailure(
+        yield* makeRelayUrlConfig("https://fork.test").pipe(
+          provideEnv({ T3CODE_RELAY_URL: "https://relay.t3.codes" }),
+          Effect.result,
+        ),
+      ),
+    );
+  }),
+);
+
 it.effect("uses the statically injected relay URL when no runtime override exists", () =>
   Effect.gen(function* () {
     const relayUrl = yield* makeRelayUrlConfig("https://embedded.example.test///").pipe(
@@ -52,9 +66,9 @@ it.effect("normalizes the hosted app URL to an absolute origin", () =>
   Effect.gen(function* () {
     assert.equal(
       yield* hostedAppUrlConfig.pipe(
-        provideEnv({ T3CODE_HOSTED_APP_URL: "https://nightly.app.t3.codes" }),
+        provideEnv({ T3CODE_HOSTED_APP_URL: "https://nightly.app.fork.test" }),
       ),
-      "https://nightly.app.t3.codes",
+      "https://nightly.app.fork.test",
     );
     assert.equal(
       yield* hostedAppUrlConfig.pipe(
@@ -72,6 +86,7 @@ it.effect("rejects malformed or insecure hosted app URLs", () =>
       "http://app.t3.codes",
       "https://app.t3.codes/nested",
       "https://app.t3.codes?alias=true",
+      "https://app.t3.codes",
     ]) {
       const result = yield* hostedAppUrlConfig.pipe(
         provideEnv({ T3CODE_HOSTED_APP_URL: value }),

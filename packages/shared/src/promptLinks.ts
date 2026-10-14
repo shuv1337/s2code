@@ -202,7 +202,8 @@ export function buildNewThreadLink(input: {
   readonly model?: string | null;
   readonly origin?: string;
 }): string {
-  const url = new URL("/new", input.origin ?? DEFAULT_HOSTED_APP_URL);
+  const origin = input.origin || DEFAULT_HOSTED_APP_URL;
+  const url = origin ? new URL("/new", origin) : new URL("shuv2code://new");
   url.searchParams.set("prompt", input.prompt);
   if (input.repository) {
     url.searchParams.set("repo", `${input.repository.owner}/${input.repository.name}`);

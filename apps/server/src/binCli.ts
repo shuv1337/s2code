@@ -32,7 +32,7 @@ import { triageCommand } from "./cli/triage.ts";
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 const connectPublicConfigMissingMessage =
-  "T3 Connect commands are unavailable: this build is missing T3 Connect public configuration.";
+  "Hosted Connect is unavailable: configure a fork-owned service first. Upstream accounts are separate. Use shuv2code pair for direct or Tailscale access.";
 
 class ConnectPublicConfigMissingError extends CliError.UserError {
   override get message() {

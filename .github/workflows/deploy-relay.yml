@@ -24,29 +24,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  hosted_preflight:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/hosted-preflight.yml
+    secrets: inherit
+    with:
+      target: relay
   deploy_relay:
     name: Deploy production relay
     # A manual run from another branch would deploy that branch to production.
-    if: github.ref == 'refs/heads/main'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    needs: hosted_preflight
+    if: github.ref == 'refs/heads/main' && needs.hosted_preflight.outputs.allowed == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment:
-      name: production
     env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      PLANETSCALE_ORGANIZATION: ${{ vars.PLANETSCALE_ORGANIZATION }}
-      AXIOM_ORG_ID: ${{ vars.AXIOM_ORG_ID }}
+      FORK_HOSTED_DEPLOYMENT_VERIFIED: "1"
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.FORK_CLOUDFLARE_ACCOUNT_ID }}
+      PLANETSCALE_ORGANIZATION: ${{ vars.FORK_PLANETSCALE_ORGANIZATION }}
+      AXIOM_ORG_ID: ${{ vars.FORK_AXIOM_ORG_ID }}
       RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
       RELAY_API_ZONE_NAME: ${{ vars.RELAY_API_ZONE_NAME }}
       RELAY_TUNNEL_ZONE_NAME: ${{ vars.RELAY_TUNNEL_ZONE_NAME }}
       RELAY_TUNNEL_CLEANUP_MODE: ${{ vars.RELAY_TUNNEL_CLEANUP_MODE }}
-      RELAY_LEGACY_TUNNEL_CLEANUP_MODE: ${{ vars.RELAY_LEGACY_TUNNEL_CLEANUP_MODE }}
+      RELAY_LEGACY_TUNNEL_CLEANUP_MODE: "off"
       CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
       CLERK_JWT_AUDIENCE: ${{ vars.CLERK_JWT_AUDIENCE }}
-      APNS_ENVIRONMENT: ${{ vars.APNS_ENVIRONMENT }}
-      APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
-      APNS_KEY_ID: ${{ vars.APNS_KEY_ID }}
-      APNS_BUNDLE_ID: ${{ vars.APNS_BUNDLE_ID }}
+      APNS_ENVIRONMENT: ${{ vars.FORK_APNS_ENVIRONMENT }}
+      APNS_ENABLED: ${{ vars.FORK_APNS_ENABLED || 'false' }}
+      APNS_TEAM_ID: ${{ vars.FORK_APNS_TEAM_ID }}
+      APNS_KEY_ID: ${{ vars.FORK_APNS_KEY_ID }}
+      APNS_BUNDLE_ID: ${{ vars.FORK_APNS_BUNDLE_ID }}
       ALCHEMY_TELEMETRY_DISABLED: "1"
     steps:
       - name: Checkout
@@ -72,13 +79,13 @@ jobs:
           # The PublishClientConfig action writes the client env here instead
           # of the repo-root .env; nothing on the runner reads it.
           T3CODE_RELAY_CLIENT_CONFIG_ENV: ${{ runner.temp }}/relay-client-config.env
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          PLANETSCALE_API_TOKEN_ID: ${{ secrets.PLANETSCALE_API_TOKEN_ID }}
-          PLANETSCALE_API_TOKEN: ${{ secrets.PLANETSCALE_API_TOKEN }}
-          AXIOM_TOKEN: ${{ secrets.AXIOM_TOKEN }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
-          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.FORK_CLOUDFLARE_API_TOKEN }}
+          PLANETSCALE_API_TOKEN_ID: ${{ secrets.FORK_PLANETSCALE_API_TOKEN_ID }}
+          PLANETSCALE_API_TOKEN: ${{ secrets.FORK_PLANETSCALE_API_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.FORK_AXIOM_TOKEN }}
+          CLERK_SECRET_KEY: ${{ secrets.FORK_CLERK_SECRET_KEY }}
+          APNS_PRIVATE_KEY: ${{ secrets.FORK_APNS_PRIVATE_KEY }}
+          FCM_SERVICE_ACCOUNT: ${{ vars.FORK_PUSH_ENABLED == '1' && secrets.FORK_FCM_SERVICE_ACCOUNT || '' }}
 
       - name: Publish relay deploy commit status
         uses: actions/github-script@v8

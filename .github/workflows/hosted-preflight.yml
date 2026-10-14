@@ -1,0 +1,68 @@
+name: Fork hosted deployment guard
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+    outputs:
+      allowed:
+        value: ${{ jobs.guard.outputs.allowed }}
+    secrets:
+      FORK_CLERK_SECRET_KEY:
+        required: false
+      FORK_CLOUDFLARE_API_TOKEN:
+        required: false
+      FORK_VERCEL_TOKEN:
+        required: false
+      FORK_PLANETSCALE_API_TOKEN_ID:
+        required: false
+      FORK_PLANETSCALE_API_TOKEN:
+        required: false
+      FORK_AXIOM_TOKEN:
+        required: false
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      allowed: ${{ steps.config.outputs.allowed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - id: config
+        name: Skip unconfigured hosted service or verify fork destination identities
+        env:
+          FORK_HOSTED_ENABLED: ${{ vars.FORK_HOSTED_ENABLED }}
+          SHUV2CODE_HOSTED_APP_URL: ${{ vars.SHUV2CODE_HOSTED_APP_URL }}
+          SHUV2CODE_WEB_LATEST_DOMAIN: ${{ vars.SHUV2CODE_WEB_LATEST_DOMAIN }}
+          SHUV2CODE_WEB_NIGHTLY_DOMAIN: ${{ vars.SHUV2CODE_WEB_NIGHTLY_DOMAIN }}
+          SHUV2CODE_AUTH_DOMAIN: ${{ vars.SHUV2CODE_AUTH_DOMAIN }}
+          FORK_HOSTED_REDIRECT_ORIGINS: ${{ vars.FORK_HOSTED_REDIRECT_ORIGINS }}
+          CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+          CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+          CLERK_JWT_AUDIENCE: ${{ vars.CLERK_JWT_AUDIENCE }}
+          CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+          CLERK_OAUTH_APPLICATION_ID: ${{ vars.CLERK_OAUTH_APPLICATION_ID }}
+          RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
+          RELAY_API_ZONE_NAME: ${{ vars.RELAY_API_ZONE_NAME }}
+          RELAY_TUNNEL_ZONE_NAME: ${{ vars.RELAY_TUNNEL_ZONE_NAME }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.FORK_CLOUDFLARE_ACCOUNT_ID }}
+          PLANETSCALE_ORGANIZATION: ${{ vars.FORK_PLANETSCALE_ORGANIZATION }}
+          AXIOM_ORG_ID: ${{ vars.FORK_AXIOM_ORG_ID }}
+          VERCEL_ORG_ID: ${{ vars.FORK_VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.FORK_VERCEL_PROJECT_ID }}
+          CLERK_SECRET_KEY: ${{ secrets.FORK_CLERK_SECRET_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.FORK_CLOUDFLARE_API_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.FORK_VERCEL_TOKEN }}
+          PLANETSCALE_API_TOKEN_ID: ${{ secrets.FORK_PLANETSCALE_API_TOKEN_ID }}
+          PLANETSCALE_API_TOKEN: ${{ secrets.FORK_PLANETSCALE_API_TOKEN }}
+          AXIOM_TOKEN: ${{ secrets.FORK_AXIOM_TOKEN }}
+          TARGET: ${{ inputs.target }}
+        run: node scripts/hosted-deployment-preflight.ts "$TARGET"

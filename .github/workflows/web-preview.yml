@@ -28,22 +28,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  hosted_preflight:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'preview:web')
+    uses: ./.github/workflows/hosted-preflight.yml
+    secrets: inherit
+    with:
+      target: web
   deploy:
+    needs: hosted_preflight
     name: Deploy web preview
     # Same-repo PRs only: fork PRs do not receive the Vercel secrets, and this
     # workflow should skip rather than fail for them. On `labeled` events, only
     # the preview label itself triggers a deploy.
     if: >-
+      needs.hosted_preflight.outputs.allowed == 'true' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       contains(github.event.pull_request.labels.*.name, 'preview:web') &&
       (github.event.action != 'labeled' || github.event.label.name == 'preview:web')
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+      VERCEL_TOKEN: ${{ secrets.FORK_VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ vars.FORK_VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.FORK_VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -75,14 +84,22 @@ jobs:
             exit 1
           fi
 
-          vercel_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
+          vercel_scope="$VERCEL_ORG_ID"
+
+          # A preview is direct-pairing only. Override project-level aliases too,
+          # so inherited Vercel environment values cannot silently enable cloud.
+          build_env=()
+          for key in T3CODE_CLERK_PUBLISHABLE_KEY VITE_CLERK_PUBLISHABLE_KEY EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY T3CODE_CLERK_JWT_TEMPLATE VITE_CLERK_JWT_TEMPLATE EXPO_PUBLIC_CLERK_JWT_TEMPLATE T3CODE_CLERK_CLI_OAUTH_CLIENT_ID VITE_CLERK_CLI_OAUTH_CLIENT_ID T3CODE_RELAY_URL VITE_T3CODE_RELAY_URL; do
+            build_env+=(--build-env "$key=")
+          done
 
           deployment_url="$(
             vp dlx vercel@53.1.1 deploy \
               --archive=tgz \
               --yes \
               --token "$VERCEL_TOKEN" \
-              --scope "$vercel_scope"
+              --scope "$vercel_scope" \
+              "${build_env[@]}"
           )"
 
           echo "Deployed $deployment_url"

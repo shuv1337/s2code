@@ -15,6 +15,7 @@ import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
+import { forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -67,7 +68,7 @@ export class DesktopClerk extends Context.Service<
 function resolveDesktopClerkFrontendApiHostname(
   publishableKey: string | undefined,
 ): string | undefined {
-  const normalizedKey = publishableKey?.trim();
+  const normalizedKey = forkClerkPublishableKey(publishableKey);
   if (!normalizedKey) return undefined;
 
   try {

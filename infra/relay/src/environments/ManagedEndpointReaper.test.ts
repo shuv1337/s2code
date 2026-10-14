@@ -13,7 +13,7 @@ import * as ManagedEndpointReaper from "./ManagedEndpointReaper.ts";
 
 const NOW = "2026-08-25T12:00:00.000Z";
 const NOW_MILLIS = DateTime.makeUnsafe(NOW).epochMilliseconds;
-const PREFIX = "t3coderelay-managedendpoint-prod-";
+const PREFIX = "shuv2coderelay-managedendpoint-prod-";
 
 function tunnel(input: {
   readonly id: string;
@@ -265,6 +265,32 @@ function harness(input?: {
 }
 
 describe("ManagedEndpointReaper", () => {
+  it.effect("never deletes upstream-named tunnels in a shared account", () => {
+    const fork = tunnel({
+      id: "fork",
+      suffix: "aaaaaaaaaaaaaaaa",
+      status: "down",
+      timestamp: "2026-08-25T10:00:00.000Z",
+    });
+    const upstream = {
+      ...fork,
+      id: "upstream",
+      name: "t3coderelay-managedendpoint-prod-bbbbbbbbbbbbbbbb",
+    };
+    const state = harness({
+      tunnels: [fork, upstream],
+      allocations: [
+        allocation({ tunnelId: "fork", recoveryEnabled: true }),
+        allocation({ tunnelId: "upstream", recoveryEnabled: true }),
+      ],
+    });
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(NOW_MILLIS);
+      yield* (yield* ManagedEndpointReaper.ManagedEndpointReaper).sweep;
+      expect(state.deleted).toEqual(["fork"]);
+      expect(state.releases.map((release) => release.expectedTunnelId)).toEqual(["fork"]);
+    }).pipe(Effect.provide(state.layer));
+  });
   it.effect("removes expired down and inactive tunnels from recoverable environments", () => {
     const state = harness({
       tunnels: [
@@ -603,7 +629,7 @@ describe("ManagedEndpointReaper", () => {
       ({ stage, expected }) => {
         const stageLegacyTunnels = legacyTunnels.map((entry) => ({
           ...entry,
-          name: entry.name!.replace(PREFIX, `t3coderelay-managedendpoint-${stage}-`),
+          name: entry.name!.replace(PREFIX, `shuv2coderelay-managedendpoint-${stage}-`),
         }));
         const state = harness({
           namespace: stage,

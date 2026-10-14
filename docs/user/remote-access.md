@@ -3,7 +3,16 @@
 Connect a phone, browser, or another desktop app to T3 Code running on a different
 machine. That machine must stay running and reachable while you work.
 
-## T3 Connect
+## Hosted Connect (unavailable by default)
+
+This fork has no configured hosted web or Connect service. Upstream T3 accounts
+and hosted domains do not enable it. The app explains this state in Connections;
+`shuv2code connect` remains unavailable until a fork-owned service is configured.
+Use direct LAN or Tailscale pairing below. Local agents, SSH, CLI installation
+and desktop releases do not require a hosted account.
+
+The Connect instructions in this guide apply only after your operator supplies
+a separately configured fork-owned deployment and its matching client build.
 
 T3 Connect makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
@@ -149,7 +158,7 @@ If that port is already in use, choose another with
 
 ### Hosted web app
 
-[app.t3.codes](https://app.t3.codes) needs an HTTPS endpoint. It connects directly
+A separately configured hosted web client needs an HTTPS endpoint. It connects directly
 to your server; a hosted pairing link does not make an unreachable backend
 reachable or convert HTTP to HTTPS.
 

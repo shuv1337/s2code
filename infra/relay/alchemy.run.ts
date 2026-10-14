@@ -14,8 +14,12 @@ import { RelayObservability } from "./src/observability.ts";
 import { ManagedEndpointZone, RelayApiZone } from "./src/zone.ts";
 import * as RelayWorker from "./src/worker.ts";
 
+// Boundary guard must precede Stack/layer construction, which can provision resources.
+if (process.env.FORK_HOSTED_DEPLOYMENT_VERIFIED !== "1")
+  throw new Error("Fork hosted identity verification is required before relay deployment.");
+
 export default Alchemy.Stack(
-  "T3CodeRelay",
+  "Shuv2codeRelay",
   {
     providers: Layer.mergeAll(
       Axiom.providers(),

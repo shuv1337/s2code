@@ -83,10 +83,10 @@ describe("managed endpoint names", () => {
       "prod-abcdef0123456789.t3coderelay.com",
     );
     expect(managedEndpointTunnelName("dev_julius", hash)).toBe(
-      "t3coderelay-managedendpoint-dev-julius-abcdef0123456789",
+      "shuv2coderelay-managedendpoint-dev-julius-abcdef0123456789",
     );
     expect(managedEndpointTunnelNamePrefix("dev_julius")).toBe(
-      "t3coderelay-managedendpoint-dev-julius-",
+      "shuv2coderelay-managedendpoint-dev-julius-",
     );
   });
 

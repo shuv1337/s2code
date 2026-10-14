@@ -1,4 +1,5 @@
 import type { ExpoConfig } from "expo/config";
+import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
@@ -6,6 +7,10 @@ import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 type AppVariant = "development" | "preview" | "production";
 
 const repoEnv = loadRepoEnv();
+const forkClerkKey = forkClerkPublishableKey(repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const authDomain = forkClerkKey
+  ? atob(forkClerkKey.split("_").slice(2).join("_")).replace(/\$$/, "")
+  : null;
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
@@ -77,7 +82,6 @@ const VARIANT_CONFIG = {
     scheme: "shuv2code-dev",
     iosBundleIdentifier: "dev.shuv.shuv2code.dev",
     androidPackage: "dev.shuv.shuv2code.dev",
-    relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
@@ -85,7 +89,6 @@ const VARIANT_CONFIG = {
     scheme: "shuv2code-nightly",
     iosBundleIdentifier: "dev.shuv.shuv2code.nightly",
     androidPackage: "dev.shuv.shuv2code.nightly",
-    relyingParty: "clerk.t3.codes",
     assets: PREVIEW_ASSETS,
   },
   production: {
@@ -93,7 +96,6 @@ const VARIANT_CONFIG = {
     scheme: "shuv2code",
     iosBundleIdentifier: "dev.shuv.shuv2code",
     androidPackage: "dev.shuv.shuv2code",
-    relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -271,10 +273,7 @@ const config: ExpoConfig = {
     bundleIdentifier: iosBundleIdentifier,
     // Configure the fork's signing team explicitly for non-interactive builds.
     ...(appleTeamId ? { appleTeamId } : {}),
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    associatedDomains: authDomain ? [`applinks:${authDomain}`, `webcredentials:${authDomain}`] : [],
     entitlements: {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
@@ -495,10 +494,10 @@ const config: ExpoConfig = {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     relay: {
-      url: repoEnv.T3CODE_RELAY_URL ?? null,
+      url: forkHostedOrigin(repoEnv.T3CODE_RELAY_URL),
     },
     clerk: {
-      publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
+      publishableKey: forkClerkKey,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
     },
     // Native Google sign-in credentials. @clerk/expo reads these from `extra`
