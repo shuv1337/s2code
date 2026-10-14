@@ -180,12 +180,14 @@ describe("AntigravityAdapterV2 client file system", () => {
         withProcess: (_stop, task) => task,
         defaultModel: Effect.succeed(undefined),
       });
-      const workspace = yield* fileSystem.makeTempDirectoryScoped({
+      const physicalWorkspace = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-antigravity-workspace-",
       });
       const outside = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-antigravity-outside-",
       });
+      const workspace = path.join(outside, "workspace-link");
+      yield* fileSystem.symlink(physicalWorkspace, workspace);
       const outsideFile = path.join(outside, "secret.txt");
       yield* fileSystem.writeFileString(outsideFile, "secret");
       const attachment = path.join(host.paths.attachmentsDir, "pasted.txt");

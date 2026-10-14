@@ -2,7 +2,20 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { resolveProductEnvironment } from "@t3tools/shared/productIdentity";
 import * as Effect from "effect/Effect";
 import { expect, it } from "@effect/vitest";
-import { createDevRunnerEnv } from "./dev-runner.ts";
+import { createDevRunnerEnv, resolveDevRunnerHome } from "./dev-runner.ts";
+
+it("ignores inherited upstream homes outside worktrees and honors only explicit fork selections", () => {
+  expect(resolveDevRunnerHome(undefined, undefined, { T3CODE_HOME: "/upstream" })).toBeUndefined();
+  expect(
+    resolveDevRunnerHome(undefined, undefined, {
+      T3CODE_HOME: "/upstream",
+      SHUV2CODE_HOME: "/fork",
+    }),
+  ).toBe("/fork");
+  expect(resolveDevRunnerHome(undefined, "/worktree/.t3", { T3CODE_HOME: "/upstream" })).toBe(
+    "/worktree/.t3",
+  );
+});
 
 it.effect.each(["dev", "dev:desktop"] as const)(
   "preserves managed dev home and port through the %s startup adapter",

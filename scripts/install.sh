@@ -197,21 +197,27 @@ if [ -z "${SHUV2CODE_HOME:-}" ]; then
   esac
 fi
 t3_home="$(canonical_dir "$t3_home")"
-case "$t3_home/" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
+case "$(printf '%s/' "$t3_home" | tr '[:upper:]' '[:lower:]')" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
 user_home="$(canonical_dir "$HOME")"
 default_fork_home=false
 case "$t3_home" in "$user_home/.shuv2code-v2") default_fork_home=true ;; esac
 [ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
+[ ! -e "$t3_home/.product-identity" ] || [ -f "$t3_home/.product-identity" ] || fail "Product metadata must be a regular file."
 if [ -f "$t3_home/.product-identity" ]; then
-  [ "$(tr -d '\r' < "$t3_home/.product-identity")" = shuv2code ] || fail "Home belongs to another product."
-elif [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home")" ] && ! "$default_fork_home"; then
+  home_product="$(tr -d '\r\n' < "$t3_home/.product-identity")"
+  case shuv2code in "$home_product"*) ;; *) fail "Home belongs to another product." ;; esac
+else home_product=
+fi
+if [ "$home_product" != shuv2code ] && [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home" | grep -v '^\.product-identity$')" ] && ! "$default_fork_home"; then
   fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
 fi
 for child in userdata dev runtime; do
   case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
 done
 mkdir -p "$t3_home"
-printf '%s\n' shuv2code > "$t3_home/.product-identity"
+home_marker_tmp="$(mktemp "$t3_home/.product-identity.XXXXXX")"
+printf '%s\n' shuv2code > "$home_marker_tmp"
+mv "$home_marker_tmp" "$t3_home/.product-identity"
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail "Invalid release version."
@@ -222,7 +228,7 @@ case "$(canonical_dir "$target_dir")/" in "$t3_home/"*) ;; *) fail "Refusing for
 product=
 if [ -e "$target_dir/.install-product" ]; then
   product="$(tr -d '\r' < "$target_dir/.install-product")" || fail "Could not read runtime product metadata."
-  [ "$product" = shuv2code ] || fail "Refusing to reuse or replace a foreign runtime cache."
+  case shuv2code in "$product"*) ;; *) fail "Refusing to reuse or replace a foreign runtime cache." ;; esac
 fi
 marker=
 if [ -e "${target_dir}/.install-complete" ]; then
@@ -234,7 +240,23 @@ else
   mkdir -p "$versions_dir"
   staging="$(mktemp -d "${versions_dir}/.staging-XXXXXX")"
   download_pid=
-  trap '[ -z "$download_pid" ] || { kill "$download_pid" 2>/dev/null || true; wait "$download_pid" 2>/dev/null || true; }; rm -rf "$staging"' EXIT
+  previous_parent= previous= validated=false committed=false
+  cleanup_runtime() {
+    [ -z "$download_pid" ] || { kill "$download_pid" 2>/dev/null || true; wait "$download_pid" 2>/dev/null || true; }
+    if [ "$committed" != true ] && [ -n "$previous" ] && [ -d "$previous" ]; then
+      if [ -e "$target_dir" ] || ! mv "$previous" "$target_dir"; then
+        printf 'Could not restore runtime. Previous copy: %s; validated replacement: %s\n' "$previous" "$staging" >&2
+        return
+      fi
+    fi
+    if [ "$validated" = true ] && [ ! -d "$target_dir" ]; then
+      printf 'Validated runtime retained at %s; retry installation or recover it manually.\n' "$staging" >&2
+      return
+    fi
+    rm -rf "$staging"
+    [ -z "$previous_parent" ] || rm -rf "$previous_parent" || printf 'Could not remove previous backup: %s\n' "$previous_parent" >&2
+  }
+  trap cleanup_runtime EXIT
   trap 'printf "\n" >&2; exit 130' INT
   trap 'printf "\n" >&2; exit 143' TERM
 
@@ -262,9 +284,15 @@ else
   "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
   printf '%s\n' shuv2code > "${staging}/.install-product"
-
-  rm -rf "$target_dir"
-  mv "$staging" "$target_dir"
+  validated=true
+  if [ -e "$target_dir" ]; then
+    previous_parent="$(mktemp -d "${versions_dir}/.previous-XXXXXX")"
+    previous="$previous_parent/runtime"
+    mv "$target_dir" "$previous"
+  fi
+  mv "$staging" "$target_dir" || fail "Could not publish the runtime; restoring the previous copy."
+  committed=true
+  cleanup_runtime
   trap - EXIT
 fi
 

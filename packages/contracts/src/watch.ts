@@ -239,7 +239,7 @@ export const WatchCommandReceipt = Schema.Union([
 ]);
 export type WatchCommandReceipt = typeof WatchCommandReceipt.Type;
 
-export const WATCH_PAIRING_CLIENT_LABEL_MAX_LENGTH = 64;
+const WATCH_PAIRING_CLIENT_LABEL_MAX_LENGTH = 64;
 export const WATCH_PAIRING_DEFAULT_CLIENT_LABEL = "T3 Watch";
 
 /**
