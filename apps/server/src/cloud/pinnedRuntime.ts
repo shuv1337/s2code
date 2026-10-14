@@ -19,6 +19,16 @@ import {
 } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
+import {
+  isProductRuntimeComplete,
+  isProductRuntimeVersion,
+  runtimeCompletionMarker,
+} from "@t3tools/shared/productIdentity";
+import {
+  canonicalProductPath,
+  ensureProductHome,
+  isLegacyProductHome,
+} from "@t3tools/shared/productHome";
 
 /**
  * A pinned runtime is an exact t3 release archive unpacked into
@@ -268,24 +278,67 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
   input: PinnedRuntimeInstallInput,
 ) {
   const { fs } = input;
+  if (!isProductRuntimeVersion(input.version))
+    return yield* new PinnedRuntimeInstallError({ step: "validating the release version" });
   const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version, input.platform);
+  yield* Effect.try({
+    try: () => {
+      ensureProductHome(input.baseDir);
+      if (
+        !canonicalProductPath(paths.versionDir).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime cache points outside the fork home.");
+      if (
+        !canonicalProductPath(paths.entryPath).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime executable points outside the fork home.");
+      if (
+        !canonicalProductPath(paths.sentinelPath).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime metadata points outside the fork home.");
+    },
+    catch: (cause) =>
+      new PinnedRuntimeInstallError({ step: "validating product ownership", cause }),
+  });
   const [versionDirExists, entryExists, sentinel] = yield* Effect.all([
     fs.exists(paths.versionDir),
     fs.exists(paths.entryPath),
-    fs.readFileString(paths.sentinelPath).pipe(Effect.option),
+    fs
+      .exists(paths.sentinelPath)
+      .pipe(
+        Effect.flatMap((exists) =>
+          exists
+            ? fs.readFileString(paths.sentinelPath).pipe(Effect.map(Option.some))
+            : Effect.succeed(Option.none<string>()),
+        ),
+      ),
   ]).pipe(
     Effect.mapError(
       (cause) => new PinnedRuntimeInstallError({ step: "checking the pinned runtime", cause }),
     ),
   );
   const alreadyPinned =
-    entryExists && Option.isSome(sentinel) && sentinel.value.trim() === input.version;
+    entryExists &&
+    Option.isSome(sentinel) &&
+    isProductRuntimeComplete(sentinel.value, input.version, isLegacyProductHome(input.baseDir));
   if (alreadyPinned) {
     input.onProgress?.({ stage: "cached" });
     yield* input.validate(paths);
     return paths;
   }
   if (versionDirExists) {
+    if (
+      Option.isSome(sentinel) &&
+      !isProductRuntimeComplete(sentinel.value, input.version, isLegacyProductHome(input.baseDir))
+    ) {
+      return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign runtime cache" });
+    }
     yield* fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(
       Effect.mapError(
         (cause) =>
@@ -333,7 +386,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     input.onProgress?.({ stage: "validate" });
     yield* input.validate(stagingPaths);
     yield* fs
-      .writeFileString(stagingPaths.sentinelPath, `${input.version}\n`)
+      .writeFileString(stagingPaths.sentinelPath, runtimeCompletionMarker(input.version))
       .pipe(
         Effect.mapError(
           (cause) =>
@@ -357,7 +410,11 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
           Effect.flatMap(([publishedEntryExists, publishedSentinel]) =>
             publishedEntryExists &&
             Option.isSome(publishedSentinel) &&
-            publishedSentinel.value.trim() === input.version
+            isProductRuntimeComplete(
+              publishedSentinel.value,
+              input.version,
+              isLegacyProductHome(input.baseDir),
+            )
               ? Effect.succeed(false)
               : Effect.fail(
                   new PinnedRuntimeInstallError({

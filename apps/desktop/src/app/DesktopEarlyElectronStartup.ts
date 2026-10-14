@@ -1,4 +1,6 @@
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { resolveProductEnvironment } from "@t3tools/shared/productIdentity";
+import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -54,7 +56,7 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
 }): string {
-  const t3Home = Option.fromUndefinedOr(input.env.T3CODE_HOME);
+  const t3Home = Option.fromUndefinedOr(resolveProductEnvironment(input.env).T3CODE_HOME);
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
@@ -66,6 +68,7 @@ function resolveEarlyDesktopSettingsPath(input: {
     joinPath: input.joinPath,
     t3Home,
   });
+  ensureProductHome(baseDir, false);
   return input.joinPath(stateDir, "desktop-settings.json");
 }
 

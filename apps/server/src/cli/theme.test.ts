@@ -25,7 +25,11 @@ const runCli = (args: ReadonlyArray<string>) =>
     Effect.provide(Layer.mergeAll(NodeServices.layer, NetService.layer, TestConsole.layer)),
   );
 
-const makeBaseDir = () => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-theme-cli-"));
+const makeBaseDir = () => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-theme-cli-"));
+  NodeFS.writeFileSync(NodePath.join(directory, ".product-identity"), "shuv2code\n");
+  return directory;
+};
 
 const settingsPathFor = (baseDir: string) => NodePath.join(baseDir, "userdata", "settings.json");
 
@@ -48,6 +52,14 @@ const writeSettings = (baseDir: string, settings: Record<string, unknown>) => {
 };
 
 describe("t3 theme", () => {
+  it.effect("claims a new custom home so later theme commands can use it", () =>
+    Effect.gen(function* () {
+      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-theme-new-"));
+      yield* runCli(["theme", "set", "ocean", "--base-dir", baseDir]);
+      yield* runCli(["theme", "clear", "--base-dir", baseDir]);
+      assert.isFalse(Object.hasOwn(readSettings(baseDir), "defaultTheme"));
+    }),
+  );
   it.effect("writes a default theme when no settings file exists yet", () =>
     Effect.gen(function* () {
       const baseDir = makeBaseDir();

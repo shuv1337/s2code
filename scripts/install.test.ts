@@ -60,10 +60,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           ...process.env,
           TERM: "xterm",
           NO_COLOR: "1",
-          T3CODE_VERSION: version,
-          T3CODE_HOME: NodePath.join(root, "home"),
-          T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-          T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+          SHUV2CODE_VERSION: version,
+          SHUV2CODE_HOME: NodePath.join(root, "home"),
+          SHUV2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+          SHUV2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -96,7 +96,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           expect(output).toContain("Installed shuv2code 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
-          ).toBe("1.2.3\n");
+          ).toBe("shuv2code\n1.2.3\n");
           expect(
             NodeChildProcess.execFileSync(NodePath.join(root, "bin/shuv2code"), ["--version"], {
               encoding: "utf8",

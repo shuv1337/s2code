@@ -86,7 +86,7 @@ const LOGIN_SHELL_ENV_NAMES = [
   "XDG_SESSION_DESKTOP",
   "XDG_SESSION_TYPE",
   "WAYLAND_DISPLAY",
-  "T3CODE_TELEMETRY_ENABLED",
+  "SHUV2CODE_TELEMETRY_ENABLED",
 ] as const;
 const WINDOWS_PROFILE_ENV_NAMES = ["PATH", "FNM_DIR", "FNM_MULTISHELL_PATH"] as const;
 const LOCALE_ENV_NAMES = ["LANG", "LC_ALL", "LC_CTYPE"] as const;
@@ -450,12 +450,16 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "XDG_RUNTIME_DIR",
       "WAYLAND_DISPLAY",
       // The telemetry opt-out is documented as a shell variable; GUI launches never see it.
-      "T3CODE_TELEMETRY_ENABLED",
+      "SHUV2CODE_TELEMETRY_ENABLED",
     ] as const) {
       if (!config.env[name] && shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];
       }
     }
+
+    const telemetryEnabled = config.env.SHUV2CODE_TELEMETRY_ENABLED?.trim();
+    if (telemetryEnabled) config.env.T3CODE_TELEMETRY_ENABLED = telemetryEnabled;
+    else delete config.env.T3CODE_TELEMETRY_ENABLED;
 
     // Locale variables form one precedence group: LC_ALL can override an inherited
     // LANG or LC_CTYPE, so only hydrate the group when the process has none of them.

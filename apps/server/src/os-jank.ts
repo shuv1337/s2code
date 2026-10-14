@@ -1,4 +1,5 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ensureProductHome } from "@t3tools/shared/productHome";
 import {
   listLoginShellCandidates,
   mergePathEntries,
@@ -9,6 +10,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as CliError from "effect/cli/CliError";
 import * as NodeOS from "node:os";
 
 function logPathHydrationWarning(message: string, error?: unknown): void {
@@ -102,10 +104,18 @@ export const expandHomePath = Effect.fn(function* (input: string) {
   return input;
 });
 
-export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
+export const resolveBaseDir = Effect.fn(function* (
+  raw: string | undefined,
+  options: { readonly claim?: boolean } = {},
+) {
   const { join, resolve } = yield* Path.Path;
-  if (!raw || raw.trim().length === 0) {
-    return join(yield* HostProcess.HomeDirectory, ".shuv2code-v2");
-  }
-  return resolve(yield* expandHomePath(raw.trim()));
+  const directory =
+    !raw || raw.trim().length === 0
+      ? join(yield* HostProcess.HomeDirectory, ".shuv2code-v2")
+      : resolve(yield* expandHomePath(raw.trim()));
+  yield* Effect.try({
+    try: () => ensureProductHome(directory, options.claim ?? false),
+    catch: (cause) => new CliError.UserError({ cause }),
+  });
+  return directory;
 });

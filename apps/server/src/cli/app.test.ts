@@ -48,6 +48,8 @@ async function startFakeDesktop(input: {
   readonly userId: number | undefined;
   readonly reply?: (request: DesktopAppActivationRequest) => unknown;
 }) {
+  await NodeFSP.mkdir(input.baseDir, { recursive: true });
+  await NodeFSP.writeFile(NodePath.join(input.baseDir, ".product-identity"), "shuv2code\n");
   const target = resolveDesktopAppControlAddress({
     stateDir: NodePath.join(input.baseDir, input.stateSubdirectory ?? "userdata"),
     platform: input.platform,
@@ -174,6 +176,9 @@ describe("t3 server command safety", () => {
           serviceManaged: true,
         });
         yield* Effect.promise(() => NodeFSP.mkdir(stateDir, { recursive: true }));
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(baseDir, ".product-identity"), "shuv2code\n"),
+        );
         yield* Effect.promise(() => NodeFSP.writeFile(statePath, record));
         const newDirectory = NodePath.join(root, "new-project");
         const platform = yield* HostProcess.Platform;
@@ -285,7 +290,7 @@ describe("t3 app", () => {
   it.effect("prefers the installed desktop app when a dev desktop is also running", () =>
     withTempDirectory("t3-app-preferred-test-", (root) =>
       Effect.gen(function* () {
-        const baseDir = NodePath.join(root, ".t3");
+        const baseDir = NodePath.join(root, ".shuv2code-v2");
         const desktop = yield* fakeDesktop({ baseDir });
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
@@ -300,14 +305,14 @@ describe("t3 app", () => {
   it.effect("finds the dev desktop when the default desktop socket is absent", () =>
     withTempDirectory("t3-app-dev-test-", (root) =>
       Effect.gen(function* () {
-        const baseDir = NodePath.join(root, ".t3");
+        const baseDir = NodePath.join(root, ".shuv2code-v2");
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
         yield* runCli(["app"]);
         yield* runCli(["app"], { T3CODE_HOME: "   " });
 
         expect(development.received).toHaveLength(2);
-        expect(yield* pathExists(baseDir)).toBe(false);
+        expect(yield* pathExists(NodePath.join(baseDir, "userdata"))).toBe(false);
       }).pipe(Effect.provideService(HostProcess.HomeDirectory, root), Effect.scoped),
     ),
   );
@@ -315,7 +320,7 @@ describe("t3 app", () => {
   it.effect("never searches a dev state directory for an explicit T3 home", () =>
     withTempDirectory("t3-app-explicit-test-", (root) =>
       Effect.gen(function* () {
-        const baseDir = NodePath.join(root, ".t3");
+        const baseDir = NodePath.join(root, ".shuv2code-v2");
         const development = yield* fakeDesktop({ baseDir, stateSubdirectory: "dev" });
 
         const flagError = yield* runCli(["app", "--base-dir", baseDir]).pipe(Effect.flip);
@@ -333,7 +338,7 @@ describe("t3 app", () => {
     (responseKind) =>
       withTempDirectory("t3-app-response-test-", (root) =>
         Effect.gen(function* () {
-          const baseDir = NodePath.join(root, ".t3");
+          const baseDir = NodePath.join(root, ".shuv2code-v2");
           const desktop = yield* fakeDesktop({
             baseDir,
             reply: (request) =>

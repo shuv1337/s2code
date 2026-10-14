@@ -9,6 +9,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { applyProductEnvironment, isProductRuntimeComplete } from "@t3tools/shared/productIdentity";
+import {
+  canonicalProductPath,
+  ensureProductHome,
+  isLegacyProductHome,
+} from "@t3tools/shared/productHome";
 
 import type {
   PendingServiceUpdate,
@@ -216,11 +222,19 @@ export async function writeServiceState(filePath: string, state: ServiceState): 
 async function runtimeExists(baseDir: string, version: string): Promise<boolean> {
   const paths = runtimePaths(baseDir, version);
   try {
+    if (
+      !canonicalProductPath(paths.entryPath).startsWith(
+        `${canonicalProductPath(baseDir)}${NodePath.sep}`,
+      )
+    )
+      return false;
     const [entry, sentinel] = await Promise.all([
       NodeFSP.stat(paths.entryPath),
       NodeFSP.readFile(paths.sentinelPath, "utf8"),
     ]);
-    return entry.isFile() && sentinel.trim() === version;
+    return (
+      entry.isFile() && isProductRuntimeComplete(sentinel, version, isLegacyProductHome(baseDir))
+    );
   } catch {
     return false;
   }
@@ -627,10 +641,12 @@ export class Launcher {
 }
 
 export async function main(): Promise<void> {
+  applyProductEnvironment(process.env);
   const baseDir = process.env.T3CODE_HOME?.trim();
   if (baseDir === undefined || baseDir === "") {
-    throw new Error("T3CODE_HOME is required by the T3 Code service launcher.");
+    throw new Error("SHUV2CODE_HOME is required by the shuv2code service launcher.");
   }
+  ensureProductHome(baseDir);
   const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
   const state = await readServiceState(statePath);
   await new Launcher(baseDir, state).run();

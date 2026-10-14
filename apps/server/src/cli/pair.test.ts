@@ -93,6 +93,11 @@ describe("pair tailscale local target", () => {
 });
 
 const runCli = (args: ReadonlyArray<string>) => Command.runWith(cli, { version: "0.0.0" })(args);
+const makeOwnedTempDirectory = (prefix: string) => {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), prefix));
+  NodeFS.writeFileSync(NodePath.join(directory, ".product-identity"), "shuv2code\n");
+  return directory;
+};
 
 const provideCliTestLayers = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.provide(effect, Layer.mergeAll(layerCliRuntime, TestConsole.layer));
@@ -148,7 +153,7 @@ describe("t3 pair", () => {
   it.effect("mints a token and prints a QR pairing URL for a live server", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-test-"));
+        const baseDir = makeOwnedTempDirectory("t3-pair-test-");
         const port = Number(new URL(origin).port);
         const statePath = NodePath.join(baseDir, "userdata", "server-runtime.json");
         yield* persistServerRuntimeState({
@@ -203,7 +208,7 @@ describe("t3 pair", () => {
   it.effect("mints a pairing grant with only the selected scopes", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-scopes-test-"));
+        const baseDir = makeOwnedTempDirectory("t3-pair-scopes-test-");
         yield* persistServerRuntimeState({
           path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
           state: yield* makePersistedServerRuntimeState({
@@ -240,7 +245,7 @@ describe("t3 pair", () => {
   it.effect("pairs through the recorded dev web URL for dev servers", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-dev-test-"));
+        const baseDir = makeOwnedTempDirectory("t3-pair-dev-test-");
         const port = Number(new URL(origin).port);
         const statePath = NodePath.join(baseDir, "dev", "server-runtime.json");
         yield* persistServerRuntimeState({
@@ -258,9 +263,9 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("directs to t3 serve or t3 connect when no server is running", () =>
+  it.effect("directs to shuv2code serve when no server is running", () =>
     Effect.gen(function* () {
-      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-none-test-"));
+      const baseDir = makeOwnedTempDirectory("t3-pair-none-test-");
 
       const error = yield* provideCliTestLayers(
         runCli(["pair", "--base-dir", baseDir]).pipe(Effect.flip),
@@ -270,15 +275,14 @@ describe("t3 pair", () => {
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
       assert.include(rendered, "No running T3 Code server found.");
-      assert.include(rendered, "npx t3 serve");
-      assert.include(rendered, "npx t3 connect");
+      assert.include(rendered, "npx shuv2code serve");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("ignores runtime state whose recorded pid is no longer alive", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-pid-test-"));
+        const baseDir = makeOwnedTempDirectory("t3-pair-pid-test-");
         const statePath = NodePath.join(baseDir, "userdata", "server-runtime.json");
         // The origin answers (another server reused the port), but the pid
         // that wrote this state file is dead — pairing must not mint a token
@@ -307,7 +311,7 @@ describe("t3 pair", () => {
 
   it.effect("ignores stale runtime state pointing at a dead server", () =>
     Effect.gen(function* () {
-      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-stale-test-"));
+      const baseDir = makeOwnedTempDirectory("t3-pair-stale-test-");
       const statePath = NodePath.join(baseDir, "userdata", "server-runtime.json");
       // A port from the dynamic range with nothing listening: the probe fails
       // fast with ECONNREFUSED and discovery moves on.
@@ -339,9 +343,7 @@ describe("auth scope options", () => {
     "issues and persists only the selected scopes for auth $group $action",
     ({ group, action }) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(
-          NodePath.join(NodeOS.tmpdir(), "t3-cli-auth-scopes-test-"),
-        );
+        const baseDir = makeOwnedTempDirectory("t3-cli-auth-scopes-test-");
         const output = yield* captureStdout(
           runCli([
             "auth",
@@ -390,7 +392,7 @@ describe("auth scope options", () => {
       if (!CliError.isCliError(error) || error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${String(error)}`);
       }
-      assert.deepEqual(error.commandPath, ["t3", ...command]);
+      assert.deepEqual(error.commandPath, ["shuv2code", ...command]);
       const scopeError = error.errors[0];
       if (scopeError?._tag !== "InvalidValue") {
         assert.fail(`Expected InvalidValue, got ${String(scopeError?._tag)}`);

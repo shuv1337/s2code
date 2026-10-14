@@ -24,7 +24,13 @@ import { deriveServerPaths } from "../config.ts";
 import { resolveServerConfig } from "./config.ts";
 
 const deriveExplicitServerPaths = (baseDir: string, devUrl: URL | undefined) =>
-  deriveServerPaths(baseDir, devUrl, { baseDirIsExplicit: true });
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.makeDirectory(baseDir, { recursive: true });
+    yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "shuv2code\n");
+    return yield* deriveServerPaths(baseDir, devUrl, { baseDirIsExplicit: true });
+  });
 
 const minimalDesktopFlags = (baseDir: string) => ({
   mode: Option.some("desktop" as const),
@@ -108,6 +114,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         const baseDir = path.join(root, name);
         const stateDir = path.join(baseDir, "userdata");
         yield* fs.makeDirectory(stateDir, { recursive: true });
+        yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "shuv2code\n");
         yield* fs.writeFileString(
           path.join(stateDir, "server-runtime.json"),
           yield* encodeUnknownJson({

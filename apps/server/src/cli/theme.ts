@@ -186,7 +186,7 @@ const resolveThemePaths = Effect.fn(function* (explicitBaseDir: Option.Option<st
   // not have this one command silently target the default install.
   const envHome = Option.filter(yield* envT3Home, (value) => value.trim().length > 0);
   const configuredBaseDir = Option.orElse(explicitBaseDir, () => envHome);
-  const baseDir = yield* resolveBaseDir(Option.getOrUndefined(configuredBaseDir));
+  const baseDir = yield* resolveBaseDir(Option.getOrUndefined(configuredBaseDir), { claim: true });
   const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined, {
     baseDirIsExplicit: Option.isSome(configuredBaseDir),
   });

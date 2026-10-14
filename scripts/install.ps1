@@ -4,27 +4,55 @@
 #   irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 #
 # Environment:
-#   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
+#   SHUV2CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: stable; preview is a maintainers' test train)
-#   T3CODE_VERSION           exact version to install (overrides T3CODE_CHANNEL)
-#   T3CODE_HOME              Server home directory (default: ~\.shuv2code-v2)
-#   T3CODE_INSTALL_BIN_DIR   where t3.exe is linked (default: ~\.local\bin)
-#   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
+#   SHUV2CODE_VERSION           exact version to install (overrides SHUV2CODE_CHANNEL)
+#   SHUV2CODE_HOME              Server home directory (default: ~\.shuv2code-v2)
+#   SHUV2CODE_INSTALL_BIN_DIR   where shuv2code is linked (default: ~\.local\bin)
+#   SHUV2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
-# The archive is unpacked into $T3CODE_HOME\runtime\versions\<version>, the
+# The archive is unpacked into $SHUV2CODE_HOME\runtime\versions\<version>, the
 # same layout `t3 service install` uses, so the service reuses this download.
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = "shuv1337/shuv2code"
-$baseUrl = if ($env:T3CODE_RELEASE_BASE_URL) { $env:T3CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
-$t3Home = if ($env:T3CODE_HOME) { $env:T3CODE_HOME } else { Join-Path $HOME ".shuv2code-v2" }
-$binDir = if ($env:T3CODE_INSTALL_BIN_DIR) { $env:T3CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
+$baseUrl = if ($env:SHUV2CODE_RELEASE_BASE_URL) { $env:SHUV2CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
+$t3Home = if ($env:SHUV2CODE_HOME) { $env:SHUV2CODE_HOME } else { Join-Path $HOME ".shuv2code-v2" }
+$binDir = if ($env:SHUV2CODE_INSTALL_BIN_DIR) { $env:SHUV2CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
 
 function Fail([string] $message) {
   Write-Error "t3 install: $message"
   exit 1
 }
+
+if ($env:SHUV2CODE_IMPORT_UPSTREAM) { Fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME." }
+function Assert-ProductPath([string] $directory) {
+  $current = [IO.Path]::GetFullPath($directory)
+  while ($current) {
+    if (Test-Path -LiteralPath $current) {
+      $item = Get-Item -LiteralPath $current -Force
+      if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Fail "Refusing a linked product path: $directory" }
+    }
+    $parent = [IO.Path]::GetDirectoryName($current)
+    if ($parent -eq $current) { break }
+    $current = $parent
+  }
+}
+$t3Home = [IO.Path]::GetFullPath($t3Home)
+Assert-ProductPath $t3Home
+if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
+$legacyForkHome = $t3Home -match '(^|[\\/])\.shuv2code-v2([\\/]|$)'
+$homeMarker = Join-Path $t3Home ".product-identity"
+Assert-ProductPath $homeMarker
+if (Test-Path -LiteralPath $homeMarker) {
+  if ((Get-Content -LiteralPath $homeMarker -Raw).Trim() -ne "shuv2code") { Fail "Home belongs to another product." }
+} elseif ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force).Count -gt 0 -and -not $legacyForkHome) {
+  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+}
+foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
+New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
+Set-Content -LiteralPath $homeMarker -Value "shuv2code"
 
 $terminal = -not [Console]::IsErrorRedirected -and $env:TERM -ne "dumb"
 $interactive = $terminal -and $Host.UI.SupportsVirtualTerminal
@@ -127,8 +155,8 @@ $arch = switch ($rawArch) {
   default { Fail "unsupported architecture $rawArch" }
 }
 
-$channel = if ($env:T3CODE_CHANNEL) { $env:T3CODE_CHANNEL } else { "stable" }
-$version = $env:T3CODE_VERSION
+$channel = if ($env:SHUV2CODE_CHANNEL) { $env:SHUV2CODE_CHANNEL } else { "stable" }
+$version = $env:SHUV2CODE_VERSION
 if (-not $version) {
   # Tags are v<semver>; the channel is the prerelease identifier, or none for
   # stable. Only tags of the requested train are considered, so a stable
@@ -137,27 +165,34 @@ if (-not $version) {
     "stable" { '^v\d+\.\d+\.\d+$' }
     "nightly" { '^v\d+\.\d+\.\d+-nightly\.\d+\.\d+$' }
     "preview" { '^v\d+\.\d+\.\d+-preview\.\d+\.\d+$' }
-    default { Fail "T3CODE_CHANNEL must be stable, nightly, or preview" }
+    default { Fail "SHUV2CODE_CHANNEL must be stable, nightly, or preview" }
   }
   $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=100" -Headers @{ "User-Agent" = "t3-install" }
   $tag = ($releases | Where-Object { -not $_.draft -and $_.tag_name -match $tagPattern } | Select-Object -First 1).tag_name
-  if (-not $tag) { Fail "could not find a $channel release; set T3CODE_VERSION" }
+  if (-not $tag) { Fail "could not find a $channel release; set SHUV2CODE_VERSION" }
   $version = $tag.Substring(1)
 }
 if ($version -match '-preview\.') {
-  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set T3CODE_CHANNEL=stable (the default) for a supported build."
-  if ($channel -ne "preview" -and -not $env:T3CODE_VERSION) {
+  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set SHUV2CODE_CHANNEL=stable (the default) for a supported build."
+  if ($channel -ne "preview" -and -not $env:SHUV2CODE_VERSION) {
     Fail "refusing a preview build that was not explicitly requested"
   }
 }
 
 $stem = "t3-$version-win32-$arch"
+if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
+Assert-ProductPath $targetDir
+Assert-ProductPath (Join-Path $targetDir "t3.exe")
+Assert-ProductPath $marker
+$completion = "shuv2code`n$version"
+$installedMarker = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -Raw).Trim().Replace("`r`n", "`n") } else { "" }
+if ($installedMarker -and $installedMarker -ne $completion -and -not ($legacyForkHome -and $installedMarker -eq $version)) { Fail "Refusing to reuse or replace a foreign runtime cache." }
 
-if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
+if ((Test-Path (Join-Path $targetDir "t3.exe")) -and ($installedMarker -eq $completion -or ($legacyForkHome -and $installedMarker -eq $version))) {
   Step "Version $version is already downloaded."
 } else {
   New-Item -ItemType Directory -Force -Path $versionsDir | Out-Null
@@ -199,7 +234,7 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
 
     & (Join-Path $staging "t3.exe") --version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "the downloaded executable does not run" }
-    Set-Content -Path (Join-Path $staging ".install-complete") -Value $version -NoNewline
+    Set-Content -Path (Join-Path $staging ".install-complete") -Value "$completion`n" -NoNewline
 
     if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force }
     Move-Item $staging $targetDir

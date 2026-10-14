@@ -92,7 +92,7 @@ const writeFakeRuntime = (
     yield* fs.chmod(entryPath, 0o755);
     yield* fs.writeFileString(
       path.join(versionDir, ".install-complete"),
-      `${path.basename(versionDir)}\n`,
+      `shuv2code\n${path.basename(versionDir)}\n`,
     );
     return entryPath;
   });

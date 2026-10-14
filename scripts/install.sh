@@ -5,27 +5,49 @@
 #   curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
 #
 # Environment:
-#   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
+#   SHUV2CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: stable; preview is a maintainers' test train)
-#   T3CODE_VERSION           exact version to install (overrides T3CODE_CHANNEL)
-#   T3CODE_HOME              Server home directory (default: ~/.shuv2code-v2)
-#   T3CODE_INSTALL_BIN_DIR   where the `t3` symlink goes (default: ~/.local/bin)
-#   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
+#   SHUV2CODE_VERSION           exact version to install (overrides SHUV2CODE_CHANNEL)
+#   SHUV2CODE_HOME              Server home directory (default: ~/.shuv2code-v2)
+#   SHUV2CODE_INSTALL_BIN_DIR   where the `shuv2code` symlink goes (default: ~/.local/bin)
+#   SHUV2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
-# The archive is unpacked into $T3CODE_HOME/runtime/versions/<version>, the
+# The archive is unpacked into $SHUV2CODE_HOME/runtime/versions/<version>, the
 # same layout `t3 service install` uses, so the service reuses this download
 # instead of fetching the release again.
 set -eu
 
 repo="shuv1337/shuv2code"
-base_url="${T3CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
-t3_home="${T3CODE_HOME:-$HOME/.shuv2code-v2}"
-bin_dir="${T3CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
+base_url="${SHUV2CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
+t3_home="${SHUV2CODE_HOME:-$HOME/.shuv2code-v2}"
+bin_dir="${SHUV2CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 
 fail() {
   printf '\nt3 install: %s\n' "$1" >&2
   exit 1
 }
+
+[ -z "${SHUV2CODE_IMPORT_UPSTREAM:-}" ] || fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME."
+canonical_dir() (
+  if [ -d "$1" ]; then cd -P "$1" && pwd -P
+  else printf '%s/%s\n' "$(canonical_dir "$(dirname "$1")")" "$(basename "$1")"
+  fi
+)
+t3_home="$(canonical_dir "$t3_home")"
+case "$t3_home/" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
+legacy_fork_home=false
+case "$t3_home/" in */.shuv2code-v2/*) legacy_fork_home=true ;; esac
+[ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
+if [ -f "$t3_home/.product-identity" ]; then
+  [ "$(tr -d '\r' < "$t3_home/.product-identity")" = shuv2code ] || fail "Home belongs to another product."
+elif [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home")" ] && ! "$legacy_fork_home"; then
+  fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+fi
+for child in userdata dev runtime; do
+  case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
+done
+mkdir -p "$t3_home"
+printf '%s\n' shuv2code > "$t3_home/.product-identity"
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
@@ -142,8 +164,8 @@ else
   fail "sha256sum or shasum is required"
 fi
 
-channel="${T3CODE_CHANNEL:-stable}"
-version="${T3CODE_VERSION:-}"
+channel="${SHUV2CODE_CHANNEL:-stable}"
+version="${SHUV2CODE_VERSION:-}"
 if [ -z "$version" ]; then
   # Tags are v<semver>; the channel is the prerelease identifier, or none for
   # stable. Only tags of the requested train are considered, so a stable
@@ -151,13 +173,13 @@ if [ -z "$version" ]; then
   case "$channel" in
     stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)' ;;
     nightly | preview) tag_pattern="v\([0-9][^\"]*-${channel}\.[0-9]*\.[0-9]*\)" ;;
-    *) fail "T3CODE_CHANNEL must be stable, nightly, or preview" ;;
+    *) fail "SHUV2CODE_CHANNEL must be stable, nightly, or preview" ;;
   esac
   tmp_index="$(mktemp)"
   fetch "https://api.github.com/repos/${repo}/releases?per_page=100" "$tmp_index"
   version="$(sed -n "s/.*\"tag_name\": *\"${tag_pattern}\".*/\1/p" "$tmp_index" | head -n 1)"
   rm -f "$tmp_index"
-  [ -n "$version" ] || fail "could not find a ${channel} release; set T3CODE_VERSION"
+  [ -n "$version" ] || fail "could not find a ${channel} release; set SHUV2CODE_VERSION"
 fi
 case "$version" in
   *-preview.*)
@@ -165,8 +187,8 @@ case "$version" in
       "t3 ${version} is a preview build." \
       "  Preview builds are cut by maintainers from unreleased branches to exercise the release" \
       "  pipeline. They can be broken, receive no fixes, and are never offered as updates." \
-      "  Set T3CODE_CHANNEL=stable (the default) for a supported build." >&2
-    if [ "$channel" != "preview" ] && [ -z "${T3CODE_VERSION:-}" ]; then
+      "  Set SHUV2CODE_CHANNEL=stable (the default) for a supported build." >&2
+    if [ "$channel" != "preview" ] && [ -z "${SHUV2CODE_VERSION:-}" ]; then
       fail "refusing a preview build that was not explicitly requested"
     fi
     ;;
@@ -176,8 +198,20 @@ stem="t3-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail "Invalid release version."
+case "$(canonical_dir "$target_dir")/" in "$t3_home/"*) ;; *) fail "Refusing foreign runtime cache path." ;; esac
+[ ! -L "$target_dir/t3" ] || fail "Refusing a linked runtime executable."
+[ ! -L "$target_dir/.install-complete" ] || fail "Refusing linked runtime metadata."
+completion="$(printf 'shuv2code\n%s' "$version")"
+marker=
+if [ -e "${target_dir}/.install-complete" ]; then
+  marker="$(tr -d '\r' < "${target_dir}/.install-complete")" || fail "Could not read runtime metadata; refusing to replace the cache."
+fi
+if [ -n "$marker" ] && [ "$marker" != "$completion" ] && { ! "$legacy_fork_home" || [ "$marker" != "$version" ]; }; then
+  fail "Refusing to reuse or replace a foreign runtime cache."
+fi
 
-if [ -f "${target_dir}/.install-complete" ] && [ "$(cat "${target_dir}/.install-complete")" = "$version" ]; then
+if [ -x "${target_dir}/t3" ] && { [ "$marker" = "$completion" ] || { "$legacy_fork_home" && [ "$marker" = "$version" ]; }; }; then
   step "Version ${version} is already downloaded."
 else
   mkdir -p "$versions_dir"
@@ -209,7 +243,7 @@ else
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
   "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
-  printf '%s\n' "$version" > "${staging}/.install-complete"
+  printf 'shuv2code\n%s\n' "$version" > "${staging}/.install-complete"
 
   rm -rf "$target_dir"
   mv "$staging" "$target_dir"

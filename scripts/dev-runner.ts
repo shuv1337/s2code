@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import { resolveGitWorktreePath, resolveWorktreeT3Home } from "@t3tools/shared/devHome";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { applyDevelopmentProductOverrides } from "@t3tools/shared/productIdentity";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -325,8 +326,10 @@ export function createDevRunnerEnv({
 
     if (configuredBaseDir !== undefined) {
       output.T3CODE_HOME = resolvedBaseDir;
+      output.SHUV2CODE_HOME = resolvedBaseDir;
     } else {
       delete output.T3CODE_HOME;
+      delete output.SHUV2CODE_HOME;
     }
 
     // A dev-runner server is never launcher-managed. When the shell that runs
@@ -415,6 +418,20 @@ export function createDevRunnerEnv({
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
+    for (const key of [
+      "PORT",
+      "HOST",
+      "MODE",
+      "NO_BROWSER",
+      "AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+      "LOG_WS_EVENTS",
+      "TAILSCALE_SERVE",
+      "TAILSCALE_SERVE_PORT",
+    ]) {
+      const value = output[`T3CODE_${key}`];
+      if (value !== undefined) output[`SHUV2CODE_${key}`] = value;
+      else delete output[`SHUV2CODE_${key}`];
+    }
     return output;
   });
 }
@@ -674,7 +691,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     const resolvedT3Home =
       (input.t3Home?.trim() || undefined) ??
       worktreeHome ??
-      (hostEnvironment.T3CODE_HOME?.trim() || undefined);
+      (hostEnvironment.SHUV2CODE_HOME?.trim() || hostEnvironment.T3CODE_HOME?.trim() || undefined);
     const env = yield* createDevRunnerEnv({
       mode: input.mode,
       baseEnv: hostEnvironment,
@@ -913,6 +930,7 @@ const cliRuntimeLayer = Layer.mergeAll(
 );
 
 if (import.meta.main) {
+  applyDevelopmentProductOverrides(process.env);
   Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
     Effect.scoped,
     Effect.provide(cliRuntimeLayer),

@@ -787,7 +787,7 @@ describe("archive runner script", () => {
         assert.deepEqual(yield* fs.readDirectory(versionsDir), [archiveVersion]);
         assert.equal(
           (yield* fs.readFileString(`${versionsDir}/${archiveVersion}/.install-complete`)).trim(),
-          archiveVersion,
+          `shuv2code\n${archiveVersion}`,
         );
 
         // A lock left by a crashed installer (dead pid) must not block the

@@ -22,8 +22,30 @@ irm https://t3.codes/install.ps1 | iex
 
 This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
-`T3CODE_VERSION` to pin an exact version.
+line to add. Set `SHUV2CODE_CHANNEL=nightly` to install the nightly train, or
+`SHUV2CODE_VERSION` to pin an exact version.
+
+### Keep upstream and fork installations separate
+
+shuv2code uses `~/.shuv2code-v2` by default. Set `SHUV2CODE_HOME` for a different
+home, `SHUV2CODE_PORT` for a server port, and `SHUV2CODE_RELEASE_BASE_URL` for a
+release-download mirror. Public settings use the `SHUV2CODE_` prefix; inherited
+upstream `T3CODE_` settings are ignored. Existing services should be reinstalled
+to save the fork-owned configuration.
+
+An empty custom home is claimed automatically. Existing installations in the
+default fork home remain usable, including older version-only runtime markers.
+An existing custom home without product metadata is refused: verify offline
+that it belongs exclusively to this fork before adding `.product-identity`
+containing `shuv2code`. Do not use this to adopt upstream state.
+Old caches in a custom home also need verification: reinstall into an empty home,
+or mark each verified fork cache's `.install-complete` with two lines,
+`shuv2code` followed by its exact version. Unidentified caches outside the default
+fork home are never reused or replaced automatically.
+
+Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` at
+an upstream home, live database, or shared runtime cache; use a separate home.
+Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 
 | Task                                             | Command                                                   |
 | ------------------------------------------------ | --------------------------------------------------------- |
