@@ -67,6 +67,7 @@ export function DesktopWebLinkCoordinator() {
   });
   const httpBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironment?.environmentId ?? null);
   const queueRef = useRef(Promise.resolve());
+  const pendingPrimaryLinksRef = useRef<string[]>([]);
   const webLinks = window.desktopBridge?.webLinks;
   const ready =
     webLinks !== undefined &&
@@ -103,7 +104,10 @@ export function DesktopWebLinkCoordinator() {
     // Environment-qualified threads do not depend on the local primary.
     // Other links retain the existing primary-readiness requirement.
     const isThreadLink = appPath !== null && /^\/[^/]+\/[^/?]+(?:\?|$)/.test(appPath);
-    if (!isThreadLink && !ready) return;
+    if (!isThreadLink && !ready) {
+      pendingPrimaryLinksRef.current.push(url);
+      return;
+    }
     if (appPath !== null) {
       await router.navigate({ href: appPath });
       return;
@@ -138,6 +142,13 @@ export function DesktopWebLinkCoordinator() {
       reportFailure(url, error instanceof Error ? error.message : url);
     }
   });
+
+  useEffect(() => {
+    if (!ready) return;
+    for (const url of pendingPrimaryLinksRef.current.splice(0)) {
+      queueRef.current = queueRef.current.then(() => openLink(url)).catch(() => undefined);
+    }
+  }, [ready]);
 
   useEffect(() => {
     if (webLinks === undefined) return;
