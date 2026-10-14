@@ -200,7 +200,7 @@ t3_home="$(canonical_dir "$t3_home")"
 case "$t3_home/" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
 user_home="$(canonical_dir "$HOME")"
 default_fork_home=false
-case "$t3_home" in "$user_home/.shuv2code-v2"|"$user_home/.shuv2code-v2-nightly"|"$user_home/.shuv2code-v2-preview") default_fork_home=true ;; esac
+case "$t3_home" in "$user_home/.shuv2code-v2") default_fork_home=true ;; esac
 [ ! -L "$t3_home/.product-identity" ] || fail "Refusing linked product metadata."
 if [ -f "$t3_home/.product-identity" ]; then
   [ "$(tr -d '\r' < "$t3_home/.product-identity")" = shuv2code ] || fail "Home belongs to another product."

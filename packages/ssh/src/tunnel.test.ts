@@ -770,10 +770,13 @@ describe("archive runner script", () => {
     const stem = `t3-${version}-${platform}-${arch}`;
     const stage = `${root}/stage/${stem}`;
     const release = `${root}/mirror/v${version}`;
+    const channelHome = version.includes("-nightly.")
+      ? ".shuv2code-v2-nightly"
+      : ".shuv2code-v2-preview";
     const script = [
       "set -eu",
       `mkdir -p '${stage}' '${release}'`,
-      `printf '#!/bin/sh\\necho t3 v${version}\\n' > '${stage}/t3'`,
+      `printf '#!/bin/sh\\ntest "$(cat "$HOME/${channelHome}/.product-identity")" = shuv2code || exit 91\\necho t3 v${version}\\n' > '${stage}/t3'`,
       `chmod +x '${stage}/t3'`,
       `tar -czf '${release}/${stem}.tar.gz' -C '${root}/stage' '${stem}'`,
       `cd '${release}' && (sha256sum '${stem}.tar.gz' 2>/dev/null || shasum -a 256 '${stem}.tar.gz') > SHA256SUMS`,
@@ -782,6 +785,41 @@ describe("archive runner script", () => {
     assert.equal(Number(yield* child.exitCode), 0);
     return `file://${root}/mirror`;
   });
+
+  for (const channel of ["nightly", "preview"])
+    it.effect.skipIf(windowsHost)(
+      `refuses unmarked ${channel} state in runner, launch and pairing before populating it`,
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "ssh-unmarked-channel-" });
+          const home = `${root}/home`;
+          const channelHome = `${home}/.shuv2code-v2-${channel}`;
+          yield* fs.makeDirectory(`${channelHome}/userdata`, { recursive: true });
+          yield* fs.writeFileString(`${channelHome}/userdata/statev2.sqlite`, "upstream-state");
+          const input = {
+            archiveVersion: `1.2.3-${channel}.20261014.1`,
+            releaseBaseUrl: "https://fixture.invalid",
+          };
+          const scripts = [
+            SshTunnel.buildRemoteT3RunnerScript(input),
+            SshTunnel.buildRemoteLaunchScript(input),
+            SshTunnel.buildRemotePairingScript("fixture", input),
+          ];
+          for (const script of scripts) {
+            const file = `${root}/runner.sh`;
+            yield* fs.writeFileString(file, script);
+            const result = yield* runRunner(home, file);
+            assert.notEqual(result.exitCode, 0);
+            assert.include(result.stderr, "Cannot establish product ownership");
+            assert.deepEqual(yield* fs.readDirectory(channelHome), ["userdata"]);
+            assert.equal(
+              yield* fs.readFileString(`${channelHome}/userdata/statev2.sqlite`),
+              "upstream-state",
+            );
+          }
+        }).pipe(Effect.provide(NodeServices.layer)),
+    );
 
   for (const channel of ["nightly", "preview"])
     it.effect.skipIf(windowsHost)(
@@ -806,6 +844,10 @@ describe("archive runner script", () => {
           assert.include(result.stdout, `t3 v${version}`);
           assert.equal(yield* fs.readFileString(`${stableCache}/t3`), "stable-executable");
           assert.equal(
+            yield* fs.readFileString(`${home}/.shuv2code-v2-${channel}/.product-identity`),
+            "shuv2code\n",
+          );
+          assert.equal(
             (yield* fs.readFileString(
               `${home}/.shuv2code-v2-${channel}/runtime/versions/${version}/.install-complete`,
             )).trim(),
@@ -829,6 +871,7 @@ describe("archive runner script", () => {
         const home = `${root}/home`;
         const cache = `${home}/.shuv2code-v2-preview/runtime/versions/${archiveVersion}`;
         yield* fs.makeDirectory(cache, { recursive: true });
+        yield* fs.writeFileString(`${home}/.shuv2code-v2-preview/.product-identity`, "shuv2code\n");
         const sentinel = "#!/bin/sh\necho upstream-sentinel\nexit 1\n";
         yield* fs.writeFileString(`${cache}/t3`, sentinel);
         yield* fs.chmod(`${cache}/t3`, 0o755);

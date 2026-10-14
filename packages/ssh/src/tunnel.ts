@@ -428,6 +428,38 @@ ensure_remote_node_path() {
 }
 `;
 
+// Claim a fresh channel home before cache, SSH bookkeeping or server state can populate it.
+// Only the stable default has legitimate installs from before ownership markers existed.
+const REMOTE_HOME_OWNERSHIP_SCRIPT = `T3_PRODUCT_HOME="$HOME/@@T3_HOME_DIRECTORY@@"
+for T3_PATH in "$T3_PRODUCT_HOME" "$T3_PRODUCT_HOME/.product-identity" "$T3_PRODUCT_HOME/userdata" "$T3_PRODUCT_HOME/runtime" "$T3_PRODUCT_HOME/runtime/versions" "$T3_PRODUCT_HOME/ssh-launch"; do
+  if [ -L "$T3_PATH" ]; then printf 'Refusing linked product ownership metadata or state.\\n' >&2; exit 1; fi
+done
+if [ -e "$T3_PRODUCT_HOME/.product-identity" ]; then
+  if [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || [ "$(cat "$T3_PRODUCT_HOME/.product-identity")" != shuv2code ]; then
+    printf 'Home belongs to another product.\\n' >&2; exit 1
+  fi
+else
+  if [ "@@T3_HOME_DIRECTORY@@" != .shuv2code-v2 ] && [ -d "$T3_PRODUCT_HOME" ] && [ -n "$(ls -A "$T3_PRODUCT_HOME")" ]; then
+    # Another initializer may have published ownership since the first check.
+    if [ -L "$T3_PRODUCT_HOME/.product-identity" ] || [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || [ "$(cat "$T3_PRODUCT_HOME/.product-identity")" != shuv2code ]; then
+      printf 'Cannot establish product ownership of an existing unmarked channel home. Choose an empty SHUV2CODE_HOME or verify ownership offline.\\n' >&2; exit 1
+    fi
+  fi
+  mkdir -p "$T3_PRODUCT_HOME"
+  # Publish complete contents atomically, without replacing another owner's marker.
+  # Stage outside the home so concurrent initializers never see unmarked partial state.
+  (
+    T3_OWNERSHIP_TEMP="$(mktemp "$HOME/.shuv2code-home-owner.XXXXXX")"
+    trap 'rm -f "$T3_OWNERSHIP_TEMP"' EXIT
+    printf 'shuv2code\\n' > "$T3_OWNERSHIP_TEMP"
+    ln "$T3_OWNERSHIP_TEMP" "$T3_PRODUCT_HOME/.product-identity" 2>/dev/null || true
+    if [ -L "$T3_PRODUCT_HOME/.product-identity" ] || [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || [ "$(cat "$T3_PRODUCT_HOME/.product-identity")" != shuv2code ]; then
+      printf 'Cannot establish product ownership.\\n' >&2; exit 1
+    fi
+  )
+fi
+`;
+
 const REMOTE_RUNNER_SCRIPT = `#!/bin/sh
 set -eu
 @@T3_NODE_ENV_SCRIPT@@
@@ -455,9 +487,7 @@ T3_RUNTIME_DIR="$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions/$T3_ARCHIVE_VERSION
 for T3_PATH in "$HOME/@@T3_HOME_DIRECTORY@@" "$HOME/@@T3_HOME_DIRECTORY@@/.product-identity" "$HOME/@@T3_HOME_DIRECTORY@@/runtime" "$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions" "$T3_RUNTIME_DIR" "$T3_RUNTIME_DIR/t3" "$T3_RUNTIME_DIR/.install-complete" "$T3_RUNTIME_DIR/.install-product"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing a linked runtime cache.\\n' >&2; exit 1; fi
 done
-if [ -f "$HOME/@@T3_HOME_DIRECTORY@@/.product-identity" ] && [ "$(cat "$HOME/@@T3_HOME_DIRECTORY@@/.product-identity")" != shuv2code ]; then
-  printf 'Home belongs to another product.\\n' >&2; exit 1
-fi
+${REMOTE_HOME_OWNERSHIP_SCRIPT}
 t3_runtime_ready() {
   T3_MARKER="$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null || true)"
   [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$T3_MARKER" = "$T3_ARCHIVE_VERSION" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-product" 2>/dev/null || true)" = shuv2code ]
@@ -564,6 +594,7 @@ DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
 for T3_PATH in "$DEFAULT_SERVER_HOME" "$DEFAULT_SERVER_HOME/.product-identity" "$DEFAULT_SERVER_HOME/userdata" "$DEFAULT_RUNTIME_FILE"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing linked server state.\\n' >&2; exit 1; fi
 done
+${REMOTE_HOME_OWNERSHIP_SCRIPT}
 if [ -f "$DEFAULT_SERVER_HOME/.product-identity" ] && [ "$(cat "$DEFAULT_SERVER_HOME/.product-identity")" != shuv2code ]; then
   printf 'Home belongs to another product.\\n' >&2; exit 1
 fi
@@ -743,6 +774,7 @@ printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGE
 `;
 
 const REMOTE_PAIRING_SCRIPT = `set -eu
+${REMOTE_HOME_OWNERSHIP_SCRIPT}
 STATE_DIR="$HOME/@@T3_HOME_DIRECTORY@@/ssh-launch/@@T3_STATE_KEY@@"
 DEFAULT_SERVER_HOME="$HOME/@@T3_HOME_DIRECTORY@@"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"

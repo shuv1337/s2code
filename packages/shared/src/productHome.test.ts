@@ -32,17 +32,44 @@ it.each([".shuv2code-v2", ".shuv2code-v2-nightly", ".shuv2code-v2-preview"])(
     );
   },
 );
-it.each([".shuv2code-v2", ".shuv2code-v2-nightly", ".shuv2code-v2-preview"])(
-  "keeps maintainer state in the exact default %s home",
-  (directory) => {
+it.each([".shuv2code-v2"])("keeps maintainer state in the exact default %s home", (directory) => {
+  vi.stubEnv("HOME", root);
+  vi.stubEnv("USERPROFILE", root);
+  const home = NodePath.join(root, directory);
+  NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "fork-state");
+  ensureProductHome(home);
+  expect(NodeFS.readFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "utf8")).toBe(
+    "fork-state",
+  );
+});
+it.each(["nightly", "preview"])(
+  "rejects unmarked upstream-like state at the exact %s default",
+  (channel) => {
     vi.stubEnv("HOME", root);
     vi.stubEnv("USERPROFILE", root);
-    const home = NodePath.join(root, directory);
+    const home = NodePath.join(root, `.shuv2code-v2-${channel}`);
     NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
-    NodeFS.writeFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "fork-state");
+    const database = NodePath.join(home, "userdata", "statev2.sqlite");
+    NodeFS.writeFileSync(database, "upstream-state");
+    expect(() => ensureProductHome(home)).toThrow("Cannot establish product ownership");
+    expect(NodeFS.existsSync(NodePath.join(home, ".product-identity"))).toBe(false);
+    expect(NodeFS.readFileSync(database, "utf8")).toBe("upstream-state");
+    NodeFS.writeFileSync(NodePath.join(home, ".product-identity"), "shuv2code\n");
     ensureProductHome(home);
-    expect(NodeFS.readFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "utf8")).toBe(
-      "fork-state",
+    expect(NodeFS.readFileSync(database, "utf8")).toBe("upstream-state");
+  },
+);
+it.each(["nightly", "preview"])(
+  "claims the empty %s default before state is populated",
+  (channel) => {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("USERPROFILE", root);
+    const home = NodePath.join(root, `.shuv2code-v2-${channel}`);
+    ensureProductHome(home);
+    expect(NodeFS.readdirSync(home)).toEqual([".product-identity"]);
+    expect(NodeFS.readFileSync(NodePath.join(home, ".product-identity"), "utf8")).toBe(
+      "shuv2code\n",
     );
   },
 );

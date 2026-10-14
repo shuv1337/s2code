@@ -34,6 +34,7 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
         const channelHome = NodePath.join(home, `.shuv2code-v2${suffix}`);
         if (channel !== "stable") {
           NodeFS.mkdirSync(NodePath.join(channelHome, "userdata"), { recursive: true });
+          NodeFS.writeFileSync(NodePath.join(channelHome, ".product-identity"), "shuv2code\n");
           NodeFS.writeFileSync(
             NodePath.join(channelHome, "userdata", "statev2.sqlite"),
             "existing-channel-state",
