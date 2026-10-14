@@ -1168,18 +1168,6 @@ export function EnvironmentProviderSettings({
         {deviceTabs ? (
           <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">{deviceTabs}</div>
         ) : null}
-        {!readOnly ? (
-          <div className="flex justify-end px-3 pb-3 sm:px-4">
-            <Button
-              variant="outline"
-              onClick={() => setIsAddInstanceDialogOpen(true)}
-              aria-label="Add provider"
-            >
-              <PlusIcon aria-hidden="true" />
-              Add provider
-            </Button>
-          </div>
-        ) : null}
         {readOnly ? (
           <SettingsGroup divided={false} className="overflow-hidden">
             <SettingsRow
@@ -1196,6 +1184,18 @@ export function EnvironmentProviderSettings({
           )}
         >
           <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
+            {!readOnly ? (
+              <div className="flex shrink-0 items-center border-b border-border/50 px-3 py-3 sm:px-4">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setIsAddInstanceDialogOpen(true)}
+                >
+                  <PlusIcon aria-hidden="true" />
+                  Add provider
+                </Button>
+              </div>
+            ) : null}
             <ScrollArea
               scrollFade
               chainVerticalScroll
@@ -1203,16 +1203,6 @@ export function EnvironmentProviderSettings({
             >
               <div className="divide-y divide-border/50">
                 {rows.map((row) => renderProviderInstance(row, "list"))}
-                {!readOnly ? (
-                  <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground sm:px-4"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                  >
-                    <PlusIcon className="size-4 shrink-0" />
-                    Add provider
-                  </button>
-                ) : null}
               </div>
             </ScrollArea>
           </div>

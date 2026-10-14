@@ -206,7 +206,10 @@ function isRefreshButton(element: ReactElement<Record<string, unknown>>): boolea
 }
 
 function isAddProviderButton(element: ReactElement<Record<string, unknown>>): boolean {
-  return element.props["aria-label"] === "Add provider";
+  const children = element.props.children;
+  return (
+    children === "Add provider" || (Array.isArray(children) && children.includes("Add provider"))
+  );
 }
 
 async function flushPromises(): Promise<void> {
@@ -427,7 +430,12 @@ describe("EnvironmentProviderSettings routing", () => {
       visitElements(panel, (element) => element.props.title === "Limited permissions"),
     ).toBeNull();
     expect(visitElements(panel, isRefreshButton)).not.toBeNull();
-    expect(visitElements(panel, isAddProviderButton)).not.toBeNull();
+    const addActions: ReactElement<Record<string, unknown>>[] = [];
+    visitElements(panel, (element) => {
+      if (isAddProviderButton(element)) addActions.push(element);
+      return false;
+    });
+    expect(addActions).toHaveLength(1);
   });
 
   it("removes an open add-instance dialog when the provider grant is revoked", () => {
