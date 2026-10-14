@@ -10,7 +10,10 @@ import bundle from "./bundle.json" with { type: "json" };
 import metadata from "./metadata.json" with { type: "json" };
 import { PRODUCT_DBUS_PREFIX } from "../../../packages/shared/src/productIdentity.ts";
 import { gnomeCaptureClientName } from "../src/snapShot/gnomeCaptureBundle.ts";
-import { resolveLinuxDesktopEntryName } from "../src/app/DesktopEarlyElectronStartup.ts";
+import {
+  resolveLinuxDesktopId,
+  resolveLinuxDesktopEntryName,
+} from "../src/app/DesktopEarlyElectronStartup.ts";
 
 it("ships only caller identities claimed by the real desktop entry resolver", () => {
   expect(metadata.uuid).toBe(bundle.uuid);
@@ -20,11 +23,17 @@ it("ships only caller identities claimed by the real desktop entry resolver", ()
   expect(bundle.dbusPath).toBe(DBUS_PATH);
   expect(DBUS_PATH).toBe(`/${DBUS_NAME.replaceAll(".", "/")}`);
   const callers = [
-    resolveLinuxDesktopEntryName(false).replace(/\.desktop$/, ""),
-    resolveLinuxDesktopEntryName(true).replace(/\.desktop$/, ""),
-  ];
+    [false, "1.2.3"],
+    [true, "1.2.3"],
+    [false, "1.2.3-nightly.1"],
+    [false, "1.2.3-preview.1"],
+  ].map(([dev, version]) => {
+    const appId = resolveLinuxDesktopId(dev, version);
+    expect(resolveLinuxDesktopEntryName(dev, version)).toBe(`${appId}.desktop`);
+    return appId;
+  });
   expect(callers.map(gnomeCaptureClientName)).toEqual(CLIENT_NAMES);
-  expect(gnomeCaptureClientName(callers[0])).not.toBe(gnomeCaptureClientName(callers[1]));
+  expect(new Set(callers.map(gnomeCaptureClientName)).size).toBe(4);
 });
 
 it.each([`${DBUS_NAME}.Client.nightly`, `${DBUS_NAME}.Client.preview`])(

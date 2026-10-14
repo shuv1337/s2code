@@ -870,9 +870,13 @@ describe("archive runner script", () => {
             SshTunnel.buildRemoteT3RunnerScript({ archiveVersion, releaseBaseUrl }),
           );
           const home = `${root}/home`;
-          const versions = `${home}/.shuv2code-v2/runtime/versions`;
+          const versions = `${home}/.shuv2code-v2-preview/runtime/versions`;
           const cache = `${versions}/${archiveVersion}`;
           yield* fs.makeDirectory(cache, { recursive: true });
+          yield* fs.writeFileString(
+            `${home}/.shuv2code-v2-preview/.product-identity`,
+            "shuv2code\n",
+          );
           yield* fs.writeFileString(`${cache}/t3`, "old-runtime");
           yield* fs.writeFileString(`${cache}/.install-complete`, archiveVersion);
           yield* fs.makeDirectory(`${root}/bin`);
