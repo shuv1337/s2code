@@ -406,6 +406,7 @@ it.effect(
           for (const changed of [
             { ...input, text: "different" },
             { ...input, principal: "watch-session-two" },
+            { ...input, admission: undefined, principal: undefined },
             s.command("same", "queue"),
           ]) {
             const error = yield* Effect.flip(s.orchestrator.dispatch(changed));
@@ -423,39 +424,84 @@ it.effect(
     ),
 );
 
-it.effect("legacy null-fingerprint receipts retain replay behavior", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const h = yield* makeHarness("watch-legacy-receipt");
-      yield* Effect.gen(function* () {
-        const s = yield* h.setup;
-        const input = s.command("legacy", "send");
-        const projection = yield* s.orchestrator.getThreadProjection(threadId);
-        const result = yield* s.sink.commitCommand({
-          commandId: input.commandId,
-          threadId,
-          commandType: input.type,
-          acceptedAt: s.now,
-          effects: [],
-          events: [
-            {
-              id: EventId.make("event:legacy"),
-              type: "thread.metadata-updated",
-              threadId,
-              occurredAt: s.now,
-              payload: projection.thread,
-            },
-          ],
-        });
-        assert.isNull(result.receipt.payloadFingerprint);
-        assert.isNull(result.receipt.admissionAction);
-        const replay = yield* s.orchestrator.dispatch({ ...input, text: "different" });
-        assert.equal(replay.sequence, result.receipt.resultSequence);
-        yield* s.worker.drain();
-        assert.equal(h.started.length, 0);
-      }).pipe(Effect.provide(h.layer));
-    }),
-  ),
+it.effect.each([null, "a".repeat(64)])(
+  "ordinary receipts retain replay behavior with fingerprint %s",
+  (payloadFingerprint) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const h = yield* makeHarness("watch-legacy-receipt");
+        yield* Effect.gen(function* () {
+          const s = yield* h.setup;
+          const input = {
+            ...s.command("legacy", "send"),
+            principal: undefined,
+            admission: undefined,
+          };
+          const projection = yield* s.orchestrator.getThreadProjection(threadId);
+          const result = yield* s.sink.commitCommand({
+            commandId: input.commandId,
+            threadId,
+            commandType: input.type,
+            acceptedAt: s.now,
+            payloadFingerprint,
+            effects: [],
+            events: [
+              {
+                id: EventId.make("event:legacy"),
+                type: "thread.metadata-updated",
+                threadId,
+                occurredAt: s.now,
+                payload: projection.thread,
+              },
+            ],
+          });
+          assert.equal(result.receipt.payloadFingerprint, payloadFingerprint);
+          assert.isNull(result.receipt.principal);
+          assert.isNull(result.receipt.admissionAction);
+          const identicalReplay = yield* s.orchestrator.dispatch(input);
+          assert.equal(identicalReplay.sequence, result.receipt.resultSequence);
+          const replay = yield* s.orchestrator.dispatch({ ...input, text: "different" });
+          assert.equal(replay.sequence, result.receipt.resultSequence);
+          assert.deepEqual(yield* s.receipt("legacy"), result.receipt);
+          yield* s.worker.drain();
+          assert.equal(h.started.length, 0);
+        }).pipe(Effect.provide(h.layer));
+      }),
+    ),
+);
+
+it.effect.each(["principal", "admission"] as const)(
+  "receipts with only %s still reject changed or stripped identity",
+  (identity) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const h = yield* makeHarness(`watch-receipt-${identity}`);
+        yield* Effect.gen(function* () {
+          const s = yield* h.setup;
+          const command = s.command("identity", "send");
+          const input =
+            identity === "principal"
+              ? { ...command, admission: undefined }
+              : { ...command, principal: undefined };
+          const accepted = yield* s.orchestrator.dispatch(input);
+          const before = yield* s.receipt("identity");
+          assert.equal((yield* s.orchestrator.dispatch(input)).sequence, accepted.sequence);
+          for (const changed of [
+            { ...input, text: "different" },
+            { ...input, admission: undefined, principal: undefined },
+          ]) {
+            const error = yield* Effect.flip(s.orchestrator.dispatch(changed));
+            assert.deepEqual(
+              parseAdmissionRejection(error.message),
+              Option.some("command_conflict"),
+            );
+            assert.deepEqual(yield* s.receipt("identity"), before);
+          }
+          yield* s.worker.drain();
+          assert.equal(h.started.length, 1);
+        }).pipe(Effect.provide(h.layer));
+      }),
+    ),
 );
 
 it.effect.each(["none", "follow_up"] as const)(
