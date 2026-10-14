@@ -4,6 +4,14 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { vi } from "vite-plus/test";
+
+// Root-command tests exercise PATH handling with a stable install; channel
+// selection is covered separately with explicit versions below.
+vi.mock("../../package.json", async (importOriginal) => {
+  const actual = await importOriginal<{ default: typeof import("../../package.json") }>();
+  return { default: { ...actual.default, version: "1.2.3" } };
+});
 
 import {
   formatCliCommand,

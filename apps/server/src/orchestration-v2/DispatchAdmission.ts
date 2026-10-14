@@ -34,9 +34,16 @@ function canonical(value: unknown): unknown {
   return value;
 }
 
-/** Include all dispatch semantics; principal is compared separately as authenticated metadata. */
+/** Fingerprint admitted commands before replay; principal is checked separately. */
 export function dispatchPayloadFingerprint(command: OrchestrationV2ServerCommand): string | null {
-  if (command.type !== "message.dispatch") return null;
+  // Ordinary launch/intake retries regenerate workspace and attachment details.
+  // Keep their established command-id replay semantics; authenticated admission
+  // commands require exact payload identity and must never use that legacy path.
+  if (
+    command.type !== "message.dispatch" ||
+    (command.admission === undefined && command.principal === undefined)
+  )
+    return null;
   const { principal: _principal, admission, ...payload } = command;
   return NodeCrypto.createHash("sha256")
     .update(
