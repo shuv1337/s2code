@@ -1,64 +1,47 @@
-# Enable a fork-owned hosted service
+# Hosted services are disabled
 
-Hosted web and Connect are intentionally unavailable in this fork. Do not point
-clients or deployment jobs at upstream accounts, domains, resource state or OAuth
-applications. CLI/desktop publication is independent: the #270 release pipeline
-does not invoke hosted jobs. No external setup is performed by these guards.
+This fork does not run hosted web or Connect services. The web-preview and relay
+workflows only emit a notice and summary: no build, deploy, credential lookup or
+resource provisioning occurs. The Alchemy entry point also refuses execution,
+including local invocations. There is no supported enable flag. CLI/desktop
+publication is independent of hosted deployment.
 
-**Relay deployment is currently refused even with complete configuration and
-opt-in.** Read-only PlanetScale and Axiom organization identity verification is
-not implemented. Credential presence is not ownership proof. Do not enable the
-relay until those checks (alongside Clerk and Cloudflare verification) exist;
-adding them requires separate maintainer direction. The guard reports this
-limitation and leaves deployment disabled. Web-preview verification is separate.
+Direct and Tailscale pairing remain available. With no hosted origin configured,
+pairing uses the server's same-origin `/pair#token=…` URL without a `host` query.
+Upstream hosted origins and auth accounts are not fork defaults.
 
-Before enabling deployment, supply these **repository variables** (not values
-in the inherited upstream `production` environment):
+## Client configuration names
 
-- Opt-in: `FORK_HOSTED_ENABLED`.
-- Router/channels: `SHUV2CODE_HOSTED_APP_URL`, `SHUV2CODE_WEB_LATEST_DOMAIN`,
-  `SHUV2CODE_WEB_NIGHTLY_DOMAIN`.
-- Auth/redirects: `SHUV2CODE_AUTH_DOMAIN`, `CLERK_PUBLISHABLE_KEY`,
-  `CLERK_JWT_TEMPLATE`, `CLERK_JWT_AUDIENCE`, `CLERK_CLI_OAUTH_CLIENT_ID`, `CLERK_OAUTH_APPLICATION_ID`,
-  `FORK_HOSTED_REDIRECT_ORIGINS`.
-- Relay domains: `RELAY_DOMAIN`, `RELAY_API_ZONE_NAME`, `RELAY_TUNNEL_ZONE_NAME`.
-- Resource identities: `FORK_CLOUDFLARE_ACCOUNT_ID`,
-  `FORK_PLANETSCALE_ORGANIZATION`, `FORK_AXIOM_ORG_ID`, `FORK_VERCEL_ORG_ID`,
-  `FORK_VERCEL_PROJECT_ID`.
-- Optional relay settings: `RELAY_TUNNEL_CLEANUP_MODE`, `FORK_APNS_ENABLED`, `FORK_PUSH_ENABLED`;
-  notification settings are covered by the mobile/push runbooks.
+These are the internal names the binaries/builds actually read, not deployment
+switches. Leave hosted settings unset for normal fork use. Public `SHUV2CODE_*`
+CLI environment aliases are normalized to the corresponding `T3CODE_*` inputs
+at the process boundary; they are not substitutes for Vite or Expo build inputs.
 
-Required secret names are `FORK_CLERK_SECRET_KEY`, `FORK_CLOUDFLARE_API_TOKEN`,
-`FORK_PLANETSCALE_API_TOKEN_ID`, `FORK_PLANETSCALE_API_TOKEN`, `FORK_AXIOM_TOKEN`, and
-`FORK_VERCEL_TOKEN`. Never put private credentials in public client settings.
-Optional relay push uses `FORK_APNS_ENVIRONMENT`, `FORK_APNS_TEAM_ID`,
-`FORK_APNS_KEY_ID`, `FORK_APNS_BUNDLE_ID`, `FORK_APNS_PRIVATE_KEY`, and
-`FORK_FCM_SERVICE_ACCOUNT`; inherited upstream push credentials are not reused.
+- Server runtime and bundled defaults: `T3CODE_HOSTED_APP_URL`,
+  `T3CODE_RELAY_URL`, `T3CODE_CLERK_PUBLISHABLE_KEY`,
+  `T3CODE_CLERK_CLI_OAUTH_CLIENT_ID`. The server build bakes the hosted origin
+  from `T3CODE_HOSTED_APP_URL`, the same name used at runtime.
+- Desktop build auth: `T3CODE_CLERK_PUBLISHABLE_KEY`,
+  `T3CODE_CLERK_JWT_TEMPLATE`.
+- Web build: `VITE_HOSTED_APP_URL`, `VITE_HOSTED_APP_CHANNEL`,
+  `VITE_T3CODE_RELAY_URL`, `VITE_CLERK_PUBLISHABLE_KEY`,
+  `VITE_CLERK_JWT_TEMPLATE`. Optional relay tracing:
+  `VITE_RELAY_OTLP_TRACES_URL`, `VITE_RELAY_OTLP_TRACES_DATASET`,
+  `VITE_RELAY_OTLP_TRACES_TOKEN`.
+- Mobile build: `T3CODE_RELAY_URL`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+  `EXPO_PUBLIC_CLERK_JWT_TEMPLATE`. Optional tracing:
+  `EXPO_PUBLIC_OTLP_TRACES_URL`, `EXPO_PUBLIC_OTLP_TRACES_DATASET`,
+  `EXPO_PUBLIC_OTLP_TRACES_TOKEN`. Mobile delivery/feature flags remain governed
+  by the mobile release runbook.
 
-The opt-in must be explicitly enabled. The redirect-origin variable is a JSON
-array covering the router and both channel origins. The Clerk key must identify
-the declared fork auth domain; the public CLI OAuth application must require PKCE
-and register the loopback callback used by the CLI. Configure browser/native
-redirects in that same fork auth instance before enabling clients.
+No credentials belong in public configuration except service-scoped public
+client keys/tokens intended for distribution.
 
-The reusable hosted preflight skips missing or upstream configuration with a
-notice and step summary, before any deployment job starts. For configured jobs it
-performs read-only Clerk OAuth and Vercel project/team identity checks for web
-previews. Relay jobs remain refused as described above. Mismatch or lookup failure blocks deployment. Tokens and remote
-responses are never printed. The relay stack/database/tunnel namespace is
-fork-owned; legacy tunnel cleanup is disabled. No upstream state is migrated.
+## Prerequisites for future enablement
 
-Use the guarded web-preview workflow only after provisioning the declared
-resources and confirming permissions; the relay workflow cannot currently deploy.
-Automatic upstream Vercel Git
-deployments remain disabled. Production web publication is not part of the fork
-release pipeline and requires a separately approved deployment workflow.
-
-Client configuration is separate from provisioning. Configure
-`SHUV2CODE_HOSTED_APP_URL`, `SHUV2CODE_RELAY_URL`,
-`SHUV2CODE_CLERK_PUBLISHABLE_KEY`, `SHUV2CODE_CLERK_CLI_OAUTH_CLIENT_ID`, and
-`SHUV2CODE_CLERK_JWT_TEMPLATE` for a server. Web/mobile builds must receive the
-corresponding public origin, relay and auth settings; follow the mobile release
-runbook for its explicit feature flags. A domain/key declaration is not proof of
-successful user sign-in, store delivery or a reachable tunnel: verify those on
-the intended platforms before advertising hosted availability.
+Separate maintainer authorization and implementation are required. Prerequisite
+areas: fork domains/DNS, Clerk instance/OAuth redirects, Vercel project/Git link,
+Cloudflare account, PlanetScale organization, Axiom organization, resource/state
+namespaces, credential scoping, protected deployment environments, ownership
+verification and platform sign-in/delivery checks. Optional push: APNs and FCM.
+None of these checks or deployments is implemented by the disabled workflows.

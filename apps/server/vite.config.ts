@@ -114,7 +114,7 @@ export default mergeConfig(
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
         __T3CODE_BUILD_HOSTED_APP_URL__: JSON.stringify(
-          repoEnv.SHUV2CODE_HOSTED_APP_URL?.trim() ?? "",
+          repoEnv.T3CODE_HOSTED_APP_URL?.trim() ?? "",
         ),
         __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
           repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",

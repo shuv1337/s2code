@@ -1,102 +1,18 @@
-name: Deploy T3 Connect relay
+name: Relay deployment (disabled)
 
 on:
   push:
-    branches:
-      - main
-  # Redeploys main after a variable or secret change. Alchemy redeploys the
-  # Worker when a value it reads changes, so force is rarely needed, and it
-  # replaces the Postgres runtime role (alchemy-run/alchemy#1832).
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      force:
-        description: Redeploy every resource, including ones with no detected changes. Replaces the Postgres runtime role.
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-  id-token: none
-  statuses: write
-
-concurrency:
-  group: relay-production
-  cancel-in-progress: false
 
 jobs:
-  hosted_preflight:
-    if: github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/hosted-preflight.yml
-    secrets: inherit
-    with:
-      target: relay
-  deploy_relay:
-    name: Deploy production relay
-    # A manual run from another branch would deploy that branch to production.
-    needs: hosted_preflight
-    if: github.ref == 'refs/heads/main' && needs.hosted_preflight.outputs.allowed == 'true'
+  unavailable:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      FORK_HOSTED_DEPLOYMENT_VERIFIED: "1"
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.FORK_CLOUDFLARE_ACCOUNT_ID }}
-      PLANETSCALE_ORGANIZATION: ${{ vars.FORK_PLANETSCALE_ORGANIZATION }}
-      AXIOM_ORG_ID: ${{ vars.FORK_AXIOM_ORG_ID }}
-      RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
-      RELAY_API_ZONE_NAME: ${{ vars.RELAY_API_ZONE_NAME }}
-      RELAY_TUNNEL_ZONE_NAME: ${{ vars.RELAY_TUNNEL_ZONE_NAME }}
-      RELAY_TUNNEL_CLEANUP_MODE: ${{ vars.RELAY_TUNNEL_CLEANUP_MODE }}
-      RELAY_LEGACY_TUNNEL_CLEANUP_MODE: "off"
-      CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
-      CLERK_JWT_AUDIENCE: ${{ vars.CLERK_JWT_AUDIENCE }}
-      APNS_ENVIRONMENT: ${{ vars.FORK_APNS_ENVIRONMENT }}
-      APNS_ENABLED: ${{ vars.FORK_APNS_ENABLED || 'false' }}
-      APNS_TEAM_ID: ${{ vars.FORK_APNS_TEAM_ID }}
-      APNS_KEY_ID: ${{ vars.FORK_APNS_KEY_ID }}
-      APNS_BUNDLE_ID: ${{ vars.FORK_APNS_BUNDLE_ID }}
-      ALCHEMY_TELEMETRY_DISABLED: "1"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=t3code-relay...
-
-      - name: Deploy production relay stage
-        run: vp run --filter t3code-relay deploy --stage prod --yes --no-input ${{ inputs.force && '--force' || '' }}
-        env:
-          # The PublishClientConfig action writes the client env here instead
-          # of the repo-root .env; nothing on the runner reads it.
-          T3CODE_RELAY_CLIENT_CONFIG_ENV: ${{ runner.temp }}/relay-client-config.env
-          CLOUDFLARE_API_TOKEN: ${{ secrets.FORK_CLOUDFLARE_API_TOKEN }}
-          PLANETSCALE_API_TOKEN_ID: ${{ secrets.FORK_PLANETSCALE_API_TOKEN_ID }}
-          PLANETSCALE_API_TOKEN: ${{ secrets.FORK_PLANETSCALE_API_TOKEN }}
-          AXIOM_TOKEN: ${{ secrets.FORK_AXIOM_TOKEN }}
-          CLERK_SECRET_KEY: ${{ secrets.FORK_CLERK_SECRET_KEY }}
-          APNS_PRIVATE_KEY: ${{ secrets.FORK_APNS_PRIVATE_KEY }}
-          FCM_SERVICE_ACCOUNT: ${{ vars.FORK_PUSH_ENABLED == '1' && secrets.FORK_FCM_SERVICE_ACCOUNT || '' }}
-
-      - name: Publish relay deploy commit status
-        uses: actions/github-script@v8
-        with:
-          script: |
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: context.sha,
-              state: "success",
-              context: "Relay deploy / production",
-              description: "Relay production deploy completed.",
-              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-            });
+      - name: Hosted relay deployment unavailable
+        run: |
+          echo '::notice::Hosted relay deployment is not supported in this fork. No resources were provisioned. Direct and Tailscale pairing remain available.'
+          echo 'Hosted relay deployment is disabled for this fork. See docs/operations/hosted-fork.md.' >> "$GITHUB_STEP_SUMMARY"

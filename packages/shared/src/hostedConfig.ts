@@ -1,4 +1,4 @@
-/** Ownership boundaries shared by hosted deployment guards and released clients. */
+/** Reject upstream hosted defaults in released fork clients. */
 export const UPSTREAM_HOSTED_DOMAINS = [
   "t3.codes",
   "t3coderelay.com",

@@ -5,5 +5,5 @@
     "types": ["node"],
     "lib": ["ESNext", "esnext.disposable"]
   },
-  "include": ["**/*.ts", "../packages/shared/src/hostedConfig.ts"]
+  "include": ["**/*.ts"]
 }

@@ -47,7 +47,7 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
   const database =
     mode === "shared-database"
       ? yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
-          name: "shuv2coderelay",
+          name: "t3coderelay",
           region: { slug: "us-west" },
           clusterSize: "PS_80",
           migrations: { dir: schema.out, table: "relay_migrations" },
