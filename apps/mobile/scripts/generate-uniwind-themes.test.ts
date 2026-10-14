@@ -1,6 +1,10 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
+import {
+  T3_CODE_LIGHT_THEME_COLORS,
+  T3_CODE_DARK_THEME_COLORS,
+} from "@t3tools/shared/themePalettes";
 
 import {
   customThemeNames,
@@ -50,10 +54,12 @@ describe("generate mobile Uniwind themes", () => {
 
     expect(variables.light).toEqual(readDefaultMobileThemeVariables("light"));
     expect(variables.dark).toEqual(readDefaultMobileThemeVariables("dark"));
-    expect(variables.light["--color-screen"]).toBe("#fcfcfc");
-    expect(variables.light["--color-drawer"]).toBe("#fafafa");
-    expect(variables.dark["--color-screen"]).toBe("#0a0a0a");
-    expect(variables.dark["--color-drawer"]).toBe("#000000");
+    expect(variables.light["--color-screen"]).toBe(T3_CODE_LIGHT_THEME_COLORS.canvas.toLowerCase());
+    expect(variables.light["--color-drawer"]).toBe(
+      T3_CODE_LIGHT_THEME_COLORS.sidebar.toLowerCase(),
+    );
+    expect(variables.dark["--color-screen"]).toBe(T3_CODE_DARK_THEME_COLORS.canvas.toLowerCase());
+    expect(variables.dark["--color-drawer"]).toBe(T3_CODE_DARK_THEME_COLORS.sidebar.toLowerCase());
     expect(Object.keys(variables.light)).toEqual(Object.keys(variables.dark));
   });
 
@@ -75,16 +81,17 @@ describe("generate mobile Uniwind themes", () => {
     for (const [name, variables] of themes) {
       expect([...variables.keys()].sort(), name).toEqual([...lightVariables.keys()].sort());
       const isDark = name === "dark" || name.endsWith("-dark");
+      const palette = isDark ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS;
       expect(
         Object.fromEntries(
           [...variables].filter(([variable]) => variable.startsWith("--color-clerk-")),
         ),
         name,
       ).toEqual({
-        "--color-clerk-page": isDark ? "#0a0a0a" : "#fcfcfc",
-        "--color-clerk-foreground": isDark ? "#f5f5f5" : "#27272a",
-        "--color-clerk-foreground-muted": isDark ? "#818181" : "#71717b",
-        "--color-clerk-border": isDark ? "#191919" : "#e4e4e7",
+        "--color-clerk-page": palette.canvas.toLowerCase(),
+        "--color-clerk-foreground": palette.text.toLowerCase(),
+        "--color-clerk-foreground-muted": isDark ? "#8995a6" : "#706c65",
+        "--color-clerk-border": palette.border.toLowerCase(),
         "--color-clerk-danger": isDark ? "#ff6467" : "#c10007",
       });
     }
