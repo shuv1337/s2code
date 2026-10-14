@@ -26,7 +26,8 @@ name: Mobile EAS Production
 #      build for the new fingerprint finishes, the OTA is skipped rather than
 #      published into the void.
 #      With OTA off, a matching native fingerprint does not ship JS changes;
-#      a push that schedules no replacement binary fails with manual build instructions.
+#      unchanged content in a finished matching binary needs no replacement.
+#      Undelivered content fails with manual build instructions.
 # Hold native-change PRs (the "📱 Native Change" label) and merge them as a
 # batch to avoid a store build per PR.
 # workflow_dispatch remains as a manual override for both modes (e.g. to
@@ -315,8 +316,8 @@ jobs:
       # An errored build for this fingerprint is not retried on push (it would
       # rebuild on every merge); retry via workflow_dispatch mode=build.
       # With OTA disabled, a matching native build does not prove these JS
-      # changes shipped. If no replacement is scheduled, fail with a manual
-      # binary-release action rather than reporting a successful no-op.
+      # changes shipped. Compare committed mobile inputs against the finished
+      # matching binary's source revision before requiring a manual release.
       - id: reconcile
         name: Publish OTA or cut store build
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'push'
@@ -364,6 +365,13 @@ jobs:
 
             if [ -z "$reason" ]; then
               if [ "$MOBILE_UPDATES_ENABLED" != 1 ]; then
+                build_commits=()
+                while IFS= read -r build_commit; do build_commits+=("$build_commit"); done < <(jq -r --arg version "$version" '[.[] | select(.status == "FINISHED" and .appVersion == $version) | .gitCommitHash // empty] | unique | .[]' <<<"$matches")
+                if node ../../scripts/mobile-content-delivered.ts "${build_commits[@]:-}"; then
+                  echo "::notice::$platform: mobile inputs are unchanged from a finished matching binary; no replacement release is needed."
+                  echo ":white_check_mark: $platform: mobile inputs are unchanged from a finished matching binary; OTA remains disabled." >> "$GITHUB_STEP_SUMMARY"
+                  continue
+                fi
                 echo "::error::$platform: OTA is disabled and no replacement binary was scheduled. Run Mobile EAS Production via workflow_dispatch with mode=build, profile=production, platform=$platform on this commit."
                 echo ":x: $platform: OTA is disabled; JS changes are not delivered by a matching native fingerprint. Run workflow_dispatch with mode=build, profile=production, platform=$platform on this commit." >> "$GITHUB_STEP_SUMMARY"
                 failed=1

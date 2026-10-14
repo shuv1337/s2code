@@ -17,6 +17,7 @@ const script = workflow
 const fixtures = `
 npx() { echo '{}'; }
 git() { echo fixture-commit; }
+node() { [ "$1" = ../../scripts/mobile-content-delivered.ts ] || return 99; return "$TEST_CONTENT_CHANGED"; }
 eas() {
   case "$1" in
     fingerprint:generate) echo '{}' ;;
@@ -28,6 +29,7 @@ eas() {
 jq() {
   cat >/dev/null
   case "$*" in
+    *'gitCommitHash'*) if [ "$TEST_FINISHED" -gt 0 ]; then echo fixture-build-commit; fi ;;
     *'.version'*) echo 2.0.0 ;;
     *'.hash'*) echo fixture-fingerprint ;;
     *'FINISHED'*) echo "$TEST_FINISHED" ;;
@@ -55,6 +57,7 @@ function reconcile(settings: Record<string, string>) {
           TEST_FINISHED: "1",
           TEST_ACTIVE: "0",
           TEST_VERSION: "2.0.0",
+          TEST_CONTENT_CHANGED: "1",
           MOBILE_UPDATES_ENABLED: "0",
           ...settings,
         },
@@ -71,6 +74,17 @@ function reconcile(settings: Record<string, string>) {
   }
 }
 describe("production push delivery reconciliation", () => {
+  it.each([
+    "unchanged mobile inputs after an unrelated scripts change",
+    "the already-built commit",
+  ])("succeeds without a replacement for %s", () => {
+    const result = reconcile({ TEST_CONTENT_CHANGED: "0" });
+    expect(result.status).toBe(0);
+    expect(result.summary).toContain("ios: mobile inputs are unchanged");
+    expect(result.summary).toContain("android: mobile inputs are unchanged");
+    expect(result.summary).not.toContain("mode=build");
+    expect(result.commands).toBe("");
+  });
   it("fails with a manual binary-release action rather than dropping JS-only changes when OTA is off", () => {
     const result = reconcile({});
     expect(result.status).toBe(1);
