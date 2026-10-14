@@ -100,7 +100,9 @@ function linearToSrgb(value: number): number {
 /** React Native does not accept OKLCH ColorValues, so palettes cross the app boundary as sRGB. */
 export function themeColorToNativeColor(value: string): string {
   const match = OKLCH_PATTERN.exec(value);
-  if (!match) return value;
+  // CSS formatting canonicalizes hex casing; native JSON and generated CSS
+  // must serialize the same palette even when source tokens use uppercase.
+  if (!match) return value.startsWith("#") ? value.toLowerCase() : value;
 
   const lightness = Number(match[1]);
   const chroma = Number(match[2]);

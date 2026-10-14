@@ -54,10 +54,12 @@ describe("generate mobile Uniwind themes", () => {
 
     expect(variables.light).toEqual(readDefaultMobileThemeVariables("light"));
     expect(variables.dark).toEqual(readDefaultMobileThemeVariables("dark"));
-    expect(variables.light["--color-screen"]).toBe(T3_CODE_LIGHT_THEME_COLORS.canvas);
-    expect(variables.light["--color-drawer"]).toBe(T3_CODE_LIGHT_THEME_COLORS.sidebar);
-    expect(variables.dark["--color-screen"]).toBe(T3_CODE_DARK_THEME_COLORS.canvas);
-    expect(variables.dark["--color-drawer"]).toBe(T3_CODE_DARK_THEME_COLORS.sidebar);
+    expect(variables.light["--color-screen"]).toBe(T3_CODE_LIGHT_THEME_COLORS.canvas.toLowerCase());
+    expect(variables.light["--color-drawer"]).toBe(
+      T3_CODE_LIGHT_THEME_COLORS.sidebar.toLowerCase(),
+    );
+    expect(variables.dark["--color-screen"]).toBe(T3_CODE_DARK_THEME_COLORS.canvas.toLowerCase());
+    expect(variables.dark["--color-drawer"]).toBe(T3_CODE_DARK_THEME_COLORS.sidebar.toLowerCase());
     expect(Object.keys(variables.light)).toEqual(Object.keys(variables.dark));
   });
 
