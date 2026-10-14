@@ -177,7 +177,7 @@ async function main() {
   if (!build) {
     console.log(`The ${trackName} track has no live release.`);
     summary(":hourglass: The configured fork track has no live release; no APK was delivered.");
-    return;
+    throw new Error("APK mirror delivered nothing: the configured track has no live release.");
   }
 
   const safeName = build.versionName.replace(/[^0-9A-Za-z.]+/g, "-").replace(/^-|-$/g, "");
@@ -200,7 +200,9 @@ async function main() {
     summary(
       `:hourglass: Play lists no universal APK for ${build.versionName} (${build.versionCode}).`,
     );
-    return;
+    throw new Error(
+      "APK mirror delivered nothing: Play has not exposed a universal APK; retry later.",
+    );
   }
 
   // Reconciled on every run so an interrupted cleanup finishes on the next one.

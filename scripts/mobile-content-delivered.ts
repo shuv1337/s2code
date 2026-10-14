@@ -2,6 +2,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import * as NodeFS from "node:fs";
 
 type Manifest = {
   name: string;
@@ -51,10 +52,13 @@ export function mobileContentPaths(repository: string) {
     "scripts/lib/brand-assets.ts",
     "scripts/lib/public-config.ts",
     "scripts/lib/mobile-release-identity.ts",
+    "scripts/lib/mobile-firebase-config.ts",
     "scripts/lib/third-party-licenses.ts",
     "third-party-licenses.config.json",
     "apps/server/src/device/deviceToolVersions.json",
+    "native/libghostty-vt/LICENSE",
   ]);
+  const visited = new Set<string>();
   const visit = (value: Manifest, appBuildTools = false) => {
     for (const [name, specifier] of Object.entries({
       ...value.dependencies,
@@ -65,19 +69,78 @@ export function mobileContentPaths(repository: string) {
       if (!specifier.startsWith("workspace:")) continue;
       const dependency = packages.get(name);
       if (!dependency) throw new Error("Cannot resolve a mobile workspace input.");
-      if (paths.has(dependency.directory)) continue;
-      paths.add(dependency.directory);
+      if (visited.has(dependency.directory)) continue;
+      visited.add(dependency.directory);
+      paths.add(`${dependency.directory}/src`);
+      paths.add(`${dependency.directory}/package.json`);
+      paths.add(`${dependency.directory}/LICENSE`);
       visit(dependency.manifest);
     }
   };
   // App build tools matter; workspace libraries' development-only test helpers do not.
   visit(manifest("apps/mobile"), true);
-  return [...paths];
+  return [
+    ...paths,
+    ":(exclude,glob)**/*.test.*",
+    ":(exclude,glob)**/*.spec.*",
+    ":(exclude,glob)**/__tests__/**",
+    ":(exclude,glob)**/__fixtures__/**",
+    ":(exclude,glob)**/fixtures/**",
+    ":(exclude,glob)**/README*",
+  ];
+}
+
+type MobileBuild = {
+  status: string;
+  appVersion?: string;
+  appBuildVersion?: string;
+  gitCommitHash?: string;
+  fingerprint?: { hash?: string };
+};
+
+/** Never let an older matching binary override the highest production build number. */
+export function newestMobileBuildCommit(
+  builds: ReadonlyArray<MobileBuild>,
+  version: string,
+  fingerprint: string,
+) {
+  const finished = builds.filter((build) => build.status === "FINISHED");
+  const number = (build: MobileBuild) =>
+    build.appBuildVersion?.split(".").map((part) => (/^\d+$/.test(part) ? BigInt(part) : -1n));
+  if (
+    !finished.length ||
+    finished.some((build) => !number(build)?.length || number(build)!.some((part) => part < 0n))
+  )
+    return null;
+  const compare = (a: MobileBuild, b: MobileBuild) => {
+    const left = number(a)!;
+    const right = number(b)!;
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+      if ((left[i] ?? 0n) > (right[i] ?? 0n)) return -1;
+      if ((left[i] ?? 0n) < (right[i] ?? 0n)) return 1;
+    }
+    return 0;
+  };
+  const ordered = [...finished].sort(compare);
+  const newest = ordered[0]!;
+  const tied = ordered.filter((build) => compare(build, newest) === 0);
+  if (
+    tied.some(
+      (build) =>
+        build.gitCommitHash !== newest.gitCommitHash ||
+        build.appVersion !== version ||
+        build.fingerprint?.hash !== fingerprint,
+    )
+  )
+    return null;
+  return newest.gitCommitHash ?? null;
 }
 
 /** A finished fingerprint/version-matching EAS binary must record a verifiable source commit. */
 export function mobileContentDelivered(repository: string, buildCommits: ReadonlyArray<string>) {
   const head = git(repository, ["rev-parse", "HEAD"]);
+  // Caller must select the newest binary first; unordered candidate sets are unsafe.
+  if (buildCommits.length !== 1) return false;
   const commits = buildCommits.filter((commit) => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(commit));
   if (commits.includes(head)) return true;
   const paths = mobileContentPaths(repository);
@@ -102,7 +165,18 @@ if (
 ) {
   try {
     const repository = git(process.cwd(), ["rev-parse", "--show-toplevel"]);
-    process.exitCode = mobileContentDelivered(repository, process.argv.slice(2)) ? 0 : 1;
+    const args = process.argv.slice(2);
+    const commits =
+      args[0] === "--builds-file"
+        ? [
+            newestMobileBuildCommit(
+              JSON.parse(NodeFS.readFileSync(args[1]!, "utf8")) as MobileBuild[],
+              args[2] ?? "",
+              args[3] ?? "",
+            ) ?? "",
+          ]
+        : args;
+    process.exitCode = mobileContentDelivered(repository, commits) ? 0 : 1;
   } catch {
     console.error("Could not verify mobile content against the matching binary's source revision.");
     process.exitCode = 1;

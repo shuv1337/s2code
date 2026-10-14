@@ -1,5 +1,6 @@
 import type { ExpoConfig } from "expo/config";
-import * as NodeFS from "node:fs";
+import * as NodeURL from "node:url";
+import { materializeMobileFirebaseConfig } from "../../scripts/lib/mobile-firebase-config.ts";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
@@ -10,7 +11,6 @@ import {
   mobileAuthDomains,
   assertEnabledMobileFeatures,
   assertMobileHostedDestinations,
-  assertFirebaseDestination,
 } from "../../scripts/lib/mobile-release-identity.ts";
 
 type AppVariant = "development" | "preview" | "production";
@@ -135,24 +135,14 @@ const iosBundleIdentifier = isIosPersonalTeamBuild
     : variant.iosBundleIdentifier;
 if (iosBundleIdentifier.startsWith("com.t3tools."))
   throw new Error("Upstream iOS bundle identifiers cannot be used for fork builds.");
-const googleServicesFile = pushEnabled ? repoEnv.ANDROID_GOOGLE_SERVICES_FILE?.trim() : undefined;
-if (
-  pushEnabled &&
-  releasePlatform !== "ios" &&
-  repoEnv.MOBILE_RELEASE_INTENT === "1" &&
-  !googleServicesFile
-)
-  throw new Error("ANDROID_GOOGLE_SERVICES_FILE is required for enabled Android push.");
-if (googleServicesFile && NodeFS.existsSync(googleServicesFile))
-  assertFirebaseDestination(
-    JSON.parse(NodeFS.readFileSync(googleServicesFile, "utf8")),
-    variant.androidPackage,
-    repoEnv.FIREBASE_PROJECT_ID ?? "",
-  );
-else if (googleServicesFile && repoEnv.MOBILE_RELEASE_INTENT === "1" && releasePlatform !== "ios")
-  throw new Error(
-    "ANDROID_GOOGLE_SERVICES_FILE is unavailable; configure the fork EAS file environment before building.",
-  );
+const googleServicesFile =
+  pushEnabled && releasePlatform !== "ios"
+    ? materializeMobileFirebaseConfig(
+        repoEnv,
+        variant.androidPackage,
+        NodeURL.fileURLToPath(new URL(".", import.meta.url)),
+      )
+    : undefined;
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",

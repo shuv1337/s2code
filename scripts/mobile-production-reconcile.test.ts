@@ -17,7 +17,7 @@ const script = workflow
 const fixtures = `
 npx() { echo '{}'; }
 git() { echo fixture-commit; }
-node() { [ "$1" = ../../scripts/mobile-content-delivered.ts ] || return 99; return "$TEST_CONTENT_CHANGED"; }
+node() { [ "$1" = ../../scripts/mobile-content-delivered.ts ] && [ "$2" = --builds-file ] && [ -f "$3" ] || return 99; return "$TEST_CONTENT_CHANGED"; }
 eas() {
   case "$1" in
     fingerprint:generate) echo '{}' ;;
@@ -36,6 +36,8 @@ jq() {
     *'IN_QUEUE'*) echo "$TEST_ACTIVE" ;;
     *'ERRORED'*) echo 0 ;;
     *'appVersion'*) echo "$TEST_VERSION" ;;
+    *'argjson page'*) echo '[]' ;;
+    *'length'*) echo 0 ;;
     *) return 99 ;;
   esac
 }

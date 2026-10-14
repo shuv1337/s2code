@@ -4,7 +4,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { mobileContentDelivered } from "./mobile-content-delivered.ts";
+import { mobileContentDelivered, newestMobileBuildCommit } from "./mobile-content-delivered.ts";
 
 function fixture(
   run: (
@@ -72,6 +72,9 @@ describe("finished binary mobile content comparison", () => {
     "packages/not-bundled/src/server.ts",
     "packages/test-tools/src/testing.ts",
     "apps/web/src/app.ts",
+    "packages/runtime/src/value.test.ts",
+    "packages/runtime/src/__fixtures__/value.ts",
+    "packages/shared/README.md",
   ])("accepts unchanged mobile inputs after an unrelated %s commit", (file) =>
     fixture((repository, commit, built) => {
       commit(file);
@@ -87,18 +90,61 @@ describe("finished binary mobile content comparison", () => {
     "pnpm-lock.yaml",
     "assets/mobile-icon.png",
     "packages/watch-native/Package.swift",
+    "native/libghostty-vt/LICENSE",
   ])("requires a release for changed mobile input %s", (file) =>
     fixture((repository, commit, built) => {
       commit(file);
       expect(mobileContentDelivered(repository, [built])).toBe(false);
     }),
   );
-  it("accepts a matching content revision even if other matching binaries are older", () =>
+  it("rejects an unordered set of candidate binaries", () =>
     fixture((repository, commit, older) => {
       const delivered = commit("apps/mobile/src/app.ts");
       commit("scripts/unrelated.ts");
-      expect(mobileContentDelivered(repository, [older, delivered])).toBe(true);
+      expect(mobileContentDelivered(repository, [older, delivered])).toBe(false);
     }));
+  it("requires a replacement after a revert matches only an older binary", () =>
+    fixture((repository, commit, older) => {
+      const newer = commit("apps/mobile/src/app.ts", "newer shipped content");
+      commit("apps/mobile/src/app.ts", "original app");
+      const selected = newestMobileBuildCommit(
+        [
+          {
+            status: "FINISHED",
+            appBuildVersion: "9",
+            appVersion: "2.0",
+            fingerprint: { hash: "native" },
+            gitCommitHash: older,
+          },
+          {
+            status: "FINISHED",
+            appBuildVersion: "10",
+            appVersion: "2.0",
+            fingerprint: { hash: "native" },
+            gitCommitHash: newer,
+          },
+        ],
+        "2.0",
+        "native",
+      );
+      expect(selected).toBe(newer);
+      expect(mobileContentDelivered(repository, [selected!])).toBe(false);
+    }));
+  it("fails closed for newer mismatching fingerprints, ambiguous numbers or unverifiable build numbers", () => {
+    const old = {
+      status: "FINISHED",
+      appBuildVersion: "1",
+      appVersion: "2.0",
+      fingerprint: { hash: "native" },
+      gitCommitHash: "a".repeat(40),
+    };
+    for (const newer of [
+      { ...old, appBuildVersion: "2", fingerprint: { hash: "other" } },
+      { ...old, appBuildVersion: "1", gitCommitHash: "b".repeat(40) },
+      { ...old, appBuildVersion: "" },
+    ])
+      expect(newestMobileBuildCommit([old, newer], "2.0", "native")).toBeNull();
+  });
   it("does not treat missing, invalid or unavailable build revisions as delivered", () =>
     fixture((repository, commit, built) => {
       commit("apps/mobile/src/app.ts");

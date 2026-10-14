@@ -135,7 +135,11 @@ export async function verifyStoreDestinations(
 }
 
 /** Keep pulled variables from redirecting an already verified project or changing release opt-ins. */
-export function mergeMobileEnvironment(env: Environment, pulled: Environment) {
+export function mergeMobileEnvironment(
+  env: Environment,
+  pulled: Environment,
+  profile = "production",
+): Environment {
   for (const key of [
     "EXPO_OWNER",
     "EXPO_PROJECT_ID",
@@ -145,10 +149,15 @@ export function mergeMobileEnvironment(env: Environment, pulled: Environment) {
     "APPLE_TEAM_ID",
     "FIREBASE_PROJECT_ID",
   ]) {
+    if (key === "MOBILE_UPDATES_ENABLED" && profile === "v2-preview") continue;
     if (pulled[key] !== undefined && pulled[key] !== env[key])
       throw new Error(`Pulled EAS environment conflicts with protected setting ${key}.`);
   }
-  return { ...pulled, ...env };
+  return {
+    ...pulled,
+    ...env,
+    ...(profile === "v2-preview" ? { MOBILE_UPDATES_ENABLED: "0" } : {}),
+  };
 }
 export function prepareSubmissionConfig(
   eas: {
@@ -183,6 +192,7 @@ export function prepareSubmissionConfig(
     "FIREBASE_PROJECT_ID",
     "APNS_TEAM_ID",
     "APNS_KEY_ID",
+    "ANDROID_GOOGLE_SERVICES_JSON",
   ]) {
     if (env[key] !== undefined) profile.env[key] = env[key]!;
   }
@@ -231,18 +241,25 @@ async function main() {
   if (phase === "prepare") {
     const file = NodePath.join(mobileDir, ".env.local");
     if (NodeFS.existsSync(file))
-      env = mergeMobileEnvironment(env, NodeUtil.parseEnv(NodeFS.readFileSync(file, "utf8")));
+      env = mergeMobileEnvironment(
+        env,
+        NodeUtil.parseEnv(NodeFS.readFileSync(file, "utf8")),
+        options.profile,
+      );
     env.MOBILE_RELEASE_INTENT = "1";
     env.MOBILE_RELEASE_PLATFORM = options.platform;
     // A file secret must be available to local fingerprint/config evaluation as well as EAS workers.
     if (
       env.MOBILE_PUSH_ENABLED === "1" &&
       options.platform !== "ios" &&
-      env.ANDROID_GOOGLE_SERVICES_JSON
+      (env.ANDROID_GOOGLE_SERVICES_JSON || env.ANDROID_GOOGLE_SERVICES_FILE)
     ) {
-      const file = NodePath.join(mobileDir, "google-services.json");
-      NodeFS.writeFileSync(file, env.ANDROID_GOOGLE_SERVICES_JSON, { mode: 0o600 });
-      env.ANDROID_GOOGLE_SERVICES_FILE = file;
+      // Freeze the same public Firebase app configuration into the build profile.
+      // Workers materialize this verified JSON instead of using a different EAS file variable.
+      env.ANDROID_GOOGLE_SERVICES_JSON ??= NodeFS.readFileSync(
+        env.ANDROID_GOOGLE_SERVICES_FILE!,
+        "utf8",
+      );
     }
   }
   const config = await verifyExpoProject(env, options);
@@ -281,13 +298,14 @@ async function main() {
     `${JSON.stringify(prepareSubmissionConfig(JSON.parse(NodeFS.readFileSync(easPath, "utf8")), env, config, destinations, credentialsDirectory), null, 2)}\n`,
   );
   if (env.GITHUB_ENV) {
-    // Only non-secret flags/identities and a file path, never credentials, are exported to later steps.
+    // Only flags/identities, public Firebase app JSON and file paths, never private credentials.
     env.MOBILE_SUBMISSION_CREDENTIALS_DIR = credentialsDirectory;
     const keys = [
       "MOBILE_RELEASE_INTENT",
       "MOBILE_RELEASE_PLATFORM",
       "MOBILE_UPDATES_ENABLED",
       "ANDROID_GOOGLE_SERVICES_FILE",
+      "ANDROID_GOOGLE_SERVICES_JSON",
       "MOBILE_SUBMISSION_CREDENTIALS_DIR",
       ...Object.keys(env).filter((key) => key.startsWith("EXPO_PUBLIC_")),
     ];

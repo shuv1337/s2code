@@ -5,6 +5,9 @@ import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { materializeMobileFirebaseConfig } from "./lib/mobile-firebase-config.ts";
 import {
   MOBILE_VARIANTS,
   mobileReleaseConfiguration,
@@ -63,6 +66,55 @@ const mirrorEnv = {
 };
 
 describe("fork mobile release preflight", () => {
+  it("embeds and materializes the exact verified Firebase JSON instead of a divergent worker file", () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-firebase-config-"));
+    const json = JSON.stringify({
+      project_info: { project_id: "fork-project" },
+      client: [
+        {
+          client_info: {
+            android_client_info: { package_name: MOBILE_VARIANTS.production.androidPackage },
+          },
+        },
+      ],
+    });
+    const settings = {
+      ...env,
+      MOBILE_PUSH_ENABLED: "1",
+      FIREBASE_PROJECT_ID: "fork-project",
+      ANDROID_GOOGLE_SERVICES_JSON: json,
+    };
+    try {
+      const prepared = prepareSubmissionConfig(
+        { build: { production: {} }, submit: {} },
+        settings,
+        configuration(),
+        {},
+        directory,
+      );
+      expect(prepared.build.production?.env?.ANDROID_GOOGLE_SERVICES_JSON).toBe(json);
+      const divergent = NodePath.join(directory, "worker-file.json");
+      NodeFS.writeFileSync(divergent, "upstream worker config");
+      const file = materializeMobileFirebaseConfig(
+        { ...prepared.build.production?.env, ANDROID_GOOGLE_SERVICES_FILE: divergent },
+        MOBILE_VARIANTS.production.androidPackage,
+        directory,
+      );
+      expect(NodeFS.readFileSync(file, "utf8")).toBe(json);
+      expect(NodeFS.readFileSync(divergent, "utf8")).toBe("upstream worker config");
+    } finally {
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it("forces preview OTA off after a production environment pull", () => {
+    expect(
+      mergeMobileEnvironment(
+        { MOBILE_UPDATES_ENABLED: "0" },
+        { MOBILE_UPDATES_ENABLED: "1" },
+        "v2-preview",
+      ).MOBILE_UPDATES_ENABLED,
+    ).toBe("0");
+  });
   it.each([
     "t3.codes",
     "clerk.t3.codes",
@@ -88,6 +140,13 @@ describe("fork mobile release preflight", () => {
     "https://relay.ping.gg",
     "https://pingdotgg.github.io",
   ])("rejects upstream relay %s for enabled hosted features", (url) => {
+    expect(() =>
+      assertMobileHostedDestinations({
+        MOBILE_AUTH_ENABLED: "0",
+        MOBILE_PUSH_ENABLED: "0",
+        MOBILE_RELAY_URL: url,
+      }),
+    ).toThrow("upstream");
     for (const flag of ["MOBILE_AUTH_ENABLED", "MOBILE_PUSH_ENABLED"])
       expect(() => assertMobileHostedDestinations({ [flag]: "1", MOBILE_RELAY_URL: url })).toThrow(
         "upstream",

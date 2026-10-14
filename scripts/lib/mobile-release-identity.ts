@@ -170,10 +170,9 @@ function assertForkMobileHost(hostname: string, setting: string) {
 /** Runs in Expo config too, even without release intent or account credentials. */
 export function assertMobileHostedDestinations(env: Environment) {
   const authEnabled = env.MOBILE_AUTH_ENABLED === "1";
-  const pushEnabled = env.MOBILE_PUSH_ENABLED === "1";
   if (authEnabled && env.MOBILE_AUTH_DOMAIN?.trim())
     assertForkMobileHost(env.MOBILE_AUTH_DOMAIN.trim(), "MOBILE_AUTH_DOMAIN");
-  if ((authEnabled || pushEnabled) && env.MOBILE_RELAY_URL?.trim())
+  if (env.MOBILE_RELAY_URL?.trim())
     assertForkMobileHost(new URL(env.MOBILE_RELAY_URL.trim()).hostname, "MOBILE_RELAY_URL");
 }
 export function mobileAuthDomains(env: Environment) {

@@ -26,7 +26,7 @@ name: Mobile EAS Production
 #      build for the new fingerprint finishes, the OTA is skipped rather than
 #      published into the void.
 #      With OTA off, a matching native fingerprint does not ship JS changes;
-#      unchanged content in a finished matching binary needs no replacement.
+#      unchanged content in the highest-numbered finished production binary needs no replacement.
 #      Undelivered content fails with manual build instructions.
 # Hold native-change PRs (the "📱 Native Change" label) and merge them as a
 # batch to avoid a store build per PR.
@@ -78,6 +78,10 @@ on:
       - packages/client-runtime/**
       - packages/contracts/**
       - packages/shared/**
+      - packages/provider-*/**
+      - packages/watch-native/**
+      - native/libghostty-vt/LICENSE
+      - third-party-licenses.config.json
       - assets/**
       - scripts/**
       - patches/**
@@ -365,13 +369,26 @@ jobs:
 
             if [ -z "$reason" ]; then
               if [ "$MOBILE_UPDATES_ENABLED" != 1 ]; then
-                build_commits=()
-                while IFS= read -r build_commit; do build_commits+=("$build_commit"); done < <(jq -r --arg version "$version" '[.[] | select(.status == "FINISHED" and .appVersion == $version) | .gitCommitHash // empty] | unique | .[]' <<<"$matches")
-                if node ../../scripts/mobile-content-delivered.ts "${build_commits[@]:-}"; then
+                # Select by build number across production, NOT just matching fingerprints.
+                # A revert may match an old binary while the newer store binary differs.
+                production_builds="$(mktemp)"
+                echo '[]' > "$production_builds"
+                offset=0
+                while :; do
+                  page="$(eas build:list --platform "$platform" --build-profile production --status finished --limit 50 --offset "$offset" --json --non-interactive)"
+                  jq --argjson page "$page" '. + $page' "$production_builds" > "$production_builds.next"
+                  mv "$production_builds.next" "$production_builds"
+                  if [ "$(jq 'length' <<<"$page")" -lt 50 ]; then break; fi
+                  offset=$((offset + 50))
+                  if [ "$offset" -ge 10000 ]; then echo 'Cannot verify complete production build history' >&2; exit 1; fi
+                done
+                if node ../../scripts/mobile-content-delivered.ts --builds-file "$production_builds" "$version" "$hash"; then
+                  rm "$production_builds"
                   echo "::notice::$platform: mobile inputs are unchanged from a finished matching binary; no replacement release is needed."
                   echo ":white_check_mark: $platform: mobile inputs are unchanged from a finished matching binary; OTA remains disabled." >> "$GITHUB_STEP_SUMMARY"
                   continue
                 fi
+                rm "$production_builds"
                 echo "::error::$platform: OTA is disabled and no replacement binary was scheduled. Run Mobile EAS Production via workflow_dispatch with mode=build, profile=production, platform=$platform on this commit."
                 echo ":x: $platform: OTA is disabled; JS changes are not delivered by a matching native fingerprint. Run workflow_dispatch with mode=build, profile=production, platform=$platform on this commit." >> "$GITHUB_STEP_SUMMARY"
                 failed=1
