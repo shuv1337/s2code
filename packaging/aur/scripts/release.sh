@@ -2,14 +2,20 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-repo='pingdotgg/t3code'
+product_id="${SHUV2CODE_AUR_PRODUCT_ID:?SHUV2CODE_AUR_PRODUCT_ID is required}"
+repo="${SHUV2CODE_AUR_RELEASE_REPO:?SHUV2CODE_AUR_RELEASE_REPO is required}"
+if [[ "$product_id" != shuv2code || "$repo" != shuv1337/shuv2code ]]; then
+  echo 'Refusing to publish outside the shuv2code fork package namespace.' >&2
+  exit 1
+fi
 tag="${RELEASE_TAG:?RELEASE_TAG is required}"
 pkgrel="${PKGREL:-1}"
+[[ "$pkgrel" =~ ^[1-9][0-9]*$ ]] || { echo 'PKGREL must be a positive integer.' >&2; exit 1; }
 
 if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  pkgname='t3code-bin'
+  pkgname="$product_id-bin"
 elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]]; then
-  pkgname='t3code-nightly-bin'
+  pkgname="$product_id-nightly-bin"
 else
   echo "Release $tag does not publish an AUR package."
   exit 0
@@ -35,12 +41,13 @@ gh api -H 'Accept: application/vnd.github.raw' \
 license_sha256="$(sha256sum "$work_dir/LICENSE" | awk '{print $1}')"
 
 package_dir="$repo_root/packaging/aur/$pkgname"
+grep -qx "pkgname=$pkgname" "$package_dir/PKGBUILD" || { echo 'Package identity does not match the fork publish target.' >&2; exit 1; }
 cd "$package_dir"
 sed -Ei \
   -e "s/^pkgver=.*/pkgver=$pkgver/" \
   -e "s/^pkgrel=.*/pkgrel=$pkgrel/" \
-  -e "/# AppImage$/s/'[0-9a-f]{64}'/'$appimage_sha256'/" \
-  -e "/# upstream license$/s/'[0-9a-f]{64}'/'$license_sha256'/" \
+  -e "/# AppImage$/s/'[^']*'/'$appimage_sha256'/" \
+  -e "/# release license$/s/'[^']*'/'$license_sha256'/" \
   PKGBUILD
 
 run_as_builder() {
@@ -74,12 +81,12 @@ printf '%s\n' \
   > "$known_hosts_file"
 export GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts_file -o StrictHostKeyChecking=yes"
 
-git clone "ssh://aur@aur.archlinux.org/$pkgname.git" "$aur_dir"
+aur_remote="ssh://aur@aur.archlinux.org/$pkgname.git"
+git clone "$aur_remote" "$aur_dir"
 cp PKGBUILD .SRCINFO "$aur_dir/"
 cd "$aur_dir"
-git rm --ignore-unmatch LICENSE .upstream-commit t3code-icon.png
-git config user.name 't3code-ci'
-git config user.email 't3code-ci@users.noreply.github.com'
+git config user.name 'shuv2code-ci'
+git config user.email 'shuv1337@users.noreply.github.com'
 git add -A
 
 if git diff --cached --quiet; then
@@ -88,4 +95,4 @@ if git diff --cached --quiet; then
 fi
 
 git commit -m "$pkgname: update to $pkgver-$pkgrel"
-git push origin HEAD:master
+git push "$aur_remote" HEAD:master

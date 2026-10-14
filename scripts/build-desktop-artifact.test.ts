@@ -308,10 +308,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             assert.isTrue(
               files.some((file) => file.endsWith(`/usr/share/doc/${scheme}/copyright`)),
             );
-            assert.equal(
-              files.filter((file) => file.includes("/usr/share/metainfo/")).length,
-              suffix === "" ? 1 : 0,
-            );
+            assert.equal(files.filter((file) => file.includes("/usr/share/metainfo/")).length, 1);
           }
           if (suffix === "preview") assert.notProperty(config, "publish");
         }

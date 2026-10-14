@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.shuv.shuv2code.nightly</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>shuv2code (Nightly)</name>
+  <summary>Nightly desktop GUI for coding agents</summary>
+  <developer id="dev.shuv"><name>shuv</name></developer>
+  <description>
+    <p>shuv2code is an open-source desktop app for coding agents. This nightly installation is separate from stable and preview.</p>
+  </description>
+  <launchable type="desktop-id">shuv2code-nightly.desktop</launchable>
+  <icon type="stock">shuv2code-nightly</icon>
+  <provides><binary>shuv2code-nightly</binary></provides>
+  <categories><category>Development</category></categories>
+  <url type="homepage">https://github.com/shuv1337/shuv2code</url>
+  <url type="bugtracker">https://github.com/shuv1337/shuv2code/issues</url>
+  <url type="vcs-browser">https://github.com/shuv1337/shuv2code</url>
+</component>
