@@ -363,8 +363,6 @@ it.each([false, true])(
 
 it.each([
   [resolveLinuxDesktopEntryName(false).replace(/\.desktop$/, ""), ""],
-  ["dev.shuv.shuv2code.nightly", ".nightly"],
-  ["dev.shuv.shuv2code.preview", ".preview"],
   [resolveLinuxDesktopEntryName(true).replace(/\.desktop$/, ""), ".Development"],
 ])(
   "uses only the fork GNOME service for %s and preserves window identity",

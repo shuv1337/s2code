@@ -6,7 +6,11 @@ import { Message, sessionBus, type MessageBus, type MessageLike } from "dbus-nex
 import * as Schema from "effect/Schema";
 import type { DesktopCaptureExtensionState } from "@t3tools/contracts";
 import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
-import { assertCaptureDirectories, regularCaptureFile } from "./captureHelperFiles.ts";
+import {
+  assertCaptureDirectories,
+  regularCaptureFile,
+  capturePathExists,
+} from "./captureHelperFiles.ts";
 
 import { GNOME_CAPTURE_FILES, GNOME_CAPTURE_UUID } from "./gnomeCaptureBundle.ts";
 export { isGnomeCaptureSession } from "./linuxCaptureSession.ts";
@@ -14,6 +18,7 @@ export { isGnomeCaptureSession } from "./linuxCaptureSession.ts";
 const SHELL = "org.gnome.Shell";
 const SHELL_PATH = "/org/gnome/Shell";
 const EXTENSIONS = "org.gnome.Shell.Extensions";
+const LEGACY_CAPTURE_UUID = "snap-shot@t3.codes";
 const NumberValue = Schema.Struct({ value: Schema.Number });
 const decodeInfo = Schema.decodeUnknownSync(
   Schema.Struct({
@@ -149,6 +154,31 @@ export class GnomeCaptureSetup {
   }
 
   async state(): Promise<DesktopCaptureExtensionState> {
+    const state = await this.forkState();
+    if (this.failure) return state;
+    const legacy = await Promise.all([
+      capturePathExists(
+        NodePath.join(this.paths.dataHome, "gnome-shell", "extensions", LEGACY_CAPTURE_UUID),
+      ).catch(() => undefined),
+      this.call({
+        interface: EXTENSIONS,
+        member: "GetExtensionInfo",
+        signature: "s",
+        body: [LEGACY_CAPTURE_UUID],
+      })
+        .then(decodeInfo)
+        .catch(() => undefined),
+    ]);
+    const warning =
+      legacy[0] || legacy[1]?.state
+        ? "An upstream-named GNOME capture extension (snap-shot@t3.codes) is still installed. It may belong to upstream T3 Code or an older fork build. Disabling the fork extension does not revoke its capture access; review it separately in GNOME Extensions if you no longer use it."
+        : legacy.some((value) => value === undefined)
+          ? "Could not check upstream-named GNOME extensions. This setup changes only the fork extension."
+          : undefined;
+    return warning ? { ...state, message: `${state.message} ${warning}` } : state;
+  }
+
+  private async forkState(): Promise<DesktopCaptureExtensionState> {
     try {
       await assertCaptureDirectories(
         this.paths.dataHome,

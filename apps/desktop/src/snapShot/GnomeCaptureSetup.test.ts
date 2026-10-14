@@ -30,6 +30,7 @@ function fixture(
     enabled?: boolean;
     accepted?: boolean;
     error?: string;
+    legacyState?: number;
   } = {},
 ) {
   const call = vi.fn(async (message: Message) => ({
@@ -40,11 +41,15 @@ function fixture(
             UserExtensionsEnabled: { value: options.enabled ?? true },
           }
         : message.member === "GetExtensionInfo"
-          ? {
-              ...(options.state === undefined ? {} : { state: { value: options.state } }),
-              ...(options.version === undefined ? {} : { version: { value: options.version } }),
-              error: { value: options.error ?? "" },
-            }
+          ? message.body[0] === GNOME_CAPTURE_UUID
+            ? {
+                ...(options.state === undefined ? {} : { state: { value: options.state } }),
+                ...(options.version === undefined ? {} : { version: { value: options.version } }),
+                error: { value: options.error ?? "" },
+              }
+            : options.legacyState === undefined
+              ? {}
+              : { state: { value: options.legacyState } }
           : (options.accepted ?? true),
     ],
   }));
@@ -97,7 +102,10 @@ it("coexists with the upstream UUID through setup, upgrade and disable", async (
   await NodeFSP.writeFile(NodePath.join(upstream, "metadata.json"), upstreamMetadata);
   await NodeFSP.writeFile(NodePath.join(upstream, "extension.js"), "upstream extension");
   const initial = fixture();
-  expect((await initial.setup.state()).status).toBe("not-installed");
+  expect(await initial.setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("snap-shot@t3.codes"),
+  });
   await initial.setup.perform("install-extension");
   initial.setup.close();
   await NodeFSP.writeFile(
@@ -110,9 +118,12 @@ it("coexists with the upstream UUID through setup, upgrade and disable", async (
   upgrade.setup.close();
   const loaded = fixture({ state: 1, version: 2 });
   await loaded.setup.perform("disable-extension");
+  expect((await loaded.setup.state()).message).toContain("does not revoke");
   for (const calls of [initial.call.mock.calls, upgrade.call.mock.calls, loaded.call.mock.calls]) {
     for (const [message] of calls) {
-      if (message.member !== "GetAll") expect(message.body).toEqual([GNOME_CAPTURE_UUID]);
+      if (message.member === "GetExtensionInfo")
+        expect([GNOME_CAPTURE_UUID, "snap-shot@t3.codes"]).toContain(message.body[0]);
+      else if (message.member !== "GetAll") expect(message.body).toEqual([GNOME_CAPTURE_UUID]);
     }
   }
   loaded.setup.close();
@@ -123,6 +134,19 @@ it("coexists with the upstream UUID through setup, upgrade and disable", async (
     "upstream extension",
   );
   expect(await NodeFSP.readdir(upstream)).toEqual(["extension.js", "metadata.json"]);
+});
+
+it("detects a loaded upstream-named GNOME extension outside the local install directory, read-only", async () => {
+  const { setup, call } = fixture({ legacyState: 1 });
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("snap-shot@t3.codes"),
+  });
+  expect(call.mock.calls.every(([message]) => message.member.startsWith("Get"))).toBe(true);
+  await expect(NodeFSP.stat(NodePath.join(dataHome, "gnome-shell"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  setup.close();
 });
 
 it.each(["foreign", "missing", "linked"] as const)(
@@ -209,6 +233,7 @@ it.each([
   expect((await setup.state()).status).toBe(status);
   expect(call.mock.calls.map(([message]) => message.member).sort()).toEqual([
     "GetAll",
+    "GetExtensionInfo",
     "GetExtensionInfo",
   ]);
   setup.close();

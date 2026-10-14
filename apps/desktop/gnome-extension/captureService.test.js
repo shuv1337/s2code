@@ -12,7 +12,7 @@ import { PRODUCT_DBUS_PREFIX } from "../../../packages/shared/src/productIdentit
 import { gnomeCaptureClientName } from "../src/snapShot/gnomeCaptureBundle.ts";
 import { resolveLinuxDesktopEntryName } from "../src/app/DesktopEarlyElectronStartup.ts";
 
-it("ships matching fork extension, service and channel-client identities", () => {
+it("ships only caller identities claimed by the real desktop entry resolver", () => {
   expect(metadata.uuid).toBe(bundle.uuid);
   expect(bundle.uuid).toBe("snap-shot@shuv1337.github.io");
   expect(bundle.dbusName).toBe(DBUS_NAME);
@@ -22,12 +22,21 @@ it("ships matching fork extension, service and channel-client identities", () =>
   const callers = [
     resolveLinuxDesktopEntryName(false).replace(/\.desktop$/, ""),
     resolveLinuxDesktopEntryName(true).replace(/\.desktop$/, ""),
-    "dev.shuv.shuv2code.nightly",
-    "dev.shuv.shuv2code.preview",
   ];
   expect(callers.map(gnomeCaptureClientName)).toEqual(CLIENT_NAMES);
   expect(gnomeCaptureClientName(callers[0])).not.toBe(gnomeCaptureClientName(callers[1]));
 });
+
+it.each([`${DBUS_NAME}.Client.nightly`, `${DBUS_NAME}.Client.preview`])(
+  "rejects the unclaimed caller %s",
+  async (client) => {
+    const { service, snapshots } = fixture({
+      getNameOwner: async (name) => (name === client ? ":1.23" : null),
+    });
+    await expect(service.capture(":1.23")).rejects.toThrow("Only shuv2code");
+    expect(snapshots()).toBe(0);
+  },
+);
 
 it.each(["com.t3tools.T3Code.SnapShot", "com.t3tools.T3Code.Development.SnapShot"])(
   "rejects the upstream owner of %s without capturing pixels",

@@ -2,7 +2,17 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
-/** Never reach another installation through links below the configured XDG data root. */
+/** Presence only, including links: never read or execute an upstream-named helper to identify it. */
+export async function capturePathExists(path: string): Promise<boolean> {
+  return NodeFSP.lstat(path)
+    .then(() => true)
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return false;
+    });
+}
+
+/** Reject existing links below the XDG data root; these path checks do not prevent concurrent directory replacement. */
 export async function assertCaptureDirectories(dataHome: string, directory: string) {
   const root = NodePath.resolve(dataHome);
   for (

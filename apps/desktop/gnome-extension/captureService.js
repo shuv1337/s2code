@@ -1,12 +1,7 @@
 // This policy is independent of Shell so lifecycle and authorization can be tested without a desktop.
 export const DBUS_NAME = "io.github.shuv1337.shuv2code.SnapShot";
 export const DBUS_PATH = "/io/github/shuv1337/shuv2code/SnapShot";
-export const CLIENT_NAMES = [
-  `${DBUS_NAME}.Client`,
-  `${DBUS_NAME}.Client.Development`,
-  `${DBUS_NAME}.Client.nightly`,
-  `${DBUS_NAME}.Client.preview`,
-];
+export const CLIENT_NAMES = [`${DBUS_NAME}.Client`, `${DBUS_NAME}.Client.Development`];
 
 export function isWaylandSession(meta) {
   // GNOME 50 removed the X11 compositor and this API. GNOME 45–49 still need the check.

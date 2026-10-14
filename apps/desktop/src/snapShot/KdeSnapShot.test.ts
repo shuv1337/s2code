@@ -149,20 +149,46 @@ it("leaves upstream-named helpers untouched through discovery, install, upgrade 
   await NodeFSP.mkdir(NodePath.dirname(legacyDesktop), { recursive: true });
   await NodeFSP.writeFile(legacyExecutable, "upstream executable", { mode: 0o755 });
   await NodeFSP.writeFile(legacyDesktop, "[Desktop Entry]\nX-T3Code-Capture-Helper=true\n");
-  expect((await setup.state()).status).toBe("not-installed");
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("upstream-named KDE"),
+  });
   await setup.perform("install-kde-helper");
   await NodeFSP.writeFile(paths.bundle, "fork upgrade");
   await setup.perform("install-kde-helper");
   const { executable } = kdeCapturePaths(paths);
   expect(await NodeFSP.readFile(executable, "utf8")).toBe("fork upgrade");
-  expect((await setup.state()).status).toBe("ready");
+  expect(await setup.state()).toMatchObject({
+    status: "ready",
+    message: expect.stringContaining("does not revoke"),
+  });
   expect(execute.mock.calls.some(([file]) => file === legacyExecutable)).toBe(false);
   await setup.perform("remove-kde-helper");
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("upstream-named KDE"),
+  });
   expect(await NodeFSP.readFile(legacyExecutable, "utf8")).toBe("upstream executable");
   expect((await NodeFSP.stat(legacyExecutable)).mode & 0o777).toBe(0o755);
   expect(await NodeFSP.readFile(legacyDesktop, "utf8")).toBe(
     "[Desktop Entry]\nX-T3Code-Capture-Helper=true\n",
   );
+});
+
+it.each([
+  "applications/com.t3tools.T3Code.KdeCapture.desktop",
+  "t3code/kde-capture/t3-kde-snap-shot",
+])("detects the legacy KDE path %s read-only, without following it", async (legacy) => {
+  const legacyPath = NodePath.join(paths.dataHome, legacy);
+  await NodeFSP.mkdir(NodePath.dirname(legacyPath), { recursive: true });
+  await NodeFSP.symlink(paths.bundle, legacyPath);
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("upstream-named KDE"),
+  });
+  expect(execute).not.toHaveBeenCalled();
+  expect(await NodeFSP.readlink(legacyPath)).toBe(paths.bundle);
+  expect(await NodeFSP.readFile(paths.bundle, "utf8")).toBe("bundled executable");
 });
 
 it.each(["install-kde-helper", "remove-kde-helper"] as const)(
