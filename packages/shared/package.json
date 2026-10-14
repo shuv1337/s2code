@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./productHome": {
+      "types": "./src/productHome.ts",
+      "import": "./src/productHome.ts"
+    },
     "./productIdentity": {
       "types": "./src/productIdentity.ts",
       "import": "./src/productIdentity.ts"

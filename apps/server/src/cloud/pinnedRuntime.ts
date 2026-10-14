@@ -1,5 +1,6 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -19,6 +20,14 @@ import {
 } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
+import {
+  isProductRuntimeComplete,
+  isProductRuntimeVersion,
+  runtimeCompletionMarker,
+  PRODUCT_RUNTIME_MARKER,
+  PRODUCT_ID,
+} from "@t3tools/shared/productIdentity";
+import { canonicalProductPath, ensureProductHome } from "@t3tools/shared/productHome";
 
 /**
  * A pinned runtime is an exact t3 release archive unpacked into
@@ -268,35 +277,75 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
   input: PinnedRuntimeInstallInput,
 ) {
   const { fs } = input;
+  if (!isProductRuntimeVersion(input.version))
+    return yield* new PinnedRuntimeInstallError({ step: "validating the release version" });
   const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version, input.platform);
+  yield* Effect.try({
+    try: () => {
+      ensureProductHome(input.baseDir);
+      if (
+        !canonicalProductPath(input.path.join(paths.versionDir, PRODUCT_RUNTIME_MARKER)).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime product metadata points outside the fork home.");
+      if (
+        !canonicalProductPath(paths.versionDir).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime cache points outside the fork home.");
+      if (
+        !canonicalProductPath(paths.entryPath).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime executable points outside the fork home.");
+      if (
+        !canonicalProductPath(paths.sentinelPath).startsWith(
+          `${canonicalProductPath(input.baseDir)}${input.path.sep}`,
+        )
+      )
+        throw new Error("Runtime metadata points outside the fork home.");
+    },
+    catch: (cause) =>
+      new PinnedRuntimeInstallError({ step: "validating product ownership", cause }),
+  });
   const [versionDirExists, entryExists, sentinel] = yield* Effect.all([
     fs.exists(paths.versionDir),
     fs.exists(paths.entryPath),
-    fs.readFileString(paths.sentinelPath).pipe(Effect.option),
+    fs
+      .exists(paths.sentinelPath)
+      .pipe(
+        Effect.flatMap((exists) =>
+          exists
+            ? fs.readFileString(paths.sentinelPath).pipe(Effect.map(Option.some))
+            : Effect.succeed(Option.none<string>()),
+        ),
+      ),
   ]).pipe(
     Effect.mapError(
       (cause) => new PinnedRuntimeInstallError({ step: "checking the pinned runtime", cause }),
     ),
   );
+  const productPath = input.path.join(paths.versionDir, PRODUCT_RUNTIME_MARKER);
+  const product = yield* fs.exists(productPath).pipe(
+    Effect.flatMap((exists) => (exists ? fs.readFileString(productPath) : Effect.succeed(""))),
+    Effect.mapError(
+      (cause) => new PinnedRuntimeInstallError({ step: "reading runtime product metadata", cause }),
+    ),
+  );
+  if ((yield* fs.exists(productPath)) && !PRODUCT_ID.startsWith(product.trim()))
+    return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign runtime cache" });
   const alreadyPinned =
-    entryExists && Option.isSome(sentinel) && sentinel.value.trim() === input.version;
+    entryExists &&
+    Option.isSome(sentinel) &&
+    isProductRuntimeComplete(sentinel.value, input.version, product);
   if (alreadyPinned) {
     input.onProgress?.({ stage: "cached" });
     yield* input.validate(paths);
     return paths;
   }
-  if (versionDirExists) {
-    yield* fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new PinnedRuntimeInstallError({
-            step: "removing an incomplete pinned runtime",
-            cause,
-          }),
-      ),
-    );
-  }
-
   const versionsDir = input.path.dirname(paths.versionDir);
   yield* fs.makeDirectory(versionsDir, { recursive: true }).pipe(
     Effect.mapError(
@@ -326,26 +375,115 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     entryPath: input.path.join(stagingDir, input.path.relative(paths.versionDir, paths.entryPath)),
     sentinelPath: input.path.join(stagingDir, ".install-complete"),
   };
+  let retainStaging = false;
+  const renameRuntime = (source: string, destination: string) =>
+    Effect.suspend(() => fs.rename(source, destination)).pipe(
+      Effect.retry({
+        times: input.platform === "win32" ? 4 : 0,
+        schedule: Schedule.spaced("50 millis"),
+      }),
+    );
 
   return yield* Effect.gen(function* () {
     yield* installFromArchive(input, stagingDir);
 
     input.onProgress?.({ stage: "validate" });
     yield* input.validate(stagingPaths);
+    yield* fs.writeFileString(
+      input.path.join(stagingDir, PRODUCT_RUNTIME_MARKER),
+      `${PRODUCT_ID}\n`,
+    );
     yield* fs
-      .writeFileString(stagingPaths.sentinelPath, `${input.version}\n`)
+      .writeFileString(stagingPaths.sentinelPath, runtimeCompletionMarker(input.version))
       .pipe(
         Effect.mapError(
           (cause) =>
             new PinnedRuntimeInstallError({ step: "recording the completed install", cause }),
         ),
       );
-    const published = yield* fs.rename(stagingDir, paths.versionDir).pipe(
+    retainStaging = true;
+    if (versionDirExists) {
+      // Nonempty directory replacement is not portable. Keep the old tree in a
+      // same-filesystem backup until publication succeeds, and mask cancellation
+      // across the two renames. If rollback also fails, retain and report both
+      // the old backup and the validated staging tree rather than deleting either.
+      const backupDir = yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const currentProduct = yield* fs.exists(productPath).pipe(
+            Effect.flatMap((exists) =>
+              exists ? fs.readFileString(productPath) : Effect.succeed(PRODUCT_ID),
+            ),
+            Effect.mapError(
+              (cause) =>
+                new PinnedRuntimeInstallError({
+                  step: "checking runtime ownership before replacement",
+                  cause,
+                }),
+            ),
+          );
+          if (!PRODUCT_ID.startsWith(currentProduct.trim()))
+            return yield* new PinnedRuntimeInstallError({
+              step: "refusing a foreign runtime cache",
+            });
+          const backupParent = yield* fs
+            .makeTempDirectory({ directory: versionsDir, prefix: ".previous-" })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new PinnedRuntimeInstallError({ step: "preparing the runtime backup", cause }),
+              ),
+            );
+          // A fresh child avoids Windows renames onto a just-deleted temp name.
+          const backup = input.path.join(backupParent, "runtime");
+          yield* renameRuntime(paths.versionDir, backup).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PinnedRuntimeInstallError({
+                  step: "preserving the previous pinned runtime",
+                  cause,
+                }),
+            ),
+          );
+          yield* renameRuntime(stagingDir, paths.versionDir).pipe(
+            Effect.catch((cause) =>
+              renameRuntime(backup, paths.versionDir).pipe(
+                Effect.mapError(
+                  (restoreCause) =>
+                    new PinnedRuntimeInstallError({
+                      step: `restoring the previous pinned runtime preserved at ${backup}; validated replacement retained at ${stagingDir}`,
+                      cause: restoreCause,
+                    }),
+                ),
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    retainStaging = false;
+                  }),
+                ),
+                Effect.andThen(
+                  fs.remove(backupParent, { recursive: true, force: true }).pipe(Effect.ignore),
+                ),
+                Effect.andThen(
+                  Effect.fail(
+                    new PinnedRuntimeInstallError({ step: "publishing the pinned runtime", cause }),
+                  ),
+                ),
+              ),
+            ),
+          );
+          retainStaging = false;
+          return backupParent;
+        }),
+      );
+      yield* fs.remove(backupDir, { recursive: true, force: true }).pipe(Effect.ignore);
+      return paths;
+    }
+    const published = yield* renameRuntime(stagingDir, paths.versionDir).pipe(
       Effect.as(true),
       Effect.catch((cause) =>
         Effect.all([
           fs.exists(paths.entryPath),
           fs.readFileString(paths.sentinelPath).pipe(Effect.option),
+          fs.readFileString(productPath).pipe(Effect.orElseSucceed(() => "")),
         ]).pipe(
           Effect.mapError(
             (checkCause) =>
@@ -354,10 +492,10 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
                 cause: checkCause,
               }),
           ),
-          Effect.flatMap(([publishedEntryExists, publishedSentinel]) =>
+          Effect.flatMap(([publishedEntryExists, publishedSentinel, publishedProduct]) =>
             publishedEntryExists &&
             Option.isSome(publishedSentinel) &&
-            publishedSentinel.value.trim() === input.version
+            isProductRuntimeComplete(publishedSentinel.value, input.version, publishedProduct)
               ? Effect.succeed(false)
               : Effect.fail(
                   new PinnedRuntimeInstallError({
@@ -370,9 +508,16 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
       ),
     );
     if (!published) yield* input.validate(paths);
+    retainStaging = false;
     return paths;
   }).pipe(
-    Effect.ensuring(fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore)),
+    Effect.ensuring(
+      Effect.suspend(() =>
+        retainStaging
+          ? Effect.void
+          : fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore),
+      ),
+    ),
   );
 });
 

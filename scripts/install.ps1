@@ -4,26 +4,83 @@
 #   irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 #
 # Environment:
-#   T3CODE_CHANNEL           release train to follow: stable, nightly, or preview
+#   SHUV2CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: stable; preview is a maintainers' test train)
-#   T3CODE_VERSION           exact version to install (overrides T3CODE_CHANNEL)
-#   T3CODE_HOME              Server home directory (default: ~\.shuv2code-v2)
-#   T3CODE_INSTALL_BIN_DIR   where t3.exe is linked (default: ~\.local\bin)
-#   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
+#   SHUV2CODE_VERSION           exact version to install (overrides SHUV2CODE_CHANNEL)
+#   SHUV2CODE_HOME              Server home directory (default: ~\.shuv2code-v2)
+#   SHUV2CODE_INSTALL_BIN_DIR   where shuv2code is linked (default: ~\.local\bin)
+#   SHUV2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
-# The archive is unpacked into $T3CODE_HOME\runtime\versions\<version>, the
+# The archive is unpacked into $SHUV2CODE_HOME\runtime\versions\<version>, the
 # same layout `t3 service install` uses, so the service reuses this download.
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $repo = "shuv1337/shuv2code"
-$baseUrl = if ($env:T3CODE_RELEASE_BASE_URL) { $env:T3CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
-$t3Home = if ($env:T3CODE_HOME) { $env:T3CODE_HOME } else { Join-Path $HOME ".shuv2code-v2" }
-$binDir = if ($env:T3CODE_INSTALL_BIN_DIR) { $env:T3CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
+$baseUrl = if ($env:SHUV2CODE_RELEASE_BASE_URL) { $env:SHUV2CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
+$t3Home = if ($env:SHUV2CODE_HOME) { $env:SHUV2CODE_HOME } else { Join-Path $HOME ".shuv2code-v2" }
+$binDir = if ($env:SHUV2CODE_INSTALL_BIN_DIR) { $env:SHUV2CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
+if ($env:T3CODE_HOME -and -not $env:SHUV2CODE_HOME) {
+  [Console]::Error.WriteLine("shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home.")
+}
 
 function Fail([string] $message) {
   Write-Error "t3 install: $message"
   exit 1
+}
+
+# Windows can briefly keep a vacated directory name locked. Never delete the
+# source tree or nest it into a destination that appeared during a retry.
+function Move-RuntimeDirectory([string] $source, [string] $destination) {
+  for ($attempt = 0; $attempt -le 4; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $destination) { throw "Runtime destination is occupied: $destination" }
+      Move-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+      return
+    } catch {
+      if ($attempt -eq 4) { throw }
+      Start-Sleep -Milliseconds 50
+    }
+  }
+}
+
+if ($env:SHUV2CODE_IMPORT_UPSTREAM) { Fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME." }
+function Assert-ProductPath([string] $directory) {
+  $current = [IO.Path]::GetFullPath($directory)
+  while ($current) {
+    if (Test-Path -LiteralPath $current) {
+      $item = Get-Item -LiteralPath $current -Force
+      if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { Fail "Refusing a linked product path: $directory" }
+    }
+    $parent = [IO.Path]::GetDirectoryName($current)
+    if ($parent -eq $current) { break }
+    $current = $parent
+  }
+}
+$t3Home = [IO.Path]::GetFullPath($t3Home)
+Assert-ProductPath $t3Home
+if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
+$defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
+$homeMarker = Join-Path $t3Home ".product-identity"
+Assert-ProductPath $homeMarker
+if (Test-Path -LiteralPath $homeMarker) {
+  $homeProduct = [IO.File]::ReadAllText($homeMarker).Trim()
+  if (-not "shuv2code".StartsWith($homeProduct, [StringComparison]::Ordinal)) { Fail "Home belongs to another product." }
+} else { $homeProduct = "" }
+if ($homeProduct -cne "shuv2code" -and (Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0 -and -not [string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) {
+  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+}
+foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
+New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
+$homeMarkerTemp = Join-Path $t3Home (".product-identity." + [Guid]::NewGuid().ToString() + ".tmp")
+try {
+  Set-Content -LiteralPath $homeMarkerTemp -Value "shuv2code"
+  if (Test-Path -LiteralPath $homeMarker) { [IO.File]::Replace($homeMarkerTemp, $homeMarker, "$homeMarkerTemp.previous") }
+  else { [IO.File]::Move($homeMarkerTemp, $homeMarker) }
+} finally {
+  foreach ($temporary in @($homeMarkerTemp, "$homeMarkerTemp.previous")) {
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+  }
 }
 
 $terminal = -not [Console]::IsErrorRedirected -and $env:TERM -ne "dumb"
@@ -127,8 +184,8 @@ $arch = switch ($rawArch) {
   default { Fail "unsupported architecture $rawArch" }
 }
 
-$channel = if ($env:T3CODE_CHANNEL) { $env:T3CODE_CHANNEL } else { "stable" }
-$version = $env:T3CODE_VERSION
+$channel = if ($env:SHUV2CODE_CHANNEL) { $env:SHUV2CODE_CHANNEL } else { "stable" }
+$version = $env:SHUV2CODE_VERSION
 if (-not $version) {
   # Tags are v<semver>; the channel is the prerelease identifier, or none for
   # stable. Only tags of the requested train are considered, so a stable
@@ -137,32 +194,44 @@ if (-not $version) {
     "stable" { '^v\d+\.\d+\.\d+$' }
     "nightly" { '^v\d+\.\d+\.\d+-nightly\.\d+\.\d+$' }
     "preview" { '^v\d+\.\d+\.\d+-preview\.\d+\.\d+$' }
-    default { Fail "T3CODE_CHANNEL must be stable, nightly, or preview" }
+    default { Fail "SHUV2CODE_CHANNEL must be stable, nightly, or preview" }
   }
   $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=100" -Headers @{ "User-Agent" = "t3-install" }
   $tag = ($releases | Where-Object { -not $_.draft -and $_.tag_name -match $tagPattern } | Select-Object -First 1).tag_name
-  if (-not $tag) { Fail "could not find a $channel release; set T3CODE_VERSION" }
+  if (-not $tag) { Fail "could not find a $channel release; set SHUV2CODE_VERSION" }
   $version = $tag.Substring(1)
 }
 if ($version -match '-preview\.') {
-  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set T3CODE_CHANNEL=stable (the default) for a supported build."
-  if ($channel -ne "preview" -and -not $env:T3CODE_VERSION) {
+  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set SHUV2CODE_CHANNEL=stable (the default) for a supported build."
+  if ($channel -ne "preview" -and -not $env:SHUV2CODE_VERSION) {
     Fail "refusing a preview build that was not explicitly requested"
   }
 }
 
 $stem = "t3-$version-win32-$arch"
+if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
+Assert-ProductPath $targetDir
+Assert-ProductPath (Join-Path $targetDir "t3.exe")
+Assert-ProductPath $marker
+$productMarker = Join-Path $targetDir ".install-product"
+Assert-ProductPath $productMarker
+$product = if (Test-Path -LiteralPath $productMarker) { [IO.File]::ReadAllText($productMarker).Trim() } else { "" }
+if (-not "shuv2code".StartsWith($product, [StringComparison]::Ordinal)) { Fail "Refusing to reuse or replace a foreign runtime cache." }
+$completion = $version
+$installedMarker = if (Test-Path -LiteralPath $marker) { [IO.File]::ReadAllText($marker).Trim().Replace("`r`n", "`n") } else { "" }
 
-if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
+if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -and $installedMarker -eq $completion) {
   Step "Version $version is already downloaded."
 } else {
   New-Item -ItemType Directory -Force -Path $versionsDir | Out-Null
   $staging = Join-Path $versionsDir (".staging-" + [System.IO.Path]::GetRandomFileName())
   New-Item -ItemType Directory -Path $staging | Out-Null
+  $previous = $previousContainer = $null
+  $validated = $false
   try {
     if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
     [Console]::Error.WriteLine("  ${muted}Installing$reset shuv2code $bold$version$reset`n")
@@ -199,13 +268,43 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
 
     & (Join-Path $staging "t3.exe") --version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "the downloaded executable does not run" }
-    Set-Content -Path (Join-Path $staging ".install-complete") -Value $version -NoNewline
+    Set-Content -Path (Join-Path $staging ".install-complete") -Value "$completion`n" -NoNewline
+    Set-Content -Path (Join-Path $staging ".install-product") -Value "shuv2code`n" -NoNewline
 
-    if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force }
-    Move-Item $staging $targetDir
+    $validated = $true
+    if (Test-Path -LiteralPath $targetDir) {
+      $previousContainer = Join-Path $versionsDir (".previous-" + [Guid]::NewGuid().ToString())
+      New-Item -ItemType Directory -Path $previousContainer | Out-Null
+      $previous = Join-Path $previousContainer "runtime"
+      Move-RuntimeDirectory $targetDir $previous
+    }
+    if (Test-Path -LiteralPath $targetDir) { throw "A runtime appeared during publication; refusing to overwrite it." }
+    Move-RuntimeDirectory $staging $targetDir
+    if ($previousContainer) {
+      try { Remove-Item -LiteralPath $previousContainer -Recurse -Force -ErrorAction Stop }
+      catch { Write-Warning "Runtime published; previous backup could not be fully removed: $previousContainer" }
+    }
   } catch {
-    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
-    throw
+    $publicationError = $_
+    $retain = $false
+    if ($previous -and (Test-Path -LiteralPath $previous)) {
+      try {
+        if (Test-Path -LiteralPath $targetDir) { throw "Destination is occupied." }
+        Move-RuntimeDirectory $previous $targetDir
+      } catch {
+        [Console]::Error.WriteLine("Could not restore runtime. Previous copy: $previous; validated replacement: $staging")
+        $retain = $true
+      }
+    }
+    if ($validated -and -not (Test-Path -LiteralPath $targetDir)) {
+      [Console]::Error.WriteLine("Validated runtime retained at $staging; retry installation or recover it manually.")
+      $retain = $true
+    }
+    if (-not $retain) {
+      if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+      if ($previousContainer -and (Test-Path -LiteralPath $previousContainer)) { Remove-Item -LiteralPath $previousContainer -Recurse -Force }
+    }
+    throw $publicationError
   }
 }
 

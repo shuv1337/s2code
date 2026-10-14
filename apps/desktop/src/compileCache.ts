@@ -3,6 +3,7 @@
 import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
 
 // Turns on Node's on-disk V8 code cache for every module loaded after this one,
 // so later launches skip recompiling the large main and server bundles.
@@ -21,7 +22,7 @@ try {
       process.platform === "linux"
         ? process.env.XDG_CACHE_HOME || NodePath.join(NodeOS.homedir(), ".cache")
         : NodeOS.tmpdir();
-    NodeModule.enableCompileCache(NodePath.join(cacheRoot, "t3code", "compile-cache"));
+    NodeModule.enableCompileCache(NodePath.join(cacheRoot, PRODUCT_ID, "compile-cache"));
   }
 } catch {
   // The cache is only a speedup. Never let it stop the app from starting.

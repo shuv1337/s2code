@@ -309,7 +309,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
     // server under test rather than the daily-driver install.
     const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
     if (worktreeHome !== undefined) {
-      bases.push(worktreeHome);
+      bases.push(yield* resolveBaseDir(worktreeHome));
     }
     const envHome = yield* Config.String("T3CODE_HOME").pipe(Config.option);
     bases.push(yield* resolveBaseDir(Option.getOrUndefined(envHome)));

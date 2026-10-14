@@ -2,6 +2,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import * as NodeVM from "node:vm";
 import { build } from "vite-plus/pack";
 import { assert, it } from "vite-plus/test";
@@ -115,6 +116,13 @@ it("loads the emitted packaged boot entry and backend cache preload", async () =
   try {
     const entries = ["src/boot.ts", "src/compileCache.ts"];
     await NodeFSP.mkdir(NodePath.join(directory, "src"));
+    // The copied boot entry needs the same fork workspace dependency as the real build.
+    await NodeFSP.mkdir(NodePath.join(directory, "node_modules/@t3tools"), { recursive: true });
+    await NodeFSP.symlink(
+      NodeURL.fileURLToPath(new URL("../../../packages/shared", import.meta.url)),
+      NodePath.join(directory, "node_modules/@t3tools/shared"),
+      "junction",
+    );
     await Promise.all(
       entries.map((entry) =>
         NodeFSP.copyFile(new URL(`../${entry}`, import.meta.url), NodePath.join(directory, entry)),

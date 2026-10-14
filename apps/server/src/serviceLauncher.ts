@@ -9,6 +9,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import { applyProductEnvironment, isProductRuntimeComplete } from "@t3tools/shared/productIdentity";
+import { canonicalProductPath, ensureProductHome } from "@t3tools/shared/productHome";
 
 import type {
   PendingServiceUpdate,
@@ -216,11 +218,18 @@ export async function writeServiceState(filePath: string, state: ServiceState): 
 async function runtimeExists(baseDir: string, version: string): Promise<boolean> {
   const paths = runtimePaths(baseDir, version);
   try {
-    const [entry, sentinel] = await Promise.all([
+    if (
+      !canonicalProductPath(paths.entryPath).startsWith(
+        `${canonicalProductPath(baseDir)}${NodePath.sep}`,
+      )
+    )
+      return false;
+    const [entry, sentinel, product] = await Promise.all([
       NodeFSP.stat(paths.entryPath),
       NodeFSP.readFile(paths.sentinelPath, "utf8"),
+      NodeFSP.readFile(NodePath.join(paths.versionDir, ".install-product"), "utf8"),
     ]);
-    return entry.isFile() && sentinel.trim() === version;
+    return entry.isFile() && isProductRuntimeComplete(sentinel, version, product);
   } catch {
     return false;
   }
@@ -627,11 +636,40 @@ export class Launcher {
 }
 
 export async function main(): Promise<void> {
+  applyProductEnvironment(process.env);
   const baseDir = process.env.T3CODE_HOME?.trim();
   if (baseDir === undefined || baseDir === "") {
-    throw new Error("T3CODE_HOME is required by the T3 Code service launcher.");
+    await pauseForServiceReinstall(
+      "This service unit does not provide SHUV2CODE_HOME. Inherited T3CODE_HOME is not fork ownership proof.",
+    );
+    return;
   }
+  ensureProductHome(baseDir);
   const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
   const state = await readServiceState(statePath);
+  if (!(await runtimeExists(baseDir, state.activeVersion))) {
+    await pauseForServiceReinstall(
+      "The active service runtime is missing or has no complete fork ownership marker.",
+    );
+    return;
+  }
   await new Launcher(baseDir, state).run();
+}
+
+/** Old Restart=always/KeepAlive units must not repeatedly execute an unowned runtime. */
+async function pauseForServiceReinstall(reason: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const keepAlive = setInterval(() => {}, 60_000);
+    const stop = () => {
+      clearInterval(keepAlive);
+      process.removeListener("SIGINT", stop);
+      process.removeListener("SIGTERM", stop);
+      resolve();
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    process.stderr.write(
+      `${reason} Reinstall with shuv2code service install using the same explicit SHUV2CODE_HOME. Service paused until reinstall; no server was started.\n`,
+    );
+  });
 }

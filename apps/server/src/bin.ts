@@ -8,6 +8,7 @@
  * the real CLI in ./binCli.ts.
  */
 import { isEntrypoint } from "./entrypoint.ts";
+import { applyProductEnvironment } from "@t3tools/shared/productIdentity";
 
 if (
   isEntrypoint({
@@ -16,6 +17,7 @@ if (
     runtimeMain: import.meta.main,
   })
 ) {
+  applyProductEnvironment(process.env);
   const command = process.argv[2];
   if (command === "acp-mcp-bridge" || command === "acp-mcp-call") {
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");

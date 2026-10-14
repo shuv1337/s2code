@@ -49,6 +49,8 @@ async function startFakeDesktop(input: {
   readonly userId: number | undefined;
   readonly reply?: (request: DesktopAppActivationRequest) => unknown;
 }) {
+  await NodeFSP.mkdir(input.baseDir, { recursive: true });
+  await NodeFSP.writeFile(NodePath.join(input.baseDir, ".product-identity"), "shuv2code\n");
   const target = resolveDesktopAppControlAddress({
     stateDir: NodePath.join(input.baseDir, input.stateSubdirectory ?? "userdata"),
     platform: input.platform,
@@ -175,6 +177,9 @@ describe("t3 server command safety", () => {
           serviceManaged: true,
         });
         yield* Effect.promise(() => NodeFSP.mkdir(stateDir, { recursive: true }));
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(NodePath.join(baseDir, ".product-identity"), "shuv2code\n"),
+        );
         yield* Effect.promise(() => NodeFSP.writeFile(statePath, record));
         const newDirectory = NodePath.join(root, "new-project");
         const platform = yield* HostProcess.Platform;
@@ -308,7 +313,7 @@ describe("t3 app", () => {
         yield* runCli(["app"], { T3CODE_HOME: "   " });
 
         expect(development.received).toHaveLength(2);
-        expect(yield* pathExists(baseDir)).toBe(false);
+        expect(yield* pathExists(NodePath.join(baseDir, "userdata"))).toBe(false);
       }).pipe(Effect.provideService(HostProcess.HomeDirectory, root), Effect.scoped),
     ),
   );

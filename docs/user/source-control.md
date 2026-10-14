@@ -81,10 +81,10 @@ If no credentials are saved, T3 Code falls back to these variables in the server
 Restart the server after changing them:
 
 ```bash
-export T3CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
+export SHUV2CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
 # or
-export T3CODE_BITBUCKET_EMAIL="you@example.com"
-export T3CODE_BITBUCKET_API_TOKEN="your-token"
+export SHUV2CODE_BITBUCKET_EMAIL="you@example.com"
+export SHUV2CODE_BITBUCKET_API_TOKEN="your-token"
 ```
 
 ### Azure DevOps

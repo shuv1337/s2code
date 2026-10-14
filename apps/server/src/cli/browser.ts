@@ -68,7 +68,7 @@ const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Opti
     .pipe(Effect.orElseSucceed(() => ""));
   const home = entry.trim().split(":")[5];
   const path = yield* Path.Path;
-  return home ? path.join(home, ".shuv2code-v2") : yield* resolveBaseDir(undefined);
+  return yield* resolveBaseDir(home ? path.join(home, ".shuv2code-v2") : undefined);
 });
 
 /** Whether apt has an installable candidate for `name`. */

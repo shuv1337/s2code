@@ -22,8 +22,36 @@ irm https://t3.codes/install.ps1 | iex
 
 This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
-`T3CODE_VERSION` to pin an exact version.
+line to add. Set `SHUV2CODE_CHANNEL=nightly` to install the nightly train, or
+`SHUV2CODE_VERSION` to pin an exact version.
+
+### Keep upstream and fork installations separate
+
+shuv2code uses `~/.shuv2code-v2` by default. Set `SHUV2CODE_HOME` for a different
+home, `SHUV2CODE_PORT` for a server port, and `SHUV2CODE_RELEASE_BASE_URL` for a
+release-download mirror. Public settings use the `SHUV2CODE_` prefix; inherited
+upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
+when a service-launcher context is inherited. Older maintainer-local fork
+services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
+updating; their old `T3CODE_HOME` setting is not adopted.
+If the binary was already updated, an old unit or unmarked active runtime pauses
+without starting a server. Its log says **Service paused until reinstall** rather
+than repeatedly restarting. Reinstall with `shuv2code service install` using the
+same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
+
+An empty custom home is claimed automatically. Existing installations in the
+exact default fork home remain usable; runtime caches without product metadata
+are downloaded again, never reused based on their directory name.
+An existing custom home without product metadata is refused: verify offline
+that it belongs exclusively to this fork before adding `.product-identity`
+containing `shuv2code`. Do not use this to adopt upstream state.
+Runtime installs write `.install-product` containing `shuv2code` and a separate
+version-only `.install-complete`, compatible with retained service launchers.
+Foreign-marked caches and paths outside the owned home are never replaced.
+
+Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` at
+an upstream home, live database, or shared runtime cache; use a separate home.
+Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 
 | Task                                             | Command                                                   |
 | ------------------------------------------------ | --------------------------------------------------------- |

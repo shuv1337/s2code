@@ -24,7 +24,7 @@ tools, and subsequent work. If even its retrieval references cannot fit, T3 Code
 instead of shortening your request. Compact the target conversation or select a larger-context
 model before trying again.
 
-Server operators can set `T3CODE_CONTEXT_HANDOFF_TOKEN_CAP` to change the initial history allowance
+Server operators can set `SHUV2CODE_CONTEXT_HANDOFF_TOKEN_CAP` to change the initial history allowance
 (default 16,000; clamped to 1,024–64,000). This is an upper bound, not a provider context-window
 guarantee. Text accounting conservatively charges one token per UTF-8 byte, including attribution
 and JSON escaping. Imported history has a separate 64,000-byte ceiling; your current input and

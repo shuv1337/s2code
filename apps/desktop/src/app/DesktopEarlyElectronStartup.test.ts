@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - tests use POSIX path joining to match the Linux startup boundary.
 import * as NodePath from "node:path";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, it } from "vite-plus/test";
 
 import {
   resolveEarlyLinuxElectronOptions,
@@ -13,7 +13,7 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("reads the persisted linux password-store preference before Electron is ready", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { T3CODE_HOME: "/home/user/.t3-test" },
+      env: { SHUV2CODE_HOME: "/home/user/.t3-test" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: (path) => {
@@ -27,7 +27,7 @@ describe("DesktopEarlyElectronStartup", () => {
 
   it("accepts JSONC in the early desktop settings file", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { T3CODE_HOME: "/home/user/.t3-test" },
+      env: { SHUV2CODE_HOME: "/home/user/.t3-test" },
       homeDirectory: "/home/user",
       joinPath,
       readFileString: () => `{
@@ -37,6 +37,19 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.equal(preference, "gnome-libsecret");
+  });
+
+  it("ignores an inherited upstream home before reading early settings", () => {
+    const preference = resolveEarlyLinuxPasswordStorePreference({
+      env: { T3CODE_HOME: "/upstream/.t3" },
+      homeDirectory: "/home/user",
+      joinPath,
+      readFileString: (path) => {
+        assert.equal(path, "/home/user/.shuv2code-v2/userdata/desktop-settings.json");
+        return JSON.stringify({ linuxPasswordStore: "kwallet6" });
+      },
+    });
+    assert.equal(preference, "kwallet6");
   });
 
   it("falls back to auto when the early settings document is missing or invalid", () => {
@@ -52,24 +65,26 @@ describe("DesktopEarlyElectronStartup", () => {
     assert.equal(preference, "auto");
   });
 
-  it("preserves absolute root paths when resolving early settings", () => {
-    const preference = resolveEarlyLinuxPasswordStorePreference({
-      env: { T3CODE_HOME: "/" },
-      homeDirectory: "/home/user",
-      joinPath,
-      readFileString: (path) => {
-        assert.equal(path, "/userdata/desktop-settings.json");
-        return JSON.stringify({ linuxPasswordStore: "kwallet6" });
-      },
-    });
-
-    assert.equal(preference, "kwallet6");
+  it("refuses an unowned nonempty root before reading early settings", () => {
+    assert.throws(
+      () =>
+        resolveEarlyLinuxPasswordStorePreference({
+          env: { SHUV2CODE_HOME: "/" },
+          homeDirectory: "/home/user",
+          joinPath,
+          readFileString: (path) => {
+            assert.equal(path, "/userdata/desktop-settings.json");
+            return JSON.stringify({ linuxPasswordStore: "kwallet6" });
+          },
+        }),
+      /Cannot establish product ownership/,
+    );
   });
 
   it("resolves the early linux Electron switches", () => {
     const options = resolveEarlyLinuxElectronOptions({
       env: {
-        T3CODE_HOME: "/home/user/.t3-test",
+        SHUV2CODE_HOME: "/home/user/.t3-test",
         XDG_CURRENT_DESKTOP: "niri",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
       },

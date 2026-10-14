@@ -33,6 +33,7 @@ const compactEnv = (env: Readonly<Record<string, string | undefined>>): Record<s
     Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
 
+// Desktop entry resolves fork-owned public settings before this adapter loads.
 export const DesktopConfig = Config.all({
   appDataDirectory: trimmedString("APPDATA"),
   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
