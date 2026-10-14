@@ -56,6 +56,25 @@ Windows background services are not supported.
 T3 Connect can offer service installation during setup, but the two are managed
 separately. Signing out of T3 Connect does not stop or uninstall the service.
 
+## Linux agent memory budget
+
+With a systemd user manager, shuv2code agents and terminals share one memory
+budget across all of your fork environments, development servers, and release
+channels. Channels remain separate installations, but a runaway agent in one
+can cause an agent in another to be killed.
+
+This is not a host-wide memory reservation. Upstream T3 Code has an independent
+budget: on a 16 GiB machine, each product can allow up to 12 GiB of agents, so
+running both near their limits can exhaust the host before either reaches its
+own cap. Limit simultaneous work across the two products, or ask your host
+administrator to configure an aggregate memory limit. The fork does not change
+upstream's limits or stop its agents.
+
+Sessions already running when you upgrade from a fork build that used upstream's
+slice stay there until they exit. Stop those sessions yourself and start new ones
+to use the separate fork budget; the upgrade does not move or clean up upstream-
+named scopes. Old runtime limits remain until the systemd user manager restarts.
+
 ## Troubleshooting
 
 Start with `t3 service status` on the host. It prints the log path and, on Linux,

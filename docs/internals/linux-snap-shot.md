@@ -91,12 +91,12 @@ Modifier serialization writes Linux `Ctrl` explicitly, never the cross-platform 
 
 ## GNOME extension
 
-Source in `apps/desktop/gnome-extension`, UUID `snap-shot@t3.codes`. GNOME only discovers a newly
+Source in `apps/desktop/gnome-extension`, UUID `snap-shot@shuv1337.github.io`. GNOME only discovers a newly
 installed extension at login, so setup distinguishes "installed, needs logout" from "discovered but
 disabled" and compares loaded and installed versions.
 
-The extension trusts callers that own `com.t3tools.T3Code.SnapShot` (or the `.Development`
-variant) on the same connection. This is GNOME's trusted-session-client pattern, not authentication
+The extension trusts callers that own `io.github.shuv1337.shuv2code.SnapShot.Client` (or its
+development/nightly/preview variant) on the same connection. This is GNOME's trusted-session-client pattern, not authentication
 against a hostile process on the user's bus.
 
 Electron does not position overlay windows on Wayland, so the flash and flight run as Shell actors

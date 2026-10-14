@@ -139,6 +139,92 @@ it("detects a bundled update, updates explicitly, and removes only capture's reg
   expect(await NodeFSP.readFile(unrelated, "utf8")).toBe("keep me");
 });
 
+it("leaves upstream-named helpers untouched through discovery, install, upgrade and removal", async () => {
+  const legacyExecutable = NodePath.join(paths.dataHome, "t3code/kde-capture/t3-kde-snap-shot");
+  const legacyDesktop = NodePath.join(
+    paths.dataHome,
+    "applications/com.t3tools.T3Code.KdeCapture.desktop",
+  );
+  await NodeFSP.mkdir(NodePath.dirname(legacyExecutable), { recursive: true });
+  await NodeFSP.mkdir(NodePath.dirname(legacyDesktop), { recursive: true });
+  await NodeFSP.writeFile(legacyExecutable, "upstream executable", { mode: 0o755 });
+  await NodeFSP.writeFile(legacyDesktop, "[Desktop Entry]\nX-T3Code-Capture-Helper=true\n");
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("upstream-named KDE"),
+  });
+  await setup.perform("install-kde-helper");
+  await NodeFSP.writeFile(paths.bundle, "fork upgrade");
+  await setup.perform("install-kde-helper");
+  const { executable } = kdeCapturePaths(paths);
+  expect(await NodeFSP.readFile(executable, "utf8")).toBe("fork upgrade");
+  expect(await setup.state()).toMatchObject({
+    status: "ready",
+    message: expect.stringContaining("does not revoke"),
+  });
+  expect(execute.mock.calls.some(([file]) => file === legacyExecutable)).toBe(false);
+  await setup.perform("remove-kde-helper");
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("upstream-named KDE"),
+  });
+  expect(await NodeFSP.readFile(legacyExecutable, "utf8")).toBe("upstream executable");
+  expect((await NodeFSP.stat(legacyExecutable)).mode & 0o777).toBe(0o755);
+  expect(await NodeFSP.readFile(legacyDesktop, "utf8")).toBe(
+    "[Desktop Entry]\nX-T3Code-Capture-Helper=true\n",
+  );
+});
+
+it.each([
+  "applications/com.t3tools.T3Code.KdeCapture.desktop",
+  "t3code/kde-capture/t3-kde-snap-shot",
+])("detects the legacy KDE path %s read-only, without following it", async (legacy) => {
+  const legacyPath = NodePath.join(paths.dataHome, legacy);
+  await NodeFSP.mkdir(NodePath.dirname(legacyPath), { recursive: true });
+  await NodeFSP.symlink(paths.bundle, legacyPath);
+  expect(await setup.state()).toMatchObject({
+    status: "not-installed",
+    message: expect.stringContaining("upstream-named KDE"),
+  });
+  expect(execute).not.toHaveBeenCalled();
+  expect(await NodeFSP.readlink(legacyPath)).toBe(paths.bundle);
+  expect(await NodeFSP.readFile(paths.bundle, "utf8")).toBe("bundled executable");
+});
+
+it.each(["install-kde-helper", "remove-kde-helper"] as const)(
+  "refuses %s for an unowned executable",
+  async (action) => {
+    const { executable, desktop } = kdeCapturePaths(paths);
+    await NodeFSP.mkdir(NodePath.dirname(executable), { recursive: true });
+    await NodeFSP.writeFile(executable, "foreign helper");
+    await expect(setup.perform(action)).rejects.toThrow("ownership");
+    expect((await setup.state()).status).toBe("error");
+    expect(await NodeFSP.readFile(executable, "utf8")).toBe("foreign helper");
+    await NodeFSP.mkdir(NodePath.dirname(desktop), { recursive: true });
+    await NodeFSP.writeFile(desktop, "[Desktop Entry]\nX-T3Code-Capture-Helper=true\n");
+    await expect(setup.perform(action)).rejects.toThrow("Another desktop entry");
+    expect(await NodeFSP.readFile(executable, "utf8")).toBe("foreign helper");
+    expect(execute).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["install-kde-helper", "remove-kde-helper"] as const)(
+  "refuses %s through a linked product directory",
+  async (action) => {
+    const upstream = NodePath.join(paths.dataHome, "t3code");
+    await NodeFSP.mkdir(NodePath.join(upstream, "kde-capture"), { recursive: true });
+    await NodeFSP.writeFile(NodePath.join(upstream, "kde-capture/shuv2code-kde-snap-shot"), "keep");
+    await NodeFSP.symlink(upstream, NodePath.join(paths.dataHome, "shuv2code"));
+    await expect(setup.perform(action)).rejects.toThrow("regular directory");
+    expect(
+      await NodeFSP.readFile(
+        NodePath.join(upstream, "kde-capture/shuv2code-kde-snap-shot"),
+        "utf8",
+      ),
+    ).toBe("keep");
+  },
+);
+
 it("repairs the old semicolon permission entry without replacing unrelated registrations", async () => {
   await setup.perform("install-kde-helper");
   const { desktop } = kdeCapturePaths(paths);

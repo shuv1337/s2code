@@ -10917,7 +10917,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const admissionAction =
       command.type === "message.dispatch" ? (command.admission?.action ?? null) : null;
     const principal = command.type === "message.dispatch" ? (command.principal ?? null) : null;
+    // Older ordinary dispatch receipts also stored hashes. Their command-id
+    // replay semantics survive upgrades; only authenticated receipts bind payloads.
     const checkReceiptIdentity = (receipt: CommandReceiptV2) =>
+      (receipt.principal != null || receipt.admissionAction != null) &&
       receipt.payloadFingerprint != null &&
       (receipt.payloadFingerprint !== payloadFingerprint ||
         (receipt.principal ?? null) !== principal)

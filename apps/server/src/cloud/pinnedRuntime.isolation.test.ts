@@ -2,6 +2,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
@@ -33,11 +36,15 @@ function install(
     | "extract"
     | "validate"
     | "publish"
-    | "rollback",
+    | "rollback"
+    | "windows-publish",
+  platform: NodeJS.Platform = "linux",
 ) {
   const archive = new TextEncoder().encode("fixture archive");
   const digest = NodeCrypto.createHash("sha256").update(archive).digest("hex");
   const requests: string[] = [];
+  const vacated = new Set<string>();
+  const renameBlocked = Deferred.makeUnsafe<void>();
   const effect = Effect.gen(function* () {
     const filesystem = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
@@ -45,13 +52,23 @@ function install(
       baseDir,
       version,
       fs:
-        failure === "publish" || failure === "rollback"
+        failure === "publish" || failure === "rollback" || failure === "windows-publish"
           ? {
               ...filesystem,
+              remove: (file, options) =>
+                filesystem.remove(file, options).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      vacated.add(file);
+                    }),
+                  ),
+                ),
               rename: (source, destination) =>
-                (source.includes(".staging-") ||
-                  (failure === "rollback" && source.includes(".previous-"))) &&
-                destination.endsWith(version)
+                ((failure === "publish" || failure === "rollback") &&
+                  (source.includes(".staging-") ||
+                    (failure === "rollback" && source.includes(".previous-"))) &&
+                  destination.endsWith(version)) ||
+                (failure === "windows-publish" && vacated.delete(destination))
                   ? Effect.fail(
                       PlatformError.systemError({
                         _tag: "PermissionDenied",
@@ -59,12 +76,18 @@ function install(
                         method: "rename",
                         pathOrDescriptor: destination,
                       }),
-                    )
-                  : filesystem.rename(source, destination),
+                    ).pipe(Effect.tapError(() => Deferred.succeed(renameBlocked, undefined)))
+                  : filesystem.rename(source, destination).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          vacated.add(source);
+                        }),
+                      ),
+                    ),
             }
           : filesystem,
       path: paths,
-      platform: "linux",
+      platform,
       arch: "x64",
       releaseBaseUrl: "https://fork.invalid/releases/download",
       httpClient: HttpClient.make((request) => {
@@ -83,7 +106,7 @@ function install(
             request,
             new Response(
               request.url.endsWith("SHA256SUMS")
-                ? `${failure === "checksum" ? "0".repeat(64) : digest}  t3-${version}-linux-x64.tar.gz\n`
+                ? `${failure === "checksum" ? "0".repeat(64) : digest}  t3-${version}-${platform}-x64.${platform === "win32" ? "zip" : "tar.gz"}\n`
                 : archive,
               {
                 status:
@@ -101,7 +124,10 @@ function install(
           Effect.gen(function* () {
             const staging = input.args[input.args.indexOf("-C") + 1]!;
             yield* filesystem
-              .writeFileString(paths.join(staging, "t3"), "fork-runtime")
+              .writeFileString(
+                paths.join(staging, platform === "win32" ? "t3.exe" : "t3"),
+                "fork-runtime",
+              )
               .pipe(Effect.orDie);
             return {
               stdout: "",
@@ -127,6 +153,7 @@ function install(
     result: effect.pipe(Effect.provide(NodeServices.layer)),
     requests,
     validate,
+    renameBlocked,
   };
 }
 it.effect("records identity and reuses only a complete owned cache", () =>
@@ -143,6 +170,25 @@ it.effect("records identity and reuses only a complete owned cache", () =>
     expect(yield* second.result).toEqual(runtime);
     expect(second.requests).toEqual([]);
   }),
+);
+
+it.effect(
+  "uses a fresh Windows backup destination and retries transient vacated-name publication failures",
+  () =>
+    Effect.gen(function* () {
+      const home = NodePath.join(root, "windows-home");
+      ensureProductHome(home);
+      const cache = NodePath.join(home, "runtime", "versions", version);
+      NodeFS.mkdirSync(cache, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(cache, "t3.exe"), "old-windows-runtime");
+      const attempt = install(home, vi.fn(), "windows-publish", "win32");
+      const running = yield* attempt.result.pipe(Effect.forkChild);
+      yield* Deferred.await(attempt.renameBlocked);
+      yield* TestClock.adjust("1 second");
+      yield* Fiber.join(running);
+      expect(NodeFS.readFileSync(NodePath.join(cache, "t3.exe"), "utf8")).toBe("fork-runtime");
+      expect(NodeFS.readdirSync(NodePath.dirname(cache))).toEqual([version]);
+    }),
 );
 it.effect.each(["1.2.3\n", "t3code\n1.2.3\n"])(
   "refuses same-version foreign cache %j without deleting or executing it",
@@ -226,11 +272,20 @@ it.effect("keeps the previous executable in its reported backup if rollback also
     NodeFS.writeFileSync(NodePath.join(cache, "t3"), "previous-executable");
     const error = yield* install(home, vi.fn(), "rollback").result.pipe(Effect.flip);
     const backups = NodeFS.readdirSync(NodePath.dirname(cache));
-    expect(backups).toHaveLength(1);
-    expect(backups[0]).toMatch(/^\.previous-/);
-    const backup = NodePath.join(NodePath.dirname(cache), backups[0]!);
+    expect(backups).toHaveLength(2);
+    const backup = NodePath.join(
+      NodePath.dirname(cache),
+      backups.find((name) => name.startsWith(".previous-"))!,
+      "runtime",
+    );
+    const staging = NodePath.join(
+      NodePath.dirname(cache),
+      backups.find((name) => name.startsWith(".staging-"))!,
+    );
     expect(error.message).toContain(backup);
     expect(NodeFS.readFileSync(NodePath.join(backup, "t3"), "utf8")).toBe("previous-executable");
+    expect(error.message).toContain(staging);
+    expect(NodeFS.readFileSync(NodePath.join(staging, "t3"), "utf8")).toBe("fork-runtime");
   }),
 );
 
