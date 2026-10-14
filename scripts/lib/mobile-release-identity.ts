@@ -151,15 +151,42 @@ export function assertFirebaseDestination(value: unknown, packageName: string, p
       "Android Google services configuration does not match the fork package/Firebase project.",
     );
 }
+// t3.codes is the upstream hosted product; the other roots appear in upstream
+// company metadata/security contacts. Match DNS boundaries, not substrings.
+const UPSTREAM_MOBILE_HOSTS = [
+  "t3.codes",
+  "t3tools.com",
+  "ping.gg",
+  "pingdotgg.github.io",
+  "t3tools.github.io",
+];
+function assertForkMobileHost(hostname: string, setting: string) {
+  const host = hostname.toLowerCase().replace(/\.+$/, "");
+  if (UPSTREAM_MOBILE_HOSTS.some((root) => host === root || host.endsWith(`.${root}`)))
+    throw new MobileReleaseConfigurationError(
+      `${setting} must not target an upstream hosted domain.`,
+    );
+}
+/** Runs in Expo config too, even without release intent or account credentials. */
+export function assertMobileHostedDestinations(env: Environment) {
+  const authEnabled = env.MOBILE_AUTH_ENABLED === "1";
+  const pushEnabled = env.MOBILE_PUSH_ENABLED === "1";
+  if (authEnabled && env.MOBILE_AUTH_DOMAIN?.trim())
+    assertForkMobileHost(env.MOBILE_AUTH_DOMAIN.trim(), "MOBILE_AUTH_DOMAIN");
+  if ((authEnabled || pushEnabled) && env.MOBILE_RELAY_URL?.trim())
+    assertForkMobileHost(new URL(env.MOBILE_RELAY_URL.trim()).hostname, "MOBILE_RELAY_URL");
+}
 export function mobileAuthDomains(env: Environment) {
   if (env.MOBILE_AUTH_ENABLED !== "1") return [];
   const domain = env.MOBILE_AUTH_DOMAIN?.trim();
   if (!domain) return [];
   if (!/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(domain))
     throw new Error("MOBILE_AUTH_DOMAIN must be a hostname.");
+  assertForkMobileHost(domain, "MOBILE_AUTH_DOMAIN");
   return [`applinks:${domain}`, `webcredentials:${domain}`];
 }
 export function assertEnabledMobileFeatures(env: Environment, platform: string) {
+  assertMobileHostedDestinations(env);
   if (env.MOBILE_AUTH_ENABLED === "1") {
     const domain = requiredMobileSetting(env, "MOBILE_AUTH_DOMAIN");
     mobileAuthDomains(env);

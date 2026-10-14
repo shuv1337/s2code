@@ -9,6 +9,7 @@ import {
   resolveExpoIdentity,
   mobileAuthDomains,
   assertEnabledMobileFeatures,
+  assertMobileHostedDestinations,
   assertFirebaseDestination,
 } from "../../scripts/lib/mobile-release-identity.ts";
 
@@ -21,6 +22,7 @@ const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const expoIdentity = resolveExpoIdentity(repoEnv);
 const pushEnabled = repoEnv.MOBILE_PUSH_ENABLED === "1";
 const authEnabled = repoEnv.MOBILE_AUTH_ENABLED === "1";
+assertMobileHostedDestinations(repoEnv);
 const releasePlatform = repoEnv.EAS_BUILD_PLATFORM ?? repoEnv.MOBILE_RELEASE_PLATFORM ?? "all";
 if (repoEnv.MOBILE_RELEASE_INTENT === "1") assertEnabledMobileFeatures(repoEnv, releasePlatform);
 if (repoEnv.MOBILE_UPDATES_ENABLED === "1" && !expoIdentity.projectId)

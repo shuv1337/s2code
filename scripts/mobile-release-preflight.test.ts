@@ -14,6 +14,7 @@ import {
   assertMobileBuildConfig,
   assertFirebaseDestination,
   assertEnabledMobileFeatures,
+  assertMobileHostedDestinations,
   mobileAuthDomains,
   mirrorConfiguration,
   assertApkIdentity,
@@ -62,6 +63,81 @@ const mirrorEnv = {
 };
 
 describe("fork mobile release preflight", () => {
+  it.each([
+    "t3.codes",
+    "clerk.t3.codes",
+    "auth.t3tools.com",
+    "auth.ping.gg",
+    "pingdotgg.github.io",
+    "t3tools.github.io",
+  ])("rejects enabled auth for upstream host %s even with its matching key", (host) => {
+    const auth = {
+      MOBILE_AUTH_ENABLED: "1",
+      MOBILE_AUTH_DOMAIN: host,
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa(`${host}$`)}`,
+      EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "fixture",
+      MOBILE_RELAY_URL: "https://relay.fork.example",
+    };
+    expect(() => assertEnabledMobileFeatures(auth, "all")).toThrow("upstream");
+    expect(() => mobileAuthDomains(auth)).toThrow("upstream");
+  });
+  it.each([
+    "https://relay.t3.codes",
+    "https://RELAY.T3.CODES./v1",
+    "https://relay.t3tools.com",
+    "https://relay.ping.gg",
+    "https://pingdotgg.github.io",
+  ])("rejects upstream relay %s for enabled hosted features", (url) => {
+    for (const flag of ["MOBILE_AUTH_ENABLED", "MOBILE_PUSH_ENABLED"])
+      expect(() => assertMobileHostedDestinations({ [flag]: "1", MOBILE_RELAY_URL: url })).toThrow(
+        "upstream",
+      );
+  });
+  it("does not confuse fork host suffixes with upstream ownership", () => {
+    expect(() =>
+      assertMobileHostedDestinations({
+        MOBILE_AUTH_ENABLED: "1",
+        MOBILE_AUTH_DOMAIN: "auth.t3.codes.fork.example",
+        MOBILE_RELAY_URL: "https://not-t3.codes.fork.example",
+      }),
+    ).not.toThrow();
+  });
+  it.each([
+    { MOBILE_AUTH_DOMAIN: "clerk.t3.codes", MOBILE_RELAY_URL: "https://relay.fork.example" },
+    { MOBILE_AUTH_DOMAIN: "auth.fork.example", MOBILE_RELAY_URL: "https://relay.t3.codes" },
+  ])(
+    "rejects upstream enabled hosted destinations during non-release Expo config evaluation (%j)",
+    (settings) => {
+      const cwd = NodeURL.fileURLToPath(new URL("../apps/mobile", import.meta.url));
+      const result = NodeChildProcess.spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          'import config from "./app.config.ts"; console.log(JSON.stringify(config));',
+        ],
+        {
+          cwd,
+          encoding: "utf8",
+          env: {
+            PATH: process.env.PATH,
+            APP_VARIANT: "production",
+            EXPO_OWNER: "",
+            EXPO_PROJECT_ID: "",
+            MOBILE_AUTH_ENABLED: "1",
+            MOBILE_PUSH_ENABLED: "0",
+            MOBILE_UPDATES_ENABLED: "0",
+            MOBILE_RELEASE_INTENT: "0",
+            EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa(`${settings.MOBILE_AUTH_DOMAIN}$`)}`,
+            ...settings,
+          },
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("upstream");
+      expect(result.stdout).toBe("");
+    },
+  );
   it("evaluates account-free Expo config with derived fork extension identities and no upstream hosted defaults", () => {
     const cwd = NodeURL.fileURLToPath(new URL("../apps/mobile", import.meta.url));
     for (const variant of ["production", "preview", "development"] as const) {

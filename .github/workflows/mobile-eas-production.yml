@@ -17,7 +17,7 @@ name: Mobile EAS Production
 #      Store approval, Apple closes the release train and `version` must be
 #      bumped before another iOS build can be submitted. Releasing to the App
 #      Store stays a manual App Store Connect step.
-#   2. OTA: publish a production-channel update for each platform where at
+#   2. OTA (explicitly enabled only): publish a production-channel update where at
 #      least one finished production build matches the current native
 #      fingerprint. Older binaries of the same major version with a matching
 #      fingerprint receive it too; the major version is part of the
@@ -25,6 +25,8 @@ name: Mobile EAS Production
 #      reaches the previous major's store binaries over the air. Until a
 #      build for the new fingerprint finishes, the OTA is skipped rather than
 #      published into the void.
+#      With OTA off, a matching native fingerprint does not ship JS changes;
+#      a push that schedules no replacement binary fails with manual build instructions.
 # Hold native-change PRs (the "📱 Native Change" label) and merge them as a
 # batch to avoid a store build per PR.
 # workflow_dispatch remains as a manual override for both modes (e.g. to
@@ -312,6 +314,9 @@ jobs:
       # because only the major version is part of the fingerprint.
       # An errored build for this fingerprint is not retried on push (it would
       # rebuild on every merge); retry via workflow_dispatch mode=build.
+      # With OTA disabled, a matching native build does not prove these JS
+      # changes shipped. If no replacement is scheduled, fail with a manual
+      # binary-release action rather than reporting a successful no-op.
       - id: reconcile
         name: Publish OTA or cut store build
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'push'
@@ -345,10 +350,6 @@ jobs:
                 echo ":x: $platform: OTA publish failed (fingerprint \`$hash\`)" >> "$GITHUB_STEP_SUMMARY"
               fi
             fi
-            if [ "$finished" -gt 0 ] && [ "$MOBILE_UPDATES_ENABLED" != 1 ]; then
-              echo "$platform: OTA is explicitly disabled; no update published." >> "$GITHUB_STEP_SUMMARY"
-            fi
-
             reason=""
             if [ "$finished" -eq 0 ] && [ "$active" -eq 0 ]; then
               if [ "$errored" -gt 0 ]; then
@@ -362,6 +363,12 @@ jobs:
             fi
 
             if [ -z "$reason" ]; then
+              if [ "$MOBILE_UPDATES_ENABLED" != 1 ]; then
+                echo "::error::$platform: OTA is disabled and no replacement binary was scheduled. Run Mobile EAS Production via workflow_dispatch with mode=build, profile=production, platform=$platform on this commit."
+                echo ":x: $platform: OTA is disabled; JS changes are not delivered by a matching native fingerprint. Run workflow_dispatch with mode=build, profile=production, platform=$platform on this commit." >> "$GITHUB_STEP_SUMMARY"
+                failed=1
+                continue
+              fi
               if [ "$finished" -eq 0 ]; then
                 echo ":hourglass: $platform: production build for fingerprint \`$hash\` is in progress — OTA resumes on the next merge after it finishes" >> "$GITHUB_STEP_SUMMARY"
               fi
