@@ -294,6 +294,16 @@ interface CreateDevRunnerEnvInput {
   readonly devUrl: URL | undefined;
 }
 
+export function resolveDevRunnerHome(
+  explicit: string | undefined,
+  worktreeHome: string | undefined,
+  env: NodeJS.ProcessEnv,
+) {
+  return (
+    (explicit?.trim() || undefined) ?? worktreeHome ?? (env.SHUV2CODE_HOME?.trim() || undefined)
+  );
+}
+
 export function createDevRunnerEnv({
   mode,
   baseEnv,
@@ -325,6 +335,7 @@ export function createDevRunnerEnv({
     };
 
     if (configuredBaseDir !== undefined) {
+      // Internal alias only after explicit fork/worktree selection, never from ambient T3CODE_HOME.
       output.T3CODE_HOME = resolvedBaseDir;
       output.SHUV2CODE_HOME = resolvedBaseDir;
     } else {
@@ -688,10 +699,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it
     // as one would skip the worktree default and land on the shared home —
     // exactly the outcome this precedence exists to prevent.
-    const resolvedT3Home =
-      (input.t3Home?.trim() || undefined) ??
-      worktreeHome ??
-      (hostEnvironment.SHUV2CODE_HOME?.trim() || hostEnvironment.T3CODE_HOME?.trim() || undefined);
+    const resolvedT3Home = resolveDevRunnerHome(input.t3Home, worktreeHome, hostEnvironment);
     const env = yield* createDevRunnerEnv({
       mode: input.mode,
       baseEnv: hostEnvironment,

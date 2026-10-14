@@ -5,7 +5,7 @@ export const PRODUCT_ID = "shuv2code";
 export const PRODUCT_HOME_MARKER = ".product-identity";
 
 /** Public settings are fork-owned; T3CODE names below remain runtime adapter inputs. */
-export const PUBLIC_CONFIG_KEYS = [
+const PUBLIC_CONFIG_KEYS = [
   "HOME",
   "PORT",
   "HOST",

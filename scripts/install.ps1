@@ -29,6 +29,21 @@ function Fail([string] $message) {
   exit 1
 }
 
+# Windows can briefly keep a vacated directory name locked. Never delete the
+# source tree or nest it into a destination that appeared during a retry.
+function Move-RuntimeDirectory([string] $source, [string] $destination) {
+  for ($attempt = 0; $attempt -le 4; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $destination) { throw "Runtime destination is occupied: $destination" }
+      Move-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+      return
+    } catch {
+      if ($attempt -eq 4) { throw }
+      Start-Sleep -Milliseconds 50
+    }
+  }
+}
+
 if ($env:SHUV2CODE_IMPORT_UPSTREAM) { Fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME." }
 function Assert-ProductPath([string] $directory) {
   $current = [IO.Path]::GetFullPath($directory)
@@ -183,13 +198,24 @@ $defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
 $homeMarker = Join-Path $t3Home ".product-identity"
 Assert-ProductPath $homeMarker
 if (Test-Path -LiteralPath $homeMarker) {
-  if ((Get-Content -LiteralPath $homeMarker -Raw).Trim() -ne "shuv2code") { Fail "Home belongs to another product." }
-} elseif ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force).Count -gt 0 -and $t3Home -ne $defaultForkHome) {
+  $homeProduct = [IO.File]::ReadAllText($homeMarker).Trim()
+  if (-not "shuv2code".StartsWith($homeProduct, [StringComparison]::Ordinal)) { Fail "Home belongs to another product." }
+} else { $homeProduct = "" }
+if ($homeProduct -cne "shuv2code" -and (Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0 -and -not [string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) {
   Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
 }
 foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
 New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
-Set-Content -LiteralPath $homeMarker -Value "shuv2code"
+$homeMarkerTemp = Join-Path $t3Home (".product-identity." + [Guid]::NewGuid().ToString() + ".tmp")
+try {
+  Set-Content -LiteralPath $homeMarkerTemp -Value "shuv2code"
+  if (Test-Path -LiteralPath $homeMarker) { [IO.File]::Replace($homeMarkerTemp, $homeMarker, "$homeMarkerTemp.previous") }
+  else { [IO.File]::Move($homeMarkerTemp, $homeMarker) }
+} finally {
+  foreach ($temporary in @($homeMarkerTemp, "$homeMarkerTemp.previous")) {
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+  }
+}
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
@@ -198,10 +224,10 @@ Assert-ProductPath (Join-Path $targetDir "t3.exe")
 Assert-ProductPath $marker
 $productMarker = Join-Path $targetDir ".install-product"
 Assert-ProductPath $productMarker
-$product = if (Test-Path -LiteralPath $productMarker) { (Get-Content -LiteralPath $productMarker -Raw).Trim() } else { "" }
-if ((Test-Path -LiteralPath $productMarker) -and $product -ne "shuv2code") { Fail "Refusing to reuse or replace a foreign runtime cache." }
+$product = if (Test-Path -LiteralPath $productMarker) { [IO.File]::ReadAllText($productMarker).Trim() } else { "" }
+if (-not "shuv2code".StartsWith($product, [StringComparison]::Ordinal)) { Fail "Refusing to reuse or replace a foreign runtime cache." }
 $completion = $version
-$installedMarker = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -Raw).Trim().Replace("`r`n", "`n") } else { "" }
+$installedMarker = if (Test-Path -LiteralPath $marker) { [IO.File]::ReadAllText($marker).Trim().Replace("`r`n", "`n") } else { "" }
 
 if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -and $installedMarker -eq $completion) {
   Step "Version $version is already downloaded."
@@ -209,6 +235,8 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
   New-Item -ItemType Directory -Force -Path $versionsDir | Out-Null
   $staging = Join-Path $versionsDir (".staging-" + [System.IO.Path]::GetRandomFileName())
   New-Item -ItemType Directory -Path $staging | Out-Null
+  $previous = $previousContainer = $null
+  $validated = $false
   try {
     if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
     [Console]::Error.WriteLine("  ${muted}Installing$reset shuv2code $bold$version$reset`n")
@@ -248,11 +276,40 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
     Set-Content -Path (Join-Path $staging ".install-complete") -Value "$completion`n" -NoNewline
     Set-Content -Path (Join-Path $staging ".install-product") -Value "shuv2code`n" -NoNewline
 
-    if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force }
-    Move-Item $staging $targetDir
+    $validated = $true
+    if (Test-Path -LiteralPath $targetDir) {
+      $previousContainer = Join-Path $versionsDir (".previous-" + [Guid]::NewGuid().ToString())
+      New-Item -ItemType Directory -Path $previousContainer | Out-Null
+      $previous = Join-Path $previousContainer "runtime"
+      Move-RuntimeDirectory $targetDir $previous
+    }
+    if (Test-Path -LiteralPath $targetDir) { throw "A runtime appeared during publication; refusing to overwrite it." }
+    Move-RuntimeDirectory $staging $targetDir
+    if ($previousContainer) {
+      try { Remove-Item -LiteralPath $previousContainer -Recurse -Force -ErrorAction Stop }
+      catch { Write-Warning "Runtime published; previous backup could not be fully removed: $previousContainer" }
+    }
   } catch {
-    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
-    throw
+    $publicationError = $_
+    $retain = $false
+    if ($previous -and (Test-Path -LiteralPath $previous)) {
+      try {
+        if (Test-Path -LiteralPath $targetDir) { throw "Destination is occupied." }
+        Move-RuntimeDirectory $previous $targetDir
+      } catch {
+        [Console]::Error.WriteLine("Could not restore runtime. Previous copy: $previous; validated replacement: $staging")
+        $retain = $true
+      }
+    }
+    if ($validated -and -not (Test-Path -LiteralPath $targetDir)) {
+      [Console]::Error.WriteLine("Validated runtime retained at $staging; retry installation or recover it manually.")
+      $retain = $true
+    }
+    if (-not $retain) {
+      if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+      if ($previousContainer -and (Test-Path -LiteralPath $previousContainer)) { Remove-Item -LiteralPath $previousContainer -Recurse -Force }
+    }
+    throw $publicationError
   }
 }
 

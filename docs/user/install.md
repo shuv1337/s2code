@@ -34,6 +34,10 @@ upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
 when a service-launcher context is inherited. Older maintainer-local fork
 services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
 updating; their old `T3CODE_HOME` setting is not adopted.
+If the binary was already updated, an old unit or unmarked active runtime pauses
+without starting a server. Its log says **Service paused until reinstall** rather
+than repeatedly restarting. Reinstall with `shuv2code service install` using the
+same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
 
 An empty custom home is claimed automatically. Existing installations in the
 exact default fork home remain usable; runtime caches without product metadata

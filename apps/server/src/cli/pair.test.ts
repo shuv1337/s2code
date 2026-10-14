@@ -263,7 +263,7 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("directs to shuv2code serve when no server is running", () =>
+  it.effect("directs to the fork server command when no server is running", () =>
     Effect.gen(function* () {
       const baseDir = makeOwnedTempDirectory("t3-pair-none-test-");
 
