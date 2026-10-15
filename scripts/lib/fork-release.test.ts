@@ -28,6 +28,7 @@ const plan = (channel = "stable", version = "1.2.3") =>
     version,
     channel,
     signing: releaseSigningPolicy(channel, false, fullCredentials),
+    npm: true,
   });
 const manifests = (version = "1.2.3") =>
   FORK_NPM_PACKAGES.map((name) => ({
@@ -98,6 +99,7 @@ describe("fork release contract", () => {
         version,
         channel,
         signing: releaseSigningPolicy(channel, true, {}),
+        npm: false,
       });
       expect(value.title).toContain("UNSIGNED");
       expect(value.distTag).toBe(channel);

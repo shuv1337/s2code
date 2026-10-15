@@ -70,7 +70,7 @@ describe("fork workflow gates", () => {
     const publish = workflow.split("  publish:\n")[1]!;
     expect(publish).toContain("needs.due.outputs.allowed_ref == 'true'");
     expect(publish).toContain("github.event.repository.default_branch");
-    expect(publish).toContain("startsWith(github.ref, 'refs/tags/v')");
+    expect(publish).not.toContain("refs/tags/");
   });
   it("leaves preview signing outside the release environment and supplies the packager's existing config names", () => {
     expect(desktop).not.toContain("environment: fork-release");

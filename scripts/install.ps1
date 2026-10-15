@@ -5,9 +5,10 @@
 #
 # Environment:
 #   SHUV2CODE_CHANNEL           release train to follow: stable, nightly, or preview
-#                            (default: stable; preview is a maintainers' test train)
+#                            (default: nightly, the only train the fork publishes)
 #   SHUV2CODE_VERSION           exact version to install (overrides SHUV2CODE_CHANNEL)
-#   SHUV2CODE_HOME              Server home directory (default: ~\.shuv2code-v2)
+#   SHUV2CODE_HOME              Server home directory (default: ~\.shuv2code-v2-<channel>,
+#                            or ~\.shuv2code-v2 for stable)
 #   SHUV2CODE_INSTALL_BIN_DIR   where shuv2code is linked (default: ~\.local\bin)
 #   SHUV2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
@@ -159,7 +160,7 @@ $arch = switch ($rawArch) {
   default { Fail "unsupported architecture $rawArch" }
 }
 
-$channel = if ($env:SHUV2CODE_CHANNEL) { $env:SHUV2CODE_CHANNEL } else { "stable" }
+$channel = if ($env:SHUV2CODE_CHANNEL) { $env:SHUV2CODE_CHANNEL } else { "nightly" }
 $version = $env:SHUV2CODE_VERSION
 if (-not $version) {
   # Tags are v<semver>; the channel is the prerelease identifier, or none for
@@ -177,7 +178,7 @@ if (-not $version) {
   $version = $tag.Substring(1)
 }
 if ($version -match '-preview\.') {
-  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set SHUV2CODE_CHANNEL=stable (the default) for a supported build."
+  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set SHUV2CODE_CHANNEL=nightly (the default) for a supported build."
   if ($channel -ne "preview" -and -not $env:SHUV2CODE_VERSION) {
     Fail "refusing a preview build that was not explicitly requested"
   }

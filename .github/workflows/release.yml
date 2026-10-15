@@ -1,26 +1,16 @@
 name: Fork release
 
+# The fork ships nightly only. The scripts keep upstream's stable/preview
+# branches so merges stay clean, but nothing here can start them.
 on:
-  push:
-    tags: ["v*.*.*", "!v*-*"]
   schedule:
-    - cron: "8,38 * * * *"
+    # Daily at 09:17 UTC (2:17 AM PDT, 1:17 AM PST). Skipped when main has no
+    # new commits or the last nightly is less than six hours old.
+    - cron: "17 9 * * *"
+  # Manual runs release main immediately, without the due check.
   workflow_dispatch:
-    inputs:
-      channel:
-        description: Release channel
-        type: choice
-        options: [preview, stable, nightly]
-        default: preview
-      version:
-        description: Exact version override (must match the channel)
-        type: string
-      allow_unsigned:
-        description: Explicitly allow labeled unsigned nightly/preview artifacts (never stable)
-        type: boolean
-        default: false
 
-# Serialize publication across channels, including the shared release index.
+# Serialize publication, including the shared release index.
 concurrency:
   group: fork-release
   cancel-in-progress: false
@@ -56,10 +46,10 @@ jobs:
             core.setOutput('allowed_ref', String(allowed));
             if (!allowed) {
               core.setOutput('due', 'false');
-              core.notice('Release skipped: publication requires the default branch or a version tag. No publisher token or protected environment requested.');
+              core.notice('Release skipped: nightly publication requires the default branch. No publisher token or protected environment requested.');
               return;
             }
-            await assertReleaseSource({ github, context, releaseChannel: context.eventName === 'push' ? 'stable' : context.eventName === 'schedule' ? 'nightly' : context.payload.inputs?.channel || 'preview' });
+            await assertReleaseSource({ github, context, releaseChannel: 'nightly' });
             const due = context.eventName !== 'schedule' || await shouldReleaseNightly({ github, context, core });
             core.setOutput('due', String(due));
             if (!due) core.notice('No release needed: unchanged nightly source or release interval not elapsed. No delivery attempted.');
@@ -89,12 +79,13 @@ jobs:
           node-version-file: package.json
           run-install: true
       - id: plan
-        name: Require fork release accounts/signing and resolve one source/version
+        name: Resolve one nightly source/version, signing and npm policy
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_VERSION: ${{ inputs.version }}
-          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          RELEASE_CHANNEL: nightly
+          # Sign each platform whose credentials are complete; otherwise the
+          # release is labeled UNSIGNED.
+          ALLOW_UNSIGNED: "true"
           FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -213,7 +204,7 @@ jobs:
     needs: [due, preflight, prepare]
     if: >-
       needs.due.outputs.allowed_ref == 'true' &&
-      (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v'))
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04 # npm trusted publishing requires GitHub-hosted runners.
     environment: fork-release
     timeout-minutes: 30
@@ -244,5 +235,5 @@ jobs:
         with:
           name: fork-release-prepared
           path: prepared
-      - name: Draft, verify, publish platforms then launcher, expose feeds and index last
+      - name: Draft, verify, publish npm when ready, expose feeds and index last
         run: node scripts/fork-release.ts publish --execute
