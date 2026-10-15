@@ -17,7 +17,7 @@ name: Mobile EAS Production
 #      Store approval, Apple closes the release train and `version` must be
 #      bumped before another iOS build can be submitted. Releasing to the App
 #      Store stays a manual App Store Connect step.
-#   2. OTA: publish a production-channel update for each platform where at
+#   2. OTA (explicitly enabled only): publish a production-channel update where at
 #      least one finished production build matches the current native
 #      fingerprint. Older binaries of the same major version with a matching
 #      fingerprint receive it too; the major version is part of the
@@ -25,6 +25,9 @@ name: Mobile EAS Production
 #      reaches the previous major's store binaries over the air. Until a
 #      build for the new fingerprint finishes, the OTA is skipped rather than
 #      published into the void.
+#      With OTA off, a matching native fingerprint does not ship JS changes;
+#      unchanged content in the highest-numbered finished production binary needs no replacement.
+#      Undelivered content fails with manual build instructions.
 # Hold native-change PRs (the "📱 Native Change" label) and merge them as a
 # batch to avoid a store build per PR.
 # workflow_dispatch remains as a manual override for both modes (e.g. to
@@ -75,6 +78,10 @@ on:
       - packages/client-runtime/**
       - packages/contracts/**
       - packages/shared/**
+      - packages/provider-*/**
+      - packages/watch-native/**
+      - native/libghostty-vt/LICENSE
+      - third-party-licenses.config.json
       - assets/**
       - scripts/**
       - patches/**
@@ -98,6 +105,30 @@ jobs:
     env:
       APP_VARIANT: production
       NODE_OPTIONS: --max-old-space-size=8192
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+      EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_API_PRIVATE_KEY: ${{ secrets.ASC_API_PRIVATE_KEY }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_PLAY_PROJECT_ID: ${{ vars.GOOGLE_PLAY_PROJECT_ID }}
+      GOOGLE_PLAY_TRACK: ${{ vars.GOOGLE_PLAY_TRACK }}
+      GOOGLE_PLAY_PREVIEW_TRACK: ${{ vars.GOOGLE_PLAY_PREVIEW_TRACK }}
+      MOBILE_UPDATES_ENABLED: ${{ vars.MOBILE_UPDATES_ENABLED || '0' }}
+      MOBILE_PUSH_ENABLED: ${{ vars.MOBILE_PUSH_ENABLED || '0' }}
+      MOBILE_AUTH_ENABLED: ${{ vars.MOBILE_AUTH_ENABLED || '0' }}
+      MOBILE_AUTH_DOMAIN: ${{ vars.MOBILE_AUTH_DOMAIN }}
+      MOBILE_RELAY_URL: ${{ vars.MOBILE_RELAY_URL }}
+      APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
+      APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+      MOBILE_BUILD_PROFILE: ${{ inputs.profile || 'production' }}
+      MOBILE_RELEASE_MODE: ${{ github.event_name == 'push' && 'build' || inputs.mode }}
+      MOBILE_RELEASE_PLATFORM: ${{ inputs.platform || 'all' }}
     steps:
       - name: Reject preview OTA updates
         if: github.event_name == 'workflow_dispatch' && inputs.profile == 'v2-preview' && inputs.mode == 'update'
@@ -106,15 +137,15 @@ jobs:
           exit 1
 
       - id: expo-token
-        name: Check for EXPO_TOKEN
+        name: Require release authorization (missing configuration is a failure)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           if [ -n "$EXPO_TOKEN" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "EXPO_TOKEN is not available; skipping EAS production job."
+            echo "::error::EXPO_TOKEN is required for release-intent workflows; no build or OTA was delivered."
+            exit 1
           fi
 
       - id: version_app_token
@@ -176,12 +207,20 @@ jobs:
           # ignored build script (no allowBuilds config outside the repo).
           packager: npm
 
+      - name: Verify fork Expo identity before the first environment pull
+        if: steps.expo-token.outputs.present == 'true'
+        run: node scripts/mobile-release-preflight.ts project --mode "$MOBILE_RELEASE_MODE" --profile "$MOBILE_BUILD_PROFILE" --platform "$MOBILE_RELEASE_PLATFORM"
+
       - name: Pull production environment variables
         if: steps.expo-token.outputs.present == 'true'
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas env:pull production --non-interactive
+
+      - name: Verify resolved fork identities, store access and enabled capabilities
+        if: steps.expo-token.outputs.present == 'true'
+        run: node scripts/mobile-release-preflight.ts prepare --mode "$MOBILE_RELEASE_MODE" --profile "$MOBILE_BUILD_PROFILE" --platform "$MOBILE_RELEASE_PLATFORM"
 
       - name: Apply manual version override
         if: steps.version_app_token.outcome == 'success'
@@ -258,6 +297,12 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
+          # Publishing into an unmatched runtime is not delivery. Require a finished fork binary.
+          for platform in $( [ "${{ inputs.platform }}" = all ] && echo 'ios android' || echo '${{ inputs.platform }}' ); do
+            hash="$(eas fingerprint:generate --platform "$platform" --environment production --json --non-interactive | sed -n '/^{/,$p' | jq -er '.hash')"
+            finished="$(eas build:list --platform "$platform" --build-profile production --fingerprint-hash "$hash" --json --non-interactive | jq '[.[] | select(.status == "FINISHED")] | length')"
+            [ "$finished" -gt 0 ] || { echo "::error::No finished fork $platform binary matches this OTA runtime."; exit 1; }
+          done
           eas update \
             --channel production \
             --environment production \
@@ -274,6 +319,9 @@ jobs:
       # because only the major version is part of the fingerprint.
       # An errored build for this fingerprint is not retried on push (it would
       # rebuild on every merge); retry via workflow_dispatch mode=build.
+      # With OTA disabled, a matching native build does not prove these JS
+      # changes shipped. Compare committed mobile inputs against the finished
+      # matching binary's source revision before requiring a manual release.
       - id: reconcile
         name: Publish OTA or cut store build
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'push'
@@ -294,7 +342,7 @@ jobs:
             errored="$(jq '[.[] | select(.status == "ERRORED")] | length' <<<"$matches")"
             latest_version="$(eas build:list --platform "$platform" --build-profile production --limit 1 --json --non-interactive | jq -r '.[0].appVersion // "none"')"
 
-            if [ "$finished" -gt 0 ]; then
+            if [ "$finished" -gt 0 ] && [ "$MOBILE_UPDATES_ENABLED" = 1 ]; then
               if eas update \
                 --channel production \
                 --environment production \
@@ -307,7 +355,6 @@ jobs:
                 echo ":x: $platform: OTA publish failed (fingerprint \`$hash\`)" >> "$GITHUB_STEP_SUMMARY"
               fi
             fi
-
             reason=""
             if [ "$finished" -eq 0 ] && [ "$active" -eq 0 ]; then
               if [ "$errored" -gt 0 ]; then
@@ -321,6 +368,32 @@ jobs:
             fi
 
             if [ -z "$reason" ]; then
+              if [ "$MOBILE_UPDATES_ENABLED" != 1 ]; then
+                # Select by build number across production, NOT just matching fingerprints.
+                # A revert may match an old binary while the newer store binary differs.
+                production_builds="$(mktemp)"
+                echo '[]' > "$production_builds"
+                offset=0
+                while :; do
+                  page="$(eas build:list --platform "$platform" --build-profile production --status finished --limit 50 --offset "$offset" --json --non-interactive)"
+                  jq --argjson page "$page" '. + $page' "$production_builds" > "$production_builds.next"
+                  mv "$production_builds.next" "$production_builds"
+                  if [ "$(jq 'length' <<<"$page")" -lt 50 ]; then break; fi
+                  offset=$((offset + 50))
+                  if [ "$offset" -ge 10000 ]; then echo 'Cannot verify complete production build history' >&2; exit 1; fi
+                done
+                if node ../../scripts/mobile-content-delivered.ts --builds-file "$production_builds" "$version" "$hash"; then
+                  rm "$production_builds"
+                  echo "::notice::$platform: mobile inputs are unchanged from a finished matching binary; no replacement release is needed."
+                  echo ":white_check_mark: $platform: mobile inputs are unchanged from a finished matching binary; OTA remains disabled." >> "$GITHUB_STEP_SUMMARY"
+                  continue
+                fi
+                rm "$production_builds"
+                echo "::error::$platform: OTA is disabled and no replacement binary was scheduled. Run Mobile EAS Production via workflow_dispatch with mode=build, profile=production, platform=$platform on this commit."
+                echo ":x: $platform: OTA is disabled; JS changes are not delivered by a matching native fingerprint. Run workflow_dispatch with mode=build, profile=production, platform=$platform on this commit." >> "$GITHUB_STEP_SUMMARY"
+                failed=1
+                continue
+              fi
               if [ "$finished" -eq 0 ]; then
                 echo ":hourglass: $platform: production build for fingerprint \`$hash\` is in progress — OTA resumes on the next merge after it finishes" >> "$GITHUB_STEP_SUMMARY"
               fi
@@ -336,3 +409,12 @@ jobs:
             fi
           done
           exit "$failed"
+
+      - name: Clean generated submission credentials
+        if: always()
+        run: |
+          case "${MOBILE_SUBMISSION_CREDENTIALS_DIR:-}" in
+            "$RUNNER_TEMP"/fork-mobile-submit-*) rm -rf -- "$MOBILE_SUBMISSION_CREDENTIALS_DIR" ;;
+            '') ;;
+            *) echo 'Unexpected credential directory; refusing cleanup.' >&2; exit 1 ;;
+          esac

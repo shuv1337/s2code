@@ -22,8 +22,8 @@ The lint command uses the K1 frontend because AGP's K2 frontend crashes while an
 
 ## Firebase and app build
 
-1. Create a Firebase project and register each Android application identifier you intend to build: `com.t3tools.t3code.dev`, `com.t3tools.t3code.preview`, or `com.t3tools.t3code`.
-2. Download `google-services.json`. Set `T3CODE_ANDROID_GOOGLE_SERVICES_FILE` to its path when running Expo prebuild and building the app. The JSON must contain the selected variant's package identifier.
+1. Create a fork-owned Firebase project and register each Android application identifier you intend to build: `dev.shuv.shuv2code.dev`, `dev.shuv.shuv2code.preview`, or `dev.shuv.shuv2code`.
+2. Download `google-services.json`. Set `ANDROID_GOOGLE_SERVICES_FILE` to its path and `FIREBASE_PROJECT_ID` to the fork project when running Expo prebuild and building the app. The JSON must contain the selected variant's package identifier. Enable Android push explicitly with `MOBILE_PUSH_ENABLED=1`.
 3. Create a service-account key with permission to send FCM messages for that Firebase project. Keep this private JSON outside the repository and the app bundle.
 4. Enable the Firebase Cloud Messaging API in the Google project if it is not already enabled. For hosted delivery, set the relay's `FCM_SERVICE_ACCOUNT` secret to the service-account JSON.
 5. Build a new Android binary. A JavaScript-only update cannot install the native notification handler or Firebase configuration. Hosted delivery also needs the relay database migration and updated relay deployment; local verification can use the watcher below.
@@ -32,27 +32,28 @@ For a local development build, from `apps/mobile`:
 
 ```sh
 APP_VARIANT=development \
-T3CODE_ANDROID_GOOGLE_SERVICES_FILE=/absolute/path/google-services.json \
+ANDROID_GOOGLE_SERVICES_FILE=/absolute/path/google-services.json \
+FIREBASE_PROJECT_ID=your-fork-project MOBILE_PUSH_ENABLED=1 \
 vp run android:dev
 ```
 
-For an EAS build, provide the same configuration through each selected build environment, using an EAS file variable named `T3CODE_ANDROID_GOOGLE_SERVICES_FILE` for the Google services file. Make the file available to fingerprint generation as well as the native build. FCM service-account credentials belong on the relay, not in EAS's app environment. If deploying a separate hosted relay, configure the build's T3 Connect public settings for that relay and Clerk application as described in [T3 Connect](../internals/t3-connect.md).
+For an EAS build, supply `ANDROID_GOOGLE_SERVICES_JSON` (the public Firebase app JSON) or a readable `ANDROID_GOOGLE_SERVICES_FILE` during preflight. Preflight freezes the verified JSON into the generated build profile; Expo config materializes those exact bytes on the worker, overriding any different EAS file variable. Do not put an FCM service-account private key in this setting: private sending credentials belong only on the fork relay. Configure fork-owned `MOBILE_RELAY_URL` and Clerk settings as described in [T3 Connect](../internals/t3-connect.md).
 
-Set `T3CODE_MOBILE_UPDATES_ENABLED=0` before prebuild and bundling a private binary to disable the repository's configured Expo OTA update source. A debug development-client APK requires Metro; a bundled release build is needed to verify cold-start notification taps without Expo's development launcher.
+OTA defaults off; keep `MOBILE_UPDATES_ENABLED=0` before prebuild and bundling a private binary. A debug development-client APK requires Metro; a bundled release build is needed to verify cold-start notification taps without Expo's development launcher.
 
 ## Clerk sign-in for private builds
 
 Clerk's native Android sign-in uses `clerk://<applicationId>.callback`. In the Clerk instance selected by the build's publishable key, its administrator must allow the exact callback under **Native applications > Allowlist for mobile SSO redirect**. For the development package, add:
 
 ```text
-clerk://com.t3tools.t3code.dev.callback
+clerk://dev.shuv.shuv2code.dev.callback
 ```
 
 The app already declares the matching callback receiver. A "redirect url ... does not match an authorized redirect URI" error requires a Clerk configuration change; rebuilding the same APK does not fix it. Reopen sign-in after the administrator saves the entry. See [Android native sign-in redirects](./connect-setup.md#android-native-sign-in-redirects) for the other variants.
 
-Using T3's existing production publishable key selects the maintainers' Clerk instance. It grants no access to change that instance's allowlist. The chosen package's callback must already be allowed or be added by that instance's administrator. Android device registration and hosted delivery separately require the relay deployment below. A successful direct-pairing or FCM smoke test does not verify hosted sign-in or device registration.
+Use a fork-owned Clerk instance and allowlist the selected package's callback there; upstream hosted destinations are rejected. Android device registration and hosted delivery separately require the fork relay deployment below. A successful direct-pairing or FCM smoke test does not verify hosted sign-in or device registration.
 
-Building with `APP_VARIANT=production` selects `com.t3tools.t3code` and its corresponding Clerk callback. Set the same variant during prebuild and bundling, and supply a Google services file that includes that package. Keep OTA updates disabled for a private binary. A locally signed build with this package cannot update an official installation signed by the maintainer or coexist with it; removing that installation also removes its app-local data. The development package remains a separate app.
+Building with `APP_VARIANT=production` selects `dev.shuv.shuv2code` and its corresponding Clerk callback. Set the same variant during prebuild and bundling, and supply a Google services file that includes that package. Keep OTA updates disabled for a private binary. Fork identities coexist with upstream; two installations with the same fork package still require compatible signing certificates to update each other. The development package remains a separate app.
 
 ## Focused delivery check
 

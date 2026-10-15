@@ -161,11 +161,14 @@ function readRelayConfig(): { readonly url: string } | null {
 }
 
 function canRegisterRemoteLiveActivities(): boolean {
-  return Platform.OS === "ios";
+  return Platform.OS === "ios" && Constants.expoConfig?.extra?.pushEnabled !== false;
 }
 
 function canRegisterPushNotifications(): boolean {
-  return Platform.OS === "ios" || Platform.OS === "android";
+  return (
+    Constants.expoConfig?.extra?.pushEnabled !== false &&
+    (Platform.OS === "ios" || Platform.OS === "android")
+  );
 }
 
 export function shouldRegisterAgentAwarenessDeviceForProvider(
