@@ -2,7 +2,7 @@ name: Thread Transfer Report
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI Full]
     types: [completed]
 
 permissions:
@@ -13,6 +13,8 @@ permissions:
 jobs:
   publish:
     name: Publish PR comment
+    # Full CI is manual-only. Retain the publisher for a future explicit PR lane,
+    # but never post missing-report comments for the lightweight CI workflow.
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-24.04
     concurrency:

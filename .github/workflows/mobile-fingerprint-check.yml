@@ -1,6 +1,7 @@
 name: Mobile Fingerprint Check
 
-# Detects whether a PR changes the native fingerprint — i.e. whether merging
+# Opt in with the `ci:mobile-fingerprint` PR label. Detects whether a PR changes
+# the native fingerprint — i.e. whether merging
 # it would leave main un-OTA-able until a new store build ships. Native-change
 # PRs get the "📱 Native Change" label so they can be held and merged as a
 # batch right before the next store submission, keeping main OTA-able for
@@ -15,7 +16,7 @@ on:
   pull_request:
     # Run even when a rebase or base change removes every native input from the
     # diff, so the label can be cleared without installing Expo dependencies.
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, labeled]
 
 concurrency:
   group: mobile-fingerprint-check-${{ github.event.pull_request.number }}
@@ -23,6 +24,7 @@ concurrency:
 
 jobs:
   fingerprint:
+    if: contains(github.event.pull_request.labels.*.name, 'ci:mobile-fingerprint')
     name: Native fingerprint diff
     runs-on: ubuntu-24.04
     permissions:
