@@ -9,6 +9,11 @@ const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
+const {
+  mirrorConfiguration,
+  assertApkIdentity,
+  MobileReleaseConfigurationError,
+} = require("../../scripts/lib/mobile-release-identity.ts");
 
 const PLAY_API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications";
 
@@ -38,7 +43,7 @@ async function playAccessToken(key) {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Google token exchange failed: ${response.status} ${await response.text()}`);
+    throw new Error(`Google token exchange failed: HTTP ${response.status}`);
   }
   return (await response.json()).access_token;
 }
@@ -46,7 +51,7 @@ async function playAccessToken(key) {
 async function play(token, method, url) {
   const response = await fetch(url, { method, headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) {
-    throw new Error(`${method} ${url} failed: ${response.status} ${await response.text()}`);
+    throw new Error(`Google Play request failed: HTTP ${response.status}`);
   }
   return response;
 }
@@ -77,7 +82,7 @@ function gh(...args) {
 
 function readRelease(tag) {
   try {
-    return JSON.parse(gh("release", "view", tag, "--json", "assets,body"));
+    return JSON.parse(gh("api", `repos/${requireEnv("GH_REPO")}/releases/tags/${tag}`));
   } catch {
     return undefined;
   }
@@ -86,9 +91,12 @@ function readRelease(tag) {
 // Downloads the build's universal APK and uploads it, creating the release on
 // first use. Returns false when Play lists no universal APK, which happens
 // while it is still processing a fresh upload.
-async function uploadApk({ token, appUrl, build, tag, apkName, notes, release }) {
+async function uploadApk(
+  { token, appUrl, build, tag, apkName, notes, release, expected },
+  dependencies = { play, gh, execFileSync },
+) {
   const generated = await (
-    await play(token, "GET", `${appUrl}/generatedApks/${build.versionCode}`)
+    await dependencies.play(token, "GET", `${appUrl}/generatedApks/${build.versionCode}`)
   ).json();
   // One entry per app signing key. More than one means a key rotation, so
   // fail rather than guess which signature testers should get.
@@ -99,37 +107,64 @@ async function uploadApk({ token, appUrl, build, tag, apkName, notes, release })
   }
   const { downloadId } = universal[0].generatedUniversalApk;
 
-  const apkPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "apk-")), apkName);
-  const download = await play(
-    token,
-    "GET",
-    `${appUrl}/generatedApks/${build.versionCode}/downloads/${encodeURIComponent(downloadId)}:download?alt=media`,
-  );
-  await pipeline(Readable.fromWeb(download.body), fs.createWriteStream(apkPath));
-
-  if (!release) {
-    // Prerelease with a non-v tag: release.yml, the desktop updater, the CLI,
-    // and the marketing site's latest-release lookup all ignore it.
-    gh(
-      "release",
-      "create",
-      tag,
-      "--prerelease",
-      "--latest=false",
-      "--title",
-      "T3 Code for Android (nightly)",
-      "--notes",
-      notes,
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "shuv2code-apk-"));
+  const apkPath = path.join(directory, apkName);
+  try {
+    const download = await dependencies.play(
+      token,
+      "GET",
+      `${appUrl}/generatedApks/${build.versionCode}/downloads/${encodeURIComponent(downloadId)}:download?alt=media`,
     );
+    await pipeline(Readable.fromWeb(download.body), fs.createWriteStream(apkPath));
+    const packageName = dependencies.execFileSync(
+      "apkanalyzer",
+      ["manifest", "application-id", apkPath],
+      { encoding: "utf8" },
+    );
+    // apksigner must succeed before its reported certificate can be trusted.
+    const signature = dependencies.execFileSync("apksigner", ["verify", "--print-certs", apkPath], {
+      encoding: "utf8",
+    });
+    assertApkIdentity(packageName, signature, expected);
+    const digest = `sha256:${crypto.createHash("sha256").update(fs.readFileSync(apkPath)).digest("hex")}`;
+    if (
+      release?.assets?.some(
+        (asset) => asset.name === apkName && asset.state === "uploaded" && asset.digest === digest,
+      )
+    )
+      return true;
+
+    if (!release) {
+      // Prerelease with a non-v tag: release.yml, the desktop updater, the CLI,
+      // and the marketing site's latest-release lookup all ignore it.
+      dependencies.gh(
+        "release",
+        "create",
+        tag,
+        "--prerelease",
+        "--latest=false",
+        "--title",
+        "shuv2code for Android (nightly)",
+        "--notes",
+        notes,
+      );
+    }
+    // --clobber replaces an asset a failed upload left behind.
+    dependencies.gh("release", "upload", tag, apkPath, "--clobber");
+    return true;
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
-  // --clobber replaces an asset a failed upload left behind.
-  gh("release", "upload", tag, apkPath, "--clobber");
-  return true;
 }
 
 async function main() {
-  const packageName = requireEnv("PACKAGE_NAME");
-  const trackName = requireEnv("PLAY_TRACK");
+  const expected = mirrorConfiguration(process.env);
+  if (process.argv.includes("--check-config")) {
+    console.log("Fork APK mirror configuration validated; no artifact delivery attempted.");
+    return;
+  }
+  const packageName = expected.packageName;
+  const trackName = expected.track;
   const tag = requireEnv("RELEASE_TAG");
   const key = JSON.parse(requireEnv("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"));
   const summary = (line) =>
@@ -141,26 +176,22 @@ async function main() {
   const build = await newestTrackBuild(token, appUrl, trackName);
   if (!build) {
     console.log(`The ${trackName} track has no live release.`);
-    return;
+    summary(":hourglass: The configured fork track has no live release; no APK was delivered.");
+    throw new Error("APK mirror delivered nothing: the configured track has no live release.");
   }
 
   const safeName = build.versionName.replace(/[^0-9A-Za-z.]+/g, "-").replace(/^-|-$/g, "");
-  const apkName = `t3code-android-${safeName}-${build.versionCode}.apk`;
+  const apkName = `shuv2code-android-${safeName}-${build.versionCode}.apk`;
   const notes = [
-    `T3 Code for Android that works with nightly servers, mirrored from the Google Play ${trackName} track. Current build: ${build.versionName} (${build.versionCode}).`,
+    `shuv2code for Android, mirrored from the fork Google Play ${trackName} track. Current build: ${build.versionName} (${build.versionCode}).`,
     "",
-    "The Play Store release can't connect to a nightly server yet. Install this APK if you can't join the Play testing group. Only the newest build is kept here.",
+    "The package name and Play app-signing certificate were verified against the fork configuration before attachment. Only the newest fork build is kept here.",
   ].join("\n");
 
   const release = readRelease(tag);
   const assets = release?.assets ?? [];
   // A failed upload can leave an empty asset under the final name.
-  const published = assets.some(
-    (asset) => asset.name === apkName && asset.state === "uploaded" && asset.size > 0,
-  );
-  if (published) {
-    console.log(`${apkName} is already published.`);
-  } else if (await uploadApk({ token, appUrl, build, tag, apkName, notes, release })) {
+  if (await uploadApk({ token, appUrl, build, tag, apkName, notes, release, expected })) {
     console.log(`Published ${apkName}.`);
     summary(`:white_check_mark: Published \`${apkName}\` to the \`${tag}\` release.`);
   } else {
@@ -169,12 +200,18 @@ async function main() {
     summary(
       `:hourglass: Play lists no universal APK for ${build.versionName} (${build.versionCode}).`,
     );
-    return;
+    throw new Error(
+      "APK mirror delivered nothing: Play has not exposed a universal APK; retry later.",
+    );
   }
 
   // Reconciled on every run so an interrupted cleanup finishes on the next one.
   for (const stale of assets) {
-    if (stale.name.endsWith(".apk") && stale.name !== apkName) {
+    if (
+      stale.name.startsWith("shuv2code-android-") &&
+      stale.name.endsWith(".apk") &&
+      stale.name !== apkName
+    ) {
       gh("release", "delete-asset", tag, stale.name, "--yes");
     }
   }
@@ -183,7 +220,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+module.exports = { uploadApk };
+if (require.main === module)
+  main().catch((error) => {
+    console.error(
+      error instanceof MobileReleaseConfigurationError
+        ? error.message
+        : "Fork APK mirror failed validation or destination access. No unverified APK will be attached.",
+    );
+    process.exit(1);
+  });

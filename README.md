@@ -6,7 +6,7 @@ client architecture with the devil-terminal identity and Apple Watch work.
 ## Run this fork
 
 Use [fork builds](https://github.com/shuv1337/shuv2code/releases) or build from source with
-`vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#fork-builds)
+`vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#matrix-and-source)
 cover desktop artifacts. Published fork CLI packages use `shuv2code` / `s2c`.
 
 The installed fork starts with a fresh `~/.shuv2code-v2` home and separate Electron profile.
@@ -61,9 +61,14 @@ To try it once without installing, run `npx t3@latest` instead.
 
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Fork builds are distributed through [shuv1337/shuv2code GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
+Stable and nightly are separate installations and may coexist with upstream T3 Code.
+Release files retain the `T3-Code-<version>-<arch>` artifact naming convention; choose the
+version for the channel you want.
 
 #### Windows (`winget`)
+
+Upstream T3 Code only; no fork Winget package is available:
 
 ```bash
 winget install T3Tools.T3Code
@@ -71,11 +76,15 @@ winget install T3Tools.T3Code
 
 #### Windows (`scoop`)
 
+Upstream T3 Code only; no fork Scoop package is available:
+
 ```bash
 scoop install extras/t3code
 ```
 
 #### macOS (Homebrew)
+
+Upstream T3 Code only; no fork Homebrew cask is available. Install fork builds from GitHub Releases instead:
 
 ```bash
 brew install --cask t3-code
@@ -83,27 +92,30 @@ brew install --cask t3-code
 
 #### Debian, Ubuntu (`.deb`)
 
-Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
+Download the intended stable or nightly `.deb` from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases), then install that exact file:
 
 ```bash
-sudo apt install ./T3-Code-*.deb
+sudo apt install ./T3-Code-VERSION-ARCH.deb
 ```
 
 #### Arch Linux (AUR)
 
-Stable:
+Fork recipes are implemented in [`packaging/aur`](./packaging/aur). They are not a
+claim that the packages have already been published to AUR. After publication, stable:
 
 ```bash
-yay -S t3code-bin
+yay -S shuv2code-bin
 ```
 
 Nightly:
 
 ```bash
-yay -S t3code-nightly-bin
+yay -S shuv2code-nightly-bin
 ```
 
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
+The two packages do not conflict with each other or upstream. Their commands are
+`shuv2code` and `shuv2code-nightly`, respectively. Preview builds are separate
+GitHub release artifacts, not an AUR package.
 
 ## Some notes
 

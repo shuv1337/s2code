@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
  * Turns the per-platform CLI archives of one release into the npm packages
- * behind `npx t3` / `npm i -g t3`: one `@t3code/t3-<platformKey>` package per
- * archive holding the archive's contents verbatim, plus the `t3` launcher
+ * behind `npx shuv2code`: one `@shuv2code/t3-<platformKey>` package per
+ * archive holding the archive's contents verbatim, plus the `shuv2code` launcher
  * that lists them as optionalDependencies and execs the one npm installed.
  * The bytes a user gets from npm are therefore the release archive's, and
  * running them needs neither a Node runtime, npm, nor a native build.
  *
  * Output layout under `--output-dir`:
  *
- *   @t3code/t3-<platformKey>/      archive contents flattened + package.json
- *   @t3code/t3-<platformKey>.tgz   the same tree as an npm tarball
- *   t3/                             launcher: package.json, bin/t3.js, README.md
- *   t3.tgz                          the launcher as an npm tarball
+ *   @shuv2code/t3-<platformKey>/     archive contents flattened + package.json
+ *   @shuv2code/t3-<platformKey>.tgz  the same tree as an npm tarball
+ *   shuv2code/                     launcher: package.json, bin/t3.js, README.md
+ *   shuv2code.tgz                  the launcher as an npm tarball
  *
  * The tarballs are what gets published. `npm publish <dir>` always drops
  * `node_modules/` (npm-packlist ignores it whatever `files` says, and
@@ -90,7 +90,7 @@ export function npmPlatformPackageName(platformKey: CliArchivePlatformKey): stri
 
 /**
  * package.json for one platform package; `os`/`cpu` let npm skip the other
- * five. The archive's runtime `node_modules` (native addons and their
+ * four. The archive's runtime `node_modules` (native addons and their
  * loaders) ships inside the tarball, and npm only keeps a nested tree it can
  * account for: anything not declared is extraneous and pruned on the next
  * `npm install` in that project, which then breaks the executable. Declaring

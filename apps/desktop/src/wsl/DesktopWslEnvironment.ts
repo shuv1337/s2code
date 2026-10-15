@@ -289,7 +289,7 @@ const WSL_RUNTIME_SELECTION_GRACE_MINUTES = 5;
 const sanitizeWslRuntimeId = (value: string): string => value.replace(/[^A-Za-z0-9._-]/g, "_");
 
 /** Claim an empty Linux-side home before preflight makes it nonempty, including archive-failure fallback. */
-export const buildWslHomeOwnershipScript = (version: string) => {
+const buildWslHomeOwnershipScript = (version: string) => {
   const identity = resolveChannelIdentity(version);
   return [
     `channel_home="$HOME/${identity.homeDirectory}"`,

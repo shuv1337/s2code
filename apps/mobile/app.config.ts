@@ -1,19 +1,33 @@
 import type { ExpoConfig } from "expo/config";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
+import * as NodeURL from "node:url";
+import { materializeMobileFirebaseConfig } from "../../scripts/lib/mobile-firebase-config.ts";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import {
+  MOBILE_SLUG,
+  MOBILE_VARIANTS,
+  resolveExpoIdentity,
+  mobileAuthDomains,
+  assertEnabledMobileFeatures,
+  assertMobileHostedDestinations,
+} from "../../scripts/lib/mobile-release-identity.ts";
 
 type AppVariant = "development" | "preview" | "production";
 
 const repoEnv = loadRepoEnv();
-const forkClerkKey = forkClerkPublishableKey(repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY);
-const authDomain = forkClerkKey
-  ? atob(forkClerkKey.split("_").slice(2).join("_")).replace(/\$$/, "")
-  : null;
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+const expoIdentity = resolveExpoIdentity(repoEnv);
+const pushEnabled = repoEnv.MOBILE_PUSH_ENABLED === "1";
+const authEnabled = repoEnv.MOBILE_AUTH_ENABLED === "1";
+assertMobileHostedDestinations(repoEnv);
+const releasePlatform = repoEnv.EAS_BUILD_PLATFORM ?? repoEnv.MOBILE_RELEASE_PLATFORM ?? "all";
+if (repoEnv.MOBILE_RELEASE_INTENT === "1") assertEnabledMobileFeatures(repoEnv, releasePlatform);
+if (repoEnv.MOBILE_UPDATES_ENABLED === "1" && !expoIdentity.projectId)
+  throw new Error("EXPO_PROJECT_ID and EXPO_OWNER are required when opting into fork OTA updates.");
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
@@ -78,24 +92,15 @@ const RELEASE_ASSETS = {
 
 const VARIANT_CONFIG = {
   development: {
-    appName: "shuv2code Dev",
-    scheme: "shuv2code-dev",
-    iosBundleIdentifier: "dev.shuv.shuv2code.dev",
-    androidPackage: "dev.shuv.shuv2code.dev",
+    ...MOBILE_VARIANTS.development,
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "shuv2code Nightly",
-    scheme: "shuv2code-nightly",
-    iosBundleIdentifier: "dev.shuv.shuv2code.nightly",
-    androidPackage: "dev.shuv.shuv2code.nightly",
+    ...MOBILE_VARIANTS.preview,
     assets: PREVIEW_ASSETS,
   },
   production: {
-    appName: "shuv2code",
-    scheme: "shuv2code",
-    iosBundleIdentifier: "dev.shuv.shuv2code",
-    androidPackage: "dev.shuv.shuv2code",
+    ...MOBILE_VARIANTS.production,
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -113,14 +118,14 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 // A fork signing with its own paid team cannot use upstream's App IDs. These
 // override just the identity; every derived ID (widgets, app group, watch)
-// follows, and the default build stays upstream's.
+// follows. Release preflight requires the registered fork production identity.
 const forkBundleIdentifier = repoEnv.T3CODE_IOS_BUNDLE_IDENTIFIER?.trim();
 if (forkBundleIdentifier && !IOS_BUNDLE_IDENTIFIER_PATTERN.test(forkBundleIdentifier)) {
   throw new Error(
     "T3CODE_IOS_BUNDLE_IDENTIFIER must be a reverse-DNS identifier such as com.example.t3code.",
   );
 }
-const appleTeamId = repoEnv.T3CODE_IOS_TEAM_ID?.trim();
+const appleTeamId = repoEnv.APPLE_TEAM_ID?.trim() ?? repoEnv.T3CODE_IOS_TEAM_ID?.trim();
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 const iosBundleIdentifier = isIosPersonalTeamBuild
@@ -129,6 +134,16 @@ const iosBundleIdentifier = isIosPersonalTeamBuild
     ? forkBundleIdentifier +
       variant.iosBundleIdentifier.slice(VARIANT_CONFIG.production.iosBundleIdentifier.length)
     : variant.iosBundleIdentifier;
+if (iosBundleIdentifier.startsWith("com.t3tools."))
+  throw new Error("Upstream iOS bundle identifiers cannot be used for fork builds.");
+const googleServicesFile =
+  pushEnabled && releasePlatform !== "ios"
+    ? materializeMobileFirebaseConfig(
+        repoEnv,
+        variant.androidPackage,
+        NodeURL.fileURLToPath(new URL(".", import.meta.url)),
+      )
+    : undefined;
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
@@ -141,7 +156,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   {
     bundleIdentifier: `${iosBundleIdentifier}.widgets`,
     groupIdentifier: `group.${iosBundleIdentifier}`,
-    enablePushNotifications: true,
+    enablePushNotifications: pushEnabled,
     // Agent activity can update many times an hour; without the
     // frequent-updates entitlement iOS throttles the update budget sooner.
     frequentUpdates: true,
@@ -242,7 +257,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "shuv2code",
+  slug: MOBILE_SLUG,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "2.0.0",
@@ -256,11 +271,8 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled:
-      repoEnv.T3CODE_MOBILE_UPDATES_ENABLED === "1" && Boolean(repoEnv.T3CODE_EXPO_PROJECT_ID),
-    ...(repoEnv.T3CODE_EXPO_PROJECT_ID
-      ? { url: `https://u.expo.dev/${repoEnv.T3CODE_EXPO_PROJECT_ID}` }
-      : {}),
+    enabled: repoEnv.MOBILE_UPDATES_ENABLED === "1" && Boolean(expoIdentity.projectId),
+    ...(expoIdentity.projectId ? { url: `https://u.expo.dev/${expoIdentity.projectId}` } : {}),
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -273,7 +285,7 @@ const config: ExpoConfig = {
     bundleIdentifier: iosBundleIdentifier,
     // Configure the fork's signing team explicitly for non-interactive builds.
     ...(appleTeamId ? { appleTeamId } : {}),
-    associatedDomains: authDomain ? [`applinks:${authDomain}`, `webcredentials:${authDomain}`] : [],
+    associatedDomains: mobileAuthDomains(repoEnv),
     entitlements: {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
@@ -313,9 +325,7 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
-    ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
-      ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
-      : {}),
+    ...(googleServicesFile ? { googleServicesFile } : {}),
     adaptiveIcon: {
       backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
       ...(variant.assets.androidAdaptiveBackgroundImage
@@ -365,17 +375,24 @@ const config: ExpoConfig = {
     ...(isIosPersonalTeamBuild
       ? [sharingPlugin]
       : ["./plugins/withShareExtensionDisplayName.cjs", sharingPlugin]),
-    [
-      "expo-notifications",
-      {
-        icon: variant.assets.androidNotificationIcon,
-        color: variant.assets.androidNotificationColor,
-        mode: APP_VARIANT === "development" ? "development" : "production",
-      },
-    ],
+    ...(pushEnabled
+      ? [
+          [
+            "expo-notifications",
+            {
+              icon: variant.assets.androidNotificationIcon,
+              color: variant.assets.androidNotificationColor,
+              mode: APP_VARIANT === "development" ? "development" : "production",
+            },
+          ] as NonNullable<ExpoConfig["plugins"]>[number],
+        ]
+      : []),
     // appleSignIn must be gated here: withoutIosPersonalTeamCapabilities.cjs runs before
     // plugins earlier in this array, so it cannot strip the entitlement Clerk would add.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    [
+      "@clerk/expo",
+      { theme: "./clerk-theme.json", appleSignIn: authEnabled && !isIosPersonalTeamBuild },
+    ],
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -493,11 +510,14 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    pushEnabled,
     relay: {
-      url: forkHostedOrigin(repoEnv.T3CODE_RELAY_URL),
+      url: forkHostedOrigin(repoEnv.MOBILE_RELAY_URL),
     },
     clerk: {
-      publishableKey: forkClerkKey,
+      publishableKey: authEnabled
+        ? forkClerkPublishableKey(repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY)
+        : null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
     },
     // Native Google sign-in credentials. @clerk/expo reads these from `extra`
@@ -505,20 +525,26 @@ const config: ExpoConfig = {
     // the iOS URL scheme at prebuild to register it in Info.plist.
     // Unset values must be omitted (not null): the public manifest serializes
     // null to {}, which is truthy and would defeat Clerk's fallback checks.
-    EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
+    EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: authEnabled
+      ? repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID
+      : undefined,
+    EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: authEnabled
+      ? repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID
+      : undefined,
+    EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: authEnabled
+      ? repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID
+      : undefined,
+    EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: authEnabled
+      ? repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME
+      : undefined,
     observability: {
       tracesUrl: repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ?? "https://api.axiom.co/v1/traces",
       tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    ...(repoEnv.T3CODE_EXPO_PROJECT_ID
-      ? { eas: { projectId: repoEnv.T3CODE_EXPO_PROJECT_ID } }
-      : {}),
+    ...(expoIdentity.projectId ? { eas: { projectId: expoIdentity.projectId } } : {}),
   },
-  ...(repoEnv.T3CODE_EXPO_OWNER ? { owner: repoEnv.T3CODE_EXPO_OWNER } : {}),
+  ...(expoIdentity.owner ? { owner: expoIdentity.owner } : {}),
 };
 
 export default config;

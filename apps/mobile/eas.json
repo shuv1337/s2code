@@ -54,7 +54,7 @@
       "distribution": "store",
       "channel": "v2-preview",
       "env": {
-        "T3CODE_MOBILE_UPDATES_ENABLED": "0"
+        "MOBILE_UPDATES_ENABLED": "0"
       }
     },
     "production": {
@@ -75,17 +75,12 @@
     "v2-preview": {
       "extends": "production",
       "android": {
-        "track": "v2",
         "releaseStatus": "completed"
       }
     },
     "production": {
-      "ios": {
-        "ascAppId": "6787819824"
-      },
-      "android": {
-        "track": "internal"
-      }
+      "ios": {},
+      "android": {}
     }
   }
 }

@@ -1,5 +1,13 @@
 const MINIMUM_RELEASE_GAP_MS = 6 * 60 * 60 * 1000;
 
+function isAllowedForkPublishRef(ref, defaultBranch) {
+  return (
+    Boolean(defaultBranch) &&
+    (ref === `refs/heads/${defaultBranch}` ||
+      /^refs\/tags\/v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(ref))
+  );
+}
+
 function repositoryDefaultBranch(context) {
   const branch = context.payload.repository?.default_branch;
   if (!branch) {
@@ -103,6 +111,7 @@ async function resolveLatestNightlyCommit({ github, context, core }) {
 }
 
 module.exports = {
+  isAllowedForkPublishRef,
   assertCommitOnDefaultBranch,
   assertReleaseSource,
   shouldReleaseNightly,
