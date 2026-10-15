@@ -6,6 +6,7 @@ import {
   resolveCloudPublicConfig,
   resolveRelayClerkTokenOptions,
 } from "./publicConfig";
+const key = `pk_test_${btoa("clerk.fork.test$")}`;
 
 vi.mock("expo-constants", () => ({
   default: {
@@ -16,6 +17,14 @@ vi.mock("expo-constants", () => ({
 }));
 
 describe("resolveCloudPublicConfig", () => {
+  it("does not expose upstream hosted values to the runtime", () => {
+    const config = resolveCloudPublicConfig({
+      clerk: { publishableKey: `pk_live_${btoa("clerk.t3.codes$")}`, jwtTemplate: "relay" },
+      relay: { url: "https://relay.t3.codes" },
+    });
+    expect(config.clerk.publishableKey).toBeNull();
+    expect(config.relay.url).toBeNull();
+  });
   it("reports the missing Clerk JWT template as structured configuration", () => {
     expect(() => resolveRelayClerkTokenOptions()).toThrowError(
       new CloudPublicConfigMissingError({ key: "T3CODE_CLERK_JWT_TEMPLATE" }),
@@ -42,7 +51,7 @@ describe("resolveCloudPublicConfig", () => {
   it("normalizes statically injected cloud configuration", () => {
     expect(
       resolveCloudPublicConfig({
-        clerk: { publishableKey: "  pk_test_example  ", jwtTemplate: "  t3-relay  " },
+        clerk: { publishableKey: `  ${key}  `, jwtTemplate: "  t3-relay  " },
         relay: { url: " https://relay.example.test/// " },
         observability: {
           tracesUrl: " https://api.axiom.co/v1/traces ",
@@ -52,7 +61,7 @@ describe("resolveCloudPublicConfig", () => {
       }),
     ).toEqual({
       clerk: {
-        publishableKey: "pk_test_example",
+        publishableKey: key,
         jwtTemplate: "t3-relay",
       },
       relay: {
@@ -69,12 +78,12 @@ describe("resolveCloudPublicConfig", () => {
   it("rejects an insecure relay URL", () => {
     expect(
       resolveCloudPublicConfig({
-        clerk: { publishableKey: "pk_test_example", jwtTemplate: "t3-relay" },
+        clerk: { publishableKey: key, jwtTemplate: "t3-relay" },
         relay: { url: "http://relay.example.test" },
       }),
     ).toEqual({
       clerk: {
-        publishableKey: "pk_test_example",
+        publishableKey: key,
         jwtTemplate: "t3-relay",
       },
       relay: {

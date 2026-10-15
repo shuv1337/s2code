@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./hostedConfig": {
+      "types": "./src/hostedConfig.ts",
+      "import": "./src/hostedConfig.ts"
+    },
     "./productHome": {
       "types": "./src/productHome.ts",
       "import": "./src/productHome.ts"

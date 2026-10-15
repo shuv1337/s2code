@@ -1,4 +1,5 @@
 import type { ExpoConfig } from "expo/config";
+import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 import * as NodeURL from "node:url";
 import { materializeMobileFirebaseConfig } from "../../scripts/lib/mobile-firebase-config.ts";
 
@@ -511,10 +512,12 @@ const config: ExpoConfig = {
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     pushEnabled,
     relay: {
-      url: repoEnv.MOBILE_RELAY_URL ?? null,
+      url: forkHostedOrigin(repoEnv.MOBILE_RELAY_URL),
     },
     clerk: {
-      publishableKey: authEnabled ? (repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null) : null,
+      publishableKey: authEnabled
+        ? forkClerkPublishableKey(repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY)
+        : null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
     },
     // Native Google sign-in credentials. @clerk/expo reads these from `extra`

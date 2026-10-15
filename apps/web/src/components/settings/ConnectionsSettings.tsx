@@ -159,6 +159,7 @@ import {
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { HOSTED_UNAVAILABLE_MESSAGE } from "@t3tools/shared/hostedConfig";
 import { RemoveT3ConnectEnvironmentDialog } from "../clerk/RemoveT3ConnectEnvironmentDialog";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { authEnvironment } from "~/state/auth";
@@ -1983,7 +1984,8 @@ function CloudLinkRow({
   readonly canReadRelay: boolean;
   readonly canManageRelay: boolean;
 }) {
-  if (!hasCloudPublicConfig()) return null;
+  if (!hasCloudPublicConfig())
+    return <SettingsRow title="Hosted Connect" description={HOSTED_UNAVAILABLE_MESSAGE} />;
   if (!canReadRelay) {
     return (
       <SettingsRow
@@ -2006,7 +2008,7 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
         <EmptyDescription>
           {cloudEnabled
             ? "Click “Add environment” to pair another environment, or connect one from T3 Connect."
-            : "Click “Add environment” to pair another environment."}
+            : `Click “Add environment” to pair another environment. ${HOSTED_UNAVAILABLE_MESSAGE}`}
         </EmptyDescription>
       </EmptyHeader>
     </Empty>

@@ -14,6 +14,9 @@ import { RelayObservability } from "./src/observability.ts";
 import { ManagedEndpointZone, RelayApiZone } from "./src/zone.ts";
 import * as RelayWorker from "./src/worker.ts";
 
+// Boundary guard must precede Stack/layer construction, which can provision resources.
+throw new Error("Hosted relay deployment is not supported in this fork.");
+
 export default Alchemy.Stack(
   "T3CodeRelay",
   {

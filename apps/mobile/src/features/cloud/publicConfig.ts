@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { relayClerkTokenOptions } from "@t3tools/shared/relayAuth";
-import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
+import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 import * as Schema from "effect/Schema";
 
 export class CloudPublicConfigMissingError extends Schema.TaggedError<CloudPublicConfigMissingError>()(
@@ -59,11 +59,11 @@ function normalizeSecureUrl(value: unknown): string | null {
 export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig?.extra) {
   return {
     clerk: {
-      publishableKey: trimNonEmpty(extra?.clerk?.publishableKey),
+      publishableKey: forkClerkPublishableKey(trimNonEmpty(extra?.clerk?.publishableKey)),
       jwtTemplate: trimNonEmpty(extra?.clerk?.jwtTemplate),
     },
     relay: {
-      url: normalizeSecureRelayUrl(trimNonEmpty(extra?.relay?.url) ?? ""),
+      url: forkHostedOrigin(trimNonEmpty(extra?.relay?.url)),
     },
     observability: {
       tracesUrl: normalizeSecureUrl(extra?.observability?.tracesUrl),

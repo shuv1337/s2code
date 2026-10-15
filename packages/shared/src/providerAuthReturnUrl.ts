@@ -1,7 +1,11 @@
 import { isLoopbackHost } from "./preview.ts";
+import { forkHostedOrigin } from "./hostedConfig.ts";
 
-/** Only return to a local client or the hosted T3 client, never an arbitrary OAuth-supplied URL. */
-export function providerAuthReturnUrl(value: string | undefined): string | undefined {
+/** Hosted returns require an explicitly configured fork origin; local returns need none. */
+export function providerAuthReturnUrl(
+  value: string | undefined,
+  hostedAppUrl?: string,
+): string | undefined {
   if (!value) return undefined;
   try {
     const url = new URL(value);
@@ -16,7 +20,7 @@ export function providerAuthReturnUrl(value: string | undefined): string | undef
       ].includes(url.protocol) && url.host === "app";
     const web =
       ["http:", "https:"].includes(url.protocol) &&
-      (isLoopbackHost(url.hostname) || url.origin === "https://app.t3.codes");
+      (isLoopbackHost(url.hostname) || url.origin === forkHostedOrigin(hostedAppUrl));
     if (
       url.username ||
       url.password ||

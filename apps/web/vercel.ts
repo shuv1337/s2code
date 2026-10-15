@@ -1,9 +1,13 @@
 import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
+import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 
-const ROUTER_HOST = "app.t3.codes";
+const routerOrigin = forkHostedOrigin(process.env.SHUV2CODE_HOSTED_APP_URL);
+const ROUTER_HOST = routerOrigin ? new URL(routerOrigin).hostname : "";
 const HOSTED_WEB_CHANNEL_COOKIE = "t3code_web_channel";
-const LATEST_ORIGIN = "https://latest.app.t3.codes";
-const NIGHTLY_ORIGIN = "https://nightly.app.t3.codes";
+const LATEST_ORIGIN = forkHostedOrigin(`https://${process.env.SHUV2CODE_WEB_LATEST_DOMAIN ?? ""}`);
+const NIGHTLY_ORIGIN = forkHostedOrigin(
+  `https://${process.env.SHUV2CODE_WEB_NIGHTLY_DOMAIN ?? ""}`,
+);
 const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
   {
     type: "request.query",
@@ -51,16 +55,23 @@ export const config: VercelConfig = {
       },
       status: 302,
     },
-    {
-      src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST), matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, "nightly")],
-      dest: `${NIGHTLY_ORIGIN}/$1`,
-    },
-    {
-      src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST)],
-      dest: `${LATEST_ORIGIN}/$1`,
-    },
+    ...(ROUTER_HOST && LATEST_ORIGIN && NIGHTLY_ORIGIN
+      ? [
+          {
+            src: "/(.*)",
+            has: [
+              matchers.host(ROUTER_HOST),
+              matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, "nightly"),
+            ],
+            dest: `${NIGHTLY_ORIGIN}/$1`,
+          },
+          {
+            src: "/(.*)",
+            has: [matchers.host(ROUTER_HOST)],
+            dest: `${LATEST_ORIGIN}/$1`,
+          },
+        ]
+      : []),
   ],
   rewrites: [routes.rewrite("/(.*)", "/index.html")],
 };
