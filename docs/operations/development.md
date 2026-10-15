@@ -33,9 +33,11 @@ are available on that run; lightweight CI does not post missing-report comments.
 Cursor's review hook is unchanged (a separate lightweight notification job on
 main pushes and PR open/reopen/ready events). Public-contribution size/vouch jobs
 are skipped in this private fork. Mobile fingerprinting requires the
-`ci:mobile-fingerprint` PR label; existing labeled mobile/macOS/web previews
-remain opt-in. Mobile production delivery and relay deployment are manual-only;
-signing, delivery preflights and OTA opt-in remain unchanged. Issue-label syncing
+`ci:mobile-fingerprint` PR label; existing labeled mobile/macOS previews
+remain opt-in. Web previews are disabled: their label only emits a notice.
+Relay deployment is also disabled; manual dispatch only emits a notice, never
+deploys. Mobile production delivery is manual-only; signing, delivery preflights
+and OTA opt-in remain unchanged. Issue-label syncing
 still runs when its own configuration changes; scheduled Android delivery is
 independent of code-push CI.
 
