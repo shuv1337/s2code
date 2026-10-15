@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   collect-targets:
+    if: github.repository != 'shuv1337/shuv2code'
     name: Collect PR targets
     runs-on: ubuntu-24.04
     outputs:

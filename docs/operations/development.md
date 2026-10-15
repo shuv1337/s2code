@@ -15,6 +15,35 @@ a new browser.
 
 Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Code and Codespaces setup.
 
+## Private-fork CI
+
+Normal PRs and main pushes run **one validation job**, named `CI` on Ubuntu:
+one pinned dependency install, formatting, lint, and a small fork identity/release
+invariant suite. No typecheck, build, broad application suites, Rust or macOS
+analysis runs by default. Stale runs are cancelled per PR/branch. The existing
+Protect main required status remains `CI`.
+
+For the full checks, select **Actions → CI Full → Run workflow**, choose the
+branch, or run `gh workflow run ci-full.yml --ref <branch>`. This manual lane
+retains lint/unused-code checks, typechecks, desktop build, package/web tests,
+six server shards, Rust, macOS mobile analysis, release smoke and transfer
+artifacts. Its 16 jobs are not required for routine merges. Transfer artifacts
+are available on that run; lightweight CI does not post missing-report comments.
+
+Cursor's review hook is unchanged (a separate lightweight notification job on
+main pushes and PR open/reopen/ready events). Public-contribution size/vouch jobs
+are skipped in this private fork. Mobile fingerprinting requires the
+`ci:mobile-fingerprint` PR label; existing labeled mobile/macOS/web previews
+remain opt-in. Mobile production delivery and relay deployment are manual-only;
+signing, delivery preflights and OTA opt-in remain unchanged. Issue-label syncing
+still runs when its own configuration changes; scheduled Android delivery is
+independent of code-push CI.
+
+The full desktop/CLI release pipeline is unchanged: stable `v*.*.*` tags
+(excluding prereleases), scheduled nightly due checks and manual releases still
+use the full platform matrix, signing, checksums, npm publication and update
+feeds. CI Full does not publish a release.
+
 ## Choosing a dev process
 
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.

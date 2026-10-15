@@ -1,6 +1,7 @@
 name: Mobile EAS Production
 
 # Production builds and OTA updates run from CI (Linux) — never from a laptop.
+# Private fork: dispatch manually; ordinary main pushes do not trigger delivery.
 # Under the fingerprint runtime-version policy the fingerprint must be computed
 # in the same OS/pnpm as the EAS build; a macOS `eas build` computes a different
 # fingerprint (platform-specific deps + pnpm version) and errors. On this Linux
@@ -71,23 +72,6 @@ on:
         description: "OTA update message (mode=update only)"
         required: false
         type: string
-  push:
-    branches: [main]
-    paths:
-      - apps/mobile/**
-      - packages/client-runtime/**
-      - packages/contracts/**
-      - packages/shared/**
-      - packages/provider-*/**
-      - packages/watch-native/**
-      - native/libghostty-vt/LICENSE
-      - third-party-licenses.config.json
-      - assets/**
-      - scripts/**
-      - patches/**
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - .github/workflows/mobile-eas-production.yml
 
 # Serialize runs so OTAs publish in merge order. GitHub keeps at most one
 # queued run per group, so a burst of merges collapses into one run of the

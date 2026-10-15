@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   prepare-config:
+    if: github.repository != 'shuv1337/shuv2code'
     name: Prepare PR size config
     runs-on: ubuntu-24.04
     outputs:

@@ -1,9 +1,6 @@
 name: Deploy T3 Connect relay
 
 on:
-  push:
-    branches:
-      - main
   # Redeploys main after a variable or secret change. Alchemy redeploys the
   # Worker when a value it reads changes, so force is rarely needed, and it
   # replaces the Postgres runtime role (alchemy-run/alchemy#1832).
