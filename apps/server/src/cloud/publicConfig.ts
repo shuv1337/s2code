@@ -10,8 +10,10 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
+import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 
 declare const __T3CODE_BUILD_RELAY_URL__: string | undefined;
+declare const __T3CODE_BUILD_HOSTED_APP_URL__: string | undefined;
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 declare const __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: string | undefined;
 declare const __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: string | undefined;
@@ -22,7 +24,7 @@ const CLOUD_CLI_OAUTH_LOOPBACK_PORT = 34338;
 const CLOUD_CLI_OAUTH_SCOPES = CONNECT_OAUTH_SCOPES;
 
 function validateRelayUrl(value: string) {
-  const relayUrl = normalizeSecureRelayUrl(value);
+  const relayUrl = forkHostedOrigin(value);
   return relayUrl === null
     ? Effect.fail(
         new Config.ConfigError(
@@ -111,12 +113,16 @@ export const relayUrlConfig = makeRelayUrlConfig();
  */
 export const hostedAppUrlConfig = makePublicValueConfig(
   "T3CODE_HOSTED_APP_URL",
-  DEFAULT_HOSTED_APP_URL,
+  typeof __T3CODE_BUILD_HOSTED_APP_URL__ === "undefined"
+    ? DEFAULT_HOSTED_APP_URL
+    : __T3CODE_BUILD_HOSTED_APP_URL__,
 ).pipe(Config.mapEffect(validateHostedAppUrl));
 
 function validateHostedAppUrl(value: string) {
   try {
-    const url = new URL(value);
+    const origin = forkHostedOrigin(value, true);
+    if (!origin) throw new Error("Hosted origin is unavailable or not fork-owned.");
+    const url = new URL(origin);
     const isLoopbackHttp =
       url.protocol === "http:" &&
       (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]");
@@ -184,7 +190,11 @@ export function makeCloudCliOAuthConfig({
   }).pipe(
     Config.mapEffect(({ clerkPublishableKey, clientId }) =>
       Effect.try({
-        try: () => clerkFrontendApiUrlFromPublishableKey(clerkPublishableKey),
+        try: () => {
+          if (!forkClerkPublishableKey(clerkPublishableKey))
+            throw new Error("Fork auth application is unconfigured or targets upstream.");
+          return clerkFrontendApiUrlFromPublishableKey(clerkPublishableKey);
+        },
         catch: (cause) =>
           new Config.ConfigError(
             new ConfigProvider.SourceError({
@@ -212,7 +222,16 @@ export function makeCloudCliOAuthConfig({
 export const cloudCliOAuthConfig = makeCloudCliOAuthConfig();
 
 export const hasCloudPublicConfig = Boolean(
-  (normalizeSecureRelayUrl(process.env.T3CODE_RELAY_URL ?? "") ?? buildTimeRelayUrl) &&
-  (process.env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() || buildTimeClerkPublishableKey) &&
+  forkHostedOrigin(process.env.T3CODE_RELAY_URL || buildTimeRelayUrl) &&
+  forkClerkPublishableKey(
+    process.env.T3CODE_CLERK_PUBLISHABLE_KEY || buildTimeClerkPublishableKey,
+  ) &&
+  forkHostedOrigin(
+    process.env.T3CODE_HOSTED_APP_URL ||
+      (typeof __T3CODE_BUILD_HOSTED_APP_URL__ === "undefined"
+        ? ""
+        : __T3CODE_BUILD_HOSTED_APP_URL__),
+    true,
+  ) &&
   (process.env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() || buildTimeClerkCliOAuthClientId),
 );

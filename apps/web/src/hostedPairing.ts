@@ -1,4 +1,5 @@
 import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
+import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
 
@@ -12,7 +13,7 @@ export type HostedAppChannel = "latest" | "nightly";
 
 /** The hosted app origin shared links point at. */
 export function configuredHostedAppUrl(): string {
-  return import.meta.env.VITE_HOSTED_APP_URL?.trim() || DEFAULT_HOSTED_APP_URL;
+  return forkHostedOrigin(import.meta.env.VITE_HOSTED_APP_URL, true) ?? DEFAULT_HOSTED_APP_URL;
 }
 
 function configuredBackendUrl(): string {
@@ -76,8 +77,11 @@ export function buildHostedPairingUrl(input: {
   readonly token: string;
   readonly label?: string | null;
 }): string {
-  const url = new URL("/pair", configuredHostedAppUrl());
-  url.searchParams.set("host", input.host);
+  const hostOrigin = /^https?:\/\//.test(input.host) ? input.host : `http://${input.host}`;
+  // Without a fork hosted client, pair against the destination's own web app.
+  const hostedOrigin = configuredHostedAppUrl();
+  const url = new URL("/pair", hostedOrigin || hostOrigin);
+  if (hostedOrigin) url.searchParams.set("host", input.host);
 
   const label = input.label?.trim();
   if (label) {
@@ -90,7 +94,9 @@ export function buildHostedPairingUrl(input: {
 export function buildHostedChannelSelectionUrl(input: {
   readonly channel: HostedAppChannel;
 }): string {
-  const url = new URL("/__t3code/channel", configuredHostedAppUrl());
+  const origin = configuredHostedAppUrl();
+  if (!origin) throw new Error("Hosted web channel selection is unavailable for this fork.");
+  const url = new URL("/__t3code/channel", origin);
   url.searchParams.set("channel", input.channel);
   return url.toString();
 }

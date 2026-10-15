@@ -10,9 +10,9 @@ const CONNECT_AUTHORIZE_PATH = "/connect";
 /**
  * The CLI prints URLs against this origin and the web bundle uses it to
  * decide whether it is the hosted deployment — the two must agree, so the
- * default lives here.
+ * default lives here. Empty means unconfigured, never the upstream service.
  */
-export const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
+export const DEFAULT_HOSTED_APP_URL = "";
 
 /**
  * Requested at authorize time by the hosted page and by the CLI's device

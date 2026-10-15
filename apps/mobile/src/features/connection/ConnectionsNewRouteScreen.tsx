@@ -28,6 +28,7 @@ import {
 } from "../../state/use-remote-environment-registry";
 import { SymbolView } from "../../components/AppSymbol";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { HOSTED_UNAVAILABLE_MESSAGE } from "@t3tools/shared/hostedConfig";
 import { CloudEnvironmentRows } from "./CloudEnvironmentRows";
 import { splitEnvironmentSections } from "./environmentSections";
 
@@ -272,7 +273,16 @@ export function ConnectionsNewRouteScreen({
             </Text>
           </View>
 
-          {hasCloudPublicConfig() ? <T3ConnectSection /> : null}
+          {hasCloudPublicConfig() ? (
+            <T3ConnectSection />
+          ) : (
+            <Text
+              accessibilityLiveRegion="polite"
+              className="px-4 text-sm leading-normal text-foreground-muted"
+            >
+              {HOSTED_UNAVAILABLE_MESSAGE}
+            </Text>
+          )}
         </View>
       </ScrollView>
     </SettingsScreen>

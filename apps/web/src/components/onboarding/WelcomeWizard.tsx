@@ -37,6 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
+import { HOSTED_UNAVAILABLE_MESSAGE } from "@t3tools/shared/hostedConfig";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { useCompleteOnboarding } from "../../onboarding/firstRun";
@@ -340,6 +341,11 @@ function ConnectionStep({
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
         Choose one or more computers. We’ll set up agents and projects on each.
       </p>
+      {!cloudEnabled ? (
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          {HOSTED_UNAVAILABLE_MESSAGE}
+        </p>
+      ) : null}
       {directEnvironments.length > 0 ? (
         <fieldset className="mt-5 space-y-2">
           <legend className="sr-only">Computers to set up</legend>
