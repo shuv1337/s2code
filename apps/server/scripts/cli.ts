@@ -20,6 +20,8 @@ import {
   ServerCliExecutableImportError,
 } from "./cliErrors.ts";
 import { publishPlatformsThenLauncher } from "./publishOrder.ts";
+import { assertForkNpmSet, assertForkDistTag } from "../../../scripts/lib/fork-release.ts";
+import { ServerCliPublishGuardError } from "./cliErrors.ts";
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
@@ -168,7 +170,7 @@ const buildExeCmd = Command.make(
 
 /**
  * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@t3code/t3-<platform>.tgz` first, `t3.tgz` (the launcher) last, so
+ * every `@shuv2code/t3-<platform>.tgz` first, `shuv2code.tgz` last, so
  * the launcher is never installable before the executables it depends on.
  * Tarballs rather than directories because `npm publish <dir>` strips the
  * `node_modules/` the executable loads its native addons from.
@@ -209,6 +211,24 @@ const publishCmd = Command.make(
         return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
       }
 
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const manifestTexts = yield* Effect.forEach([...platformTarballs, launcherTarball], (file) =>
+        spawner.string(ChildProcess.make("tar", ["-xOf", file, "package/package.json"])),
+      );
+      yield* Effect.try({
+        try: () => {
+          const manifests = manifestTexts.map((text) => JSON.parse(text) as { version?: string });
+          const version = manifests[0]?.version;
+          if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
+            throw new Error("Invalid fork package version.");
+          assertForkNpmSet(manifests, version);
+          assertForkDistTag(version, config.tag);
+          if (config.access !== "public")
+            throw new Error("Fork platform distribution must be public.");
+        },
+        catch: (cause) => new ServerCliPublishGuardError({ cause }),
+      });
+
       const args = ["publish", "--access", config.access, "--tag", config.tag];
       if (config.provenance) args.push("--provenance");
       if (config.dryRun) args.push("--dry-run");
@@ -231,7 +251,7 @@ const publishCmd = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    "Publish the @t3code/t3-<platform> tarballs and then the t3 launcher to npm.",
+    "Publish the complete @shuv2code platform set and then the shuv2code launcher to npm.",
   ),
 );
 

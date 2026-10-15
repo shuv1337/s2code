@@ -1,4 +1,12 @@
 import * as Schema from "effect/Schema";
+export class ServerCliPublishGuardError extends Schema.TaggedError<ServerCliPublishGuardError>()(
+  "ServerCliPublishGuardError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Refusing npm publication outside the complete fork package/version/channel allowlist.";
+  }
+}
 
 export class ServerCliCommandExitError extends Schema.TaggedError<ServerCliCommandExitError>()(
   "ServerCliCommandExitError",

@@ -6,7 +6,7 @@ client architecture with the devil-terminal identity and Apple Watch work.
 ## Run this fork
 
 Use [fork builds](https://github.com/shuv1337/shuv2code/releases) or build from source with
-`vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#fork-builds)
+`vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#matrix-and-source)
 cover desktop artifacts. Published fork CLI packages use `shuv2code` / `s2c`.
 
 The installed fork starts with a fresh `~/.shuv2code-v2` home and separate Electron profile.

@@ -3812,12 +3812,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
+  const signingEnvironment = loadRepoEnv({ repoRoot });
+  // Local/direct signed builds do not require a hosted Clerk account or its
+  // associated-domain provisioning profile. Explicit hosted passkeys retain validation.
+  const hostedPasskeysConfigured = Boolean(
+    signingEnvironment.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ||
+    signingEnvironment.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim(),
+  );
   const configuredMacPasskeySigning =
-    options.platform === "mac" && options.signed
+    options.platform === "mac" && options.signed && hostedPasskeysConfigured
       ? yield* Effect.try({
           try: () =>
             resolveMacPasskeySigningConfiguration(
-              loadRepoEnv({ repoRoot }),
+              signingEnvironment,
               resolveChannelIdentity(appVersion).appId,
             ),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,

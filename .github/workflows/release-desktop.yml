@@ -77,20 +77,28 @@ on:
       # relay state is expected. PR previews carry no tracing config.
       relay_client_tracing:
         required: false
-        default: true
+        default: false
         type: boolean
       clerk_publishable_key:
-        required: true
+        required: false
         type: string
       clerk_jwt_template:
-        required: true
+        required: false
         type: string
       clerk_cli_oauth_client_id:
-        required: true
+        required: false
         type: string
       relay_url:
-        required: true
+        required: false
         type: string
+      release_publication:
+        required: false
+        default: false
+        type: boolean
+      allow_unsigned:
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   # Windows builds read this run's artifact list to wait for the Linux CLI archive.
@@ -99,6 +107,7 @@ permissions:
 
 jobs:
   build:
+    if: github.repository == 'shuv1337/shuv2code'
     name: Build ${{ inputs.label }}
     runs-on: ${{ inputs.runner }}
     # Windows waits for the Linux CLI archive inside its own budget (see
@@ -109,6 +118,7 @@ jobs:
       T3CODE_CLERK_JWT_TEMPLATE: ${{ inputs.clerk_jwt_template }}
       T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
       T3CODE_RELAY_URL: ${{ inputs.relay_url }}
+      SHUV2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/shuv2code
     steps:
       # This repository is public, so Git needs no credentials. checkout's
       # credential cleanup runs submodule foreach even with submodules disabled,
@@ -231,6 +241,28 @@ jobs:
 
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ inputs.version }}"
+
+      - id: signing_policy
+        name: Fail closed on missing release signing configuration
+        if: inputs.release_publication
+        shell: bash
+        env:
+          RELEASE_CHANNEL: ${{ inputs.release_channel }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+        run: node scripts/fork-release.ts signing
 
       # The artifact root is `apps/` (upload-artifact keeps the least common
       # ancestor of its paths), so extracting into `apps` restores
@@ -444,9 +476,9 @@ jobs:
           }
 
           if [[ "${{ inputs.platform }}" == "mac" ]]; then
-            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              if ! has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
-                echo "macOS signing is configured, but APPLE_TEAM_ID or MACOS_PROVISIONING_PROFILE is missing." >&2
+            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER" && [[ "${{ inputs.release_publication }}" != true || "${{ steps.signing_policy.outputs.mac_signed }}" == true ]]; then
+              if ! has_all "$APPLE_TEAM_ID"; then
+                echo "macOS signing is configured, but APPLE_TEAM_ID is missing." >&2
                 exit 1
               fi
 
@@ -454,11 +486,13 @@ jobs:
               printf '%s' "$APPLE_API_KEY" > "$key_path"
               export APPLE_API_KEY="$key_path"
 
-              profile_path="$RUNNER_TEMP/t3code.provisionprofile"
-              printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
-              security cms -D -i "$profile_path" >/dev/null
               export T3CODE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
-              export T3CODE_MACOS_PROVISIONING_PROFILE="$profile_path"
+              if [[ -n "$MACOS_PROVISIONING_PROFILE" ]]; then
+                profile_path="$RUNNER_TEMP/shuv2code.provisionprofile"
+                printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
+                security cms -D -i "$profile_path" >/dev/null
+                export T3CODE_MACOS_PROVISIONING_PROFILE="$profile_path"
+              fi
 
               echo "macOS signing enabled."
               args+=(--signed)
@@ -504,7 +538,7 @@ jobs:
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
       - name: Import macOS signing certificate for the CLI archive
-        if: inputs.cli_archive && inputs.platform == 'mac'
+        if: inputs.cli_archive && inputs.platform == 'mac' && (!inputs.release_publication || steps.signing_policy.outputs.mac_signed == 'true')
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -517,6 +551,7 @@ jobs:
           fi
           keychain="$RUNNER_TEMP/t3-cli-signing.keychain-db"
           keychain_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$keychain_password"
           cert_path="$RUNNER_TEMP/t3-cli-signing.p12"
           printf '%s' "$CSC_LINK" | base64 --decode > "$cert_path"
           security create-keychain -p "$keychain_password" "$keychain"
@@ -524,13 +559,14 @@ jobs:
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$cert_path" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          keychains=("$keychain")
+          while IFS= read -r existing; do keychains+=("$existing"); done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+          security list-keychains -d user -s "${keychains[@]}"
           identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
           if [[ -z "$identity" ]]; then
             echo "No Developer ID Application identity found in CSC_LINK." >&2
             exit 1
           fi
-          echo "::add-mask::$keychain_password"
           echo "T3CODE_CLI_MAC_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
           echo "macOS CLI signing enabled."
 
@@ -562,6 +598,12 @@ jobs:
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
         run: |
           set -euo pipefail
+          if [[ "${{ inputs.release_publication }}" == true && "${{ steps.signing_policy.outputs.mac_signed }}" != true && "${{ inputs.platform }}" == mac ]]; then
+            unset APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER T3CODE_CLI_MAC_SIGN_IDENTITY
+          fi
+          if [[ "${{ inputs.release_publication }}" == true && "${{ steps.signing_policy.outputs.win_signed }}" != true && "${{ inputs.platform }}" == win ]]; then
+            unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME
+          fi
           if [[ "${{ inputs.platform }}" == "mac" && -n "${APPLE_API_KEY:-}" ]]; then
             key_path="$RUNNER_TEMP/AuthKey_cli_${APPLE_API_KEY_ID}.p8"
             printf '%s' "$APPLE_API_KEY" > "$key_path"
@@ -609,6 +651,7 @@ jobs:
           fi
           for pattern in "${patterns[@]}"; do
             for file in $pattern; do
+              [[ "$file" == */builder-debug.yml ]] && continue
               cp "$file" release-publish/
             done
           done
@@ -631,6 +674,50 @@ jobs:
               mv "$manifest" "${manifest%.yml}-win-${{ inputs.arch }}.yml"
             done
           fi
+
+      - name: Verify macOS signature and notarization before declaring a signed receipt
+        if: inputs.release_publication && inputs.platform == 'mac' && steps.signing_policy.outputs.mac_signed == 'true'
+        shell: bash
+        env:
+          EXPECTED_TEAM: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          app="$(find release -maxdepth 3 -name '*.app' -type d -print -quit)"
+          test -n "$app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -F "TeamIdentifier=$EXPECTED_TEAM"
+          # electron-builder notarizes and staples the app bundle, not the DMG container.
+          xcrun stapler validate "$app"
+
+      - name: Verify Windows installer signatures before declaring a signed receipt
+        if: inputs.release_publication && inputs.platform == 'win' && steps.signing_policy.outputs.win_signed == 'true'
+        shell: pwsh
+        env:
+          EXPECTED_PUBLISHER: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem release-publish/*.exe | ForEach-Object {
+            $signature = Get-AuthenticodeSignature $_.FullName
+            $certificate = $signature.SignerCertificate
+            $publisherMatches = $certificate -and (
+              [string]::Equals($certificate.Subject, $env:EXPECTED_PUBLISHER, [StringComparison]::OrdinalIgnoreCase) -or
+              [string]::Equals($certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false), $env:EXPECTED_PUBLISHER, [StringComparison]::OrdinalIgnoreCase)
+            )
+            if ($signature.Status -ne 'Valid' -or -not $publisherMatches) {
+              throw 'Installer signature or fork publisher mismatch.'
+            }
+          }
+
+      - name: Record resolved source, signing policy and packaged WSL digest
+        if: inputs.release_publication
+        shell: bash
+        env:
+          BUILD_PLATFORM: ${{ inputs.platform }}
+          BUILD_ARCH: ${{ inputs.arch }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          MAC_SIGNED: ${{ steps.signing_policy.outputs.mac_signed }}
+          WIN_SIGNED: ${{ steps.signing_policy.outputs.win_signed }}
+        run: node scripts/fork-release.ts receipt
 
       - name: Collect resource monitor
         shell: bash
