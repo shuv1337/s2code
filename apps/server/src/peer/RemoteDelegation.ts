@@ -335,6 +335,7 @@ const make = Effect.gen(function* () {
     status: "completed" | "failed" | "cancelled" | "interrupted",
     result: string,
     stoppedThere: "ran-out" | "stopped" | undefined,
+    stopCount?: number,
   ) =>
     Effect.gen(function* () {
       const attempt = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
@@ -347,6 +348,7 @@ const make = Effect.gen(function* () {
           status,
           result,
           ...(stoppedThere === undefined ? {} : { stoppedThere }),
+          ...(stopCount === undefined ? {} : { stopCount }),
         })
         .pipe(
           Effect.catch((error) =>
@@ -497,7 +499,9 @@ const make = Effect.gen(function* () {
             const reason = yield* finalReason(parentThreadId, taskId, error);
             if (reason === undefined) return yield* error;
             // Gone there, or no link to reach it by: nothing left to stop there.
-            yield* complete(parentThreadId, taskId, "failed", reason, "stopped");
+            const { subagents } = yield* threads.getThreadRecords(parentThreadId, ["subagents"]);
+            const stopCount = subagents.find((task) => task.id === taskId)?.remoteChild?.stopCount;
+            yield* complete(parentThreadId, taskId, "failed", reason, "stopped", stopCount);
           }),
       }),
       Effect.retry(backoff),
@@ -546,7 +550,9 @@ const make = Effect.gen(function* () {
             terminalStatus(task.status),
             task.result,
             "stopped",
+            remote.stopCount,
           );
+          return yield* settled(parentThreadId, taskId);
         }
         return true;
       }
@@ -687,7 +693,14 @@ const make = Effect.gen(function* () {
         // Best effort: the result stands whether or not the stop gets there.
         yield* stopThere(there, remote, key, reason).pipe(
           Effect.andThen(
-            complete(task.threadId, task.id, terminalStatus(task.status), task.result, "stopped"),
+            complete(
+              task.threadId,
+              task.id,
+              terminalStatus(task.status),
+              task.result,
+              "stopped",
+              remote.stopCount,
+            ),
           ),
           Effect.ignoreCause({ log: true }),
         );
@@ -714,6 +727,7 @@ const make = Effect.gen(function* () {
           ? cancelled
           : `${cancelled} It could not be stopped in ${remote.label} and may still run there: ${unstopped}`,
         unstopped === undefined ? "stopped" : undefined,
+        remote.stopCount,
       ).pipe(
         Effect.mapError(
           (error) =>

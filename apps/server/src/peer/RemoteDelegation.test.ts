@@ -118,6 +118,9 @@ interface BoxThread {
   readonly holdRead: Ref.Ref<boolean>;
   readonly readStarted: Deferred.Deferred<void>;
   readonly releaseRead: Deferred.Deferred<void>;
+  readonly holdFirstStop: Ref.Ref<boolean>;
+  readonly stopStarted: Deferred.Deferred<void>;
+  readonly releaseStop: Deferred.Deferred<void>;
   /** Messages sent to the thread there after its launch, each starting a later run. */
   readonly sent: Ref.Ref<ReadonlyArray<string>>;
 }
@@ -149,6 +152,9 @@ const makeBoxThread = Effect.gen(function* () {
     holdRead: yield* Ref.make(false),
     readStarted: yield* Deferred.make<void>(),
     releaseRead: yield* Deferred.make<void>(),
+    holdFirstStop: yield* Ref.make(false),
+    stopStarted: yield* Deferred.make<void>(),
+    releaseStop: yield* Deferred.make<void>(),
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
   } satisfies BoxThread;
 });
@@ -387,6 +393,13 @@ const boxToolkitLayer = (thread: BoxThread) => {
     dispatch: (command) =>
       command.type === "thread.stop"
         ? recordStop(command.commandId, "thread.stop").pipe(
+            Effect.tap(() =>
+              Effect.gen(function* () {
+                if (!(yield* Ref.getAndSet(thread.holdFirstStop, false))) return;
+                yield* Deferred.succeed(thread.stopStarted, undefined);
+                yield* Deferred.await(thread.releaseStop);
+              }),
+            ),
             Effect.as({ sequence: 0, storedEvents: [] } as never),
           )
         : Effect.die(`The box does not expect ${command.type}`),
@@ -1420,6 +1433,56 @@ it.effect("stopping the parent stops follow-up work on a task there that has its
       });
       expect(yield* stoppedThere(a, delegated.taskId, 2)).toMatchObject({ status: "completed" });
       expect(yield* Ref.get(thread.interrupted)).toBe(2);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a delayed Stop acknowledgement leaves a newer Stop owed", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      yield* a.remote.start();
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+      const delegated = yield* delegateToBox(a);
+      yield* Ref.set(thread.reply, "All green.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      yield* taskResult(a, delegated.taskId);
+
+      yield* Ref.set(thread.holdFirstStop, true);
+      yield* a.threads.stopDelegatedTasks({
+        threadId: parentThreadId,
+        commandId: CommandId.make("command:stop:delayed-first"),
+      });
+      yield* Deferred.await(thread.stopStarted);
+      // Work starts after the first Stop landed there, but before its acknowledgement returns.
+      yield* a.call("t3_thread_send", {
+        environmentId: box.environmentId,
+        threadId: delegated.remoteChild.threadId,
+        message: "Run another check.",
+      });
+      yield* a.threads.stopDelegatedTasks({
+        threadId: parentThreadId,
+        commandId: CommandId.make("command:stop:delayed-second"),
+      });
+      const pending = yield* a.threads.getThreadRecords(parentThreadId, ["subagents"]);
+      expect(
+        pending.subagents.find((task) => task.id === delegated.taskId)?.remoteChild,
+      ).toMatchObject({ stoppedThere: false, stopCount: 2 });
+      yield* Deferred.succeed(thread.releaseStop, undefined);
+      expect(yield* stoppedThere(a, delegated.taskId, 2)).toMatchObject({
+        status: "completed",
+        result: "All green.",
+      });
+      expect(yield* Ref.get(thread.interrupted)).toBe(2);
+      expect(yield* a.projections.getOpenRemoteDelegatedTasks).toEqual([]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

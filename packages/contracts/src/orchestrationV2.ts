@@ -3106,6 +3106,8 @@ const OrchestrationV2InternalCommand = Schema.Union([
      * a run that ended by itself leaves the stop owed for what may follow it.
      */
     stoppedThere: Schema.optional(Schema.Literals(["ran-out", "stopped"])),
+    /** The stop generation this report acknowledges; absent for the original unnumbered stop. */
+    stopCount: Schema.optional(NonNegativeInt),
   }),
   /**
    * Owes a stop to the thread there of a remote task that already has its

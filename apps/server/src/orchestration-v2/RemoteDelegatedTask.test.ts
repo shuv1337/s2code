@@ -225,6 +225,73 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
     }),
   );
 
+  it.effect("keeps a newer stop recoverable after an older acknowledgement", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parent = yield* seedLiveParent("stop-generation");
+      yield* orchestrator.dispatch({
+        type: "delegated_task.remote.request",
+        commandId: CommandId.make("command:remote-delegate:stop-generation"),
+        parentThreadId: parent.threadId,
+        parentRunId: parent.runId,
+        parentNodeId: parent.rootNodeId,
+        task: "Run a check.",
+        driver: ProviderDriverKind.make("remote"),
+        modelSelection,
+        remoteChild,
+      });
+      const task = (yield* orchestrator.getThreadProjection(parent.threadId)).subagents[0]!;
+      const openFor = projections.getOpenRemoteDelegatedTasks.pipe(
+        Effect.map((open) => open.filter((entry) => entry.parentThreadId === parent.threadId)),
+      );
+      const complete = {
+        type: "delegated_task.remote.complete" as const,
+        parentThreadId: parent.threadId,
+        taskId: task.id,
+        status: "completed" as const,
+        result: "Original result.",
+      };
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:result:stop-generation"),
+        stoppedThere: "ran-out",
+      });
+      for (const count of [1, 2]) {
+        yield* orchestrator.dispatch({
+          type: "delegated_task.remote.stop",
+          parentThreadId: parent.threadId,
+          taskId: task.id,
+          commandId: CommandId.make(`command:stop-generation:${count}`),
+        });
+      }
+      // Reports from before generation tracking cannot clear a later numbered Stop either.
+      for (const stopCount of [undefined, 1]) {
+        const rejected = yield* orchestrator
+          .dispatch({
+            ...complete,
+            commandId: CommandId.make(`command:stale-stop:${stopCount}`),
+            stoppedThere: "stopped",
+            ...(stopCount === undefined ? {} : { stopCount }),
+          })
+          .pipe(Effect.flip);
+        assert.equal(rejected._tag, "OrchestratorDispatchError");
+        assert.deepEqual(yield* openFor, [{ parentThreadId: parent.threadId, taskId: task.id }]);
+      }
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:current-stop:2"),
+        stoppedThere: "stopped",
+        stopCount: 2,
+      });
+      const settled = (yield* orchestrator.getThreadProjection(parent.threadId)).subagents[0]!;
+      assert.equal(settled.result, "Original result.");
+      assert.equal(settled.status, "completed");
+      assert.equal(settled.remoteChild?.stoppedThere, true);
+      assert.deepEqual(yield* openFor, []);
+    }),
+  );
+
   it.effect("wakes its parent with the result when it completes there", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
