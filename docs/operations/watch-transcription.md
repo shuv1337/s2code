@@ -3,7 +3,8 @@
 Watch recordings are transcribed on the connected T3 server using sherpa-onnx and
 Parakeet TDT 0.6B v2 (int8, English). macOS arm64 and Linux x64 use the same CPU
 path. Neither an Apple speech framework nor an API key is required. Threads on
-other environments use those environments' servers.
+other environments use those environments' servers. Windows on Arm has no bundled
+FFmpeg, so transcription is unavailable on a server running there.
 
 The first recording downloads about 661 MB of model assets into
 `<T3 home>/userdata/speech-models/`. Allow up to ten minutes for preparation and
@@ -22,6 +23,8 @@ retry.
 
 For a source install, use the repository's normal dependency installation. The
 `ffmpeg-static` install script must be allowed; `pnpm-workspace.yaml` grants it.
+It is an optional dependency because it publishes no win32-arm64 binary and its
+install script fails there; every other target must still retain it.
 Packaged installations must retain `sherpa-onnx-node`, the target's matching native
 package, and `ffmpeg-static` with its target-specific executable. They are runtime
 externals in the shared CLI packaging list. Do not copy a Mac `node_modules` tree

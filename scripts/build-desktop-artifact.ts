@@ -35,6 +35,7 @@ import {
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import {
   findInlinedExternalPackages,
+  partitionStageDependencies,
   selectCliRuntimeExternalDependencies,
 } from "./lib/cli-external-packages.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
@@ -961,6 +962,7 @@ interface StagePackageJson {
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
+  readonly optionalDependencies?: Record<string, unknown>;
   readonly devDependencies: {
     readonly electron: string;
   };
@@ -3134,7 +3136,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     version: input.appVersion,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    dependencies: sidecarDependencies,
+    ...partitionStageDependencies(sidecarDependencies),
   };
   const sidecarPackageJsonString = yield* encodeJsonString(sidecarPackageJson);
   yield* fs.writeFileString(
@@ -3584,7 +3586,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const electronVersion = desktopPackageJson.dependencies.electron;
 
-  const serverDependencies = serverPackageJson.dependencies;
+  // Optional externals are production dependencies too; each stage manifest
+  // keeps them optional so an unbuildable platform does not fail the install.
+  const serverDependencies = {
+    ...serverPackageJson.dependencies,
+    ...serverPackageJson.optionalDependencies,
+  };
   if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
     return yield* new MissingServerProductionDependenciesError({
       manifestPath: "apps/server/package.json",
@@ -3916,7 +3923,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
     ),
-    dependencies: stageDependencies,
+    ...partitionStageDependencies(stageDependencies),
     devDependencies: {
       electron: electronVersion,
     },

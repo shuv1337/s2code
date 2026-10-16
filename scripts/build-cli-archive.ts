@@ -40,7 +40,10 @@ import {
   resolveFffNativeDependencies,
   STAGE_INSTALL_ARGS,
 } from "./build-desktop-artifact.ts";
-import { selectCliRuntimeExternalDependencies } from "./lib/cli-external-packages.ts";
+import {
+  partitionStageDependencies,
+  selectCliRuntimeExternalDependencies,
+} from "./lib/cli-external-packages.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -161,8 +164,10 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
     yield* fs.readFileString(path.join(input.repoRoot, "pnpm-workspace.yaml")),
   );
   const catalog = workspace.catalog ?? {};
+  // Optional externals are production dependencies too; the stage manifest
+  // keeps them optional so an unbuildable platform does not fail the install.
   const serverDependencies = resolveCatalogDependencies(
-    serverPackageJson.dependencies,
+    { ...serverPackageJson.dependencies, ...serverPackageJson.optionalDependencies },
     catalog,
     "apps/server",
   );
@@ -189,7 +194,7 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
       version: input.version,
       private: true,
       packageManager: rootPackageJson.packageManager,
-      dependencies,
+      ...partitionStageDependencies(dependencies),
     })}\n`,
   );
   yield* fs.writeFileString(

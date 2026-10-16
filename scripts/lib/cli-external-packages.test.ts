@@ -14,6 +14,7 @@ import { findEsmImportsOfExternalPackages } from "./cli-executable-imports.ts";
 import {
   isRuntimeExternalCliDependency,
   findInlinedExternalPackages,
+  partitionStageDependencies,
   selectCliRuntimeExternalDependencies,
   shouldBundleCliDependency,
 } from "./cli-external-packages.ts";
@@ -82,7 +83,12 @@ describe("selectCliRuntimeExternalDependencies", () => {
 
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
-      Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
+      Object.keys(
+        selectCliRuntimeExternalDependencies({
+          ...serverPackageJson.dependencies,
+          ...serverPackageJson.optionalDependencies,
+        }),
+      ).sort(),
       [
         "@cursor/sdk",
         "@ff-labs/fff-node",
@@ -92,6 +98,22 @@ describe("selectCliRuntimeExternalDependencies", () => {
         "playwright-core",
         "sherpa-onnx-node",
       ],
+    );
+  });
+
+  // win32-arm64 has no ffmpeg-static binary and its install script fails there,
+  // which would fail the whole stage install for a required dependency.
+  it("stages packages that cannot build everywhere as optional", () => {
+    assert.deepStrictEqual(
+      partitionStageDependencies({ "ffmpeg-static": "5.3.0", "node-pty": "1.1.0" }),
+      { dependencies: { "node-pty": "1.1.0" }, optionalDependencies: { "ffmpeg-static": "5.3.0" } },
+    );
+    assert.deepStrictEqual(partitionStageDependencies({ "node-pty": "1.1.0" }), {
+      dependencies: { "node-pty": "1.1.0" },
+    });
+    assert.isTrue(
+      Object.hasOwn(serverPackageJson.optionalDependencies, "ffmpeg-static"),
+      "ffmpeg-static must stay optional for the server's own install",
     );
   });
 });
