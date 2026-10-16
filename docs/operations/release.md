@@ -35,8 +35,11 @@ Each platform is signed when its credentials are complete. Preflight resolves
 that once and passes `mac_signed`/`win_signed` to the desktop builds, which fail
 closed when a platform planned as signed cannot see its credentials. Every check
 runs on the finished artifacts: the app bundle is verified inside the macOS
-update ZIP for signature, team, stapled ticket and Gatekeeper, and the Windows
-installer for its publisher. The DMG container itself is not signed. A platform
+update ZIP for signature, team and stapled ticket, and the Windows installer for
+its publisher. `spctl` is logged but not a gate, because hosted runners report
+"Insufficient Context" for a stapled app. The DMG container itself is not
+signed, and the Windows receipt needs 7-Zip on the runner to read the
+installer's payload. A platform
 without complete credentials ships unsigned, and the release title, body and
 `release.json` say so. Partial credentials are not proof of signing.
 

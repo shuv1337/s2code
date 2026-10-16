@@ -35,6 +35,7 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import {
+  assertStagedFfmpeg,
   createStagePatchedDependencies,
   createStageWorkspaceConfig,
   resolveFffNativeDependencies,
@@ -231,6 +232,12 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
     }),
     "vp install --prod (cli archive runtime externals)",
   );
+  yield* assertStagedFfmpeg({
+    stageDir: input.stageDir,
+    platform: input.platform,
+    arch: input.arch,
+    label: `The ${input.platform}-${input.arch} CLI archive`,
+  });
 
   // pnpm's bookkeeping and the manifest only matter to pnpm; the runtime
   // resolves packages by directory. node-pty ships every platform's prebuilds

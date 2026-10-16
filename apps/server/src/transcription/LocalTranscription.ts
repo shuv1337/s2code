@@ -69,7 +69,10 @@ const make = Effect.gen(function* () {
           (cause) => new TranscriptionError({ code: "transcription_unavailable", cause }),
         ),
       );
-      if (typeof ffmpeg !== "string")
+      // ffmpeg-static resolves to a path on every supported platform whether or
+      // not its install wrote the executable, so an absent file is as
+      // unavailable as an absent package rather than a spawn failure.
+      if (typeof ffmpeg !== "string" || !(yield* fs.exists(ffmpeg)))
         return yield* new TranscriptionError({ code: "transcription_unavailable" });
       const temporary = yield* fs.makeTempDirectoryScoped({ prefix: "t3-voice-" });
       const input = path.join(temporary, "recording.m4a");
