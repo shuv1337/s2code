@@ -204,7 +204,14 @@ const make = Effect.gen(function* () {
           OrchestratorMcpThreadWaitInput,
           OrchestratorMcpThreadWaitResult,
           environmentId,
-          { threadId: input.threadId, ...(runId === undefined ? {} : { runId }), timeoutMs: chunk },
+          {
+            threadId: input.threadId,
+            ...(runId === undefined ? {} : { runId }),
+            timeoutMs: chunk,
+            ...(input.untilDelegatedWorkSettled === undefined
+              ? {}
+              : { untilDelegatedWorkSettled: input.untilDelegatedWorkSettled }),
+          },
         );
         remaining -= chunk;
         if (!result.timedOut || remaining <= 0) return result;

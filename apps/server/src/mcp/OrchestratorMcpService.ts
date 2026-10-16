@@ -2675,6 +2675,9 @@ const make = Effect.gen(function* () {
               MAX_WAIT_TIMEOUT_MS,
               Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
             ),
+            ...(input.untilDelegatedWorkSettled === true
+              ? { untilDelegatedWorkSettled: true }
+              : {}),
           })
           .pipe(Effect.mapError(threadManagementFailure));
         return {
@@ -2682,6 +2685,11 @@ const make = Effect.gen(function* () {
           runId: result.run?.id ?? null,
           status: result.run === null ? "idle" : runOutcome(result.run),
           timedOut: result.timedOut,
+          ...(result.resultRun === undefined
+            ? {}
+            : {
+                resultRun: { runId: result.resultRun.id, status: runOutcome(result.resultRun) },
+              }),
         } satisfies OrchestratorMcpThreadWaitResult;
       }),
     interruptThread: (scope, input) =>

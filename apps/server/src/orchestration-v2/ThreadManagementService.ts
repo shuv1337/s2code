@@ -35,6 +35,7 @@ import {
   ThreadId,
   type TurnItemId,
 } from "@t3tools/contracts";
+import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -157,12 +158,20 @@ export interface ThreadManagementWaitInput {
   readonly threadId: ThreadId;
   readonly runId?: RunId;
   readonly timeoutMs: number;
+  /**
+   * Also wait until the thread's own delegated work settles: an ended run
+   * still owes the thread's answer while a child, a background task or a
+   * completion delivery will wake it again, as a delegated task's result does.
+   */
+  readonly untilDelegatedWorkSettled?: boolean;
 }
 
 export interface ThreadManagementWaitResult {
   readonly threadId: ThreadId;
   readonly run: OrchestrationV2Run | null;
   readonly timedOut: boolean;
+  /** With `untilDelegatedWorkSettled`, once settled: the run with the thread's final answer. */
+  readonly resultRun?: OrchestrationV2Run;
 }
 
 export interface ThreadManagementInterruptInput {
@@ -883,29 +892,65 @@ const make = Effect.gen(function* () {
             (yield* orchestrator.restartContinuationPending(run));
           return { run, pending, settled: isTerminalRunStatus(run.status) && !pending };
         });
-      const initial = yield* outcome(target.runs);
-      if (initial.settled) {
-        return { threadId: input.threadId, run: initial.run, timedOut: false };
-      }
+      const untilDelegatedWorkSettled = input.untilDelegatedWorkSettled === true;
+      const delegatedWorkResult = Effect.gen(function* () {
+        const records = yield* getProjectThreadRecords(
+          input,
+          ["runs", "messages", "subagents", "providerThreads"],
+          { messageRoles: ["user"] },
+        );
+        const progress = delegatedTaskProgress(records);
+        if (progress.state !== "result_available") return undefined;
+        const pending = yield* orchestrator
+          .delegatedTaskResultPending(input.threadId)
+          .pipe(Effect.mapError(loadError));
+        return pending ? undefined : progress.resultRun;
+      });
+      const evaluate = (runs: ReadonlyArray<OrchestrationV2Run>) =>
+        Effect.gen(function* () {
+          const current = yield* outcome(runs);
+          if (!current.settled || !untilDelegatedWorkSettled) {
+            return { ...current, resultRun: undefined };
+          }
+          const resultRun = yield* delegatedWorkResult;
+          return { ...current, settled: resultRun !== undefined, resultRun };
+        });
+      const settledResult = (current: Effect.Success<ReturnType<typeof evaluate>>) => ({
+        threadId: input.threadId,
+        run: current.run,
+        timedOut: !current.settled,
+        ...(current.resultRun === undefined ? {} : { resultRun: current.resultRun }),
+      });
+      const initial = yield* evaluate(target.runs);
+      if (initial.settled) return settledResult(initial);
 
       // A declined continuation records no event, so its effect settling wakes
       // the wait too.
       const wait = Stream.merge(
-        Stream.merge(
-          orchestrator.streamStoredEventsFrom({
-            threadId: input.threadId,
-            afterSequence,
-            eventType: "run.updated",
-          }),
-          orchestrator.streamStoredEventsFrom({
-            threadId: input.threadId,
-            afterSequence,
-            eventType: "thread.deleted",
-          }),
+        Stream.mergeAll(
+          (
+            [
+              "run.updated",
+              "thread.deleted",
+              // What delegated work reads besides runs: tasks and their
+              // deliveries, and a provider thread's background tasks.
+              ...(untilDelegatedWorkSettled
+                ? (["subagent.updated", "provider-thread.updated"] as const)
+                : []),
+            ] as const
+          ).map((eventType) =>
+            orchestrator.streamStoredEventsFrom({
+              threadId: input.threadId,
+              afterSequence,
+              eventType,
+            }),
+          ),
+          { concurrency: "unbounded" },
         ).pipe(
           Stream.mapError(loadError),
           Stream.filter(
             (stored) =>
+              untilDelegatedWorkSettled ||
               stored.event.type !== "run.updated" ||
               stored.event.payload.id === selectedRun.id ||
               stored.event.payload.restartContinuationOfRunId !== undefined,
@@ -917,7 +962,7 @@ const make = Effect.gen(function* () {
       ).pipe(
         Stream.mapEffect(() =>
           getProjectThreadRecords(input, ["runs"]).pipe(
-            Effect.flatMap((current) => outcome(current.runs)),
+            Effect.flatMap((current) => evaluate(current.runs)),
           ),
         ),
         Stream.filter((current) => current.settled),
@@ -925,14 +970,11 @@ const make = Effect.gen(function* () {
         Effect.timeoutOption(Duration.millis(Math.max(1, input.timeoutMs))),
       );
       const waited = Option.flatten(yield* wait);
-      if (Option.isSome(waited)) {
-        return { threadId: input.threadId, run: waited.value.run, timedOut: false };
-      }
+      if (Option.isSome(waited)) return settledResult(waited.value);
       // The run may have reached a terminal status while the timeout was
       // winning the race; the final projection read decides what actually
       // happened, so only a still-active run counts as timed out.
-      const final = yield* outcome((yield* getProjectThreadRecords(input, ["runs"])).runs);
-      return { threadId: input.threadId, run: final.run, timedOut: !final.settled };
+      return settledResult(yield* evaluate((yield* getProjectThreadRecords(input, ["runs"])).runs));
     });
 
   const settleAfterRun: ThreadManagementServiceShape["settleAfterRun"] = Effect.fn(

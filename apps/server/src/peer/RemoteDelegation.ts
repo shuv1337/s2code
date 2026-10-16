@@ -561,6 +561,10 @@ const make = Effect.gen(function* () {
           threadId: remote.threadId,
           ...(remote.runId === undefined ? {} : { runId: remote.runId }),
           timeoutMs: FOLLOW_WAIT_MS,
+          // A thread there whose run ended may still be waiting on its own
+          // tasks to wake it for the answer, which a task here waits for too.
+          // An older peer ignores this and reports the run alone.
+          untilDelegatedWorkSettled: true,
         })
         .pipe(Effect.raceFirst(endedHere));
       // The next look reads the result and stops it there.
@@ -580,16 +584,20 @@ const make = Effect.gen(function* () {
         return yield* settled(parentThreadId, taskId);
       }
       if (!isTerminal(waited.status)) return false;
+      const resultRun = waited.resultRun ?? {
+        runId: remote.runId ?? waited.runId,
+        status: waited.status,
+      };
       const result = yield* lastReply(
         scope,
         remote,
-        remote.runId ?? waited.runId,
-        waited.status === "failed",
+        resultRun.runId,
+        resultRun.status === "failed",
       );
       yield* complete(
         parentThreadId,
         taskId,
-        terminalStatus(waited.status),
+        terminalStatus(resultRun.status),
         result ?? noReply,
         "ran-out",
       );
