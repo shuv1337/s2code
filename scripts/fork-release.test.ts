@@ -18,6 +18,7 @@ import {
 } from "./build-npm-platform-packages.ts";
 import { forkReleasePlan, FORK_DESKTOP_MATRIX, desktopAssetGroups } from "./lib/fork-release.ts";
 import { cliArchiveFileName, CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { serializeUpdateManifest, parseUpdateManifest } from "./lib/update-manifest.ts";
 const FS = NodeFS;
 const OS = NodeOS;
@@ -265,7 +266,7 @@ describe("complete fork release assets", () => {
   });
   // 7-Zip exits 1 for warnings it recovered from, so the extracted file has to
   // decide success. The fixture stands in for 7-Zip's NSIS handler.
-  it.skipIf(process.platform === "win32")(
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "accepts a 7-Zip warning exit when the payload lands, and fails on a real error",
     () => {
       const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-installer-7z-"));
