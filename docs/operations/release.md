@@ -17,40 +17,47 @@ CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 desktop app. Internal executable/archive names remain `t3`; that does not authorize
 publishing the workspace package named `t3`, which is private.
 
-Public npm endpoints are `shuv2code` and `@shuv2code/t3-<platform>` for those five
-CLI targets. Platform packages publish and verify first; the launcher follows only
+When npm is enabled, the public npm endpoints are `shuv2code` and
+`@shuv2code/t3-<platform>` for those five CLI targets. Platform packages publish and verify first; the launcher follows only
 when all five are verifiable, with exact matching optional dependency versions.
 
-## Channel and publication policy
+## Nightly only
 
-Stable tag pushes and manual stable dispatches require complete macOS and Windows
-signing configuration. Nightly schedules also require signing. Only a manual
-nightly/preview dispatch with `allow_unsigned` explicitly enabled may omit signing;
-the release title/body and `release.json` identify unsigned builds. Partial credentials
-are not proof of signing. Signed jobs verify platform signatures; macOS verifies
-notarization and the configured team.
+The fork publishes only nightly releases. `release.yml` runs once a day and
+releases `main` when it has new commits and the last nightly is at least six
+hours old. A manual **Run workflow** on `main` releases right away. The release
+scripts keep upstream's stable and preview code paths so upstream merges stay
+clean, but the workflow has no tag trigger or channel input that could start them.
 
-Publication accepts only the repository's default branch or a `v*.*.*` version
-tag. Branch-only preview publication is intentionally unavailable. The scheduled
-due/source check runs without a protected environment; unchanged/not-due ticks
-skip signing preflight, builds and publication without requesting approval.
+Each platform is signed when its credentials are complete. macOS signing also
+verifies notarization and the configured team. Windows signing verifies the
+publisher. A platform without complete credentials ships unsigned, and the
+release title, body and `release.json` say so. Partial credentials are not
+proof of signing.
+
+Publication accepts only the default branch. The scheduled due/source check
+runs without a protected environment, so days with nothing to release skip the
+builds and publication without requesting approval.
 
 Artifacts are first uploaded to a **draft** release and checked against their
-GitHub SHA-256 digests. All six npm packages use a temporary, non-default release
-dist-tag with `npm publish --provenance`. Registry names, versions, repository and
-tarball integrity are verified before exposure. Updater manifests are uploaded
-last; the complete draft is verified before publication. Dist-tags are then
-promoted, platform packages first and launcher last: `latest` for stable,
-`nightly` for nightly, `preview` for preview. Preview never carries updater
-manifests/blockmaps and never enters the automatic release index.
+GitHub SHA-256 digests. Updater manifests are uploaded last, and the complete
+draft is verified before publication.
 
-`SHA256SUMS` covers final desktop and CLI bytes. Stable/nightly feeds use their
-channel-specific Electron manifest names, including both architectures. The
+npm publication is optional. When `FORK_NPM_TRUSTED_PUBLISHING_READY` is not
+`true`, the GitHub release still publishes and `release.json` lists no npm
+packages. When it is `true`, all six packages publish under a temporary
+non-default dist-tag with `npm publish --provenance`, and their names, versions,
+repository and tarball integrity are verified before the release is exposed.
+After the release publishes, the `nightly` dist-tag is promoted, platform
+packages first and the launcher last.
+
+`SHA256SUMS` covers final desktop and CLI bytes. The updater feeds use the
+`nightly*.yml` Electron manifest names and include both architectures. The
 rolling `index.json` on the dedicated `fork-release-index` branch is written last, using
-`[{"tag_name":"v1.2.3","draft":false}]` records for complete non-preview releases.
+`[{"tag_name":"v1.2.3-nightly.20261014.1","draft":false}]` records for complete releases.
 The Contents API publishes a commit with the previous blob SHA as a compare-and-swap;
 there is no delete-before-upload window. A failed update leaves the last index available.
-The stable URL is
+The index URL is
 `https://raw.githubusercontent.com/shuv1337/shuv2code/fork-release-index/index.json`.
 This index is available to mirrors or other consumers; publishing it does not
 add a runtime discovery protocol or mirror configuration. Current client update
@@ -58,8 +65,8 @@ checks retain the fork npm/GitHub sources. Consumers of the rolling index should
 use the raw branch URL above, not the former release-asset URL. CDN caches may
 briefly serve the previous complete index after a successful publication.
 
-GitHub and npm cannot commit a release atomically. Exact npm versions become
-public during publication, but automatic tags remain unchanged until verification.
+When npm is enabled, GitHub and npm cannot commit a release atomically. Exact npm
+versions become public during publication, but automatic tags remain unchanged until verification.
 A failed platform publish skips the launcher; a later failure leaves automatic
 promotion incomplete and the workflow red. Never treat a successful dry run or
 one published endpoint as delivery evidence.
@@ -67,7 +74,7 @@ one published endpoint as delivery evidence.
 ## Account and credential prerequisites (names only)
 
 Use the protected GitHub environment `fork-release`, with appropriate default
-branch/tag protections and approvals. Repository variables:
+branch protections and approvals. Repository variables:
 `FORK_NPM_TRUSTED_PUBLISHING_READY`, `APPLE_TEAM_ID`.
 
 Keep build-signing secrets available to the reusable desktop workflow through
@@ -89,9 +96,9 @@ do not require Clerk, relay, passkey domains or a hosted provisioning profile.
 Hosted/relay, marketing and AUR deployment are intentionally separate and are not
 invoked by this pipeline; configure their fork identities in their owning work.
 
-Human npm setup must establish ownership/bootstrap of all six package names and
-trusted publishers for **calling workflow filename `release.yml`**, repository
-`shuv1337/shuv2code`, environment `fork-release`. Enable both direct `npm publish`
+npm is optional (see [Nightly only](#nightly-only)). To enable it, human npm setup
+must establish ownership/bootstrap of all six package names and trusted publishers
+for **calling workflow filename `release.yml`**, repository `shuv1337/shuv2code`, environment `fork-release`. Enable both direct `npm publish`
 and `npm dist-tag` allowed actions for each package. The readiness variable is an
 explicit human attestation, not an authentication test. `npm whoami`, token names,
 404 responses and `npm publish --dry-run` do not verify trusted-publisher readiness.
@@ -110,10 +117,10 @@ lost, use a new version. Rolling index/tag repair may be retried after a fully
 verified release; inspect all six endpoints and the release before doing so.
 
 Before claiming delivery, a human must run the protected workflow with real fork
-accounts and capture: signature/team/publisher and notarization evidence; CLI
-smoke results on all five architectures; installs/upgrades for each desktop target;
-same-arch Windows WSL startup; clean npm installs of the launcher and optional
-packages; OIDC provenance; checksums and stable/nightly feed selection; preview
-absence from automatic feeds; install-order coexistence with upstream. An offline
-test or green artifact job is not evidence that signing, npm ownership or delivery
+accounts and capture: signature/team/publisher and notarization evidence for
+signed platforms; CLI smoke results on all five architectures; installs/upgrades
+for each desktop target; same-arch Windows WSL startup; checksums and nightly feed
+selection; install-order coexistence with upstream. With npm enabled, also capture
+clean npm installs of the launcher and optional packages and OIDC provenance. An
+offline test or green artifact job is not evidence that signing, npm ownership or delivery
 was configured correctly.

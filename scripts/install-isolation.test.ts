@@ -232,6 +232,7 @@ describe
     "ignores inherited upstream home, version and release origin",
     () => {
       env.T3CODE_VERSION = version;
+      env.SHUV2CODE_CHANNEL = "stable";
       delete env.SHUV2CODE_VERSION;
       delete env.SHUV2CODE_RELEASE_BASE_URL;
       const upstream = seedCache(env.T3CODE_HOME!, version, kind);
@@ -248,6 +249,15 @@ describe
           "utf8",
         ).trim(),
       ).toBe(version);
+    },
+  );
+  it.skipIf(kind === "pwsh" && !hasPwsh)(
+    "follows the nightly train by default and never falls back to stable",
+    () => {
+      delete env.SHUV2CODE_VERSION;
+      const result = runInstaller(kind);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr + result.stdout).toContain("could not find a nightly release");
     },
   );
   it.skipIf(kind === "pwsh" && !hasPwsh)(

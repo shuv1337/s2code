@@ -127,7 +127,10 @@ export function forkReleasePlan(input: {
   version: string;
   channel: string;
   signing: ReturnType<typeof releaseSigningPolicy>;
+  /** Whether this release also publishes the npm packages; GitHub assets always publish. */
+  npm: boolean;
 }) {
+  if (typeof input.npm !== "boolean") throw new Error("Invalid release npm policy.");
   if (input.repository !== FORK_RELEASE_REPOSITORY)
     throw new Error("Release publication is restricted to the fork repository.");
   if (!/^[a-f0-9]{40}$/i.test(input.sha))

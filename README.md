@@ -46,25 +46,22 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 ### Command line
 
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://t3.codes/install.ps1 | iex
+irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 ```
 
-Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
-
-To try it once without installing, run `npx t3@latest` instead.
+The fork publishes nightly builds only, so this installs the nightly train. Then run `shuv2code-nightly` to start the server and open the local web app. `shuv2code-nightly service install` keeps it running in the background, `shuv2code-nightly update` moves to a newer release, and `shuv2code-nightly --help` has the full reference.
 
 ### Desktop app
 
-Fork builds are distributed through [shuv1337/shuv2code GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
-Stable and nightly are separate installations and may coexist with upstream T3 Code.
-Release files retain the `T3-Code-<version>-<arch>` artifact naming convention; choose the
-version for the channel you want.
+Fork builds are distributed as nightly releases through [shuv1337/shuv2code GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
+They are separate installations and may coexist with upstream T3 Code.
+Release files retain the `T3-Code-<version>-<arch>` artifact naming convention.
 
 #### Windows (`winget`)
 
@@ -92,7 +89,7 @@ brew install --cask t3-code
 
 #### Debian, Ubuntu (`.deb`)
 
-Download the intended stable or nightly `.deb` from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases), then install that exact file:
+Download the nightly `.deb` from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases), then install that exact file:
 
 ```bash
 sudo apt install ./T3-Code-VERSION-ARCH.deb

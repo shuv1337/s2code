@@ -57,7 +57,7 @@ globalThis.fetch=async input=>{
 };
 `;
 
-function publishFixture(mode = "resume", ref = "refs/heads/main") {
+function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
     repository: "shuv1337/shuv2code",
@@ -65,6 +65,7 @@ function publishFixture(mode = "resume", ref = "refs/heads/main") {
     channel: "preview",
     version: "1.2.3-preview.20261014.1",
     signing: { mac: false, win: false, unsigned: true },
+    npm,
   });
   try {
     const prepared = NodePath.join(root, "prepared");
@@ -142,7 +143,7 @@ function publishFixture(mode = "resume", ref = "refs/heads/main") {
           RUNNER_ENVIRONMENT: "github-hosted",
           ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
-          FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
+          ...(npm ? { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" } : {}),
           GH_TOKEN: "fixture",
         },
       },
@@ -199,6 +200,16 @@ describe("fork publication fixtures", () => {
             : /npm .*publish.*HTTP 401/,
       );
       expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "publishes the GitHub release without touching npm when npm is not ready",
+    () => {
+      // The registry fixture fails every request in this mode, so success proves npm was skipped.
+      const { result, state } = publishFixture("http-error", "refs/heads/main", false);
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(state.commands.some(([command]) => command === "npm")).toBe(false);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(

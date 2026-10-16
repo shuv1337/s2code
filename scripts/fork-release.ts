@@ -104,10 +104,11 @@ function assertCi() {
   if (!isAllowedForkPublishRef(process.env.GITHUB_REF, process.env.GITHUB_DEFAULT_BRANCH))
     throw new Error("Publication requires the default branch or a v*.*.* version tag.");
 }
-function assertPublishContext() {
+function assertPublishContext(npm: boolean) {
   assertCi();
   if (!process.argv.includes("--execute"))
     throw new Error("Publication requires explicit --execute in the protected workflow.");
+  if (!npm) return;
   if (
     process.env.RUNNER_ENVIRONMENT !== "github-hosted" ||
     !process.env.ACTIONS_ID_TOKEN_REQUEST_URL ||
@@ -233,7 +234,7 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   );
   writeJson(Path.join(directory, "release.json"), {
     ...plan,
-    npmPackages: FORK_NPM_PACKAGES,
+    npmPackages: plan.npm ? FORK_NPM_PACKAGES : [],
     signing: { ...plan.signing, linux: "checksum-only" },
   });
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
@@ -277,7 +278,7 @@ async function registryVersion(
   return true;
 }
 async function publishPrepared(plan: ForkReleasePlan) {
-  assertPublishContext();
+  assertPublishContext(plan.npm);
   if (run("git", ["rev-parse", "HEAD"]) !== plan.sha)
     throw new Error("Publisher checkout differs from the resolved source.");
   const assets = "prepared/release-assets";
@@ -300,7 +301,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (tags[plan.distTag] && compareSemverVersions(tags[plan.distTag]!, plan.version) > 0)
       throw new Error("Refusing to move a fork release/dist-tag backwards.");
   };
-  for (const pkg of packages) await assertTagNotBackwards(pkg.manifest.name);
+  if (plan.npm) for (const pkg of packages) await assertTagNotBackwards(pkg.manifest.name);
   const gh = (...args: string[]) => run("gh", args);
   const verifyTag = async (required: boolean) => {
     const response = await releaseFetch(
@@ -395,6 +396,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
     }
   };
   const verifyNpm = async () => {
+    if (!plan.npm) return;
     for (const pkg of packages)
       if (!(await registryVersion(pkg, plan.version)))
         throw new Error("All six exact npm versions must exist before release exposure.");
@@ -446,6 +448,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
     verifyBinaries: async () =>
       verifyAssets(names.filter((name) => !plan.feedAssets.includes(name))),
     publishNpm: async () => {
+      if (!plan.npm) return;
       const results = await Promise.allSettled(
         packages.filter((pkg) => pkg.manifest.name !== "shuv2code").map(publishPackage),
       );
@@ -475,6 +478,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
       if (getRelease().draft) throw new Error("GitHub release publication is not yet verifiable.");
     },
     promoteNpmTags: async () => {
+      if (!plan.npm) return;
       for (const pkg of packages) {
         await assertTagNotBackwards(pkg.manifest.name);
         run("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, plan.distTag]);
@@ -581,9 +585,10 @@ async function main() {
       process.env.ALLOW_UNSIGNED === "true",
       process.env,
     );
-    if (process.env.FORK_NPM_TRUSTED_PUBLISHING_READY !== "true")
-      throw new Error(
-        "Missing FORK_NPM_TRUSTED_PUBLISHING_READY: human npm ownership/bootstrap and exact release.yml trusted-publisher setup are required; a token name or 404 is not readiness proof.",
+    const npm = process.env.FORK_NPM_TRUSTED_PUBLISHING_READY === "true";
+    if (!npm)
+      console.log(
+        "npm publication skipped: FORK_NPM_TRUSTED_PUBLISHING_READY is not true. Only the GitHub release will publish.",
       );
     const sha = run("git", ["rev-parse", "HEAD"]);
     const base = (
@@ -612,6 +617,7 @@ async function main() {
       version,
       channel,
       signing,
+      npm,
     });
     if (
       (JSON.parse(FS.readFileSync("apps/server/package.json", "utf8")) as { private?: boolean })

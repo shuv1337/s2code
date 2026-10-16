@@ -6,11 +6,8 @@ name: Mobile Android APK
 # key, so its universal APK matches the Play Store install and needs no signing
 # secrets here. EAS submits asynchronously (--no-wait), so this polls Play
 # instead of chaining off mobile-eas-production.yml; runs with nothing new exit
-# early.
+# early. Manual only in this fork: there is no Play account to poll on a schedule.
 on:
-  schedule:
-    # Avoid minute zero, when GitHub scheduled jobs are busiest.
-    - cron: "23 * * * *"
   workflow_dispatch:
 
 concurrency:

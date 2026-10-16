@@ -24,11 +24,10 @@ On Windows, in PowerShell:
 irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 ```
 
-This installs the fork command to `~/.local/bin`. Stable uses `shuv2code`, nightly
-uses `shuv2code-nightly`, and preview uses `shuv2code-preview`. If your shell reports `command not found`
-afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `SHUV2CODE_CHANNEL=nightly` to install the nightly train, or
-`SHUV2CODE_VERSION` to pin an exact version.
+The fork publishes nightly builds only, so the installer follows the nightly train
+and installs the `shuv2code-nightly` command to `~/.local/bin`. If your shell
+reports `command not found` afterwards, that directory is not on your `PATH` yet;
+the installer prints the line to add. Set `SHUV2CODE_VERSION` to pin an exact version.
 
 ### Keep upstream and fork installations separate
 
@@ -67,8 +66,8 @@ Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importin
 | Move to the newest release                       | `shuv2code update`                                               |
 | Remove it again                                  | `shuv2code uninstall`                                            |
 
-These examples use stable. Substitute the installed channel's command, or the
-exact Node/source invocation printed by your server. A published npm install uses
+These examples use `shuv2code`. For a nightly install, run `shuv2code-nightly`
+instead, or the exact Node/source invocation printed by your server. A published npm install uses
 the fork package `shuv2code`; uninstall only that proven package/prefix, never `t3`.
 
 Run `shuv2code help` or `shuv2code --help` for the full reference. To start in a new working
@@ -80,7 +79,7 @@ instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
 Do not use `npx t3` to try this fork: it downloads upstream. When the fork npm
-package is published, its runner form will be `npx shuv2code@latest` (or `@nightly`).
+package is published, its runner form will be `npx shuv2code@nightly`.
 
 ### Intel Macs
 

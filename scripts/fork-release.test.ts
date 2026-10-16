@@ -30,6 +30,7 @@ function fixture(
     version,
     channel,
     signing: { mac: true, win: true, unsigned: false },
+    npm: true,
   });
   const desktops = desktopAssetGroups(version).map((group) => group[0]!);
   const sha256 = (name: string) =>
