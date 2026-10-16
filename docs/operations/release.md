@@ -92,6 +92,9 @@ desktop build does not select `fork-release` and cannot see secrets attached onl
 to that environment; that environment is used only by the canonical release
 preflight and publish jobs. A secret that preflight can read and the build cannot
 now fails the build instead of silently producing an unsigned artifact.
+`APPLE_TEAM_ID` is a variable rather than a secret, and preflight passes the
+value it resolved to the desktop builds, so signing and verification use one team
+id even if the variable is defined per environment.
 
 macOS secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`,
 `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`.

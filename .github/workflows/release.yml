@@ -68,6 +68,7 @@ jobs:
       release_channel: ${{ steps.plan.outputs.release_channel }}
       mac_signed: ${{ steps.plan.outputs.mac_signed }}
       win_signed: ${{ steps.plan.outputs.win_signed }}
+      apple_team_id: ${{ steps.plan.outputs.apple_team_id }}
       matrix: ${{ steps.plan.outputs.matrix }}
       due: ${{ needs.due.outputs.due }}
     steps:
@@ -166,6 +167,9 @@ jobs:
       # cannot see those secrets and must not resolve it again.
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      # APPLE_TEAM_ID is a variable, and this job is outside the release
+      # environment, so the team id comes from preflight rather than `vars`.
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
   prepare:
     needs: [preflight, desktop]

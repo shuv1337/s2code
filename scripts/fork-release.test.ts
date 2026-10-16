@@ -75,6 +75,10 @@ function fixture(
       );
     if (channel !== "preview") {
       const prefix = channel === "stable" ? "latest" : "nightly";
+      // electron-builder writes a blockmap beside every differentially
+      // updatable installer, whether or not that platform ends up signed.
+      for (const name of desktops.filter((name) => !name.endsWith(".deb")))
+        FS.writeFileSync(Path.join(directory, `${name}.blockmap`), `fixture blocks ${name}`);
       for (const [name, files] of [
         [
           `${prefix}-mac.yml`,
@@ -176,6 +180,14 @@ describe("complete fork release assets", () => {
         );
         expect(FS.readdirSync(directory)).not.toContain("nightly-mac.yml");
         expect(FS.readdirSync(directory)).not.toContain("nightly.yml");
+        // Only Linux can still update, so only its blocks are worth shipping.
+        expect(assets.filter((name) => name.endsWith(".blockmap")).sort()).toEqual(
+          desktopAssetGroups(plan.version)
+            .map((group) => group[0]!)
+            .filter((name) => name.endsWith(".AppImage"))
+            .map((name) => `${name}.blockmap`)
+            .sort(),
+        );
         const release = JSON.parse(
           FS.readFileSync(Path.join(directory, "release.json"), "utf8"),
         ) as { npmPackages: string[]; signing: { unsigned: boolean } };
@@ -183,6 +195,26 @@ describe("complete fork release assets", () => {
         expect(release.signing.unsigned).toBe(true);
       },
       { signing: { mac: false, win: false, unsigned: true }, npm: false },
+    ));
+  it("keeps the macOS feed and blocks when only Windows is unsigned", () =>
+    fixture(
+      "nightly",
+      (directory, plan) => {
+        const assets = prepareForkAssets(plan, directory);
+        expect(assets.filter((name) => name.endsWith(".yml"))).toEqual([
+          "nightly-mac.yml",
+          "nightly-linux.yml",
+          "nightly-linux-arm64.yml",
+        ]);
+        const blocks = assets.filter((name) => name.endsWith(".blockmap"));
+        expect(blocks.some((name) => name.endsWith(".dmg.blockmap"))).toBe(true);
+        expect(blocks.some((name) => name.endsWith(".zip.blockmap"))).toBe(true);
+        expect(blocks.some((name) => name.endsWith(".exe.blockmap"))).toBe(false);
+        const checksums = FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8");
+        expect(checksums).not.toContain(".exe.blockmap");
+        expect(checksums).toContain(".dmg.blockmap");
+      },
+      { signing: { mac: true, win: false, unsigned: true } },
     ));
   it("rejects missing CLI platforms before publishing", () =>
     fixture("stable", (directory, plan) => {

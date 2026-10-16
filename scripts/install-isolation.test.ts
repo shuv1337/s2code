@@ -46,6 +46,10 @@ beforeEach(() => {
   );
   NodeFS.writeFileSync(NodePath.join(assets, "releases"), '[{"tag_name":"v1.2.3"}]');
   NodeFS.writeFileSync(
+    NodePath.join(assets, "release.json"),
+    JSON.stringify({ signing: { mac: true, win: false, unsigned: true } }),
+  );
+  NodeFS.writeFileSync(
     NodePath.join(fixtureBin, "curl"),
     `#!/bin/sh
 out= url=
@@ -53,7 +57,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in -o) out="$2"; shift ;; http*) url="$1" ;; esac
   shift
 done
-case "$url" in *SHA256SUMS) file=SHA256SUMS ;; *.tar.gz) file="${stem}.tar.gz" ;; *) file=releases ;; esac
+case "$url" in *SHA256SUMS) file=SHA256SUMS ;; *.tar.gz) file="${stem}.tar.gz" ;; *release.json) file=release.json ;; *) file=releases ;; esac
 if [ -n "\${FIXTURE_PRODUCT_HOME:-}" ]; then
   [ "$(cat "$FIXTURE_PRODUCT_HOME/.product-identity" 2>/dev/null)" = shuv2code ] || exit 91
 fi
@@ -110,9 +114,11 @@ if ($env:FIXTURE_FAIL_PUBLISH) {
     }
   }
 }
-function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing)
+function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing, $Headers)
   if ($env:FIXTURE_PRODUCT_HOME -and [IO.File]::ReadAllText((Join-Path $env:FIXTURE_PRODUCT_HOME '.product-identity')).Trim() -ne 'shuv2code') { throw 'Missing home ownership before download' }
   Add-Content $env:FIXTURE_REQUESTS $Uri
+  # Release assets are octet-stream, so the real cmdlet hands back raw bytes.
+  if ($Uri.EndsWith('release.json')) { return [pscustomobject]@{ Content = [IO.File]::ReadAllBytes(${psQuote(NodePath.join(assets, "release.json"))}) } }
   if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, '${digest}  t3-1.2.3-win32-x64.zip') }
   else { Copy-Item ${psQuote(NodePath.join(assets, "windows.zip"))} $OutFile }
 }
@@ -161,6 +167,12 @@ describe
       ).toBe("shuv2code");
     },
   );
+  it.skipIf(kind === "pwsh" && !hasPwsh)("warns about an unsigned release and installs it", () => {
+    const result = runInstaller(kind);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    // PowerShell's warning stream reaches stdout on these hosts.
+    expect(result.stderr + result.stdout).toContain("UNSIGNED build");
+  });
   it.skipIf(kind === "pwsh" && !hasPwsh).each(["nightly", "preview"])(
     "rejects unmarked upstream-like state at the exact %s default before changing any files",
     (channel) => {

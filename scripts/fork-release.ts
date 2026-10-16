@@ -16,6 +16,7 @@ import {
   FORK_NPM_PACKAGES,
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
+  RELEASE_CREDENTIAL_VARIABLES,
   releaseSigningPolicy,
   forkReleasePlan,
   requiredDesktopAssets,
@@ -225,6 +226,15 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
       )
     )
       throw new Error("Wrong-channel updater metadata was produced.");
+    // Blockmaps only serve differential updates, so a platform without a feed
+    // has no use for them. Their extension identifies the platform.
+    const strandedBlocks = [
+      ...(plan.signing.mac ? [] : [".dmg.blockmap", ".zip.blockmap"]),
+      ...(plan.signing.win ? [] : [".exe.blockmap"]),
+    ];
+    for (const name of FS.readdirSync(directory))
+      if (strandedBlocks.some((suffix) => name.endsWith(suffix)))
+        FS.unlinkSync(Path.join(directory, name));
   }
   const payloads = [
     ...desktops,
@@ -650,9 +660,12 @@ async function main() {
     )
       throw new Error("Workspace t3 must remain private.");
     writeJson("release-plan.json", plan);
+    // The build jobs run outside this environment, so they get the team id
+    // resolved here instead of looking it up in a narrower variable scope.
+    const team = process.env.APPLE_TEAM_ID?.trim() ?? "";
     FS.appendFileSync(
       process.env.GITHUB_OUTPUT!,
-      `ref=${sha}\nversion=${version}\nrelease_channel=${channel}\nmac_signed=${signing.mac}\nwin_signed=${signing.win}\nmatrix=${JSON.stringify({ include: FORK_DESKTOP_MATRIX })}\n`,
+      `ref=${sha}\nversion=${version}\nrelease_channel=${channel}\nmac_signed=${signing.mac}\nwin_signed=${signing.win}\napple_team_id=${/^[A-Za-z0-9]+$/.test(team) ? team : ""}\nmatrix=${JSON.stringify({ include: FORK_DESKTOP_MATRIX })}\n`,
     );
   } else if (mode === "signing") {
     // Preflight resolved signing once, inside the release environment. A build
@@ -675,7 +688,13 @@ async function main() {
       missing.length
     )
       throw new Error(
-        `The release plans a signed ${platform} build, but this job is missing: ${missing.join(", ")}. Signing credentials must be repository or organization secrets; the fork-release environment is not visible here.`,
+        `The release plans a signed ${platform} build, but this job cannot see ${missing
+          .map((key) =>
+            RELEASE_CREDENTIAL_VARIABLES.includes(key) ? `${key} (variable)` : `${key} (secret)`,
+          )
+          .join(
+            ", ",
+          )}. Signing inputs must be repository or organization secrets and variables; anything scoped to the fork-release environment is invisible here.`,
       );
     FS.appendFileSync(
       process.env.GITHUB_OUTPUT!,

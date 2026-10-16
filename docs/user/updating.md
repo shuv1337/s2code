@@ -70,18 +70,19 @@ The offered action depends on how the server runs:
 On the host, run:
 
 ```sh
-shuv2code update <client-version>
+shuv2code-nightly update <client-version>
 ```
 
 Replace `<client-version>` with the version shown in the notice. The command
 asks before restarting the background service; if you decline, run
-`shuv2code service restart` when you are ready. For a server you started by hand,
+`shuv2code-nightly service restart` when you are ready. For a server you started by hand,
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
 If you run a published fork package with `npx` rather than an installed command, there is
 nothing to update on the host: stop the server and relaunch it as
-`npx shuv2code@<client-version>` with the same subcommand and options. For source
+`npx shuv2code@<client-version>` with the same subcommand and options. Plain
+`npx shuv2code` picks the newest nightly, the only train this fork publishes. For source
 installs, update the fork checkout and rebuild; do not install upstream as recovery.
 
 ## If an update fails

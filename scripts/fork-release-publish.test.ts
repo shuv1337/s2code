@@ -63,7 +63,14 @@ globalThis.fetch=async input=>{
 };
 `;
 
-function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true, channel = "preview") {
+function publishFixture(
+  mode = "resume",
+  ref = "refs/heads/main",
+  npm = true,
+  channel = "preview",
+  /** dist-tags the registry already holds, by package name. */
+  tags: Record<string, Record<string, string>> = {},
+) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
     repository: "shuv1337/shuv2code",
@@ -109,7 +116,7 @@ function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true, ch
       JSON.stringify({
         mode,
         registry,
-        tags: {},
+        tags,
         commands: [],
         release: {
           id: 1234,
@@ -162,6 +169,7 @@ function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true, ch
       state: JSON.parse(NodeFS.readFileSync(stateFile, "utf8")) as {
         commands: string[][];
         index?: string;
+        tags: Record<string, Record<string, string>>;
         release: { draft: boolean; assets: { name: string }[] };
       },
     };
@@ -242,6 +250,35 @@ describe("fork publication fixtures", () => {
       // Without macOS and Windows feeds the release is not a complete index
       // entry, and publication proceeds with the index unchanged.
       expect(JSON.parse(state.index!)).toEqual([]);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "promotes nightly and latest, platform packages before the launcher",
+    () => {
+      const held = "@shuv2code/t3-linux-x64";
+      const { result, state, plan } = publishFixture("resume", "refs/heads/main", true, "nightly", {
+        ...Object.fromEntries(
+          CLI_ARCHIVE_PLATFORM_KEYS.map((key) => [`@shuv2code/t3-${key}`, { latest: "0.0.0" }]),
+        ),
+        shuv2code: { latest: "0.0.0" },
+        // A newer published version must keep `latest`, without failing the run.
+        [held]: { latest: "9.9.9" },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const promotions = state.commands
+        .filter(([command, subcommand]) => command === "npm" && subcommand === "dist-tag")
+        .map((args) => [args[3]!.slice(0, args[3]!.lastIndexOf("@")), args[4]!] as const);
+      for (const name of [...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@shuv2code/t3-${key}`)])
+        expect(promotions.filter(([pkg]) => pkg === name).map(([, tag]) => tag)).toEqual(
+          name === held ? ["nightly"] : ["nightly", "latest"],
+        );
+      expect(promotions.filter(([pkg]) => pkg === "shuv2code").map(([, tag]) => tag)).toEqual([
+        "nightly",
+        "latest",
+      ]);
+      expect(promotions.findIndex(([pkg]) => pkg === "shuv2code")).toBe(promotions.length - 2);
+      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(

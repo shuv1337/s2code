@@ -94,6 +94,8 @@ export const MAC_RELEASE_CREDENTIALS = [
   "APPLE_API_ISSUER",
   "APPLE_TEAM_ID",
 ];
+/** Signing inputs that are configuration rather than secrets, so they come from `vars`. */
+export const RELEASE_CREDENTIAL_VARIABLES = ["APPLE_TEAM_ID"];
 export const WIN_RELEASE_CREDENTIALS = [
   "AZURE_TENANT_ID",
   "AZURE_CLIENT_ID",

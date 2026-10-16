@@ -41,8 +41,8 @@ services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
 updating; their old `T3CODE_HOME` setting is not adopted.
 If the binary was already updated, an old unit or unmarked active runtime pauses
 without starting a server. Its log says **Service paused until reinstall** rather
-than repeatedly restarting. Reinstall with `shuv2code service install` using the
-same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
+than repeatedly restarting. Reinstall with `shuv2code-nightly service install`
+using the same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
 
 An empty custom home is claimed automatically. Historical installations in the
 exact stable default home remain usable; nightly/preview homes must be empty or
@@ -80,8 +80,9 @@ If the command or its `start` subcommand reports an already running server, conn
 instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
-Do not use `npx t3` to try this fork: it downloads upstream. When the fork npm
-package is published, its runner form will be `npx shuv2code@nightly`.
+Do not use `npx t3` to try this fork: it downloads upstream. Once the fork npm
+package is published, `npx shuv2code` runs the newest nightly, because nightly
+is the only train this fork publishes.
 
 ### Intel Macs
 
@@ -178,11 +179,11 @@ take longer.
 With the desktop app already running on the same machine:
 
 ```bash
-shuv2code app
+shuv2code-nightly app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `shuv2code app ../my-project`, to open another directory. It requires
+Pass a path, such as `shuv2code-nightly app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 
