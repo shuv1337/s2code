@@ -5,7 +5,11 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
-import { prepareForkAssets, inspectForkNpmPackages } from "./fork-release.ts";
+import {
+  prepareForkAssets,
+  inspectForkNpmPackages,
+  assertPackagedWslRuntime,
+} from "./fork-release.ts";
 import {
   npmPlatformPackageManifest,
   npmLauncherPackageManifest,
@@ -216,6 +220,25 @@ describe("complete fork release assets", () => {
       },
       { signing: { mac: true, win: false, unsigned: true } },
     ));
+  it("verifies the WSL runtime inside the shipped Windows installer", () => {
+    const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-wsl-payload-"));
+    try {
+      const resources = Path.join(directory, "resources");
+      FS.mkdirSync(resources);
+      const archive = Path.join(resources, "wsl-runtime.tar.gz");
+      FS.writeFileSync(archive, "wsl runtime bytes");
+      const expected = Crypto.createHash("sha256").update("wsl runtime bytes").digest("hex");
+      expect(() => assertPackagedWslRuntime(directory, expected)).not.toThrow();
+      expect(() => assertPackagedWslRuntime(directory, "deadbeef")).toThrow("does not match");
+      expect(() => assertPackagedWslRuntime("", expected)).toThrow("PACKAGED_PAYLOAD_DIR");
+      FS.unlinkSync(archive);
+      expect(() => assertPackagedWslRuntime(directory, expected)).toThrow(
+        "no resources/wsl-runtime.tar.gz",
+      );
+    } finally {
+      FS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it("rejects missing CLI platforms before publishing", () =>
     fixture("stable", (directory, plan) => {
       FS.unlinkSync(Path.join(directory, plan.cliAssets[0]!));

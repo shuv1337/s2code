@@ -256,6 +256,26 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
 }
 
+/**
+ * The WSL runtime the Windows installer will lay down, read from the payload
+ * extracted out of that installer. `release/` keeps only finished artifacts, so
+ * there is no unpacked build tree to inspect by the time the receipt is written.
+ */
+export function assertPackagedWslRuntime(payloadDir: string, expected: string) {
+  if (!payloadDir)
+    throw new Error(
+      "PACKAGED_PAYLOAD_DIR is required: extract the Windows installer payload before writing the receipt.",
+    );
+  const file = Path.join(payloadDir, "resources", "wsl-runtime.tar.gz");
+  if (!FS.existsSync(file))
+    throw new Error(`The Windows installer payload has no resources/wsl-runtime.tar.gz (${file}).`);
+  const actual = digest(file);
+  if (actual !== expected)
+    throw new Error(
+      `Packaged Windows WSL runtime ${actual} does not match the released Linux archive ${expected}.`,
+    );
+}
+
 export function inspectForkNpmPackages(directory: string, version: string) {
   const tarballs = [
     ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@shuv2code", `t3-${key}.tgz`)),
@@ -722,15 +742,8 @@ async function main() {
           }
         : {}),
     };
-    if (platform === "win") {
-      const unpacked = FS.readdirSync("release").filter((name) => /^win.*-unpacked$/.test(name));
-      if (
-        unpacked.length !== 1 ||
-        digest(Path.join("release", unpacked[0]!, "resources/wsl-runtime.tar.gz")) !==
-          receipt.wslSha256
-      )
-        throw new Error("Packaged Windows WSL runtime is missing or mismatched.");
-    }
+    if (platform === "win")
+      assertPackagedWslRuntime(process.env.PACKAGED_PAYLOAD_DIR ?? "", receipt.wslSha256!);
     writeJson(`release-publish/build-${platform}-${arch}.json`, receipt);
   } else if (mode === "prepare") {
     const plan = readPlan();
