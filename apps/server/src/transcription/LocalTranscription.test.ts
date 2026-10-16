@@ -11,12 +11,19 @@ import * as LocalSpeechModel from "./LocalSpeechModel.ts";
 const native = vi.hoisted(() => ({
   decode: vi.fn<() => Promise<{ text: string }>>(),
   create: vi.fn<() => Promise<unknown>>(),
+  // undefined keeps the real ffmpeg-static lookup; a string overrides it.
+  ffmpeg: undefined as string | undefined,
 }));
-vi.mock("./NativeSpeech.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./NativeSpeech.ts")>()),
-  loadSherpa: () => ({ OfflineRecognizer: { createAsync: native.create } }),
-}));
+vi.mock("./NativeSpeech.ts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./NativeSpeech.ts")>();
+  return {
+    ...original,
+    loadSherpa: () => ({ OfflineRecognizer: { createAsync: native.create } }),
+    loadFfmpeg: () => native.ffmpeg ?? original.loadFfmpeg(),
+  };
+});
 beforeEach(() => {
+  native.ffmpeg = undefined;
   native.decode.mockReset().mockResolvedValue({ text: "Run the tests." });
   native.create.mockReset().mockResolvedValue({
     createStream: () => ({ acceptWaveform: () => {} }),
@@ -43,6 +50,15 @@ it.effect("decodes AAC, reuses the native model, and returns text", () =>
     assert.equal(yield* service.transcribe(audio), "Run the tests.");
     assert.equal(native.create.mock.calls.length, 1);
     assert.equal(native.decode.mock.calls.length, 2);
+  }).pipe(Effect.provide(layer)),
+);
+it.effect("an ffmpeg path that is not on disk reports transcription as unavailable", () =>
+  Effect.gen(function* () {
+    native.ffmpeg = "/nonexistent/ffmpeg-static/ffmpeg";
+    const service = yield* LocalTranscription.LocalTranscription;
+    const failure = yield* service.transcribe(yield* clip).pipe(Effect.flip);
+    assert.equal(failure.code, "transcription_unavailable");
+    assert.equal(native.create.mock.calls.length, 0);
   }).pipe(Effect.provide(layer)),
 );
 it.effect("malformed and oversized audio never loads the model", () =>

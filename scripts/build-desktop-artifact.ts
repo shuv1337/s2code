@@ -35,6 +35,7 @@ import {
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import {
   findInlinedExternalPackages,
+  partitionStageDependencies,
   selectCliRuntimeExternalDependencies,
 } from "./lib/cli-external-packages.ts";
 import { loadRepoEnv } from "./lib/public-config.ts";
@@ -703,6 +704,19 @@ export class WslRuntimeArchiveMissingError extends Schema.TaggedError<WslRuntime
   }
 }
 
+export class StagedFfmpegMissingError extends Schema.TaggedError<StagedFfmpegMissingError>()(
+  "StagedFfmpegMissingError",
+  {
+    stageDir: Schema.String,
+    label: Schema.String,
+    resolved: Schema.optionalKey(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `${this.label} installed no usable FFmpeg (${this.resolved ?? "ffmpeg-static did not resolve"} in ${this.stageDir}). ffmpeg-static is optional so win32-arm64 can install at all, so a failed download here would otherwise ship silently without transcription.`;
+  }
+}
+
 export class WindowsServerSidecarPackError extends Schema.TaggedError<WindowsServerSidecarPackError>()(
   "WindowsServerSidecarPackError",
   {
@@ -961,6 +975,7 @@ interface StagePackageJson {
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
+  readonly optionalDependencies?: Record<string, unknown>;
   readonly devDependencies: {
     readonly electron: string;
   };
@@ -3134,7 +3149,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     version: input.appVersion,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    dependencies: sidecarDependencies,
+    ...partitionStageDependencies(sidecarDependencies),
   };
   const sidecarPackageJsonString = yield* encodeJsonString(sidecarPackageJson);
   yield* fs.writeFileString(
@@ -3173,6 +3188,12 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     }),
     { label: "vp install --prod (server sidecar)", verbose: input.verbose },
   );
+  yield* assertStagedFfmpeg({
+    stageDir: serverStageDir,
+    platform: "win",
+    arch: input.arch,
+    label: "The Windows server sidecar",
+  });
 
   yield* Effect.log("[desktop-artifact] Packing server.asar...");
   yield* fs.makeDirectory(path.dirname(input.asarPath), { recursive: true });
@@ -3307,6 +3328,41 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
     }),
   );
 });
+
+/**
+ * Prove a staged production install actually carries the FFmpeg executable.
+ *
+ * ffmpeg-static is an optional dependency so win32-arm64, which has no binary,
+ * can install at all. Optional also means any transient failure is tolerated
+ * silently, and the package resolves to a path for every supported platform
+ * whether or not the install script wrote the file, so both the package and the
+ * executable are checked. Every stage install runs this except win32-arm64,
+ * where transcription is knowingly unavailable.
+ */
+export const assertStagedFfmpeg = Effect.fn("desktopArtifact.assertStagedFfmpeg")(
+  function* (input: {
+    readonly stageDir: string;
+    readonly platform: typeof BuildPlatform.Type;
+    readonly arch: typeof BuildArch.Type;
+    readonly label: string;
+  }) {
+    if (input.platform === "win" && input.arch === "arm64") return;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const resolved = yield* Effect.try(() =>
+      NodeModule.createRequire(path.join(input.stageDir, "package.json"))("ffmpeg-static"),
+    ).pipe(Effect.orElseSucceed(() => null));
+    if (typeof resolved !== "string")
+      return yield* new StagedFfmpegMissingError({ stageDir: input.stageDir, label: input.label });
+    if (!(yield* fs.exists(resolved).pipe(Effect.orElseSucceed(() => false))))
+      return yield* new StagedFfmpegMissingError({
+        stageDir: input.stageDir,
+        label: input.label,
+        resolved,
+      });
+    yield* Effect.log(`[desktop-artifact] ${input.label} FFmpeg: ${resolved}`);
+  },
+);
 
 export const validateWindowsPackagedPayload = Effect.fn(
   "desktopArtifact.validateWindowsPackagedPayload",
@@ -3584,7 +3640,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   const electronVersion = desktopPackageJson.dependencies.electron;
 
-  const serverDependencies = serverPackageJson.dependencies;
+  // Optional externals are production dependencies too; each stage manifest
+  // keeps them optional so an unbuildable platform does not fail the install.
+  const serverDependencies = {
+    ...serverPackageJson.dependencies,
+    ...serverPackageJson.optionalDependencies,
+  };
   if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
     return yield* new MissingServerProductionDependenciesError({
       manifestPath: "apps/server/package.json",
@@ -3916,7 +3977,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
     ),
-    dependencies: stageDependencies,
+    ...partitionStageDependencies(stageDependencies),
     devDependencies: {
       electron: electronVersion,
     },
@@ -3956,6 +4017,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     }),
     { label: "vp install --prod", verbose: options.verbose },
   );
+  if (options.platform !== "win")
+    yield* assertStagedFfmpeg({
+      stageDir: stageAppDir,
+      platform: options.platform,
+      arch: options.arch,
+      label: "The staged desktop app",
+    });
   yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
   yield* stageKeyringNativeBinaries(stageAppDir, options.platform, options.arch);
 

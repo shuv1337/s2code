@@ -688,19 +688,52 @@ jobs:
             done
           fi
 
+      # Verify the bytes users download. `release/` holds only the finished
+      # artifacts, so the app bundle is checked inside the update ZIP, which
+      # electron-builder writes after it staples the notarization ticket. The
+      # DMG is deliberately not checked: this pipeline never signs the DMG
+      # container itself. Signature, team and ticket are the gates; Gatekeeper's
+      # own verdict is unreliable on hosted runners and is only logged.
       - name: Verify macOS signature and notarization before declaring a signed receipt
         if: inputs.release_publication && inputs.platform == 'mac' && steps.signing_policy.outputs.mac_signed == 'true'
         shell: bash
         env:
           EXPECTED_TEAM: ${{ inputs.apple_team_id || vars.APPLE_TEAM_ID }}
+          BUILD_ARCH: ${{ inputs.arch }}
         run: |
           set -euo pipefail
-          app="$(find release -maxdepth 3 -name '*.app' -type d -print -quit)"
-          test -n "$app"
-          codesign --verify --deep --strict "$app"
-          codesign -dv --verbose=4 "$app" 2>&1 | grep -F "TeamIdentifier=$EXPECTED_TEAM"
-          # electron-builder notarizes and staples the app bundle, not the DMG container.
-          xcrun stapler validate "$app"
+          shopt -s nullglob
+          archives=(release-publish/*-"$BUILD_ARCH".zip)
+          if [[ ${#archives[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one macOS $BUILD_ARCH update archive in release-publish; found ${#archives[@]}." >&2
+            exit 1
+          fi
+          archive="${archives[0]}"
+          extracted="$RUNNER_TEMP/verify-mac-$BUILD_ARCH"
+          rm -rf "$extracted"
+          mkdir -p "$extracted"
+          ditto -x -k "$archive" "$extracted"
+          app="$(find "$extracted" -maxdepth 2 -name '*.app' -type d -print -quit)"
+          if [[ -z "$app" ]]; then
+            echo "::error::$archive contains no .app bundle to verify." >&2
+            exit 1
+          fi
+          echo "Verifying $(basename "$app") from $(basename "$archive")"
+          if ! codesign --verify --deep --strict "$app"; then
+            echo "::error::$(basename "$app") in $(basename "$archive") is not validly signed." >&2
+            exit 1
+          fi
+          if ! codesign -dv --verbose=4 "$app" 2>&1 | grep -F "TeamIdentifier=$EXPECTED_TEAM"; then
+            echo "::error::$(basename "$app") is not signed by team $EXPECTED_TEAM." >&2
+            exit 1
+          fi
+          if ! xcrun stapler validate "$app"; then
+            echo "::error::$(basename "$app") carries no stapled notarization ticket, so it would be checked online on first launch." >&2
+            exit 1
+          fi
+          # Not a gate: hosted runners answer "Insufficient Context" for a
+          # stapled app often enough that Gatekeeper's verdict is only a note.
+          spctl --assess --type execute --verbose=2 "$app" || true
 
       - name: Verify Windows installer signatures before declaring a signed receipt
         if: inputs.release_publication && inputs.platform == 'win' && steps.signing_policy.outputs.win_signed == 'true'
@@ -721,6 +754,8 @@ jobs:
             }
           }
 
+      # On Windows the receipt reads the WSL runtime back out of the installer
+      # it just collected, so it needs 7-Zip on PATH.
       - name: Record resolved source, signing policy and packaged WSL digest
         if: inputs.release_publication
         shell: bash

@@ -256,6 +256,78 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
 }
 
+/**
+ * The name electron-builder's NSIS installer embeds its app payload under. The
+ * build directory calls the archive `<name>-<version>-<arch>.nsis.7z`, but
+ * `File /oname=` renames it on the way in; see app-builder-lib's
+ * templates/nsis/include/extractAppPackage.nsh.
+ */
+export function windowsInstallerPayloadName(arch: string) {
+  if (arch !== "x64" && arch !== "arm64")
+    throw new Error(`Unsupported Windows release architecture: ${arch}.`);
+  return `app-${arch === "x64" ? "64" : "arm64"}.7z`;
+}
+const SEVEN_ZIP_COMMANDS = ["7z", "C:\\Program Files\\7-Zip\\7z.exe"];
+/**
+ * Extract one entry, by pattern, from an archive 7-Zip can open.
+ *
+ * 7-Zip exits 1 for warnings it recovered from, so only exit 2 and above is a
+ * failure; whether the wanted file is on disk decides the rest.
+ */
+function extractArchiveEntry(archive: string, entry: string, into: string) {
+  const args = ["x", "-y", "-r", `-o${into}`, archive, entry];
+  for (const command of SEVEN_ZIP_COMMANDS) {
+    try {
+      CP.execFileSync(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+      return;
+    } catch (error) {
+      const failure = error as { code?: unknown; status?: unknown };
+      if (failure.code === "ENOENT") continue;
+      if (typeof failure.status === "number" && failure.status < 2) return;
+      throw releaseCommandError(command, args, error);
+    }
+  }
+  throw new Error(
+    `Reading the Windows installer payload needs 7-Zip; none of ${SEVEN_ZIP_COMMANDS.join(", ")} ran.`,
+  );
+}
+/**
+ * Read the app payload back out of the installer users will run. `release/`
+ * keeps only finished artifacts, so there is no unpacked build tree left to
+ * inspect by the time the receipt is written.
+ */
+export function extractPackagedWslRuntime(installerDir: string, arch: string, workDir: string) {
+  const expected = windowsInstallerPayloadName(arch);
+  const installers = FS.readdirSync(installerDir).filter((name) => name.endsWith(".exe"));
+  if (installers.length !== 1)
+    throw new Error(
+      `Expected exactly one Windows installer in ${installerDir}; found ${installers.length}.`,
+    );
+  FS.rmSync(workDir, { recursive: true, force: true });
+  const inner = Path.join(workDir, "inner");
+  extractArchiveEntry(Path.join(installerDir, installers[0]!), "app-*.7z", inner);
+  const payloads = (FS.existsSync(inner) ? FS.readdirSync(inner, { recursive: true }) : [])
+    .map(String)
+    .filter((name) => name.endsWith(".7z"));
+  if (payloads.length !== 1 || Path.basename(payloads[0]!) !== expected)
+    throw new Error(
+      `Expected ${expected} inside ${installers[0]}; found ${payloads.join(", ") || "no app payload"}.`,
+    );
+  const payload = Path.join(workDir, "app");
+  extractArchiveEntry(Path.join(inner, payloads[0]!), "resources/wsl-runtime.tar.gz", payload);
+  return payload;
+}
+export function assertPackagedWslRuntime(payloadDir: string, expected: string) {
+  const file = Path.join(payloadDir, "resources", "wsl-runtime.tar.gz");
+  if (!FS.existsSync(file))
+    throw new Error(`The Windows installer payload has no resources/wsl-runtime.tar.gz (${file}).`);
+  const actual = digest(file);
+  if (actual !== expected)
+    throw new Error(
+      `Packaged Windows WSL runtime ${actual} does not match the released Linux archive ${expected}.`,
+    );
+}
+
 export function inspectForkNpmPackages(directory: string, version: string) {
   const tarballs = [
     ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@shuv2code", `t3-${key}.tgz`)),
@@ -722,15 +794,15 @@ async function main() {
           }
         : {}),
     };
-    if (platform === "win") {
-      const unpacked = FS.readdirSync("release").filter((name) => /^win.*-unpacked$/.test(name));
-      if (
-        unpacked.length !== 1 ||
-        digest(Path.join("release", unpacked[0]!, "resources/wsl-runtime.tar.gz")) !==
-          receipt.wslSha256
-      )
-        throw new Error("Packaged Windows WSL runtime is missing or mismatched.");
-    }
+    if (platform === "win")
+      assertPackagedWslRuntime(
+        extractPackagedWslRuntime(
+          "release-publish",
+          arch,
+          Path.join(process.env.RUNNER_TEMP ?? process.cwd(), `installer-payload-${arch}`),
+        ),
+        receipt.wslSha256!,
+      );
     writeJson(`release-publish/build-${platform}-${arch}.json`, receipt);
   } else if (mode === "prepare") {
     const plan = readPlan();

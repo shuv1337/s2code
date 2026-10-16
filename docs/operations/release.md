@@ -10,7 +10,8 @@ One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives, package manifests and release receipts. Desktop builds cover
 macOS ARM64/x64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
 ARM64/x64 (NSIS). Each Windows desktop embeds the matching same-version Linux
-archive; its packaged digest is checked before publication.
+archive; the receipt reads that archive back out of the finished installer and
+compares its digest before publication.
 
 CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-arm64`, `win32-x64`. **Intel macOS CLI/SEA is unsupported**; use the Intel
@@ -32,11 +33,15 @@ and a version tag is refused as a publication ref.
 
 Each platform is signed when its credentials are complete. Preflight resolves
 that once and passes `mac_signed`/`win_signed` to the desktop builds, which fail
-closed when a platform planned as signed cannot see its credentials. macOS
-signing also verifies notarization and the configured team. Windows signing
-verifies the publisher. A platform without complete credentials ships unsigned,
-and the release title, body and `release.json` say so. Partial credentials are
-not proof of signing.
+closed when a platform planned as signed cannot see its credentials. Every check
+runs on the finished artifacts: the app bundle is verified inside the macOS
+update ZIP for signature, team and stapled ticket, and the Windows installer for
+its publisher. `spctl` is logged but not a gate, because hosted runners report
+"Insufficient Context" for a stapled app. The DMG container itself is not
+signed, and the Windows receipt needs 7-Zip on the runner to read the
+installer's payload. A platform
+without complete credentials ships unsigned, and the release title, body and
+`release.json` say so. Partial credentials are not proof of signing.
 
 An unsigned macOS or Windows build publishes no updater feed, because those
 updaters require a signature, and the release is then left out of the rolling

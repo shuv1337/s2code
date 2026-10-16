@@ -103,6 +103,34 @@ export function selectCliRuntimeExternalDependencies(
 }
 
 /**
+ * Externals a build may legitimately end up without. ffmpeg-static publishes no
+ * win32-arm64 binary and its install script exits non-zero there, which fails a
+ * whole `pnpm install` for a required dependency. The server treats a missing
+ * FFmpeg as `transcription_unavailable`, so the package is optional everywhere
+ * rather than conditional on one architecture.
+ */
+export const CLI_OPTIONAL_EXTERNAL_PACKAGES = ["ffmpeg-static"] as const;
+
+/**
+ * Split staged dependencies into the manifest halves a stage install needs, so
+ * a package that cannot build on this platform does not fail the install.
+ */
+export function partitionStageDependencies(dependencies: Readonly<Record<string, string>>): {
+  dependencies: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+} {
+  const required: Record<string, string> = {};
+  const optional: Record<string, string> = {};
+  for (const [name, version] of Object.entries(dependencies))
+    if ((CLI_OPTIONAL_EXTERNAL_PACKAGES as ReadonlyArray<string>).includes(name))
+      optional[name] = version;
+    else required[name] = version;
+  return Object.keys(optional).length === 0
+    ? { dependencies: required }
+    : { dependencies: required, optionalDependencies: optional };
+}
+
+/**
  * Scan an emitted bundle chunk for runtime-external packages that were inlined.
  *
  * Configuring the bundler is not the same as checking what it produced. The
