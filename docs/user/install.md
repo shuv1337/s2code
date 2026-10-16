@@ -31,7 +31,8 @@ the installer prints the line to add. Set `SHUV2CODE_VERSION` to pin an exact ve
 
 ### Keep upstream and fork installations separate
 
-shuv2code uses `~/.shuv2code-v2` by default. Set `SHUV2CODE_HOME` for a different
+A default install follows the nightly train, so shuv2code uses
+`~/.shuv2code-v2-nightly`. Set `SHUV2CODE_HOME` for a different
 home, `SHUV2CODE_PORT` for a server port, and `SHUV2CODE_RELEASE_BASE_URL` for a
 release-download mirror. Public settings use the `SHUV2CODE_` prefix; inherited
 upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
@@ -58,23 +59,24 @@ Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` a
 an upstream home, live database, or shared runtime cache; use a separate home.
 Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 
-| Task                                             | Command                                                          |
-| ------------------------------------------------ | ---------------------------------------------------------------- |
-| Start the server and open the web app            | `shuv2code`                                                      |
-| Start the server without a browser               | `shuv2code serve`                                                |
-| Keep it running in the background (macOS, Linux) | `shuv2code service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `shuv2code update`                                               |
-| Remove it again                                  | `shuv2code uninstall`                                            |
+| Task                                             | Command                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------ |
+| Start the server and open the web app            | `shuv2code-nightly`                                                      |
+| Start the server without a browser               | `shuv2code-nightly serve`                                                |
+| Keep it running in the background (macOS, Linux) | `shuv2code-nightly service install` ([details](./background-service.md)) |
+| Move to the newest release                       | `shuv2code-nightly update`                                               |
+| Remove it again                                  | `shuv2code-nightly uninstall`                                            |
 
-These examples use `shuv2code`. For a nightly install, run `shuv2code-nightly`
-instead, or the exact Node/source invocation printed by your server. A published npm install uses
+These examples use `shuv2code-nightly`, the command a default install creates.
+Stable (`shuv2code`) and preview (`shuv2code-preview`) are reached only by setting
+`SHUV2CODE_CHANNEL`, and neither train is published today. A published npm install uses
 the fork package `shuv2code`; uninstall only that proven package/prefix, never `t3`.
 
-Run `shuv2code help` or `shuv2code --help` for the full reference. To start in a new working
-directory, use an explicit path such as `shuv2code ./my-project`. A bare directory name
-is accepted only if it already exists.
+Run `shuv2code-nightly help` or `shuv2code-nightly --help` for the full reference. To start in
+a new working directory, use an explicit path such as `shuv2code-nightly ./my-project`. A bare
+directory name is accepted only if it already exists.
 
-If `shuv2code` or `shuv2code start` reports an already running server, connect to that server
+If the command or its `start` subcommand reports an already running server, connect to that server
 instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
@@ -100,12 +102,16 @@ update it with `git pull` and a rebuild.
 
 ### Fork release channels
 
-Stable and nightly shuv2code are separate installations and can run together.
-They keep separate settings, connections, browser profiles, local server data,
-background services, and update feeds. Stable uses `~/.shuv2code-v2`; nightly
-uses `~/.shuv2code-v2-nightly`. Install the other channel separately rather than
-switching an installed app's update feed. If you override the data home, choose
-a different directory for each channel.
+Only nightly is published. Stable and nightly shuv2code are separate installations
+and can run together. They keep separate settings, connections, browser profiles,
+local server data, background services, and update feeds. Stable uses
+`~/.shuv2code-v2`; nightly uses `~/.shuv2code-v2-nightly`. Install the other
+channel separately rather than switching an installed app's update feed. If you
+override the data home, choose a different directory for each channel.
+
+Desktop builds update automatically only when they are signed. A release titled
+UNSIGNED ships at least one platform without a signature; update those installs
+by downloading the new build.
 
 Preview (including PR builds) is a third, independent installation using
 `~/.shuv2code-v2-preview`. It does not update automatically; replace it manually.

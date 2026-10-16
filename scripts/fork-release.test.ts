@@ -21,16 +21,18 @@ const Crypto = NodeCrypto;
 function fixture(
   channel: "stable" | "nightly" | "preview",
   run: (directory: string, plan: ReturnType<typeof forkReleasePlan>) => void,
+  options: { signing?: { mac: boolean; win: boolean; unsigned: boolean }; npm?: boolean } = {},
 ) {
   const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-release-fixture-"));
   const version = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
+  const signing = options.signing ?? { mac: true, win: true, unsigned: false };
   const plan = forkReleasePlan({
     repository: "shuv1337/shuv2code",
     sha: "ab".repeat(20),
     version,
     channel,
-    signing: { mac: true, win: true, unsigned: false },
-    npm: true,
+    signing,
+    npm: options.npm ?? true,
   });
   const desktops = desktopAssetGroups(version).map((group) => group[0]!);
   const sha256 = (name: string) =>
@@ -64,7 +66,8 @@ function fixture(
           sha: plan.sha,
           platform: target.platform,
           arch: target.arch,
-          signed: target.platform !== "linux",
+          signed:
+            target.platform === "mac" ? signing.mac : target.platform === "win" && signing.win,
           ...(target.platform === "win"
             ? { wslSha256: sha256(cliArchiveFileName(version, `linux-${target.arch}`)) }
             : {}),
@@ -161,6 +164,26 @@ describe("complete fork release assets", () => {
         if (channel === "preview") expect(assets.some((name) => name.endsWith(".yml"))).toBe(false);
       }),
   );
+  it("publishes an unsigned nightly without the feeds its updaters cannot follow", () =>
+    fixture(
+      "nightly",
+      (directory, plan) => {
+        const assets = prepareForkAssets(plan, directory);
+        const feeds = assets.filter((name) => name.endsWith(".yml"));
+        expect(feeds).toEqual(["nightly-linux.yml", "nightly-linux-arm64.yml"]);
+        expect(FS.readdirSync(directory).filter((name) => name.endsWith(".yml"))).toEqual(
+          expect.arrayContaining(feeds),
+        );
+        expect(FS.readdirSync(directory)).not.toContain("nightly-mac.yml");
+        expect(FS.readdirSync(directory)).not.toContain("nightly.yml");
+        const release = JSON.parse(
+          FS.readFileSync(Path.join(directory, "release.json"), "utf8"),
+        ) as { npmPackages: string[]; signing: { unsigned: boolean } };
+        expect(release.npmPackages).toEqual([]);
+        expect(release.signing.unsigned).toBe(true);
+      },
+      { signing: { mac: false, win: false, unsigned: true }, npm: false },
+    ));
   it("rejects missing CLI platforms before publishing", () =>
     fixture("stable", (directory, plan) => {
       FS.unlinkSync(Path.join(directory, plan.cliAssets[0]!));

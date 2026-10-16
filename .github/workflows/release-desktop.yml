@@ -95,7 +95,13 @@ on:
         required: false
         default: false
         type: boolean
-      allow_unsigned:
+      # The signing the release already resolved. A planned-signed platform
+      # fails closed here when its credentials did not reach this job.
+      mac_signed:
+        required: false
+        default: false
+        type: boolean
+      win_signed:
         required: false
         default: false
         type: boolean
@@ -247,8 +253,9 @@ jobs:
         if: inputs.release_publication
         shell: bash
         env:
-          RELEASE_CHANNEL: ${{ inputs.release_channel }}
-          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          BUILD_PLATFORM: ${{ inputs.platform }}
+          MAC_SIGNED: ${{ inputs.mac_signed }}
+          WIN_SIGNED: ${{ inputs.win_signed }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -497,7 +504,7 @@ jobs:
               echo "macOS signing enabled."
               args+=(--signed)
             else
-              echo "macOS signing disabled (missing one or more Apple signing secrets)."
+              echo "macOS signing disabled (the release plans an unsigned build, or an Apple signing secret is missing)."
             fi
           elif [[ "${{ inputs.platform }}" == "win" ]]; then
             # Embed the Linux CLI archive built by the same-arch Linux job as
@@ -510,11 +517,11 @@ jobs:
               "$AZURE_TRUSTED_SIGNING_ENDPOINT" \
               "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" \
               "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" \
-              "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"; then
+              "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME" && [[ "${{ inputs.release_publication }}" != true || "${{ steps.signing_policy.outputs.win_signed }}" == true ]]; then
               echo "Windows signing enabled (Azure Trusted Signing)."
               args+=(--signed)
             else
-              echo "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
+              echo "Windows signing disabled (the release plans an unsigned build, or an Azure Trusted Signing secret is missing)."
             fi
           else
             echo "Signing disabled for ${{ inputs.platform }}."

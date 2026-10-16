@@ -121,6 +121,18 @@ export function releaseSigningPolicy(channel: string, allowUnsigned: boolean, en
     unsigned: missingMac.length > 0 || missingWin.length > 0,
   };
 }
+/**
+ * The npm dist-tags a channel publishes, primary tag first. The fork ships only
+ * nightly, so a nightly also moves `latest`; `npx shuv2code` would otherwise
+ * install the placeholder version that trusted publishing required.
+ */
+export function forkDistTags(channel: string) {
+  return channel === "stable"
+    ? ["latest"]
+    : channel === "nightly"
+      ? ["nightly", "latest"]
+      : [channel];
+}
 export function forkReleasePlan(input: {
   repository: string;
   sha: string;
@@ -149,10 +161,15 @@ export function forkReleasePlan(input: {
     throw new Error("Release version does not match its installation channel.");
   if (input.channel === "stable" && input.signing.unsigned)
     throw new Error("Unsigned stable publication is prohibited.");
+  // Electron's macOS and Windows updaters require a signature, so an unsigned
+  // platform gets no feed and is reached only by a deliberate download. Linux
+  // updates are checksum-only, so their feeds always publish.
+  const prefix = input.channel === "stable" ? "latest" : "nightly";
   return {
     ...input,
     tag: `v${input.version}`,
-    distTag: input.channel === "stable" ? "latest" : input.channel,
+    distTag: forkDistTags(input.channel)[0]!,
+    distTags: forkDistTags(input.channel),
     stagingTag: `release-${input.sha.slice(0, 12)}-${input.version}`,
     title: `${input.signing.unsigned ? "UNSIGNED — " : ""}shuv2code ${input.channel} v${input.version}`,
     cliAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(input.version, key)),
@@ -160,10 +177,10 @@ export function forkReleasePlan(input: {
       input.channel === "preview"
         ? []
         : [
-            `${input.channel === "stable" ? "latest" : "nightly"}-mac.yml`,
-            `${input.channel === "stable" ? "latest" : "nightly"}-linux.yml`,
-            `${input.channel === "stable" ? "latest" : "nightly"}-linux-arm64.yml`,
-            `${input.channel === "stable" ? "latest" : "nightly"}.yml`,
+            ...(input.signing.mac ? [`${prefix}-mac.yml`] : []),
+            `${prefix}-linux.yml`,
+            `${prefix}-linux-arm64.yml`,
+            ...(input.signing.win ? [`${prefix}.yml`] : []),
           ],
   };
 }
@@ -247,9 +264,8 @@ export function assertForkDistTag(version: string, tag: string) {
   if (!/^\d+\.\d+\.\d+(?:-(?:nightly|preview)\.\d{8}\.\d+)?$/.test(version))
     throw new Error("Invalid fork release version.");
   const channel = resolveChannelIdentity(version).channel;
-  const expected = channel === "stable" ? "latest" : channel;
   if (
-    tag !== expected &&
+    !forkDistTags(channel).includes(tag) &&
     !new RegExp(`^release-[a-f0-9]{12}-${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`).test(
       tag,
     )
@@ -258,7 +274,11 @@ export function assertForkDistTag(version: string, tag: string) {
       "npm dist-tag must match the fork installation channel or its private release staging tag.",
     );
 }
-/** #272 consumes this tag_name/draft shape. Preview and incomplete/draft releases never enter it. */
+/**
+ * #272 consumes this tag_name/draft shape. Preview and incomplete/draft
+ * releases never enter it, and neither does a release missing a platform feed,
+ * which is how an unsigned macOS or Windows build stays out of automatic updates.
+ */
 export function forkReleaseIndex(
   releases: ReadonlyArray<{
     tag_name: string;

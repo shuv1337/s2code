@@ -219,6 +219,19 @@ mkdir -p "$t3_home"
 home_marker_tmp="$(mktemp "$t3_home/.product-identity.XXXXXX")"
 printf '%s\n' shuv2code > "$home_marker_tmp"
 mv "$home_marker_tmp" "$t3_home/.product-identity"
+
+# The release records its own signing policy. A release without one, or an
+# unreadable one, is not an installation failure; the warning is simply skipped.
+release_metadata="$(mktemp)"
+if fetch "${base_url}/v${version}/release.json" "$release_metadata" 2>/dev/null &&
+  grep -q '"unsigned": *true' "$release_metadata"; then
+  printf '%s\n' \
+    "shuv2code ${version} is an UNSIGNED build." \
+    "  At least one platform was built without signing credentials, so its code signature" \
+    "  and notarization are absent and your system may refuse to run it without an override." >&2
+fi
+rm -f "$release_metadata"
+
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || fail "Invalid release version."

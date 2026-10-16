@@ -66,7 +66,8 @@ jobs:
       ref: ${{ steps.plan.outputs.ref }}
       version: ${{ steps.plan.outputs.version }}
       release_channel: ${{ steps.plan.outputs.release_channel }}
-      allow_unsigned: ${{ steps.plan.outputs.allow_unsigned }}
+      mac_signed: ${{ steps.plan.outputs.mac_signed }}
+      win_signed: ${{ steps.plan.outputs.win_signed }}
       matrix: ${{ steps.plan.outputs.matrix }}
       due: ${{ needs.due.outputs.due }}
     steps:
@@ -161,7 +162,10 @@ jobs:
       release_channel: ${{ needs.preflight.outputs.release_channel }}
       relay_client_tracing: false
       release_publication: true
-      allow_unsigned: ${{ needs.preflight.outputs.allow_unsigned == 'true' }}
+      # Signing is resolved once, in the release environment; the build jobs
+      # cannot see those secrets and must not resolve it again.
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
 
   prepare:
     needs: [preflight, desktop]
