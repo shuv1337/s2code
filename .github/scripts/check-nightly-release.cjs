@@ -1,11 +1,9 @@
 const MINIMUM_RELEASE_GAP_MS = 6 * 60 * 60 * 1000;
 
+// The workflow has no tag trigger and publishes nightly only, so a version tag
+// is not a publishable ref here.
 function isAllowedForkPublishRef(ref, defaultBranch) {
-  return (
-    Boolean(defaultBranch) &&
-    (ref === `refs/heads/${defaultBranch}` ||
-      /^refs\/tags\/v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(ref))
-  );
+  return Boolean(defaultBranch) && ref === `refs/heads/${defaultBranch}`;
 }
 
 function repositoryDefaultBranch(context) {
@@ -39,7 +37,7 @@ async function assertReleaseSource({ github, context, releaseChannel }) {
   const defaultBranch = repositoryDefaultBranch(context);
   if (context.eventName === "workflow_dispatch" && context.ref !== `refs/heads/${defaultBranch}`) {
     throw new Error(
-      `${releaseChannel} releases must be dispatched from ${defaultBranch}; selected ${context.ref}. Use the preview channel for branch builds.`,
+      `${releaseChannel} releases must be dispatched from ${defaultBranch}; selected ${context.ref}. Re-run the workflow from ${defaultBranch}.`,
     );
   }
 

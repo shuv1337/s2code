@@ -3,6 +3,7 @@ const test = require("node:test");
 const {
   assertCommitOnDefaultBranch,
   assertReleaseSource,
+  isAllowedForkPublishRef,
   shouldReleaseNightly,
 } = require("./check-nightly-release.cjs");
 
@@ -45,6 +46,22 @@ function releaseSourceFixture({
     },
   };
 }
+
+test("publishes only from the default branch, never from a version tag", () => {
+  assert.equal(isAllowedForkPublishRef("refs/heads/main", "main"), true);
+  for (const ref of ["refs/heads/feature", "refs/tags/v1.2.3", "refs/tags/v1.2.3-nightly.1.1"]) {
+    assert.equal(isAllowedForkPublishRef(ref, "main"), false);
+  }
+  assert.equal(isAllowedForkPublishRef("refs/heads/main", undefined), false);
+});
+
+test("tells the operator to dispatch a nightly from the default branch", async () => {
+  const { options } = releaseSourceFixture({ ref: "refs/heads/feature" });
+  await assert.rejects(
+    assertReleaseSource({ ...options, releaseChannel: "nightly" }),
+    /Re-run the workflow from main\./,
+  );
+});
 
 test("allows preview releases from any branch without consulting main", async () => {
   const { options, calls } = releaseSourceFixture({ ref: "refs/heads/feature" });

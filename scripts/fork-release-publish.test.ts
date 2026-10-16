@@ -38,6 +38,9 @@ else if(command==='gh') {
  } else if(endpoint?.endsWith('/releases/1234')) {
    if(args.includes('PATCH')) { if(!args.includes('draft=false')) fail(400); s.release.draft=false; }
    save(); console.log(JSON.stringify(s.release));
+ } else if(endpoint?.endsWith('/contents/index.json')) {
+   const body=JSON.parse(fs.readFileSync(args[args.indexOf('--input')+1],'utf8'));
+   s.index=Buffer.from(body.content,'base64').toString('utf8'); save(); console.log('{}');
  } else fail(400);
 } else fail(400);
 `;
@@ -53,17 +56,27 @@ globalThis.fetch=async input=>{
    return Response.json(s.registry[name]);
  }
  if(url.hostname==='api.github.com' && url.pathname.includes('/commits/')) return s.release.draft ? new Response(null,{status:404}) : Response.json({sha:s.release.target_commitish});
+ if(url.hostname==='api.github.com' && url.pathname.endsWith('/git/ref/heads/fork-release-index')) return Response.json({ref:'refs/heads/fork-release-index'});
+ if(url.hostname==='api.github.com' && url.pathname.endsWith('/contents/index.json'))
+   return s.index===undefined ? new Response(null,{status:404}) : Response.json({sha:'index-blob',encoding:'base64',content:Buffer.from(s.index).toString('base64')});
  throw new Error('Unexpected HTTP fixture request');
 };
 `;
 
-function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true) {
+function publishFixture(
+  mode = "resume",
+  ref = "refs/heads/main",
+  npm = true,
+  channel = "preview",
+  /** dist-tags the registry already holds, by package name. */
+  tags: Record<string, Record<string, string>> = {},
+) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
     repository: "shuv1337/shuv2code",
     sha: "ab".repeat(20),
-    channel: "preview",
-    version: "1.2.3-preview.20261014.1",
+    channel,
+    version: `1.2.3-${channel}.20261014.1`,
     signing: { mac: false, win: false, unsigned: true },
     npm,
   });
@@ -75,6 +88,8 @@ function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true) {
       NodePath.join(prepared, "release-assets/fixture.bin"),
       "immutable fixture bytes",
     );
+    for (const feed of plan.feedAssets)
+      NodeFS.writeFileSync(NodePath.join(prepared, "release-assets", feed), `feed ${feed}`);
     const registry: Record<string, unknown> = {};
     const packageDir = NodePath.join(root, "package");
     NodeFS.mkdirSync(packageDir);
@@ -101,7 +116,7 @@ function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true) {
       JSON.stringify({
         mode,
         registry,
-        tags: {},
+        tags,
         commands: [],
         release: {
           id: 1234,
@@ -150,8 +165,11 @@ function publishFixture(mode = "resume", ref = "refs/heads/main", npm = true) {
     );
     return {
       result,
+      plan,
       state: JSON.parse(NodeFS.readFileSync(stateFile, "utf8")) as {
         commands: string[][];
+        index?: string;
+        tags: Record<string, Record<string, string>>;
         release: { draft: boolean; assets: { name: string }[] };
       },
     };
@@ -213,6 +231,57 @@ describe("fork publication fixtures", () => {
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "publishes an unsigned nightly publicly, with Linux feeds only and no npm",
+    () => {
+      // The registry fixture fails every request in this mode, so success proves npm was skipped.
+      const { result, state, plan } = publishFixture(
+        "http-error",
+        "refs/heads/main",
+        false,
+        "nightly",
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(state.commands.some(([command]) => command === "npm")).toBe(false);
+      expect(state.release.assets.map((asset) => asset.name).sort()).toEqual(
+        ["fixture.bin", ...plan.feedAssets].sort(),
+      );
+      expect(plan.feedAssets).toEqual(["nightly-linux.yml", "nightly-linux-arm64.yml"]);
+      // Without macOS and Windows feeds the release is not a complete index
+      // entry, and publication proceeds with the index unchanged.
+      expect(JSON.parse(state.index!)).toEqual([]);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "promotes nightly and latest, platform packages before the launcher",
+    () => {
+      const held = "@shuv2code/t3-linux-x64";
+      const { result, state, plan } = publishFixture("resume", "refs/heads/main", true, "nightly", {
+        ...Object.fromEntries(
+          CLI_ARCHIVE_PLATFORM_KEYS.map((key) => [`@shuv2code/t3-${key}`, { latest: "0.0.0" }]),
+        ),
+        shuv2code: { latest: "0.0.0" },
+        // A newer published version must keep `latest`, without failing the run.
+        [held]: { latest: "9.9.9" },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const promotions = state.commands
+        .filter(([command, subcommand]) => command === "npm" && subcommand === "dist-tag")
+        .map((args) => [args[3]!.slice(0, args[3]!.lastIndexOf("@")), args[4]!] as const);
+      for (const name of [...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@shuv2code/t3-${key}`)])
+        expect(promotions.filter(([pkg]) => pkg === name).map(([, tag]) => tag)).toEqual(
+          name === held ? ["nightly"] : ["nightly", "latest"],
+        );
+      expect(promotions.filter(([pkg]) => pkg === "shuv2code").map(([, tag]) => tag)).toEqual([
+        "nightly",
+        "latest",
+      ]);
+      expect(promotions.findIndex(([pkg]) => pkg === "shuv2code")).toBe(promotions.length - 2);
+      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "rejects a branch dispatch before any publisher commands",
     () => {
       const { result, state } = publishFixture("resume", "refs/heads/feature");
@@ -238,20 +307,16 @@ describe("fork publication fixtures", () => {
       ).message,
     ).toContain("HTTP 401");
   });
-  it("allows OIDC publication only from the default branch or a version tag", () => {
+  it("allows OIDC publication only from the default branch", () => {
     const { isAllowedForkPublishRef } = NodeModule.createRequire(import.meta.url)(
       "../.github/scripts/check-nightly-release.cjs",
     ) as { isAllowedForkPublishRef: (ref: string, branch: string) => boolean };
-    for (const ref of [
-      "refs/heads/main",
-      "refs/tags/v1.2.3",
-      "refs/tags/v1.2.3-preview.20261014.1",
-    ])
-      expect(isAllowedForkPublishRef(ref, "main")).toBe(true);
+    expect(isAllowedForkPublishRef("refs/heads/main", "main")).toBe(true);
     for (const ref of [
       "refs/heads/feature",
+      "refs/tags/v1.2.3",
+      "refs/tags/v1.2.3-preview.20261014.1",
       "refs/tags/vanything",
-      "refs/tags/v1.2",
       "refs/pull/1/merge",
     ])
       expect(isAllowedForkPublishRef(ref, "main")).toBe(false);

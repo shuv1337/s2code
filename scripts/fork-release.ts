@@ -14,6 +14,9 @@ import {
   publishAtomicReleaseIndex,
   FORK_DESKTOP_MATRIX,
   FORK_NPM_PACKAGES,
+  MAC_RELEASE_CREDENTIALS,
+  WIN_RELEASE_CREDENTIALS,
+  RELEASE_CREDENTIAL_VARIABLES,
   releaseSigningPolicy,
   forkReleasePlan,
   requiredDesktopAssets,
@@ -102,7 +105,7 @@ function assertCi() {
   )
     throw new Error("Only the fork's canonical release.yml may publish.");
   if (!isAllowedForkPublishRef(process.env.GITHUB_REF, process.env.GITHUB_DEFAULT_BRANCH))
-    throw new Error("Publication requires the default branch or a v*.*.* version tag.");
+    throw new Error("Publication requires the default branch.");
 }
 function assertPublishContext(npm: boolean) {
   assertCi();
@@ -174,16 +177,20 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
     ]) {
       const first = Path.join(directory, primary!);
       const second = Path.join(directory, secondary!);
-      const merged = mergeUpdateManifests(
-        parseUpdateManifest(FS.readFileSync(first, "utf8"), primary!, platform!),
-        parseUpdateManifest(FS.readFileSync(second, "utf8"), secondary!, platform!),
-        platform!,
-      );
-      FS.writeFileSync(
-        Path.join(directory, output!),
-        serializeUpdateManifest(merged, { platformLabel: platform! }),
-      );
-      if (primary !== output) FS.unlinkSync(first);
+      // An unsigned platform has no feed in the plan: electron-builder still
+      // wrote per-arch manifests, so drop them instead of merging.
+      if (plan.feedAssets.includes(output!)) {
+        const merged = mergeUpdateManifests(
+          parseUpdateManifest(FS.readFileSync(first, "utf8"), primary!, platform!),
+          parseUpdateManifest(FS.readFileSync(second, "utf8"), secondary!, platform!),
+          platform!,
+        );
+        FS.writeFileSync(
+          Path.join(directory, output!),
+          serializeUpdateManifest(merged, { platformLabel: platform! }),
+        );
+      }
+      if (primary !== output || !plan.feedAssets.includes(output!)) FS.unlinkSync(first);
       FS.unlinkSync(second);
     }
     for (const name of plan.feedAssets) {
@@ -219,6 +226,15 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
       )
     )
       throw new Error("Wrong-channel updater metadata was produced.");
+    // Blockmaps only serve differential updates, so a platform without a feed
+    // has no use for them. Their extension identifies the platform.
+    const strandedBlocks = [
+      ...(plan.signing.mac ? [] : [".dmg.blockmap", ".zip.blockmap"]),
+      ...(plan.signing.win ? [] : [".exe.blockmap"]),
+    ];
+    for (const name of FS.readdirSync(directory))
+      if (strandedBlocks.some((suffix) => name.endsWith(suffix)))
+        FS.unlinkSync(Path.join(directory, name));
   }
   const payloads = [
     ...desktops,
@@ -437,7 +453,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
           "--title",
           plan.title,
           "--notes",
-          `${plan.signing.unsigned ? "UNSIGNED opt-in build: platform signatures/notarization may be absent. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}. Preview builds never enter automatic feeds.`,
+          `${plan.signing.unsigned ? "UNSIGNED build: signing credentials were unavailable for at least one platform, so its signature and notarization are absent. Unsigned macOS and Windows builds ship no updater feed and are never offered as automatic updates; install them deliberately. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}.`,
         );
       }
       release = existing ?? getRelease();
@@ -481,11 +497,27 @@ async function publishPrepared(plan: ForkReleasePlan) {
       if (!plan.npm) return;
       for (const pkg of packages) {
         await assertTagNotBackwards(pkg.manifest.name);
-        run("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, plan.distTag]);
-        if ((await readTags(pkg.manifest.name))[plan.distTag] !== plan.version)
-          throw new Error(
-            "Fork dist-tag promotion is not yet verifiable; retry with the original prepared artifact.",
-          );
+        const tags = await readTags(pkg.manifest.name);
+        for (const tag of plan.distTags) {
+          // The channel tag refuses to move backwards above; an alias such as
+          // nightly's `latest` yields to a newer published version instead of
+          // failing a release that is otherwise complete.
+          if (
+            tag !== plan.distTag &&
+            tags[tag] &&
+            compareSemverVersions(tags[tag]!, plan.version) > 0
+          ) {
+            console.log(
+              `Leaving ${pkg.manifest.name}@${tag} on ${tags[tag]}; it is newer than ${plan.version}.`,
+            );
+            continue;
+          }
+          run("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, tag]);
+          if ((await readTags(pkg.manifest.name))[tag] !== plan.version)
+            throw new Error(
+              "Fork dist-tag promotion is not yet verifiable; retry with the original prepared artifact.",
+            );
+        }
       }
     },
     publishIndex: async () => {
@@ -499,7 +531,13 @@ async function publishPrepared(plan: ForkReleasePlan) {
         ),
       ) as Parameters<typeof forkReleaseIndex>[0][];
       const index = forkReleaseIndex(pages.flat());
-      if (!index.some((entry) => entry.tag_name === plan.tag))
+      // A release without a macOS or Windows feed is deliberately incomplete,
+      // so the index keeps the previous entries instead of gaining this one.
+      if (
+        plan.signing.mac &&
+        plan.signing.win &&
+        !index.some((entry) => entry.tag_name === plan.tag)
+      )
         throw new Error("New complete release is missing from the release index.");
       writeJson("prepared/index.json", index);
       const get = (path: string) =>
@@ -574,12 +612,9 @@ async function main() {
   const mode = process.argv[2];
   if (mode === "preflight") {
     assertCi();
-    const channel =
-      process.env.GITHUB_EVENT_NAME === "push"
-        ? "stable"
-        : process.env.GITHUB_EVENT_NAME === "schedule"
-          ? "nightly"
-          : process.env.RELEASE_CHANNEL || "preview";
+    // The workflow states the channel for every event; nothing is inferred
+    // from the trigger.
+    const channel = process.env.RELEASE_CHANNEL || "preview";
     const signing = releaseSigningPolicy(
       channel,
       process.env.ALLOW_UNSIGNED === "true",
@@ -625,19 +660,45 @@ async function main() {
     )
       throw new Error("Workspace t3 must remain private.");
     writeJson("release-plan.json", plan);
+    // The build jobs run outside this environment, so they get the team id
+    // resolved here instead of looking it up in a narrower variable scope.
+    const team = process.env.APPLE_TEAM_ID?.trim() ?? "";
     FS.appendFileSync(
       process.env.GITHUB_OUTPUT!,
-      `ref=${sha}\nversion=${version}\nrelease_channel=${channel}\nallow_unsigned=${process.env.ALLOW_UNSIGNED === "true"}\nmatrix=${JSON.stringify({ include: FORK_DESKTOP_MATRIX })}\n`,
+      `ref=${sha}\nversion=${version}\nrelease_channel=${channel}\nmac_signed=${signing.mac}\nwin_signed=${signing.win}\napple_team_id=${/^[A-Za-z0-9]+$/.test(team) ? team : ""}\nmatrix=${JSON.stringify({ include: FORK_DESKTOP_MATRIX })}\n`,
     );
   } else if (mode === "signing") {
-    const policy = releaseSigningPolicy(
-      process.env.RELEASE_CHANNEL ?? "",
-      process.env.ALLOW_UNSIGNED === "true",
-      process.env,
-    );
+    // Preflight resolved signing once, inside the release environment. A build
+    // job only confirms that the credentials its planned-signed platform needs
+    // reached this runner, and fails closed when they did not.
+    const planned = {
+      mac: process.env.MAC_SIGNED === "true",
+      win: process.env.WIN_SIGNED === "true",
+    };
+    const platform = process.env.BUILD_PLATFORM;
+    const required =
+      platform === "mac"
+        ? MAC_RELEASE_CREDENTIALS
+        : platform === "win"
+          ? WIN_RELEASE_CREDENTIALS
+          : [];
+    const missing = required.filter((key) => !process.env[key]?.trim());
+    if (
+      (platform === "mac" ? planned.mac : platform === "win" ? planned.win : false) &&
+      missing.length
+    )
+      throw new Error(
+        `The release plans a signed ${platform} build, but this job cannot see ${missing
+          .map((key) =>
+            RELEASE_CREDENTIAL_VARIABLES.includes(key) ? `${key} (variable)` : `${key} (secret)`,
+          )
+          .join(
+            ", ",
+          )}. Signing inputs must be repository or organization secrets and variables; anything scoped to the fork-release environment is invisible here.`,
+      );
     FS.appendFileSync(
       process.env.GITHUB_OUTPUT!,
-      `mac_signed=${policy.mac}\nwin_signed=${policy.win}\n`,
+      `mac_signed=${planned.mac}\nwin_signed=${planned.win}\n`,
     );
   } else if (mode === "receipt") {
     const platform = process.env.BUILD_PLATFORM!;

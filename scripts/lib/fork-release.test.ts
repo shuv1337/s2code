@@ -103,9 +103,33 @@ describe("fork release contract", () => {
       });
       expect(value.title).toContain("UNSIGNED");
       expect(value.distTag).toBe(channel);
-      expect(value.distTag).not.toBe("latest");
-      if (channel === "preview") expect(value.feedAssets).toEqual([]);
+      // Unsigned macOS and Windows builds carry no updater feed; Linux
+      // updates are checksum-only and keep theirs.
+      expect(value.feedAssets).toEqual(
+        channel === "preview" ? [] : ["nightly-linux.yml", "nightly-linux-arm64.yml"],
+      );
     }
+  });
+  it("keeps a half-signed nightly out of the updater feed it cannot serve", () => {
+    const value = (mac: boolean, win: boolean) =>
+      forkReleasePlan({
+        repository: "shuv1337/shuv2code",
+        sha,
+        version: "1.2.3-nightly.20261014.1",
+        channel: "nightly",
+        signing: { mac, win, unsigned: !mac || !win },
+        npm: false,
+      }).feedAssets;
+    expect(value(true, false)).not.toContain("nightly.yml");
+    expect(value(true, false)).toContain("nightly-mac.yml");
+    expect(value(false, true)).not.toContain("nightly-mac.yml");
+    expect(value(false, true)).toContain("nightly.yml");
+    expect(value(true, true)).toEqual([
+      "nightly-mac.yml",
+      "nightly-linux.yml",
+      "nightly-linux-arm64.yml",
+      "nightly.yml",
+    ]);
   });
   it("keeps stable/nightly feeds channel-bound and rejects upstream repositories and channel/version mismatches", () => {
     expect(plan().feedAssets).toEqual([
@@ -145,10 +169,17 @@ describe("fork release contract", () => {
       ),
     ).toThrow("all five");
   });
-  it("prevents preview/nightly from moving latest and permits only matching staging tags", () => {
-    for (const channel of ["nightly", "preview"]) {
-      const value = plan(channel, `1.2.3-${channel}.20261014.1`);
-      expect(() => assertForkDistTag(value.version, "latest")).toThrow();
+  it("moves latest with nightly, keeps preview off it, and permits only matching staging tags", () => {
+    // The fork ships nightly only, so nightly owns `latest` as well.
+    const nightly = plan("nightly", "1.2.3-nightly.20261014.1");
+    expect(nightly.distTags).toEqual(["nightly", "latest"]);
+    expect(nightly.distTag).toBe("nightly");
+    const preview = plan("preview", "1.2.3-preview.20261014.1");
+    expect(preview.distTags).toEqual(["preview"]);
+    expect(plan().distTags).toEqual(["latest"]);
+    expect(() => assertForkDistTag(preview.version, "latest")).toThrow();
+    expect(() => assertForkDistTag(nightly.version, "latest")).not.toThrow();
+    for (const value of [nightly, preview]) {
       expect(() => assertForkDistTag(value.version, value.distTag)).not.toThrow();
       expect(() => assertForkDistTag(value.version, value.stagingTag)).not.toThrow();
     }

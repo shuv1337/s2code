@@ -27,13 +27,20 @@ The fork publishes only nightly releases. `release.yml` runs once a day and
 releases `main` when it has new commits and the last nightly is at least six
 hours old. A manual **Run workflow** on `main` releases right away. The release
 scripts keep upstream's stable and preview code paths so upstream merges stay
-clean, but the workflow has no tag trigger or channel input that could start them.
+clean, but the workflow has no tag trigger or channel input that could start them,
+and a version tag is refused as a publication ref.
 
-Each platform is signed when its credentials are complete. macOS signing also
-verifies notarization and the configured team. Windows signing verifies the
-publisher. A platform without complete credentials ships unsigned, and the
-release title, body and `release.json` say so. Partial credentials are not
-proof of signing.
+Each platform is signed when its credentials are complete. Preflight resolves
+that once and passes `mac_signed`/`win_signed` to the desktop builds, which fail
+closed when a platform planned as signed cannot see its credentials. macOS
+signing also verifies notarization and the configured team. Windows signing
+verifies the publisher. A platform without complete credentials ships unsigned,
+and the release title, body and `release.json` say so. Partial credentials are
+not proof of signing.
+
+An unsigned macOS or Windows build publishes no updater feed, because those
+updaters require a signature, and the release is then left out of the rolling
+index. Linux updates are checksum-only, so their feeds always publish.
 
 Publication accepts only the default branch. The scheduled due/source check
 runs without a protected environment, so days with nothing to release skip the
@@ -49,10 +56,13 @@ packages. When it is `true`, all six packages publish under a temporary
 non-default dist-tag with `npm publish --provenance`, and their names, versions,
 repository and tarball integrity are verified before the release is exposed.
 After the release publishes, the `nightly` dist-tag is promoted, platform
-packages first and the launcher last.
+packages first and the launcher last. A nightly moves `latest` as well, so
+`npx shuv2code` installs the newest nightly instead of the placeholder version
+that trusted publishing required; `nightly` refuses to move backwards, while
+`latest` is left alone with a log line when a newer version already holds it.
 
-`SHA256SUMS` covers final desktop and CLI bytes. The updater feeds use the
-`nightly*.yml` Electron manifest names and include both architectures. The
+`SHA256SUMS` covers final desktop and CLI bytes. The updater feeds that publish
+use the `nightly*.yml` Electron manifest names and include both architectures. The
 rolling `index.json` on the dedicated `fork-release-index` branch is written last, using
 `[{"tag_name":"v1.2.3-nightly.20261014.1","draft":false}]` records for complete releases.
 The Contents API publishes a commit with the previous blob SHA as a compare-and-swap;
@@ -77,10 +87,14 @@ Use the protected GitHub environment `fork-release`, with appropriate default
 branch protections and approvals. Repository variables:
 `FORK_NPM_TRUSTED_PUBLISHING_READY`, `APPLE_TEAM_ID`.
 
-Keep build-signing secrets available to the reusable desktop workflow through
-repository/organization secrets and the caller's secret list. The reusable build
-does not select `fork-release` or inherit its environment secrets/approvals; that
-environment is used only by the canonical release preflight and publish jobs.
+Signing secrets must be **repository or organization secrets**. The reusable
+desktop build does not select `fork-release` and cannot see secrets attached only
+to that environment; that environment is used only by the canonical release
+preflight and publish jobs. A secret that preflight can read and the build cannot
+now fails the build instead of silently producing an unsigned artifact.
+`APPLE_TEAM_ID` is a variable rather than a secret, and preflight passes the
+value it resolved to the desktop builds, so signing and verification use one team
+id even if the variable is defined per environment.
 
 macOS secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`,
 `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`.

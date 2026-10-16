@@ -217,6 +217,19 @@ try {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
   }
 }
+# The release records its own signing policy. A release without one, or an
+# unreadable one, is not an installation failure; the warning is simply skipped.
+# Release assets are served as application/octet-stream, so the body arrives as
+# text or bytes and is decoded here rather than by the web cmdlet.
+try {
+  $releaseBody = (Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/v$version/release.json" -Headers @{ "User-Agent" = "t3-install" }).Content
+  if ($releaseBody -is [byte[]]) { $releaseBody = [Text.Encoding]::UTF8.GetString($releaseBody) }
+  $releaseMetadata = [string]$releaseBody | ConvertFrom-Json
+  if ($releaseMetadata.signing.unsigned) {
+    Write-Warning "shuv2code $version is an UNSIGNED build. At least one platform was built without signing credentials, so its code signature and notarization are absent and your system may refuse to run it without an override."
+  }
+} catch {}
+
 $versionsDir = Join-Path $t3Home "runtime\versions"
 $targetDir = Join-Path $versionsDir $version
 $marker = Join-Path $targetDir ".install-complete"
