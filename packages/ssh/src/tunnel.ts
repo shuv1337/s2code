@@ -554,7 +554,7 @@ if ! t3_runtime_ready; then
     x86_64 | amd64) T3_ARCH="x64" ;;
     *) printf 'Remote host %s has no t3 release archive.\\n' "$(uname -m)" >&2; exit 1 ;;
   esac
-  T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
+  T3_ARCHIVE="shuv2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
   T3_STAGING="$(mktemp -d "$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions/.staging-XXXXXX")"
   T3_PREVIOUS_PARENT= T3_PREVIOUS= T3_VALIDATED=false T3_PUBLISHED=false
   t3_runtime_cleanup() {

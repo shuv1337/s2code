@@ -274,7 +274,7 @@ describe("complete fork release assets", () => {
       const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-installer-7z-"));
       const path = process.env.PATH;
       try {
-        FS.writeFileSync(Path.join(directory, "T3-Code-1.2.3-x64.exe"), "installer");
+        FS.writeFileSync(Path.join(directory, "S2Code-1.2.3-x64.exe"), "installer");
         FS.writeFileSync(
           Path.join(directory, "7z"),
           `#!/bin/sh
@@ -348,7 +348,7 @@ exit \${FAKE_SEVEN_ZIP_EXIT:-1}
     }));
   it("rejects wrong feed bytes and preview automatic metadata", () => {
     fixture("stable", (directory, plan) => {
-      FS.appendFileSync(Path.join(directory, `T3-Code-${plan.version}-arm64.zip`), "changed");
+      FS.appendFileSync(Path.join(directory, `S2Code-${plan.version}-arm64.zip`), "changed");
       expect(() => prepareForkAssets(plan, directory)).toThrow("changed release bytes");
     });
     fixture("preview", (directory, plan) => {

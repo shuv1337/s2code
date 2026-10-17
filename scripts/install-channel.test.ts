@@ -41,7 +41,7 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
           );
         }
         const version = `1.2.3${channel === "stable" ? "" : `-${channel}.20261014.1`}`;
-        const stem = `t3-${version}-${platform}-${arch}`;
+        const stem = `shuv2code-${version}-${platform}-${arch}`;
         const source = NodePath.join(root, stem);
         const release = NodePath.join(root, "mirror", `v${version}`);
         NodeFS.mkdirSync(source);

@@ -42,7 +42,7 @@ const releaseHttpClient = (order: string[]) =>
         ).join("");
         return HttpClientResponse.fromWeb(
           request,
-          new Response(`${hex}  t3-1.1.0-linux-x64.tar.gz\n`),
+          new Response(`${hex}  shuv2code-1.1.0-linux-x64.tar.gz\n`),
         );
       }
       order.push("download");

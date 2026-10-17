@@ -183,7 +183,7 @@ case "$version" in
     ;;
 esac
 
-stem="t3-${version}-${platform}-${arch}"
+stem="shuv2code-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
 command_name=shuv2code
 prerelease="${version#*-}"

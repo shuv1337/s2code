@@ -1,37 +1,28 @@
 import type { ColorValue } from "react-native";
-import Svg, { G, Path, Rect } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
+import { withUniwind } from "uniwind";
+
+const ThemedPath = withUniwind(Path);
 
 export function T3Wordmark(props: {
   readonly height: number;
   readonly color?: ColorValue;
   readonly colorClassName?: string;
 }) {
-  const color = props.color ?? "#D35C46";
+  const aspectRatio = 2469 / 1530;
   return (
     <Svg
-      accessibilityLabel="shuv2code"
+      accessibilityLabel="S2"
       height={props.height}
-      width={props.height}
-      viewBox="0 0 512 512"
+      width={props.height * aspectRatio}
+      viewBox="72 -1510 2469 1530"
     >
-      <G transform="translate(256 256) scale(1.08) translate(-256 -256)">
-        <G transform="translate(-57 -14) scale(1.058)">
-          <Path d="M396 406c54-4 74-28 74-70" fill="none" stroke={color} strokeWidth={36} />
-          <Path
-            fill={color}
-            d="M504 336H436l34-58zM104 68c24 40 46 56 86 58 44 4 88 4 132 0 40-2 62-18 86-58 12 40 16 72 16 122v182a72 72 0 0 1-72 72H160a72 72 0 0 1-72-72V190c0-50 4-82 16-122Z"
-          />
-          <Rect width={272} height={256} x={120} y={158} fill="#0C1119" rx={46} />
-          <Path
-            fill="none"
-            stroke="#E7ECF3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={30}
-            d="m180 232 62 60-62 60m88 -6h72"
-          />
-        </G>
-      </G>
+      <ThemedPath
+        color={props.color}
+        colorClassName={props.colorClassName}
+        fill="currentColor"
+        d="M691 20Q505 20 367-36Q229-92 152-206Q75-320 72-492H411Q416-420 450.5-371Q485-322 545.5-297.5Q606-273 687-273Q760-273 813-293Q866-313 894.5-349Q923-385 923-433Q923-476 896.5-506Q870-536 817-559Q764-582 682-600L524-637Q331-681 221-781Q111-881 111-1049Q111-1187 186-1291Q261-1395 391.5-1452.5Q522-1510 691-1510Q864-1510 991-1451.5Q1118-1393 1188-1288.5Q1258-1184 1260-1046H921Q914-1127 855-1172Q796-1217 690-1217Q620-1217 572-1198.5Q524-1180 500-1147.5Q476-1115 476-1073Q476-1027 503-995.5Q530-964 580-943Q630-922 696-907L825-877Q933-854 1017.5-814.5Q1102-775 1160.5-720Q1219-665 1249.5-593Q1280-521 1280-432Q1280-291 1209.5-189.5Q1139-88 1007.5-34Q876 20 691 20ZM1443 0V-253L1985-732Q2047-788 2090.5-835.5Q2134-883 2157-930Q2180-977 2180-1034Q2180-1096 2152.5-1140.5Q2125-1185 2077.5-1209Q2030-1233 1968-1233Q1905-1233 1858-1208Q1811-1183 1785-1135Q1759-1087 1759-1019H1423Q1423-1170 1491.5-1280Q1560-1390 1683-1450Q1806-1510 1969-1510Q2137-1510 2261.5-1453.5Q2386-1397 2454-1295.5Q2522-1194 2522-1061Q2522-976 2488.5-893.5Q2455-811 2367.5-709Q2280-607 2118-467L1933-295V-285H2541V0Z"
+      />
     </Svg>
   );
 }

@@ -290,6 +290,7 @@ const config: ExpoConfig = {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
+      CFBundleDisplayName: variant.displayName,
       UISupportedInterfaceOrientations: [
         "UIInterfaceOrientationPortrait",
         "UIInterfaceOrientationLandscapeLeft",
@@ -496,6 +497,7 @@ const config: ExpoConfig = {
       {
         // Personal Teams cannot sign App Groups.
         groupIdentifier: isIosPersonalTeamBuild ? null : `group.${iosBundleIdentifier}`,
+        displayName: variant.displayName,
       },
     ],
     "./plugins/withAndroidCleartextTraffic.cjs",
@@ -505,9 +507,11 @@ const config: ExpoConfig = {
     "./plugins/withAndroidModernAlertDialog.cjs",
     "./plugins/withAndroidPredictiveBackCompat.cjs",
     "./plugins/withAndroidTabletOrientation.cjs",
+    "./plugins/withAndroidDisplayName.cjs",
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {
+    displayName: variant.displayName,
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     pushEnabled,

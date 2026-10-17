@@ -257,7 +257,7 @@ function UnknownWhenVariableWarning({
 
   return (
     <WarningTooltipIcon label={label} focusable={focusable} className="size-4.5">
-      shuv2code does not recognize this condition yet. It can still be saved, but it may not match
+      S2Code does not recognize this condition yet. It can still be saved, but it may not match
       unless the runtime provides it.
     </WarningTooltipIcon>
   );
@@ -1282,7 +1282,7 @@ function BrowserKeybindingNotice() {
 export function KeybindingsSettingsPanel() {
   // The representative environment supplies the displayed bindings; edits
   // fan out to every connected environment in the selection, so one
-  // shortcut change reaches each machine the user runs T3 Code on.
+  // shortcut change reaches each machine the user runs S2Code on.
   const { environment: primaryEnvironment, connectedEnvironments } = useSettingsScope();
   const canOpenKeybindingsFile = useEnvironmentScope(
     primaryEnvironment?.environmentId ?? null,

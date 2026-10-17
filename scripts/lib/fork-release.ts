@@ -173,7 +173,7 @@ export function forkReleasePlan(input: {
     distTag: forkDistTags(input.channel)[0]!,
     distTags: forkDistTags(input.channel),
     stagingTag: `release-${input.sha.slice(0, 12)}-${input.version}`,
-    title: `${input.signing.unsigned ? "UNSIGNED — " : ""}shuv2code ${input.channel} v${input.version}`,
+    title: `${input.signing.unsigned ? "UNSIGNED — " : ""}S2Code ${input.channel === "nightly" ? "Nightly" : input.channel} v${input.version}`,
     cliAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(input.version, key)),
     feedAssets:
       input.channel === "preview"
@@ -203,7 +203,7 @@ export function desktopAssetGroups(version: string) {
             ? ["amd64", "x64"]
             : ["x86_64", "x64"]
           : [target.arch];
-      return aliases.map((arch) => `T3-Code-${version}-${arch}.${extension}`);
+      return aliases.map((arch) => `S2Code-${version}-${arch}.${extension}`);
     });
   });
 }

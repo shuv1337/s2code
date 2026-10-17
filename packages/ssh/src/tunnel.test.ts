@@ -134,7 +134,10 @@ describe("ssh tunnel scripts", () => {
       script,
       'T3_RUNTIME_DIR="$HOME/.shuv2code-v2-preview/runtime/versions/$T3_ARCHIVE_VERSION"',
     );
-    assert.include(script, 'T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"');
+    assert.include(
+      script,
+      'T3_ARCHIVE="shuv2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"',
+    );
     assert.include(script, "SHA256SUMS");
     assert.include(script, 'exec "$T3_RUNTIME_DIR/t3" "$@"');
     assert.notInclude(script, "npx");
@@ -767,7 +770,7 @@ describe("archive runner script", () => {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const platform = hostPlatform === "darwin" ? "darwin" : "linux";
     const arch = hostArch === "arm64" ? "arm64" : "x64";
-    const stem = `t3-${version}-${platform}-${arch}`;
+    const stem = `shuv2code-${version}-${platform}-${arch}`;
     const stage = `${root}/stage/${stem}`;
     const release = `${root}/mirror/v${version}`;
     const channelHome = version.includes("-nightly.")

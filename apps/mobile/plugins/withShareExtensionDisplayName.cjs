@@ -85,7 +85,7 @@ function withExtensionDisplayNameBuildSetting(config, displayName) {
 }
 
 module.exports = function withShareExtensionDisplayName(config) {
-  const displayName = config.name;
+  const displayName = config.extra?.displayName ?? config.name;
   return withExtensionDisplayNameBuildSetting(
     withDisplayNamePlist(config, displayName),
     displayName,

@@ -10,7 +10,7 @@ them from a real release, rather than reusing an upstream artifact or disabling 
 Stable and nightly install under separate `/opt` directories and own separate
 commands, desktop entries, icons and license paths. Neither declares `provides`,
 `replaces`, or conflicts with upstream or the other fork channel. Preview is not
-published to AUR. Artifact names remain `T3-Code-<version>-x86_64.AppImage`, matching
+published to AUR. Artifact names remain `S2Code-<version>-x86_64.AppImage`, matching
 the desktop build/release workflow; that filename is not the installed product identity.
 
 ## Publishing

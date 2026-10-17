@@ -80,7 +80,7 @@ describe("client telemetry metadata", () => {
         desktopBridge: { getClientPlatform: () => "darwin" },
       }),
     ).toEqual({
-      label: "shuv2code Desktop",
+      label: "S2Code Desktop",
       deviceType: "desktop",
       os: "macOS",
       surface: "desktop",

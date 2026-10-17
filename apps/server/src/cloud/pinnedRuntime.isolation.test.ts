@@ -106,7 +106,7 @@ function install(
             request,
             new Response(
               request.url.endsWith("SHA256SUMS")
-                ? `${failure === "checksum" ? "0".repeat(64) : digest}  t3-${version}-${platform}-x64.${platform === "win32" ? "zip" : "tar.gz"}\n`
+                ? `${failure === "checksum" ? "0".repeat(64) : digest}  shuv2code-${version}-${platform}-x64.${platform === "win32" ? "zip" : "tar.gz"}\n`
                 : archive,
               {
                 status:

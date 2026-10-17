@@ -27,7 +27,7 @@ beforeEach(() => {
   assets = NodePath.join(root, "assets");
   fixtureBin = NodePath.join(root, "fixture-bin");
   [home, assets, fixtureBin].forEach((directory) => NodeFS.mkdirSync(directory));
-  const stem = `t3-${version}-${platform}-${arch}`;
+  const stem = `shuv2code-${version}-${platform}-${arch}`;
   NodeFS.mkdirSync(NodePath.join(assets, stem));
   NodeFS.writeFileSync(NodePath.join(assets, stem, "t3"), "#!/bin/sh\necho fork-runtime\n", {
     mode: 0o755,
@@ -119,14 +119,14 @@ function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing, $He
   Add-Content $env:FIXTURE_REQUESTS $Uri
   # Release assets are octet-stream, so the real cmdlet hands back raw bytes.
   if ($Uri.EndsWith('release.json')) { return [pscustomobject]@{ Content = [IO.File]::ReadAllBytes(${psQuote(NodePath.join(assets, "release.json"))}) } }
-  if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, '${digest}  t3-1.2.3-win32-x64.zip') }
+  if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, '${digest}  shuv2code-1.2.3-win32-x64.zip') }
   else { Copy-Item ${psQuote(NodePath.join(assets, "windows.zip"))} $OutFile }
 }
 function Invoke-RestMethod { param($Uri, $Headers) Add-Content $env:FIXTURE_REQUESTS $Uri; return @{ tag_name = 'v1.2.3'; draft = $false } }
 function Expand-Archive { param($Path, $DestinationPath, [switch]$Force)
-  $directory = Join-Path $DestinationPath 't3-1.2.3-win32-x64'
+  $directory = Join-Path $DestinationPath 'shuv2code-1.2.3-win32-x64'
   New-Item -ItemType Directory $directory | Out-Null
-  Copy-Item ${psQuote(NodePath.join(assets, `t3-${version}-${platform}-${arch}`, "t3"))} (Join-Path $directory 't3.exe')
+  Copy-Item ${psQuote(NodePath.join(assets, `shuv2code-${version}-${platform}-${arch}`, "t3"))} (Join-Path $directory 't3.exe')
   & chmod +x (Join-Path $directory 't3.exe')
 }
 . ${psQuote(NodePath.join(import.meta.dirname, "install.ps1"))}

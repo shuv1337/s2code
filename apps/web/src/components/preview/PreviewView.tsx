@@ -1097,7 +1097,7 @@ export function PreviewView({
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <p className="max-w-sm text-sm text-muted-foreground">
-                This tab is open in the shuv2code desktop app.
+                This tab is open in the S2Code desktop app.
               </p>
             </div>
           )

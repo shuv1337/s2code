@@ -69,7 +69,7 @@ export function MaterialPullRequestToolbar(props: { readonly onRequestVisibility
               brand={
                 <CompactBrandTitle
                   allowFontScaling={false}
-                  accessibilityLabel="shuv2code, Pull requests"
+                  accessibilityLabel="S2Code, Pull requests"
                 />
               }
               onPress={() =>

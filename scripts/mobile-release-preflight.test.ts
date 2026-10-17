@@ -224,6 +224,9 @@ describe("fork mobile release preflight", () => {
         },
       );
       const app = JSON.parse(output);
+      expect(app.name).toBe(MOBILE_VARIANTS[variant].appName);
+      expect(app.extra.displayName).toBe(MOBILE_VARIANTS[variant].displayName);
+      expect(app.ios.infoPlist.CFBundleDisplayName).toBe(MOBILE_VARIANTS[variant].displayName);
       expect(app.ios.bundleIdentifier).toBe(MOBILE_VARIANTS[variant].iosBundleIdentifier);
       expect(app.android.package).toBe(MOBILE_VARIANTS[variant].androidPackage);
       expect(app.ios.associatedDomains).toEqual([]);

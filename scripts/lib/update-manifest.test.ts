@@ -9,11 +9,11 @@ import {
 // Shape electron-builder writes for a Linux AppImage feed.
 const linuxFeed = `version: 0.0.46-nightly.20261016.37
 files:
-  - url: T3-Code-0.0.46-nightly.20261016.37-x86_64.AppImage
+  - url: S2Code-0.0.46-nightly.20261016.37-x86_64.AppImage
     sha512: abc123==
     size: 130000000
     blockMapSize: 211644
-path: T3-Code-0.0.46-nightly.20261016.37-x86_64.AppImage
+path: S2Code-0.0.46-nightly.20261016.37-x86_64.AppImage
 sha512: abc123==
 releaseDate: '2026-10-16T23:59:00.000Z'
 `;
@@ -23,7 +23,7 @@ describe("update manifests", () => {
     const manifest = parseUpdateManifest(linuxFeed, "nightly-linux.yml", "linux");
     expect(manifest.files).toEqual([
       {
-        url: "T3-Code-0.0.46-nightly.20261016.37-x86_64.AppImage",
+        url: "S2Code-0.0.46-nightly.20261016.37-x86_64.AppImage",
         sha512: "abc123==",
         size: 130000000,
         blockMapSize: 211644,

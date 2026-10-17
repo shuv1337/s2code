@@ -3341,7 +3341,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description="Notices for dependencies, assets, and optional tools used by shuv2code."
+          description="Notices for dependencies, assets, and optional tools used by S2Code."
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

@@ -184,7 +184,7 @@ if ($version -match '-preview\.') {
   }
 }
 
-$stem = "t3-$version-win32-$arch"
+$stem = "shuv2code-$version-win32-$arch"
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
 $commandName = if ($version -match '^[^-+]+-nightly\.') { "shuv2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "shuv2code-preview" } else { "shuv2code" }

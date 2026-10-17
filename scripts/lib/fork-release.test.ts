@@ -102,6 +102,9 @@ describe("fork release contract", () => {
         npm: false,
       });
       expect(value.title).toContain("UNSIGNED");
+      if (channel === "nightly") {
+        expect(value.title).toBe(`UNSIGNED — S2Code Nightly v${version}`);
+      }
       expect(value.distTag).toBe(channel);
       // Unsigned macOS and Windows builds carry no updater feed; Linux
       // updates are checksum-only and keep theirs.

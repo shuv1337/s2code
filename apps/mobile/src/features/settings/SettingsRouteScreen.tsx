@@ -215,7 +215,7 @@ function SettingsIndexSections() {
 
       <SettingsSection title="App">
         <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-        <SettingsRow icon="info.circle" label="About shuv2code" target="SettingsAbout" />
+        <SettingsRow icon="info.circle" label="About S2Code" target="SettingsAbout" />
       </SettingsSection>
     </>
   );
