@@ -55,7 +55,11 @@ globalThis.fetch=async input=>{
    if(!s.registry[name]) throw new Error('Unexpected registry package');
    return Response.json(s.registry[name]);
  }
- if(url.hostname==='api.github.com' && url.pathname.includes('/commits/')) return s.release.draft ? new Response(null,{status:422}) : Response.json({sha:s.release.target_commitish});
+ if(url.hostname==='api.github.com' && url.pathname.includes('/commits/')) {
+   // GitHub's answers: an unresolved ref, or a generic validation failure.
+   if(s.mode==='tag-validation') return Response.json({message:'Validation Failed',status:'422'},{status:422});
+   return s.release.draft ? Response.json({message:'No commit found for SHA: '+url.pathname.split('/').pop(),status:'422'},{status:422}) : Response.json({sha:s.release.target_commitish});
+ }
  if(url.hostname==='api.github.com' && url.pathname.endsWith('/git/ref/heads/fork-release-index')) return Response.json({ref:'refs/heads/fork-release-index'});
  if(url.hostname==='api.github.com' && url.pathname.endsWith('/contents/index.json'))
    return s.index===undefined ? new Response(null,{status:404}) : Response.json({sha:'index-blob',encoding:'base64',content:Buffer.from(s.index).toString('base64')});
@@ -218,6 +222,18 @@ describe("fork publication fixtures", () => {
             : /npm .*publish.*HTTP 401/,
       );
       expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "stops before the draft when the tag lookup fails validation rather than finding no ref",
+    () => {
+      const { result, state } = publishFixture("tag-validation");
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/commits\/.*HTTP 422/);
+      expect(state.commands.some(([command]) => command === "npm")).toBe(false);
+      expect(
+        state.commands.some((args) => args.some((arg) => arg.includes("/releases/1234/assets?"))),
+      ).toBe(false);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(

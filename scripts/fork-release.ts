@@ -403,8 +403,19 @@ async function publishPrepared(plan: ForkReleasePlan) {
       },
     );
     // A new draft's tag may not exist until GitHub publishes the draft. The
-    // commits API answers an unknown ref with 422 rather than 404.
-    if ((response.status === 404 || response.status === 422) && !required) return;
+    // commits API answers an unknown ref with 422 "No commit found for SHA";
+    // any other 422 is a validation failure and stays an error.
+    if (!required) {
+      if (response.status === 404) return;
+      if (response.status === 422) {
+        const body = (await response
+          .clone()
+          .json()
+          .catch(() => null)) as { message?: unknown } | null;
+        if (typeof body?.message === "string" && body.message.startsWith("No commit found for SHA"))
+          return;
+      }
+    }
     if (!response.ok)
       throw new Error(
         `GET https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/commits/${plan.tag} failed (HTTP ${response.status}).`,
