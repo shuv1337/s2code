@@ -402,8 +402,9 @@ async function publishPrepared(plan: ForkReleasePlan) {
         signal: AbortSignal.timeout(30_000),
       },
     );
-    // A new draft's tag may not exist until GitHub publishes the draft.
-    if (response.status === 404 && !required) return;
+    // A new draft's tag may not exist until GitHub publishes the draft. The
+    // commits API answers an unknown ref with 422 rather than 404.
+    if ((response.status === 404 || response.status === 422) && !required) return;
     if (!response.ok)
       throw new Error(
         `GET https://api.github.com/repos/${FORK_RELEASE_REPOSITORY}/commits/${plan.tag} failed (HTTP ${response.status}).`,

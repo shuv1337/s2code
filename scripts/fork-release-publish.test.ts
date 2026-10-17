@@ -55,7 +55,7 @@ globalThis.fetch=async input=>{
    if(!s.registry[name]) throw new Error('Unexpected registry package');
    return Response.json(s.registry[name]);
  }
- if(url.hostname==='api.github.com' && url.pathname.includes('/commits/')) return s.release.draft ? new Response(null,{status:404}) : Response.json({sha:s.release.target_commitish});
+ if(url.hostname==='api.github.com' && url.pathname.includes('/commits/')) return s.release.draft ? new Response(null,{status:422}) : Response.json({sha:s.release.target_commitish});
  if(url.hostname==='api.github.com' && url.pathname.endsWith('/git/ref/heads/fork-release-index')) return Response.json({ref:'refs/heads/fork-release-index'});
  if(url.hostname==='api.github.com' && url.pathname.endsWith('/contents/index.json'))
    return s.index===undefined ? new Response(null,{status:404}) : Response.json({sha:'index-blob',encoding:'base64',content:Buffer.from(s.index).toString('base64')});
