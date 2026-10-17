@@ -134,7 +134,14 @@ describe("ssh tunnel scripts", () => {
       script,
       'T3_RUNTIME_DIR="$HOME/.shuv2code-v2-preview/runtime/versions/$T3_ARCHIVE_VERSION"',
     );
-    assert.include(script, 'T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"');
+    assert.include(
+      script,
+      'T3_ARCHIVE="shuv2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"',
+    );
+    assert.include(
+      script,
+      'T3_LEGACY_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"',
+    );
     assert.include(script, "SHA256SUMS");
     assert.include(script, 'exec "$T3_RUNTIME_DIR/t3" "$@"');
     assert.notInclude(script, "npx");
@@ -763,11 +770,15 @@ describe("archive runner script", () => {
   // A fake "executable" that answers --version, packed the way the release
   // workflow packs the real archive: one top-level directory named after the
   // stem, checksummed in SHA256SUMS.
-  const makeMirror = Effect.fn("makeMirror")(function* (root: string, version = archiveVersion) {
+  const makeMirror = Effect.fn("makeMirror")(function* (
+    root: string,
+    version = archiveVersion,
+    legacy = false,
+  ) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const platform = hostPlatform === "darwin" ? "darwin" : "linux";
     const arch = hostArch === "arm64" ? "arm64" : "x64";
-    const stem = `t3-${version}-${platform}-${arch}`;
+    const stem = `${legacy ? "t3" : "shuv2code"}-${version}-${platform}-${arch}`;
     const stage = `${root}/stage/${stem}`;
     const release = `${root}/mirror/v${version}`;
     const channelHome = version.includes("-nightly.")
@@ -829,7 +840,7 @@ describe("archive runner script", () => {
           const fs = yield* FileSystem.FileSystem;
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "ssh-channel-runtime-" });
           const version = `1.2.3-${channel}.20261014.1`;
-          const releaseBaseUrl = yield* makeMirror(root, version);
+          const releaseBaseUrl = yield* makeMirror(root, version, channel === "nightly");
           const home = `${root}/home`;
           const stableCache = `${home}/.shuv2code-v2/runtime/versions/1.2.3`;
           yield* fs.makeDirectory(stableCache, { recursive: true });

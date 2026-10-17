@@ -10,12 +10,15 @@ One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives, package manifests and release receipts. Desktop builds cover
 macOS ARM64/x64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
 ARM64/x64 (NSIS). Each Windows desktop embeds the matching same-version Linux
-archive; the receipt reads that archive back out of the finished installer and
+`shuv2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
 compares its digest before publication.
 
 CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-arm64`, `win32-x64`. **Intel macOS CLI/SEA is unsupported**; use the Intel
-desktop app. Internal executable/archive names remain `t3`; that does not authorize
+desktop app. CLI release archives are named `shuv2code-<version>-<platform>-<arch>` and
+temporarily include byte-identical `t3-<version>-<platform>-<arch>` aliases for installs
+from before the rename; both names have checksum entries. The internal executable remains
+`t3`. That does not authorize
 publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the public npm endpoints are `shuv2code` and
@@ -72,6 +75,7 @@ that trusted publishing required; `nightly` refuses to move backwards, while
 
 `SHA256SUMS` covers final desktop and CLI bytes. The updater feeds that publish
 use the `nightly*.yml` Electron manifest names and include both architectures. The
+desktop assets in those feeds are named `S2Code-<version>-<arch>.<ext>`.
 rolling `index.json` on the dedicated `fork-release-index` branch is written last, using
 `[{"tag_name":"v1.2.3-nightly.20261014.1","draft":false}]` records for complete releases.
 The Contents API publishes a commit with the previous blob SHA as a compare-and-swap;

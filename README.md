@@ -1,4 +1,4 @@
-# shuv2code
+# S2Code
 
 A branded fork of [T3 Code](https://github.com/pingdotgg/t3code), retaining its provider and
 client architecture with the devil-terminal identity and Apple Watch work.
@@ -10,7 +10,7 @@ Use [fork builds](https://github.com/shuv1337/shuv2code/releases) or build from 
 cover desktop artifacts. Published fork CLI packages use `shuv2code` / `s2c`.
 
 The installed fork starts with a fresh `~/.shuv2code-v2` home and separate Electron profile.
-Old shuv2code and upstream T3 data are not imported automatically. `T3CODE_HOME` and other
+Old S2Code and upstream T3 data are not imported automatically. `T3CODE_HOME` and other
 upstream configuration names still apply; choose a separate V2 home when overriding it.
 The desktop automatically attaches to an already-running fork server in that home when
 their exact versions match. Quitting the desktop leaves that server running.
@@ -19,22 +19,22 @@ Local networking and Tailscale are the primary remote paths. Fork-hosted Connect
 OTA need their own deployment configuration. Upstream app-store and package-manager links
 below install T3 Code, not this fork.
 
-## Upstream project notes
+## Product
 
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+S2Code is an "agent harness control surface". It enables control of the agents on your machine from web, mobile, and desktop clients.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
+Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, S2Code can control them.
 
 ## "Wait, what are you selling me?"
 
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+Nothing. S2Code exists to provide the best possible development experience with agents.
 
 We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Antigravity. Install and authenticate at least one provider before use:
+> S2Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Antigravity. Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
 > - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
@@ -61,7 +61,7 @@ The fork publishes nightly builds only, so this installs the nightly train. Then
 
 Fork builds are distributed as nightly releases through [shuv1337/shuv2code GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
 They are separate installations and may coexist with upstream T3 Code.
-Release files retain the `T3-Code-<version>-<arch>` artifact naming convention.
+Release files retain the `S2Code-<version>-<arch>` artifact naming convention.
 
 #### Windows (`winget`)
 
@@ -92,7 +92,7 @@ brew install --cask t3-code
 Download the nightly `.deb` from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases), then install that exact file:
 
 ```bash
-sudo apt install ./T3-Code-VERSION-ARCH.deb
+sudo apt install ./S2Code-VERSION-ARCH.deb
 ```
 
 #### Arch Linux (AUR)

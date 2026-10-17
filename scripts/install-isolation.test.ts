@@ -27,7 +27,7 @@ beforeEach(() => {
   assets = NodePath.join(root, "assets");
   fixtureBin = NodePath.join(root, "fixture-bin");
   [home, assets, fixtureBin].forEach((directory) => NodeFS.mkdirSync(directory));
-  const stem = `t3-${version}-${platform}-${arch}`;
+  const stem = `shuv2code-${version}-${platform}-${arch}`;
   NodeFS.mkdirSync(NodePath.join(assets, stem));
   NodeFS.writeFileSync(NodePath.join(assets, stem, "t3"), "#!/bin/sh\necho fork-runtime\n", {
     mode: 0o755,
@@ -117,16 +117,18 @@ if ($env:FIXTURE_FAIL_PUBLISH) {
 function Invoke-WebRequest { param($Uri, $OutFile, [switch]$UseBasicParsing, $Headers)
   if ($env:FIXTURE_PRODUCT_HOME -and [IO.File]::ReadAllText((Join-Path $env:FIXTURE_PRODUCT_HOME '.product-identity')).Trim() -ne 'shuv2code') { throw 'Missing home ownership before download' }
   Add-Content $env:FIXTURE_REQUESTS $Uri
+  $archiveStem = if ($env:FIXTURE_LEGACY_ARCHIVE) { 't3-1.2.3-win32-x64' } else { 'shuv2code-1.2.3-win32-x64' }
   # Release assets are octet-stream, so the real cmdlet hands back raw bytes.
   if ($Uri.EndsWith('release.json')) { return [pscustomobject]@{ Content = [IO.File]::ReadAllBytes(${psQuote(NodePath.join(assets, "release.json"))}) } }
-  if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, '${digest}  t3-1.2.3-win32-x64.zip') }
+  if ($Uri.EndsWith('SHA256SUMS')) { [IO.File]::WriteAllText($OutFile, "${digest}  $archiveStem.zip") }
   else { Copy-Item ${psQuote(NodePath.join(assets, "windows.zip"))} $OutFile }
 }
 function Invoke-RestMethod { param($Uri, $Headers) Add-Content $env:FIXTURE_REQUESTS $Uri; return @{ tag_name = 'v1.2.3'; draft = $false } }
 function Expand-Archive { param($Path, $DestinationPath, [switch]$Force)
-  $directory = Join-Path $DestinationPath 't3-1.2.3-win32-x64'
+  $archiveStem = if ($env:FIXTURE_LEGACY_ARCHIVE) { 't3-1.2.3-win32-x64' } else { 'shuv2code-1.2.3-win32-x64' }
+  $directory = Join-Path $DestinationPath $archiveStem
   New-Item -ItemType Directory $directory | Out-Null
-  Copy-Item ${psQuote(NodePath.join(assets, `t3-${version}-${platform}-${arch}`, "t3"))} (Join-Path $directory 't3.exe')
+  Copy-Item ${psQuote(NodePath.join(assets, `shuv2code-${version}-${platform}-${arch}`, "t3"))} (Join-Path $directory 't3.exe')
   & chmod +x (Join-Path $directory 't3.exe')
 }
 . ${psQuote(NodePath.join(import.meta.dirname, "install.ps1"))}
@@ -319,6 +321,17 @@ describe
       ).trim(),
     ).toBe(version);
   });
+  it.skipIf(kind !== "pwsh" || !hasPwsh)(
+    "falls back to a pre-rename Windows archive and its checksum entry",
+    () => {
+      env.FIXTURE_LEGACY_ARCHIVE = "1";
+      const result = runInstaller(kind);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(NodeFS.readFileSync(env.FIXTURE_REQUESTS!, "utf8")).toContain(
+        "/t3-1.2.3-win32-x64.zip",
+      );
+    },
+  );
   it.skipIf(kind === "pwsh" && !hasPwsh)(
     "refuses foreign product metadata even in the default fork namespace",
     () => {

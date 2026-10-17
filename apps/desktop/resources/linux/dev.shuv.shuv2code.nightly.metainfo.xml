@@ -3,11 +3,11 @@
   <id>dev.shuv.shuv2code.nightly</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <name>shuv2code (Nightly)</name>
+  <name>S2Code (Nightly)</name>
   <summary>Nightly desktop GUI for coding agents</summary>
   <developer id="dev.shuv"><name>shuv</name></developer>
   <description>
-    <p>shuv2code is an open-source desktop app for coding agents. This nightly installation is separate from stable and preview.</p>
+    <p>S2Code is an open-source desktop app for coding agents. This nightly installation is separate from stable and preview.</p>
   </description>
   <launchable type="desktop-id">shuv2code-nightly.desktop</launchable>
   <icon type="stock">shuv2code-nightly</icon>

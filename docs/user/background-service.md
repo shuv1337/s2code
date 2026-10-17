@@ -1,12 +1,12 @@
-# Running T3 Code in the background
+# Running S2Code in the background
 
-On Linux and macOS, T3 Code can run as a service for your user so you do not need
+On Linux and macOS, S2Code can run as a service for your user so you do not need
 to keep a terminal open.
 
 ## Manage the service
 
 Install the fork CLI first ([Install shuv2code](./install.md#command-line)), then
-run these commands on the machine that will host T3 Code:
+run these commands on the machine that will host S2Code:
 
 | Task                            | Command                       |
 | ------------------------------- | ----------------------------- |
@@ -31,7 +31,7 @@ the old version until you run `shuv2code service restart`. Pass `--yes` from a
 script. A server you started by hand is left running; stop and start it again
 to pick up the new version. Wait for any remote update already in progress
 before updating; to match a remote client's version, follow
-[Updating T3 Code](./updating.md).
+[Updating S2Code](./updating.md).
 
 Pass an exact version on the installed channel to pin one, or
 `--allow-downgrade` to move backwards within that channel. Stable, nightly and
@@ -46,7 +46,7 @@ script.
 
 ## Platform support
 
-Linux needs systemd user services. Setup enables lingering so T3 Code starts at
+Linux needs systemd user services. Setup enables lingering so S2Code starts at
 boot and keeps running after logout. If this needs administrator permission,
 setup prints a recovery command before changing the service.
 
@@ -99,7 +99,7 @@ ssh -t your-server 'sudo loginctl enable-linger "$(id -un)"'
 ```
 
 Then retry service setup as your normal user. Run only the `loginctl` command
-with sudo; running T3 Code as root creates a separate installation and Connect
+with sudo; running S2Code as root creates a separate installation and Connect
 identity. Without administrator access, run `shuv2code serve` in a terminal and keep
 that session open.
 

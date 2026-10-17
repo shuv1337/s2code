@@ -51,7 +51,22 @@ export function cliArchiveTarCommand(
 }
 
 export function cliArchiveFileName(version: string, platformKey: CliArchivePlatformKey): string {
+  return `shuv2code-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
+}
+
+export function cliArchiveLegacyFileName(
+  version: string,
+  platformKey: CliArchivePlatformKey,
+): string {
   return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
+}
+
+/** Preferred archive name followed by the pre-rename compatibility name. */
+export function cliArchiveFileNames(
+  version: string,
+  platformKey: CliArchivePlatformKey,
+): readonly [string, string] {
+  return [cliArchiveFileName(version, platformKey), cliArchiveLegacyFileName(version, platformKey)];
 }
 
 const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;

@@ -18,7 +18,7 @@ Use **Environments** at the bottom of the thread list to add or switch servers.
 Each environment keeps its own drafts, pins, and recent threads.
 
 Choose **iPhone** as the connection route for a private server reached through
-Tailscale on your phone. The paired iPhone must be available, have T3 Code
+Tailscale on your phone. The paired iPhone must be available, have S2Code
 installed, and be able to reach the server. **Direct** connects from Watch.
 **Automatic** uses the phone when available, otherwise it tries a direct
 connection. If a request loses its connection, it is not automatically sent

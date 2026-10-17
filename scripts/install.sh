@@ -183,8 +183,10 @@ case "$version" in
     ;;
 esac
 
-stem="t3-${version}-${platform}-${arch}"
+stem="shuv2code-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
+legacy_stem="t3-${version}-${platform}-${arch}"
+legacy_archive="${legacy_stem}.tar.gz"
 command_name=shuv2code
 prerelease="${version#*-}"
 case "$prerelease" in
@@ -284,11 +286,15 @@ else
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
+  if ! grep -q " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS"; then
+    archive="$legacy_archive"
+    stem="$legacy_stem"
+  fi
+  expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
+  [ -n "$expected" ] || fail "no release archive for ${platform}-${arch} is listed in SHA256SUMS"
   download "${base_url}/v${version}/${archive}" "${staging}/${archive}"
 
   step "Verifying the download..."
-  expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
-  [ -n "$expected" ] || fail "${archive} is not listed in SHA256SUMS"
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 

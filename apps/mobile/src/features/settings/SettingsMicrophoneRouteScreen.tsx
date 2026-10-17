@@ -166,7 +166,7 @@ export function SettingsMicrophoneRouteScreen() {
             <Text className="px-2 text-sm text-foreground-muted">
               {permission === "ask"
                 ? "Voice input needs microphone access before it can record or list your microphones."
-                : "Microphone access is off for shuv2code. Turn it on in Settings to use voice input."}
+                : "Microphone access is off for S2Code. Turn it on in Settings to use voice input."}
             </Text>
           </>
         ) : null}

@@ -185,7 +185,7 @@ describe("DesktopPreReadyPlatform", () => {
         const identity = yield* Effect.promise(() => portalIdentity);
         assert.equal(identity.desktopName, "dev.shuv.shuv2code.desktop");
         assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
-        assert.include(identity.desktopEntry ?? "", "Name=shuv2code (Alpha)");
+        assert.include(identity.desktopEntry ?? "", "Name=S2Code (Alpha)");
         assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/shuv2code;");
         assert.include(
           identity.desktopEntry ?? "",

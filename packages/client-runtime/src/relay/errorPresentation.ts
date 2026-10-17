@@ -69,7 +69,7 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
 // coming back, which clears this reason. While it is still reported, the host
 // is either still off or running a build too old to do that.
 export const RELAY_TUNNEL_RELEASED_MESSAGE =
-  "Offline for a while, so its T3 Connect tunnel was removed. Start T3 Code on that computer and update it to the latest version to reconnect.";
+  "Offline for a while, so its T3 Connect tunnel was removed. Start S2Code on that computer and update it to the latest version to reconnect.";
 
 /** User-facing text for an offline status, or null when the relay gave no known reason. */
 export function relayOfflineReasonMessage(

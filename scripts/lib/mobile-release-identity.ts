@@ -3,18 +3,21 @@ export const MOBILE_SLUG = "shuv2code";
 export const MOBILE_VARIANTS = {
   development: {
     appName: "shuv2code Dev",
+    displayName: "S2Code Dev",
     scheme: "shuv2code-dev",
     iosBundleIdentifier: "dev.shuv.shuv2code.dev",
     androidPackage: "dev.shuv.shuv2code.dev",
   },
   preview: {
     appName: "shuv2code Nightly",
+    displayName: "S2Code Nightly",
     scheme: "shuv2code-nightly",
     iosBundleIdentifier: "dev.shuv.shuv2code.nightly",
     androidPackage: "dev.shuv.shuv2code.nightly",
   },
   production: {
     appName: "shuv2code",
+    displayName: "S2Code",
     scheme: "shuv2code",
     iosBundleIdentifier: "dev.shuv.shuv2code",
     androidPackage: "dev.shuv.shuv2code",

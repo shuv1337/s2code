@@ -162,9 +162,17 @@ describe("complete fork release assets", () => {
         const assets = prepareForkAssets(plan, directory);
         expect(
           assets.filter((name) => /\.(dmg|zip|AppImage|deb|exe|tar\.gz)$/.test(name)),
-        ).toHaveLength(15);
+        ).toHaveLength(20);
         const checksums = FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8");
-        for (const name of plan.cliAssets) expect(checksums).toContain(`  ${name}\n`);
+        for (let index = 0; index < plan.cliAssets.length; index++) {
+          const name = plan.cliAssets[index]!;
+          const legacyName = plan.cliLegacyAssets[index]!;
+          expect(checksums).toContain(`  ${name}\n`);
+          expect(checksums).toContain(`  ${legacyName}\n`);
+          expect(FS.readFileSync(Path.join(directory, legacyName))).toEqual(
+            FS.readFileSync(Path.join(directory, name)),
+          );
+        }
         for (const name of plan.feedAssets) {
           const feed = parseUpdateManifest(
             FS.readFileSync(Path.join(directory, name), "utf8"),
@@ -274,7 +282,7 @@ describe("complete fork release assets", () => {
       const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-installer-7z-"));
       const path = process.env.PATH;
       try {
-        FS.writeFileSync(Path.join(directory, "T3-Code-1.2.3-x64.exe"), "installer");
+        FS.writeFileSync(Path.join(directory, "S2Code-1.2.3-x64.exe"), "installer");
         FS.writeFileSync(
           Path.join(directory, "7z"),
           `#!/bin/sh
@@ -348,7 +356,7 @@ exit \${FAKE_SEVEN_ZIP_EXIT:-1}
     }));
   it("rejects wrong feed bytes and preview automatic metadata", () => {
     fixture("stable", (directory, plan) => {
-      FS.appendFileSync(Path.join(directory, `T3-Code-${plan.version}-arm64.zip`), "changed");
+      FS.appendFileSync(Path.join(directory, `S2Code-${plan.version}-arm64.zip`), "changed");
       expect(() => prepareForkAssets(plan, directory)).toThrow("changed release bytes");
     });
     fixture("preview", (directory, plan) => {

@@ -41,7 +41,7 @@ depends=(
 optdepends=('openai-codex: use the system-installed Codex CLI')
 options=('!debug' '!strip')
 
-_appimage="T3-Code-${pkgver}-x86_64.AppImage"
+_appimage="S2Code-${pkgver}-x86_64.AppImage"
 source=(
   "$_appimage::https://github.com/shuv1337/shuv2code/releases/download/v${pkgver}/$_appimage"
   "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/shuv2code/v${pkgver}/LICENSE"
@@ -85,7 +85,7 @@ EOF
 
   install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/shuv2code.desktop" <<'EOF'
 [Desktop Entry]
-Name=shuv2code
+Name=S2Code
 Comment=Desktop control surface for local coding agents
 Exec=shuv2code %U
 TryExec=shuv2code

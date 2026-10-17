@@ -1,14 +1,14 @@
 # ACP providers
 
-T3 Code can run installed ACP commands or coding agents from the official
+S2Code can run installed ACP commands or coding agents from the official
 [ACP Registry](https://agentclientprotocol.com/get-started/registry). Registry agents bring their
-own models, tools, and sign-in, while T3 Code provides projects, threads, checkpoints, and task
+own models, tools, and sign-in, while S2Code provides projects, threads, checkpoints, and task
 delegation.
 
 Google Antigravity is available through its official `antigravity-acp` Registry entry. Add it like
-any other Registry agent; it does not need an Antigravity-specific T3 Code provider.
+any other Registry agent; it does not need an Antigravity-specific S2Code provider.
 
-T3 Code prefers the current ACP v2 preview protocol and uses its richer messages, usage, plans,
+S2Code prefers the current ACP v2 preview protocol and uses its richer messages, usage, plans,
 configuration, compaction, and agent-terminal updates when the agent supports them. It also
 negotiates ACP v1 for Registry agents that have not migrated yet, so agents such as Pi continue to
 work through the same generic integration.
@@ -31,15 +31,15 @@ name. For DeepSeek Harness, use `dsh` with arguments `--profile` and `acp`.
 
 Local commands require no registry entry or download. Environment overrides apply to the command;
 credentials and skills remain managed by the installed agent or its wrapper. Models and reasoning
-options come from ACP, including model IDs that contain JSON. T3 Code launches the executable directly
+options come from ACP, including model IDs that contain JSON. S2Code launches the executable directly
 without expanding shell expressions.
 
 ## Where agents run
 
-Registry agents always run on the machine that hosts your T3 Code server. That stays true when you
+Registry agents always run on the machine that hosts your S2Code server. That stays true when you
 connect through `app.t3.codes`, T3 Connect, or a relay.
 
-Agents install under `tools/<agent-id>/<version>/` inside T3 home. T3 Code verifies SHA-256 when the Registry entry
+Agents install under `tools/<agent-id>/<version>/` inside T3 home. S2Code verifies SHA-256 when the Registry entry
 provides one; entries without a checksum retain the Registry's HTTPS distribution guarantee.
 Registry `npx` and `uvx` packages use T3-owned npm prefixes and Python tool directories at the exact
 version published by the Registry. Their commands are available in a new server terminal for
@@ -55,7 +55,7 @@ provider, mobile also offers **Settings → Provider accounts**.
 Browser sign-in shows the agent's URL and waits for you to open or copy it before telling the
 agent to proceed. The page opens on your device, while the agent runs on the environment.
 Terminal methods run in an in-app terminal on that environment. On mobile, send responses
-through the terminal response field. T3 Code reconnects after terminal login and waits for the
+through the terminal response field. S2Code reconnects after terminal login and waits for the
 agent to confirm sign-in before reporting success. You can cancel or retry an expired attempt.
 
 Browser and terminal sign-in leave credentials in the agent's own store. Agents that use API keys
@@ -78,13 +78,13 @@ your own model IDs under **Custom models** in the instance settings.
 
 Other settings the agent offers, such as reasoning effort or approval mode, appear in the
 composer's model options menu like they do for built-in providers. Agents with their own plan and
-build modes follow T3 Code's Plan and Build toggle. Models and options that change while an agent
+build modes follow S2Code's Plan and Build toggle. Models and options that change while an agent
 is running update the picker without waiting for another provider probe.
 
 ## Commands and skills
 
 Slash commands the agent provides appear under **Provider** in the `/` menu while a session is
-running. Commands the agent names with a `$` prefix appear in T3 Code's `$` skill menu instead.
+running. Commands the agent names with a `$` prefix appear in S2Code's `$` skill menu instead.
 
 ## Native sessions
 
@@ -94,9 +94,9 @@ backed by that native session. Importing the same agent session again returns th
 including when another client performs the import.
 
 The thread keeps the native session's title and last-update value as provider metadata without
-overwriting a title you set in T3 Code. Agents that report ACP context usage drive the composer's
+overwriting a title you set in S2Code. Agents that report ACP context usage drive the composer's
 context meter and cumulative cost metadata. Text resources and links render as assistant output;
-binary resources, images, and audio that T3 Code cannot render yet appear as explicit placeholders
+binary resources, images, and audio that S2Code cannot render yet appear as explicit placeholders
 instead of disappearing.
 
 ## Permissions and terminals
@@ -106,13 +106,13 @@ approval rules. They start in their own default mode, and their mode picker in t
 menu switches it. How far an agent is confined depends on that mode and the agent's own settings,
 so use its sandbox and permission controls when that matters.
 
-When a registry agent asks for approval, T3 Code answers by the thread's
+When a registry agent asks for approval, S2Code answers by the thread's
 [permission mode](./permission-modes.md): **Supervised** shows the request in the conversation,
 **Auto-accept edits** approves edits and shows the rest, and **Auto** and **Full access** approve
 automatically. File reads and searches never wait for approval.
 
-Devin runs its commands through T3 Code's terminals, and those commands follow the thread's
-permission mode. For other agents, T3 Code shows the command, output, and exit status the agent
+Devin runs its commands through S2Code's terminals, and those commands follow the thread's
+permission mode. For other agents, S2Code shows the command, output, and exit status the agent
 reports but does not run or stop their terminals.
 
 Registry agents can schedule work and use T3's MCP tools. Child-task presentation depends on what

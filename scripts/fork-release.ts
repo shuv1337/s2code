@@ -132,6 +132,12 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   const desktops = requiredDesktopAssets(plan.version, names);
   for (const name of plan.cliAssets)
     if (!names.includes(name)) throw new Error(`Missing required CLI archive: ${name}`);
+  // Keep aliases for installs from before the archive rename; remove after that transition ends.
+  for (let index = 0; index < plan.cliAssets.length; index++)
+    FS.copyFileSync(
+      Path.join(directory, plan.cliAssets[index]!),
+      Path.join(directory, plan.cliLegacyAssets[index]!),
+    );
   for (const target of FORK_DESKTOP_MATRIX) {
     const receipt = JSON.parse(
       FS.readFileSync(Path.join(directory, `build-${target.platform}-${target.arch}.json`), "utf8"),
@@ -240,6 +246,7 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   const payloads = [
     ...desktops,
     ...plan.cliAssets,
+    ...plan.cliLegacyAssets,
     ...FS.readdirSync(directory).filter((name) => name.endsWith(".blockmap")),
   ];
   FS.writeFileSync(

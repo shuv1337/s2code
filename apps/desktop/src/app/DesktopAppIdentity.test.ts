@@ -217,8 +217,8 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         yield* identity.configure;
 
-        assert.deepEqual(calls.setName, ["shuv2code Alpha"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "shuv2code (Alpha)");
+        assert.deepEqual(calls.setName, ["S2Code Alpha"]);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "S2Code (Alpha)");
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
         // Packaged: the bundle's own icon stands, so a custom one the user
@@ -261,10 +261,10 @@ describe("DesktopAppIdentity", () => {
 
         const runtimeName = calls.setName[0];
         assert.isDefined(runtimeName);
-        assert.equal(runtimeName, `shuv2code ${stage}`);
+        assert.equal(runtimeName, `S2Code ${stage}`);
         // RFC 9110's token grammar, after Electron removes ASCII spaces.
         assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, `shuv2code (${stage})`);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, `S2Code (${stage})`);
       }),
       { calls, environment },
     );
