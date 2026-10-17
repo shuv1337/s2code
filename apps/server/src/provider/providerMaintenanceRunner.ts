@@ -352,7 +352,11 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           refreshedProviders,
           (refreshedProvider) =>
             enrichProviderSnapshotWithVersionAdvisory(
-              refreshedProvider,
+              {
+                ...refreshedProvider,
+                version:
+                  refreshedProvider.versionAdvisory?.currentVersion ?? refreshedProvider.version,
+              },
               maintenanceCapabilities,
             ).pipe(
               Effect.provideService(HttpClient.HttpClient, httpClient),

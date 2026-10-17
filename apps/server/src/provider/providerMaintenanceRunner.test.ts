@@ -715,6 +715,38 @@ describe("providerMaintenanceRunner", () => {
       ),
   );
 
+  it.effect("verifies an external server update against its installed binary advisory", () =>
+    Effect.gen(function* () {
+      const { registry } = yield* makeRegistry({
+        ...baseOpenCodeProvider,
+        version: "2.0.28-shuv.1",
+        versionAdvisory: {
+          status: "current",
+          currentVersion: "2.0.30-shuv.1",
+          latestVersion: "2.0.30-shuv.1",
+          updateCommand: "shuvcode upgrade",
+          canUpdate: true,
+          checkedAt: "2026-10-17T12:00:00.000Z",
+          message:
+            "shuvcode 2.0.30-shuv.1 is installed; the running server is still 2.0.28-shuv.1 and will use the new version after it restarts.",
+        },
+      });
+      const updater = yield* makeTestRunner(registry);
+
+      const result = yield* updater.updateProvider(OPENCODE_DRIVER);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.notInclude(result.providers[0]?.updateState?.message ?? "", "still detects");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("2.0.30-shuv.1"),
+          layerMockSpawner(() => ({ stdout: "already current" })),
+        ),
+      ),
+    ),
+  );
+
   it.effect("prevents concurrent updates for the same provider", () => {
     const startedLatch: { resolve: () => void } = { resolve: () => {} };
     const releaseLatch: { resolve: () => void } = { resolve: () => {} };

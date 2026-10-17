@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import type { OpenCodeSettings } from "../settings.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
@@ -26,7 +26,11 @@ import {
   OPENCODE_2_WORKSPACE_RESPONSES,
   replayOpenCodeServer,
 } from "./probeResponses.fixture.ts";
-import { OpenCodeDriver, openCodeUpdateFor } from "./driver.ts";
+import {
+  enrichOpenCodeSnapshotWithVersionAdvisory,
+  OpenCodeDriver,
+  openCodeUpdateFor,
+} from "./driver.ts";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 
 const serverStarts: Array<string> = [];
@@ -134,12 +138,17 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
 
 // npm links `<prefix>/bin/opencode` into the package that installed it:
 // `opencode-ai` for 1.x and `@opencode/cli` (whose bin is `bin/opencode.exe`) for 2.x.
-const npmGlobalInstall = (prefix: string, packagePath: ReadonlyArray<string>, bin: string) => {
+const npmGlobalInstall = (
+  prefix: string,
+  packagePath: ReadonlyArray<string>,
+  bin: string,
+  command = "opencode",
+) => {
   const target = NodePath.join(prefix, "lib", "node_modules", ...packagePath, "bin", bin);
   NodeFS.mkdirSync(NodePath.dirname(target), { recursive: true });
   NodeFS.writeFileSync(target, "#!/bin/sh\n");
   NodeFS.chmodSync(target, 0o755);
-  const link = NodePath.join(prefix, "bin", "opencode");
+  const link = NodePath.join(prefix, "bin", command);
   NodeFS.mkdirSync(NodePath.dirname(link), { recursive: true });
   NodeFS.symlinkSync(target, link);
   return link;
@@ -190,6 +199,124 @@ it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         (yield* resolveUpdate("v1", NodePath.join(v2Prefix, "bin", "opencode"))).update,
       );
     }),
+);
+
+it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+  "uses shuvcode's native updater for npm and bun package installs",
+  () =>
+    Effect.gen(function* () {
+      const root = NodeFS.realpathSync(
+        NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-shuvcode-update-")),
+      );
+      const npmBinary = npmGlobalInstall(
+        NodePath.join(root, "npm"),
+        ["shuvcode"],
+        "launcher.mjs",
+        "shuvcode",
+      );
+      const npm = yield* resolveUpdate("v2", npmBinary);
+      assert.strictEqual(npm.packageName, "shuvcode");
+      assert.deepStrictEqual(npm.update, {
+        command: `${npmBinary} upgrade`,
+        executable: npmBinary,
+        args: ["upgrade"],
+        lockKey: "opencode-native",
+      });
+
+      const bunRoot = NodePath.join(root, ".bun");
+      const bunTarget = NodePath.join(
+        bunRoot,
+        "install",
+        "global",
+        "node_modules",
+        "shuvcode-node-darwin-arm64",
+        "bin",
+        "shuvcode",
+      );
+      NodeFS.mkdirSync(NodePath.dirname(bunTarget), { recursive: true });
+      NodeFS.writeFileSync(bunTarget, "#!/bin/sh\n");
+      NodeFS.chmodSync(bunTarget, 0o755);
+      const bunBinary = NodePath.join(bunRoot, "bin", "shuvcode");
+      NodeFS.mkdirSync(NodePath.dirname(bunBinary), { recursive: true });
+      NodeFS.symlinkSync(bunTarget, bunBinary);
+      const bun = yield* resolveUpdate("v2", bunBinary);
+      assert.strictEqual(bun.packageName, "shuvcode-node");
+      assert.deepStrictEqual(bun.update?.args, ["upgrade"]);
+      assert.strictEqual(bun.update?.executable, bunBinary);
+    }),
+);
+
+it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+  "keeps an unowned shuvcode binary manual and never targets upstream OpenCode",
+  () =>
+    Effect.gen(function* () {
+      const root = NodeFS.realpathSync(
+        NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-standalone-shuvcode-")),
+      );
+      const binary = NodePath.join(root, "shuvcode");
+      NodeFS.writeFileSync(binary, "#!/bin/sh\n");
+      NodeFS.chmodSync(binary, 0o755);
+
+      const capabilities = yield* resolveUpdate("v2", binary);
+      assert.strictEqual(capabilities.packageName, "shuvcode");
+      assert.isNull(capabilities.update);
+    }),
+);
+
+const externalServerProvider: ServerProvider = {
+  instanceId: ProviderInstanceId.make("shuvcode-server"),
+  driver: ProviderDriverKind.make("opencode"),
+  enabled: true,
+  installed: true,
+  version: "2.0.28-shuv.1",
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-10-17T12:00:00.000Z",
+  models: [],
+  slashCommands: [],
+  skills: [],
+};
+const shuvcodeMaintenance = ProviderMaintenance.makeProviderMaintenanceCapabilities({
+  provider: ProviderDriverKind.make("opencode"),
+  packageName: "shuvcode",
+  updateExecutable: "/opt/shuvcode/bin/shuvcode",
+  updateArgs: ["upgrade"],
+  updateLockKey: "opencode-native",
+});
+
+it.effect("compares an external server against the installed shuvcode version", () =>
+  Effect.gen(function* () {
+    const current = yield* enrichOpenCodeSnapshotWithVersionAdvisory({
+      snapshot: externalServerProvider,
+      maintenanceCapabilities: shuvcodeMaintenance,
+      installedRuntime: { generation: "v2", version: "2.0.30-shuv.1" },
+      usesExternalServer: true,
+      enableProviderUpdateChecks: true,
+    });
+    assert.strictEqual(current.version, "2.0.28-shuv.1");
+    assert.strictEqual(current.versionAdvisory?.currentVersion, "2.0.30-shuv.1");
+    assert.strictEqual(current.versionAdvisory?.status, "current");
+    assert.include(
+      current.versionAdvisory?.message ?? "",
+      "will use the new version after it restarts",
+    );
+
+    const behind = yield* enrichOpenCodeSnapshotWithVersionAdvisory({
+      snapshot: externalServerProvider,
+      maintenanceCapabilities: shuvcodeMaintenance,
+      installedRuntime: { generation: "v2", version: "2.0.29-shuv.1" },
+      usesExternalServer: true,
+      enableProviderUpdateChecks: true,
+    });
+    assert.strictEqual(behind.versionAdvisory?.status, "behind_latest");
+    assert.strictEqual(behind.versionAdvisory?.updateCommand, "/opt/shuvcode/bin/shuvcode upgrade");
+  }).pipe(
+    Effect.provideServiceEffect(
+      ProviderLatestVersions.ProviderLatestVersions,
+      ProviderLatestVersions.make([["shuvcode", "2.0.30-shuv.1"]]),
+    ),
+    Effect.provideService(HttpClient.HttpClient, noHttp),
+  ),
 );
 
 // The update the driver offers follows the version the binary reports now.
