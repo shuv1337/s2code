@@ -5,6 +5,7 @@ import * as NodeURL from "node:url";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeModule from "node:module";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -344,19 +345,73 @@ export function inspectForkNpmPackages(directory: string, version: string) {
   }));
 }
 
+// Only tests shorten the wait; CI keeps the real cadence.
+const configuredPollMs = Number(process.env.FORK_RELEASE_NPM_POLL_MS);
+const NPM_POLL_MS =
+  Number.isFinite(configuredPollMs) && configuredPollMs > 0 ? configuredPollMs : 15_000;
+/**
+ * Attempts cover the budget at the normal fifteen-second cadence, so a shorter
+ * interval makes the same number of polls finish sooner rather than multiplying
+ * them.
+ */
+const pollsWithin = (budgetMs: number) => Math.max(1, Math.ceil(budgetMs / 15_000));
+/** npm holds each new version in review before it is installable: ~15 minutes. */
+const NPM_REVIEW_POLLS = pollsWithin(30 * 60_000);
+/** Registry propagation for a dist-tag write, or one answer that did not arrive. */
+const NPM_TAG_POLLS = pollsWithin(60_000);
+
+/** A registry answer that says nothing about the package, so it can be retried. */
+class TransientRegistryError extends Error {}
+/** GET a registry endpoint, separating "no answer" from a real verdict. */
+async function registryFetch(url: string) {
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  } catch {
+    throw new TransientRegistryError(`GET ${url} failed (network error or timeout).`);
+  }
+  if (response.status === 429 || response.status >= 500)
+    throw new TransientRegistryError(`GET ${url} failed (HTTP ${response.status}).`);
+  return response;
+}
+/**
+ * Poll the registry until `read` answers. `undefined` means "not yet", and a
+ * transient failure counts as "not yet" except that exhausting the budget
+ * reports it. Every other failure throws at once, so an integrity or allowlist
+ * violation still fails the release immediately.
+ */
+async function pollRegistry<T>(input: {
+  readonly attempts: number;
+  readonly read: () => Promise<T | undefined>;
+  readonly exhausted: string;
+  readonly waiting?: string;
+}): Promise<T> {
+  let transient: string | undefined;
+  for (let attempt = 1; attempt <= input.attempts; attempt++) {
+    try {
+      const answer = await input.read();
+      if (answer !== undefined) return answer;
+      transient = undefined;
+    } catch (error) {
+      if (!(error instanceof TransientRegistryError)) throw error;
+      transient = error.message;
+    }
+    if (attempt === input.attempts) break;
+    if (input.waiting && attempt % 4 === 0) console.log(input.waiting);
+    await Effect.runPromise(Effect.sleep(Duration.millis(NPM_POLL_MS)));
+  }
+  throw new Error(
+    transient ? `${input.exhausted} Last registry failure: ${transient}` : input.exhausted,
+  );
+}
 async function registryVersion(
   pkg: { manifest: { name: string }; integrity: string },
   version: string,
 ) {
-  const response = await releaseFetch(
-    `https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)}`,
-    { signal: AbortSignal.timeout(30_000) },
-  );
+  const url = `https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)}`;
+  const response = await registryFetch(url);
   if (response.status === 404) return false;
-  if (!response.ok)
-    throw new Error(
-      `GET https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)} failed (HTTP ${response.status}).`,
-    );
+  if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
   const value = (await response.json()) as { dist?: { integrity?: string } };
   assertForkNpmManifest(value, version);
   if (value.dist?.integrity !== pkg.integrity)
@@ -373,16 +428,23 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const names = FS.readdirSync(assets).filter((name) => !name.startsWith("build-"));
   const packages = inspectForkNpmPackages("prepared/npm-packages", plan.version);
   const readTags = async (name: string) => {
-    const response = await releaseFetch(
-      `https://registry.npmjs.org/${encodeURIComponent(name)}/dist-tags`,
-      { signal: AbortSignal.timeout(30_000) },
-    );
-    if (response.status === 404) return {} as Record<string, string>; // absence is not an ownership/readiness check
-    if (!response.ok)
-      throw new Error(
-        `GET https://registry.npmjs.org/${encodeURIComponent(name)}/dist-tags failed (HTTP ${response.status}).`,
-      );
-    return (await response.json()) as Record<string, string>;
+    // `/<name>/dist-tags` would be read as a version named "dist-tags".
+    const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
+    const answer = await pollRegistry({
+      attempts: NPM_TAG_POLLS,
+      read: async () => {
+        const response = await registryFetch(url);
+        // A name nobody has published answers 404 unscoped and 401 scoped on
+        // this unauthenticated public GET. Neither is an ownership or
+        // readiness check.
+        if (response.status === 404 || response.status === 401)
+          return { tags: {} as Record<string, string> };
+        if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
+        return { tags: (await response.json()) as Record<string, string> };
+      },
+      exhausted: `The npm registry did not answer dist-tags for ${name}.`,
+    });
+    return answer.tags;
   };
   const assertTagNotBackwards = async (name: string) => {
     const tags = await readTags(name);
@@ -495,14 +557,24 @@ async function publishPrepared(plan: ForkReleasePlan) {
       );
     }
   };
+  // Every registry read goes through pollRegistry, so a registry that did not
+  // answer is never mistaken for a verdict about the package.
+  const publishedVersion = (pkg: (typeof packages)[number]) =>
+    pollRegistry({
+      attempts: NPM_TAG_POLLS,
+      read: async () => ({ published: await registryVersion(pkg, plan.version) }),
+      exhausted: `The npm registry did not answer for ${pkg.manifest.name}@${plan.version}.`,
+    });
   const verifyNpm = async () => {
     if (!plan.npm) return;
     for (const pkg of packages)
-      if (!(await registryVersion(pkg, plan.version)))
+      if (!(await publishedVersion(pkg)).published)
         throw new Error("All six exact npm versions must exist before release exposure.");
   };
   const publishPackage = async (pkg: (typeof packages)[number]) => {
-    if (!(await registryVersion(pkg, plan.version)))
+    // A transient answer must never read as "absent" here: publishing over an
+    // existing immutable version is refused by npm, not retried.
+    if (!(await publishedVersion(pkg)).published)
       await runAsync("npm", [
         "publish",
         pkg.file,
@@ -512,12 +584,14 @@ async function publishPrepared(plan: ForkReleasePlan) {
         "--tag",
         plan.stagingTag,
       ]);
-    // Bounded propagation retries; these run only in CI, not in tests.
-    for (let attempt = 0; attempt < 6; attempt++) {
-      if (await registryVersion(pkg, plan.version)) return;
-      await Effect.runPromise(Effect.sleep("5 seconds"));
-    }
-    throw new Error("npm publication is not yet verifiable; the draft remains unavailable.");
+    // npm reviews each new version before it becomes installable, which took
+    // up to about fifteen minutes for these packages. Wait well past that.
+    await pollRegistry({
+      attempts: NPM_REVIEW_POLLS,
+      read: async () => (await registryVersion(pkg, plan.version)) || undefined,
+      exhausted: "npm publication is not yet verifiable; the draft remains unavailable.",
+      waiting: `Waiting for npm to finish reviewing ${pkg.manifest.name}@${plan.version}.`,
+    });
   };
   await publishForkReleaseSequence({
     ensureDraft: async () => {
@@ -597,10 +671,13 @@ async function publishPrepared(plan: ForkReleasePlan) {
             continue;
           }
           run("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, tag]);
-          if ((await readTags(pkg.manifest.name))[tag] !== plan.version)
-            throw new Error(
+          await pollRegistry({
+            attempts: NPM_TAG_POLLS,
+            read: async () =>
+              (await readTags(pkg.manifest.name))[tag] === plan.version ? true : undefined,
+            exhausted:
               "Fork dist-tag promotion is not yet verifiable; retry with the original prepared artifact.",
-            );
+          });
         }
       }
     },
