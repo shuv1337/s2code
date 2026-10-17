@@ -14,38 +14,19 @@ Exporting requires Icon Composer 2 or newer on macOS. The script selects the new
 
 ## macOS exports
 
-Icon Composer's command-line exporter does not expose the `macOS pre-Tahoe` preset. A plain command-line `macOS` export is full bleed and is not suitable for the desktop app, so the export script intentionally leaves the tracked macOS PNGs unchanged and prints a reminder after every run.
+The tracked macOS PNGs are flat SVG renders rather than Icon Composer exports. Render each variant's raw mark with `rsvg-convert` at 1024×1024 using this wrapper, substituting the variant colour and mark paths:
 
-After changing an Icon Composer project, open it in Icon Composer and export the macOS PNG with exactly these settings:
-
-- Platform: `macOS pre-Tahoe`
-- Appearance: `Default`
-- Size: `1024pt`
-- Scale: `1×`
-
-Save the three exports to:
-
-- `dev/app-icon.icon` -> `dev/blueprint-macos-1024.png`
-- `nightly/app-icon.icon` -> `nightly/nightly-macos-1024.png`
-- `prod/app-icon.icon` -> `prod/black-macos-1024.png`
-
-The result must be a 1024×1024 PNG with the classic macOS safe area: the opaque icon body is 824×824, inset 100 pixels on every side, with only the native Icon Composer shadow extending into the surrounding transparent canvas.
-
-To have Codex perform the native exports, paste this prompt into a task opened at the repository root:
-
-```text
-Use [@Computer](plugin://computer-use@openai-bundled) and the Icon Composer app to export the three macOS app icons in this repository.
-
-For each project below, use Platform: macOS pre-Tahoe, Appearance: Default, Size: 1024pt, and Scale: 1×, then save the PNG to the exact destination:
-
-- assets/dev/app-icon.icon -> assets/dev/blueprint-macos-1024.png
-- assets/nightly/app-icon.icon -> assets/nightly/nightly-macos-1024.png
-- assets/prod/app-icon.icon -> assets/prod/black-macos-1024.png
-
-Do not resize, composite, or otherwise post-process the exported PNGs.
-
-Verify every result is 1024×1024 and has the classic macOS safe area: an 824×824 opaque body inset 100px on every side, with only Icon Composer's native shadow extending beyond it.
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><rect x="100" y="100" width="824" height="824" rx="180" fill="#0C1119"/><g transform="translate(512 512) scale(1.356) translate(-256 -256)">MARK</g></svg>
 ```
+
+Write the results to:
+
+- `dev/app-icon.icon/Assets/text.svg` -> `dev/blueprint-macos-1024.png`
+- `nightly/app-icon.icon/Assets/text.svg` -> `nightly/nightly-macos-1024.png`
+- `prod/app-icon.icon/Assets/text.svg` -> `prod/black-macos-1024.png`
+
+Run `/opt/homebrew/bin/rsvg-convert -w 1024 -h 1024 input.svg -o output.png`. The plate remains 824×824 and inset 100 pixels on every side; the transform centres the horned body while the tail extends right.
 
 Do not edit the generated PNG or ICO files directly.
 

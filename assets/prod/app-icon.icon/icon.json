@@ -6,7 +6,7 @@
         {
           "image-name": "text.svg",
           "name": "shuv2code mark",
-          "position": { "scale": 0.74, "translation-in-points": [0, 0] }
+          "position": { "scale": 1.5, "translation-in-points": [0, 0] }
         }
       ],
       "shadow": { "kind": "neutral", "opacity": 0.35 },

@@ -29,7 +29,7 @@ const exportAndroidIcons = Effect.gen(function* () {
       try: () =>
         sharp(
           Buffer.from(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">${background ? `<rect width="512" height="512" fill="${background}"/>` : ""}<g transform="translate(113 113) scale(.56)">${svg}</g></svg>`,
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">${background ? `<rect width="512" height="512" fill="${background}"/>` : ""}<g transform="translate(256 256) scale(.6) translate(-256 -256)">${svg}</g></svg>`,
           ),
         )
           .png()

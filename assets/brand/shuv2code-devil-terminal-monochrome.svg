@@ -1,23 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">shuv2code monochrome devil terminal mark</title>
   <desc id="desc">A one-color horned terminal with a command prompt knocked out of the screen.</desc>
-  <!-- Icon master: locked mono lockup with ink scaled ×1.08 for app-icon bleed. -->
+  <!-- Icon master: the horned body is centred at (256,256), and the tail extends to the right. -->
   <mask id="screen" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
     <rect width="512" height="512" fill="#fff"/>
-    <g transform="translate(256 256) scale(1.08) translate(-256 -256)">
-      <g transform="translate(-57 -14) scale(1.058)">
-        <rect width="272" height="256" x="120" y="158" fill="#000" rx="46"/>
-        <path fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="30" d="m180 232 62 60-62 60m88 -6h72"/>
-      </g>
-    </g>
+    <rect width="272" height="256" x="120" y="158" fill="#000" rx="46"/>
+    <path fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="30" d="m180 232 62 60-62 60m88 -6h72"/>
   </mask>
   <g mask="url(#screen)">
-    <g transform="translate(256 256) scale(1.08) translate(-256 -256)">
-      <g transform="translate(-57 -14) scale(1.058)">
-        <path d="M396 406c54-4 74-28 74-70" fill="none" stroke="currentColor" stroke-width="36"/>
-        <path fill="currentColor" d="M504 336H436l34-58z"/>
-        <path fill="currentColor" d="M104 68c24 40 46 56 86 58 44 4 88 4 132 0 40-2 62-18 86-58 12 40 16 72 16 122v182a72 72 0 0 1-72 72H160a72 72 0 0 1-72-72V190c0-50 4-82 16-122Z"/>
-      </g>
-    </g>
+    <path d="M396 406c54-4 74-28 74-70" fill="none" stroke="currentColor" stroke-width="36"/>
+    <path fill="currentColor" d="M504 336H436l34-58z"/>
+    <path fill="currentColor" d="M104 68c24 40 46 56 86 58 44 4 88 4 132 0 40-2 62-18 86-58 12 40 16 72 16 122v182a72 72 0 0 1-72 72H160a72 72 0 0 1-72-72V190c0-50 4-82 16-122Z"/>
   </g>
 </svg>
