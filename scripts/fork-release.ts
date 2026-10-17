@@ -598,21 +598,30 @@ async function publishPrepared(plan: ForkReleasePlan) {
       await verifyTag(false);
       const existing = findRelease();
       if (!existing) {
-        gh(
-          "release",
-          "create",
-          plan.tag,
-          "--repo",
-          FORK_RELEASE_REPOSITORY,
-          "--target",
-          plan.sha,
-          "--draft",
-          ...(plan.channel === "stable" ? [] : ["--prerelease"]),
-          "--title",
-          plan.title,
-          "--notes",
-          `${plan.signing.unsigned ? "UNSIGNED build: signing credentials were unavailable for at least one platform, so its signature and notarization are absent. Unsigned macOS and Windows builds ship no updater feed and are never offered as automatic updates; install them deliberately. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}.`,
-        );
+        // The release list lags a new draft, so keep the id the API returns and
+        // read the release by id from here on.
+        const created = JSON.parse(
+          gh(
+            "api",
+            "-X",
+            "POST",
+            `repos/${FORK_RELEASE_REPOSITORY}/releases`,
+            "-f",
+            `tag_name=${plan.tag}`,
+            "-f",
+            `target_commitish=${plan.sha}`,
+            "-F",
+            "draft=true",
+            "-F",
+            `prerelease=${plan.channel !== "stable"}`,
+            "-f",
+            `name=${plan.title}`,
+            "-f",
+            `body=${plan.signing.unsigned ? "UNSIGNED build: signing credentials were unavailable for at least one platform, so its signature and notarization are absent. Unsigned macOS and Windows builds ship no updater feed and are never offered as automatic updates; install them deliberately. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}.`,
+          ),
+        ) as Release;
+        if (created.tag_name !== plan.tag) throw new Error("GitHub release tag mismatch.");
+        releaseId = created.id;
       }
       release = existing ?? getRelease();
       if (release.target_commitish !== plan.sha)

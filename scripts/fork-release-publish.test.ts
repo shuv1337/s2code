@@ -29,7 +29,13 @@ else if(command==='gh') {
  if(endpoint?.includes('/releases/tags/')) fail(404); // Published-only lookup cannot see this draft.
  if(endpoint?.endsWith('/releases?per_page=100')) {
    if(s.mode==='gh-error') fail(503);
-   save(); console.log(JSON.stringify([[{...s.release,id:999,tag_name:s.release.tag_name+'0'},s.release]]));
+   // Like GitHub, the list can lag a draft created moments ago.
+   const listed=s.mode==='new-release' ? [] : [s.release];
+   save(); console.log(JSON.stringify([[{...s.release,id:999,tag_name:s.release.tag_name+'0'},...listed]]));
+ } else if(endpoint?.endsWith('/releases') && args.includes('POST')) {
+   if(s.mode!=='new-release') fail(422); // An existing draft must never be recreated.
+   if(!args.includes('tag_name='+s.release.tag_name) || !args.includes('target_commitish='+s.release.target_commitish) || !args.includes('draft=true')) fail(400);
+   save(); console.log(JSON.stringify(s.release));
  } else if(endpoint?.startsWith('https://uploads.github.com/')) {
    if(!endpoint.includes('/releases/1234/assets?')) fail(404);
    const name=new URL(endpoint).searchParams.get('name'); const bytes=fs.readFileSync(args[args.indexOf('--input')+1]);
@@ -256,6 +262,19 @@ describe("fork publication fixtures", () => {
       expect(
         state.commands.some((args) => args.some((arg) => arg.includes("/releases/1234/assets?"))),
       ).toBe(false);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "creates the draft and reads it by id while the release list still lags",
+    () => {
+      const { result, state } = publishFixture("new-release");
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(
+        state.commands.some(
+          (args) => args.includes("POST") && args.some((arg) => arg.endsWith("/releases")),
+        ),
+      ).toBe(true);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
