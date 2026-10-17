@@ -6,6 +6,7 @@ import {
   canMaintainEnvironment,
   canUpdateEnvironmentProvider,
   findEnvironmentUpdate,
+  getProviderRestartPendingMessage,
   supportsEnvironmentUpdate,
 } from "./environment-maintenance";
 
@@ -154,6 +155,29 @@ describe("environment maintenance access", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it("shows restart guidance only while the installed version is current but the server is older", () => {
+    const message =
+      "shuvcode 2.0.30-shuv.1 is installed; the running server is still 2.0.28-shuv.1 and will use the new version after it restarts.";
+    const restartPending = {
+      ...provider,
+      versionAdvisory: {
+        ...provider.versionAdvisory!,
+        status: "current" as const,
+        currentVersion: "2.0.30-shuv.1",
+        latestVersion: "2.0.30-shuv.1",
+        message,
+      },
+    };
+    expect(getProviderRestartPendingMessage(restartPending)).toBe(message);
+    expect(
+      getProviderRestartPendingMessage({
+        ...restartPending,
+        versionAdvisory: { ...restartPending.versionAdvisory, message: null },
+      }),
+    ).toBeNull();
+    expect(getProviderRestartPendingMessage(provider)).toBeNull();
   });
 });
 

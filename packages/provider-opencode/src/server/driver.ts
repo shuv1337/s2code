@@ -12,7 +12,8 @@
  *
  * @module provider/Drivers/OpenCodeDriver
  */
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { compareSemverVersions } from "@t3tools/shared/semver";
 import { OpenCodeSettings } from "../settings.ts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -69,8 +70,12 @@ import {
   makeCachedProviderMaintenanceResolution,
   makeManualOnlyProviderMaintenanceCapabilities,
   makePackageManagedProviderMaintenanceResolver,
+  makeProviderMaintenanceCapabilities,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
+  type ProviderMaintenanceCapabilities,
+  type ProviderMaintenanceCapabilitiesResolver,
+  type ProviderMaintenanceResolutionContext,
 } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
@@ -95,7 +100,7 @@ function isOpenCodeNativeCommandPath(commandPath: string): boolean {
  * 2.x or back, since 2.x converts the shared database in place.
  */
 export const openCodeUpdateFor = (generation: ProbedOpenCode["generation"]) =>
-  makePackageManagedProviderMaintenanceResolver({
+  makeOpenCodeMaintenanceResolver({
     provider: DRIVER_KIND,
     npmPackageName: generation === "v2" ? "@opencode/cli" : "opencode-ai",
     nativeUpdate: {
@@ -103,6 +108,114 @@ export const openCodeUpdateFor = (generation: ProbedOpenCode["generation"]) =>
       isCommandPath: isOpenCodeNativeCommandPath,
     },
   });
+
+const SHUVCODE_PACKAGE_PATTERN =
+  /^shuvcode(?:-node)?(?:-(?:darwin|linux|windows)-(?:x64|arm64|arm)(?:-baseline)?(?:-musl)?)?$/;
+
+/** Map shuvcode's wrapper and platform packages back to the package whose `latest` tag it follows. */
+function shuvcodePackageFromCommandPath(commandPath: string): "shuvcode" | "shuvcode-node" | null {
+  const packages = Array.from(
+    commandPath.replaceAll("\\", "/").matchAll(/\/node_modules\/([^/]+)/gi),
+    (match) => match[1]?.toLowerCase(),
+  ).filter((packageName): packageName is string => packageName !== undefined);
+  const ownedPackage = packages.find((packageName) => SHUVCODE_PACKAGE_PATTERN.test(packageName));
+  if (!ownedPackage) return null;
+  return ownedPackage.startsWith("shuvcode-node") ? "shuvcode-node" : "shuvcode";
+}
+
+function isShuvcodeCommand(context: ProviderMaintenanceResolutionContext): boolean {
+  return [context.binaryPath, context.resolvedCommandPath, context.realCommandPath].some(
+    (commandPath) => /(?:^|[/\\])shuvcode(?:\.(?:cmd|bat|exe|ps1))?$/i.test(commandPath),
+  );
+}
+
+const shuvcodePackageFromWindowsShim = Effect.fn("shuvcodePackageFromWindowsShim")(function* (
+  context: ProviderMaintenanceResolutionContext,
+) {
+  if (context.platform !== "win32" || !isShuvcodeCommand(context)) return null;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const shimDirectory = path.dirname(context.resolvedCommandPath);
+  for (const packageName of ["shuvcode", "shuvcode-node"] as const) {
+    const manifest = path.join(shimDirectory, "node_modules", packageName, "package.json");
+    if (yield* fileSystem.exists(manifest).pipe(Effect.orElseSucceed(() => false))) {
+      return packageName;
+    }
+  }
+  return null;
+});
+
+function makeOpenCodeMaintenanceResolver(
+  definition: Parameters<typeof makePackageManagedProviderMaintenanceResolver>[0],
+): ProviderMaintenanceCapabilitiesResolver {
+  const upstream = makePackageManagedProviderMaintenanceResolver(definition);
+  return {
+    resolve: (context) =>
+      Effect.gen(function* () {
+        if (!context) return yield* upstream.resolve(context);
+        const shuvcodePackage =
+          [context.resolvedCommandPath, context.realCommandPath]
+            .map(shuvcodePackageFromCommandPath)
+            .find((packageName) => packageName !== null) ??
+          (yield* shuvcodePackageFromWindowsShim(context));
+        if (shuvcodePackage) {
+          return makeProviderMaintenanceCapabilities({
+            provider: definition.provider,
+            packageName: shuvcodePackage,
+            updateExecutable: context.resolvedCommandPath,
+            updateArgs: ["upgrade"],
+            updateLockKey: `${definition.provider}-native`,
+            platform: context.platform,
+          });
+        }
+        if (isShuvcodeCommand(context)) {
+          return makeManualOnlyProviderMaintenanceCapabilities({
+            provider: definition.provider,
+            packageName: "shuvcode",
+          });
+        }
+        return yield* upstream.resolve(context);
+      }),
+  };
+}
+
+export const enrichOpenCodeSnapshotWithVersionAdvisory = Effect.fn(
+  "enrichOpenCodeSnapshotWithVersionAdvisory",
+)(function* (input: {
+  readonly snapshot: ServerProvider;
+  readonly maintenanceCapabilities: ProviderMaintenanceCapabilities;
+  readonly installedRuntime: ProbedOpenCode | undefined;
+  readonly usesExternalServer: boolean;
+  readonly enableProviderUpdateChecks: boolean | undefined;
+}) {
+  const advisoryVersion = input.usesExternalServer
+    ? (input.installedRuntime?.version ?? null)
+    : input.snapshot.version;
+  const enriched = yield* enrichProviderSnapshotWithVersionAdvisory(
+    { ...input.snapshot, version: advisoryVersion },
+    input.maintenanceCapabilities,
+    { enableProviderUpdateChecks: input.enableProviderUpdateChecks },
+  );
+  const serverVersion = input.snapshot.version;
+  const restartPending =
+    input.usesExternalServer &&
+    advisoryVersion !== null &&
+    serverVersion !== null &&
+    compareSemverVersions(serverVersion, advisoryVersion) < 0;
+  const packageName = input.maintenanceCapabilities.packageName;
+  const providerName = packageName?.startsWith("shuvcode") ? "shuvcode" : "OpenCode";
+  return {
+    ...enriched,
+    version: serverVersion,
+    versionAdvisory:
+      restartPending && enriched.versionAdvisory
+        ? {
+            ...enriched.versionAdvisory,
+            message: `${providerName} ${advisoryVersion} is installed; the running server is still ${serverVersion} and will use the new version after it restarts.`,
+          }
+        : enriched.versionAdvisory,
+  };
+});
 
 type OpenCodeRuntimeProbe = Effect.Success<
   ReturnType<typeof makeOpenCodeRuntimeProbe<OpenCodeRuntime.OpenCodeRuntimeError>>
@@ -231,6 +344,18 @@ export const OpenCodeDriver: ProviderDriver<
           Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
         ),
       );
+      const usesExternalServer = effectiveConfig.serverUrl.trim().length > 0;
+      const installedRuntimeProbe = usesExternalServer
+        ? yield* makeOpenCodeRuntimeProbe(
+            probeOpenCodeRuntime(
+              { ...effectiveConfig, serverUrl: "", serverPassword: "" },
+              processEnv,
+            ).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+              Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
+            ),
+          )
+        : runtimeProbe;
       // Updates follow the installed package, which the version probe names. An
       // unknown version offers no package update, since a guess could move a
       // 2.x install onto 1.x's package or the reverse. A disabled instance never
@@ -239,24 +364,35 @@ export const OpenCodeDriver: ProviderDriver<
         provider: DRIVER_KIND,
         packageName: null,
       });
+      const unavailableInstalledRuntime: ProviderMaintenanceCapabilities = {
+        ...noUpdate,
+        installedVersion: null,
+      };
       const maintenanceFor = (probed: typeof runtimeProbe.get) =>
         probed.pipe(
-          Effect.map((result) => result.generation),
           Effect.option,
-          Effect.flatMap((generation) =>
-            Option.isNone(generation)
-              ? Effect.succeed(noUpdate)
-              : resolveProviderMaintenanceCapabilitiesEffect(openCodeUpdateFor(generation.value), {
-                  binaryPath: effectiveConfig.binaryPath,
-                  env: processEnv,
-                }),
+          Effect.flatMap((result) =>
+            Option.isNone(result)
+              ? Effect.succeed(unavailableInstalledRuntime)
+              : resolveProviderMaintenanceCapabilitiesEffect(
+                  openCodeUpdateFor(result.value.generation),
+                  {
+                    binaryPath: effectiveConfig.binaryPath,
+                    env: processEnv,
+                  },
+                ).pipe(
+                  Effect.map((capabilities) => ({
+                    ...capabilities,
+                    installedVersion: result.value.version,
+                  })),
+                ),
           ),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, pathService),
         );
       const cachedMaintenance = yield* makeCachedProviderMaintenanceResolution(
-        maintenanceFor(runtimeProbe.get),
+        maintenanceFor(installedRuntimeProbe.get),
       );
       // A fresh read (an update about to run, or a manual refresh) re-probes, so
       // a binary replaced by the other major version gets its own package.
@@ -264,11 +400,29 @@ export const OpenCodeDriver: ProviderDriver<
         !effectiveConfig.enabled
           ? Effect.succeed(noUpdate)
           : options?.fresh === true
-            ? runtimeProbe.refresh.pipe(
+            ? installedRuntimeProbe.refresh.pipe(
                 Effect.ignore,
                 Effect.andThen(cachedMaintenance({ fresh: true })),
               )
             : cachedMaintenance();
+      const resolveSnapshotMaintenance = usesExternalServer
+        ? Effect.gen(function* () {
+            const installedRuntime = yield* installedRuntimeProbe.refresh.pipe(Effect.option);
+            const maintenanceCapabilities = Option.isSome(installedRuntime)
+              ? yield* maintenanceFor(Effect.succeed(installedRuntime.value))
+              : noUpdate;
+            return {
+              maintenanceCapabilities,
+              installedRuntime: Option.getOrUndefined(installedRuntime),
+            };
+          })
+        : Effect.all({
+            maintenanceCapabilities: resolveMaintenance(),
+            installedRuntime: installedRuntimeProbe.get.pipe(
+              Effect.option,
+              Effect.map(Option.getOrUndefined),
+            ),
+          });
       const openCodeV1Adapter = yield* OpenCodeAdapterV2.OpenCodeAdapterV2Driver.create({
         instanceId,
         displayName,
@@ -463,9 +617,13 @@ export const OpenCodeDriver: ProviderDriver<
             makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
           checkProvider,
           enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
-            resolveMaintenance().pipe(
-              Effect.flatMap((maintenanceCapabilities) =>
-                enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities, {
+            resolveSnapshotMaintenance.pipe(
+              Effect.flatMap(({ maintenanceCapabilities, installedRuntime }) =>
+                enrichOpenCodeSnapshotWithVersionAdvisory({
+                  snapshot,
+                  maintenanceCapabilities,
+                  installedRuntime,
+                  usesExternalServer,
                   enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 }),
               ),

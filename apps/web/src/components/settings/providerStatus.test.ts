@@ -140,6 +140,28 @@ it("shows compatibility in the version popover even when the installed version i
   });
 });
 
+it("shows restart guidance for a current installed version until the server catches up", () => {
+  const advisory = {
+    status: "current" as const,
+    currentVersion: "2.0.30-shuv.1",
+    latestVersion: "2.0.30-shuv.1",
+    updateCommand: "/opt/shuvcode/bin/shuvcode upgrade",
+    canUpdate: true,
+    checkedAt: provider.checkedAt,
+    message:
+      "shuvcode 2.0.30-shuv.1 is installed; the running server is still 2.0.28-shuv.1 and will use the new version after it restarts.",
+  };
+  expect(getProviderVersionAdvisoryPresentation(advisory)).toEqual({
+    title: "Restart pending",
+    detail: advisory.message,
+    updateCommand: null,
+    emphasis: "normal",
+    targetVersion: null,
+    showUpdateAction: false,
+  });
+  expect(getProviderVersionAdvisoryPresentation({ ...advisory, message: null })).toBeNull();
+});
+
 describe("provider status copy", () => {
   it("surfaces an ACP-advertised authentication method", () => {
     const provider = {

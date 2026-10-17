@@ -122,6 +122,7 @@ export function getProviderVersionAdvisoryPresentation(
   readonly updateCommand: string | null;
   readonly emphasis: "normal" | "strong";
   readonly targetVersion: string | null;
+  readonly showUpdateAction?: false;
 } | null {
   const latestIsIncompatible =
     compatibility?.latestVersionStatus === "broken" ||
@@ -146,13 +147,20 @@ export function getProviderVersionAdvisoryPresentation(
       targetVersion,
     };
   }
-  if (
-    !advisory ||
-    advisory.status === "current" ||
-    advisory.status === "unknown" ||
-    latestIsIncompatible
-  ) {
+  if (!advisory || advisory.status === "unknown" || latestIsIncompatible) {
     return null;
+  }
+  if (advisory.status === "current") {
+    return advisory.message
+      ? {
+          title: "Restart pending",
+          detail: advisory.message,
+          updateCommand: null,
+          emphasis: "normal",
+          targetVersion: null,
+          showUpdateAction: false,
+        }
+      : null;
   }
 
   const label = "Update available";

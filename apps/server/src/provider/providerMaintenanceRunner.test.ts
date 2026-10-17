@@ -715,6 +715,140 @@ describe("providerMaintenanceRunner", () => {
       ),
   );
 
+  it.effect("verifies an external server update against its installed binary advisory", () =>
+    Effect.gen(function* () {
+      const rawServerSnapshot = {
+        ...baseOpenCodeProvider,
+        version: "2.0.28-shuv.1",
+      } satisfies ServerProvider;
+      const capabilities = makeProviderMaintenanceCapabilities({
+        provider: OPENCODE_DRIVER,
+        packageName: "shuvcode",
+        updateExecutable: "shuvcode",
+        updateArgs: ["upgrade"],
+        updateLockKey: "opencode-native",
+        installedVersion: "2.0.30-shuv.1",
+      });
+      const { registry } = yield* makeRegistry(rawServerSnapshot);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () => Effect.succeed(capabilities),
+      });
+
+      const result = yield* updater.updateProvider(OPENCODE_DRIVER);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.notInclude(result.providers[0]?.updateState?.message ?? "", "still detects");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("2.0.30-shuv.1"),
+          layerMockSpawner(() => ({ stdout: "already current" })),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reports could not verify when the post-update installed probe fails", () =>
+    Effect.gen(function* () {
+      let capabilityReads = 0;
+      const installedCapabilities = makeProviderMaintenanceCapabilities({
+        provider: OPENCODE_DRIVER,
+        packageName: "shuvcode",
+        updateExecutable: "shuvcode",
+        updateArgs: ["upgrade"],
+        updateLockKey: "opencode-native",
+        installedVersion: "2.0.28-shuv.1",
+      });
+      const failedProbeCapabilities = makeProviderMaintenanceCapabilities({
+        provider: OPENCODE_DRIVER,
+        packageName: null,
+        updateExecutable: null,
+        updateArgs: [],
+        updateLockKey: null,
+        installedVersion: null,
+      });
+      const reachableExternalServer = {
+        ...baseOpenCodeProvider,
+        version: "2.0.28-shuv.1",
+        versionAdvisory: {
+          status: "unknown",
+          currentVersion: "2.0.28-shuv.1",
+          latestVersion: null,
+          updateCommand: null,
+          canUpdate: false,
+          checkedAt: "2026-10-17T12:00:00.000Z",
+          message: null,
+        },
+      } satisfies ServerProvider;
+      const { registry } = yield* makeRegistry(reachableExternalServer);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () => {
+          capabilityReads += 1;
+          return Effect.succeed(
+            capabilityReads === 3 ? failedProbeCapabilities : installedCapabilities,
+          );
+        },
+      });
+
+      const result = yield* updater.updateProvider(OPENCODE_DRIVER);
+
+      assert.strictEqual(capabilityReads, 3);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
+      assert.include(result.providers[0]?.updateState?.message ?? "", "could not verify");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("2.0.30-shuv.1"),
+          layerMockSpawner(() => ({ stdout: "updated" })),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reports could not verify when installed-version verification times out", () =>
+    Effect.gen(function* () {
+      const verificationStarted = yield* Deferred.make<void>();
+      let capabilityReads = 0;
+      const capabilities = makeProviderMaintenanceCapabilities({
+        provider: OPENCODE_DRIVER,
+        packageName: "shuvcode",
+        updateExecutable: "shuvcode",
+        updateArgs: ["upgrade"],
+        updateLockKey: "opencode-native",
+        installedVersion: "2.0.30-shuv.1",
+      });
+      const { registry } = yield* makeRegistry(baseOpenCodeProvider);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () => {
+          capabilityReads += 1;
+          return capabilityReads === 3
+            ? Deferred.succeed(verificationStarted, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.succeed(capabilities);
+        },
+      });
+
+      const update = yield* updater.updateProvider(OPENCODE_DRIVER).pipe(Effect.forkChild);
+      yield* Deferred.await(verificationStarted);
+      yield* TestClock.adjust("15 seconds");
+      const result = yield* Fiber.join(update);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
+      assert.include(result.providers[0]?.updateState?.message ?? "", "could not verify");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("2.0.30-shuv.1"),
+          layerMockSpawner(() => ({ stdout: "updated" })),
+          TestClock.layer(),
+        ),
+      ),
+    ),
+  );
+
   it.effect("prevents concurrent updates for the same provider", () => {
     const startedLatch: { resolve: () => void } = { resolve: () => {} };
     const releaseLatch: { resolve: () => void } = { resolve: () => {} };

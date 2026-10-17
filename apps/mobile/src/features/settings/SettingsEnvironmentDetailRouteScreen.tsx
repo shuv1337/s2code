@@ -29,6 +29,7 @@ import {
   canMaintainEnvironment,
   canUpdateEnvironmentProvider,
   findEnvironmentUpdate,
+  getProviderRestartPendingMessage,
   supportsEnvironmentUpdate,
 } from "./environment-maintenance";
 
@@ -346,6 +347,11 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                           {provider.compatibilityAdvisory?.message ? (
                             <Text selectable className="text-sm text-foreground-muted">
                               {provider.compatibilityAdvisory.message}
+                            </Text>
+                          ) : null}
+                          {getProviderRestartPendingMessage(provider) ? (
+                            <Text selectable className="text-sm text-foreground-muted">
+                              {getProviderRestartPendingMessage(provider)}
                             </Text>
                           ) : null}
                           {provider.unavailableReason || provider.message ? (

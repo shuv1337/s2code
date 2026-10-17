@@ -98,6 +98,7 @@ describe("providerModelsFromSettings", () => {
 describe("parseGenericCliVersion", () => {
   it("parses a bare version", () => {
     expect(parseGenericCliVersion("1.14.19")).toBe("1.14.19");
+    expect(parseGenericCliVersion("shuvcode v2.0.30-shuv.1")).toBe("2.0.30-shuv.1");
   });
 
   it("parses a v-prefixed version", () => {

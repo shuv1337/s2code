@@ -139,7 +139,9 @@ export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Comman
 export function parseGenericCliVersion(output: string): string | null {
   // "opencode v2.0.3"-style output: the optional "v" has to be consumed first,
   // since "v2" itself contains no word boundary.
-  const match = output.match(/\bv?(\d+\.\d+\.\d+)\b/);
+  const match = output.match(
+    /\bv?(\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)\b/,
+  );
   return match?.[1] ?? null;
 }
 
