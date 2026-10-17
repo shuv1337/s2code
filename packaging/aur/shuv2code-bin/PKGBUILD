@@ -85,7 +85,7 @@ EOF
 
   install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/shuv2code.desktop" <<'EOF'
 [Desktop Entry]
-Name=shuv2code
+Name=S2Code
 Comment=Desktop control surface for local coding agents
 Exec=shuv2code %U
 TryExec=shuv2code
