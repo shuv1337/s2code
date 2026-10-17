@@ -360,6 +360,9 @@ const NPM_REVIEW_POLLS = pollsWithin(30 * 60_000);
 /** Registry propagation for a dist-tag write, or one answer that did not arrive. */
 const NPM_TAG_POLLS = pollsWithin(60_000);
 
+/** Release-list reads before concluding a tag has no release; about fifteen seconds. */
+const RELEASE_LIST_POLLS = 4;
+const RELEASE_LIST_POLL_MS = Math.min(5_000, NPM_POLL_MS);
 /** A registry answer that says nothing about the package, so it can be retried. */
 class TransientRegistryError extends Error {}
 /** GET a registry endpoint, separating "no answer" from a real verdict. */
@@ -515,6 +518,15 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (found) releaseId = found.id;
     return found;
   };
+  // The release list lags drafts created moments ago, so look a few times
+  // before concluding that this tag has no release yet.
+  const settleRelease = async () => {
+    for (let attempt = 1; ; attempt++) {
+      const found = findRelease();
+      if (found || attempt >= RELEASE_LIST_POLLS) return found;
+      await Effect.runPromise(Effect.sleep(Duration.millis(RELEASE_LIST_POLL_MS)));
+    }
+  };
   const getRelease = () => {
     const found = findRelease();
     if (!found) throw new Error("Expected fork release is missing, including drafts.");
@@ -596,32 +608,41 @@ async function publishPrepared(plan: ForkReleasePlan) {
   await publishForkReleaseSequence({
     ensureDraft: async () => {
       await verifyTag(false);
-      const existing = findRelease();
+      let existing = await settleRelease();
       if (!existing) {
-        // The release list lags a new draft, so keep the id the API returns and
-        // read the release by id from here on.
-        const created = JSON.parse(
-          gh(
-            "api",
-            "-X",
-            "POST",
-            `repos/${FORK_RELEASE_REPOSITORY}/releases`,
-            "-f",
-            `tag_name=${plan.tag}`,
-            "-f",
-            `target_commitish=${plan.sha}`,
-            "-F",
-            "draft=true",
-            "-F",
-            `prerelease=${plan.channel !== "stable"}`,
-            "-f",
-            `name=${plan.title}`,
-            "-f",
-            `body=${plan.signing.unsigned ? "UNSIGNED build: signing credentials were unavailable for at least one platform, so its signature and notarization are absent. Unsigned macOS and Windows builds ship no updater feed and are never offered as automatic updates; install them deliberately. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}.`,
-          ),
-        ) as Release;
-        if (created.tag_name !== plan.tag) throw new Error("GitHub release tag mismatch.");
-        releaseId = created.id;
+        // Keep the id the API returns and read the release by id from here on.
+        let created: Release | undefined;
+        try {
+          created = JSON.parse(
+            gh(
+              "api",
+              "-X",
+              "POST",
+              `repos/${FORK_RELEASE_REPOSITORY}/releases`,
+              "-f",
+              `tag_name=${plan.tag}`,
+              "-f",
+              `target_commitish=${plan.sha}`,
+              "-F",
+              "draft=true",
+              "-F",
+              `prerelease=${plan.channel !== "stable"}`,
+              "-f",
+              `name=${plan.title}`,
+              "-f",
+              `body=${plan.signing.unsigned ? "UNSIGNED build: signing credentials were unavailable for at least one platform, so its signature and notarization are absent. Unsigned macOS and Windows builds ship no updater feed and are never offered as automatic updates; install them deliberately. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}.`,
+            ),
+          ) as Release;
+        } catch (error) {
+          // A draft this list had not caught up with yet: reuse it, never add a second.
+          existing = await settleRelease();
+          if (!existing) throw error;
+        }
+        if (created) {
+          if (created.tag_name !== plan.tag || typeof created.id !== "number")
+            throw new Error("GitHub did not return the created release.");
+          releaseId = created.id;
+        }
       }
       release = existing ?? getRelease();
       if (release.target_commitish !== plan.sha)
@@ -700,7 +721,10 @@ async function publishPrepared(plan: ForkReleasePlan) {
           `repos/${FORK_RELEASE_REPOSITORY}/releases?per_page=100`,
         ),
       ) as Parameters<typeof forkReleaseIndex>[0][];
-      const index = forkReleaseIndex(pages.flat());
+      const releases = pages.flat();
+      // The list can still lag this release; read it by id rather than drop it.
+      if (!releases.some((entry) => entry.tag_name === plan.tag)) releases.push(getRelease());
+      const index = forkReleaseIndex(releases);
       // A release without a macOS or Windows feed is deliberately incomplete,
       // so the index keeps the previous entries instead of gaining this one.
       if (
