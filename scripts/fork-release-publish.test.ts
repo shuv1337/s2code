@@ -45,17 +45,30 @@ else if(command==='gh') {
 } else fail(400);
 `;
 const http = `import fs from 'node:fs';
+// A flaky registry: every Nth request of a kind fails with a retryable status.
+// Counted in this process, where every registry request is made, so the shim's
+// state file is never contended, and spread so no single poll is exhausted.
+const flakyTags=Number(process.env.FIXTURE_FLAKY_TAGS??0);
+const flakyVersions=Number(process.env.FIXTURE_FLAKY_VERSIONS??0);
+let tagReads=0, versionReads=0;
 globalThis.fetch=async input=>{
  const s=JSON.parse(fs.readFileSync(process.env.FIXTURE_STATE,'utf8')); const url=new URL(String(input));
  if(url.hostname==='registry.npmjs.org') {
    const parts=url.pathname.slice(1).split('/');
    if(s.mode==='http-error') return new Response('PRIVATE_RESPONSE_BODY',{status:502});
    // Like npm: tags live under /-/package/, and /<name>/dist-tags is a version lookup.
-   if(parts[0]==='-' && parts[1]==='package' && parts[3]==='dist-tags') return Response.json(s.tags[decodeURIComponent(parts[2])]??{});
+   if(parts[0]==='-' && parts[1]==='package' && parts[3]==='dist-tags') {
+     if(flakyTags>0 && ++tagReads%flakyTags===0) return new Response('PRIVATE_RESPONSE_BODY',{status:503});
+     return Response.json(s.tags[decodeURIComponent(parts[2])]??{});
+   }
    if(parts[1]==='dist-tags') return Response.json('version not found: dist-tags',{status:404});
    const name=decodeURIComponent(parts[0]);
+   if(flakyVersions>0 && ++versionReads%flakyVersions===0) return new Response('PRIVATE_RESPONSE_BODY',{status:429});
    if(s.mode==='npm-error') return new Response(null,{status:404});
    if(!s.registry[name]) throw new Error('Unexpected registry package');
+   // Bytes that are not this run's: never retried, never republished.
+   if(s.mode==='integrity-mismatch')
+     return Response.json({...s.registry[name],dist:{integrity:'sha512-someoneElsesBytes'}});
    return Response.json(s.registry[name]);
  }
  if(url.hostname==='api.github.com' && url.pathname.includes('/commits/')) {
@@ -77,6 +90,8 @@ function publishFixture(
   channel = "preview",
   /** dist-tags the registry already holds, by package name. */
   tags: Record<string, Record<string, string>> = {},
+  /** Every Nth registry answer of a kind fails with a retryable status. */
+  flaky: { tags?: number; versions?: number } = {},
 ) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
@@ -166,6 +181,10 @@ function publishFixture(
           ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
           ...(npm ? { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" } : {}),
+          // Same number of polls as CI, without the fifteen-second waits.
+          FORK_RELEASE_NPM_POLL_MS: "1",
+          FIXTURE_FLAKY_TAGS: String(flaky.tags ?? 0),
+          FIXTURE_FLAKY_VERSIONS: String(flaky.versions ?? 0),
           GH_TOKEN: "fixture",
         },
       },
@@ -298,6 +317,44 @@ describe("fork publication fixtures", () => {
       expect(promotions.findIndex(([pkg]) => pkg === "shuv2code")).toBe(promotions.length - 2);
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "polls through transient registry failures instead of failing the release",
+    () => {
+      // Every version already exists in this fixture, so a 429 mistaken for
+      // "absent" would republish and the npm shim would fail the run. Failing
+      // every other answer spans the backwards guard, the review poll and the
+      // promotion verification.
+      const { result, state, plan } = publishFixture(
+        "resume",
+        "refs/heads/main",
+        true,
+        "nightly",
+        { shuv2code: { latest: "0.0.0" } },
+        { versions: 2, tags: 2 },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(
+        state.commands.some(
+          ([command, subcommand]) => command === "npm" && subcommand === "publish",
+        ),
+      ).toBe(false);
+      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "fails immediately when the published version is not this run's bytes",
+    () => {
+      const { result, state } = publishFixture("integrity-mismatch");
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("immutable package bytes");
+      // A retried answer would have ended in the poll's exhaustion message.
+      expect(result.stderr).not.toContain("Last registry failure");
+      expect(state.commands.some(([command]) => command === "npm")).toBe(false);
+      expect(state.release.draft).toBe(true);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(

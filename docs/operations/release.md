@@ -62,6 +62,8 @@ non-default dist-tag with `npm publish --provenance`, and their names, versions,
 repository and tarball integrity are verified before the release is exposed.
 npm reviews each new version before it can be installed, which took up to about
 fifteen minutes for these packages; publish waits up to thirty minutes per package.
+Answers the registry could not give (429, 5xx, timeouts) are retried within that
+budget; a mismatched tarball or a package outside the allowlist fails at once.
 After the release publishes, the `nightly` dist-tag is promoted, platform
 packages first and the launcher last. A nightly moves `latest` as well, so
 `npx shuv2code` installs the newest nightly instead of the placeholder version
