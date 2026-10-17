@@ -495,8 +495,9 @@ const config: ExpoConfig = {
     [
       "./plugins/withT3Watch.cjs",
       {
-        // Personal Teams cannot sign App Groups.
-        groupIdentifier: isIosPersonalTeamBuild ? null : `group.${iosBundleIdentifier}`,
+        // The watch app never reads the App Group, and automatic signing does not
+        // attach one to its App ID, so requesting it only breaks device signing.
+        groupIdentifier: null,
         displayName: variant.displayName,
       },
     ],
