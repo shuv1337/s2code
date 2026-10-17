@@ -140,6 +140,7 @@ export function makeProviderMaintenanceCapabilities(input: {
   readonly platform?: NodeJS.Platform;
   readonly env?: NodeJS.ProcessEnv;
   readonly latestVersion?: string | null;
+  readonly installedVersion?: string | null;
 }): ProviderMaintenanceCapabilities {
   const platform = input.platform ?? HostProcess.Platform.defaultValue();
   const update =
@@ -161,6 +162,7 @@ export function makeProviderMaintenanceCapabilities(input: {
     provider: input.provider,
     packageName: input.packageName,
     update,
+    ...(input.installedVersion !== undefined ? { installedVersion: input.installedVersion } : {}),
     ...("latestVersion" in input ? { latestVersion: input.latestVersion } : {}),
   };
 }

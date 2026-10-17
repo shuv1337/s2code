@@ -8,6 +8,7 @@ import {
   type ServerProviderUpdateState,
 } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { compareSemverVersions } from "@t3tools/shared/semver";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -40,6 +41,7 @@ import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStr
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
+const UPDATE_VERIFY_TIMEOUT = Duration.seconds(15);
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
 // Every progress publish resends the provider list to each client, so the
 // installer's output is sampled rather than forwarded line by line.
@@ -348,6 +350,12 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             verifiedProviders: [],
           });
         }
+        if (maintenanceCapabilities.installedVersion !== undefined) {
+          return Effect.succeed<VerifiedProviderRefresh>({
+            providers,
+            verifiedProviders: refreshedProviders,
+          });
+        }
         return Effect.forEach(
           refreshedProviders,
           (refreshedProvider) =>
@@ -519,31 +527,81 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
 
             yield* setRunningMessage("Verifying the installed version");
             // Homebrew's "latest" moves once the upgrade lands; read it again.
-            const verified = yield* providerRegistry.getProviderMaintenanceCapabilitiesForInstance(
-              instanceId,
-              provider,
-              { fresh: true },
-            );
-            const { verifiedProviders } = yield* verifyRefreshedProvider(
-              provider,
-              verified,
-              instanceId,
-            );
+            const verification = yield* Effect.gen(function* () {
+              const verified =
+                yield* providerRegistry.getProviderMaintenanceCapabilitiesForInstance(
+                  instanceId,
+                  provider,
+                  { fresh: true },
+                );
+              const { verifiedProviders } = yield* verifyRefreshedProvider(
+                provider,
+                verified,
+                instanceId,
+              );
+              const installedVersion = verified.installedVersion;
+              const expectedVersion =
+                targetVersion ??
+                (installedVersion !== undefined
+                  ? yield* resolveLatestProviderVersion(verified).pipe(
+                      Effect.provideService(HttpClient.HttpClient, httpClient),
+                      Effect.provideService(
+                        ProviderLatestVersions.ProviderLatestVersions,
+                        latestVersions,
+                      ),
+                    )
+                  : null);
+              return { verified, verifiedProviders, installedVersion, expectedVersion };
+            }).pipe(Effect.timeoutOption(UPDATE_VERIFY_TIMEOUT));
+            if (Option.isNone(verification)) {
+              return yield* finish(
+                makeUpdateState({
+                  status: "unchanged",
+                  startedAt,
+                  finishedAt,
+                  message:
+                    "Update command completed, but T3 Code could not verify the provider version.",
+                  output: commandOutput(result),
+                }),
+              );
+            }
+            const { verified, verifiedProviders, installedVersion, expectedVersion } =
+              verification.value;
             // "Succeeded" needs the provider to still be installed: an
             // installer that exits 0 and leaves the binary missing is not a
             // success. A missing version alone is not held against it, since
             // Cursor's `about` probe can fail transiently on a healthy binary.
+            const installedVersionCouldNotVerify =
+              installedVersion !== undefined &&
+              (installedVersion === null || expectedVersion === null);
+            const installedVersionMismatch =
+              installedVersion !== undefined &&
+              installedVersion !== null &&
+              expectedVersion !== null &&
+              (targetVersion !== undefined
+                ? (verified.compareVersions ?? compareSemverVersions)(
+                    installedVersion,
+                    expectedVersion,
+                  ) !== 0
+                : (verified.compareVersions ?? compareSemverVersions)(
+                    installedVersion,
+                    expectedVersion,
+                  ) < 0);
             const couldNotVerify =
+              installedVersionCouldNotVerify ||
               verifiedProviders.length === 0 ||
               verifiedProviders.some(
                 (verifiedProvider) =>
                   !isStillInstalled(verifiedProvider) ||
-                  (targetVersion !== undefined &&
+                  (installedVersion === undefined &&
+                    targetVersion !== undefined &&
                     verifiedProvider.version?.replace(/^v/, "") !== targetVersion),
               );
             const stillOutdated =
-              targetVersion === undefined &&
-              verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider));
+              installedVersionMismatch ||
+              (installedVersion === undefined &&
+                targetVersion === undefined &&
+                verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider)));
             return yield* finish(
               makeUpdateState({
                 status: couldNotVerify || stillOutdated ? "unchanged" : "succeeded",

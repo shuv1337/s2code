@@ -366,15 +366,22 @@ export const OpenCodeDriver: ProviderDriver<
       });
       const maintenanceFor = (probed: typeof runtimeProbe.get) =>
         probed.pipe(
-          Effect.map((result) => result.generation),
           Effect.option,
-          Effect.flatMap((generation) =>
-            Option.isNone(generation)
+          Effect.flatMap((result) =>
+            Option.isNone(result)
               ? Effect.succeed(noUpdate)
-              : resolveProviderMaintenanceCapabilitiesEffect(openCodeUpdateFor(generation.value), {
-                  binaryPath: effectiveConfig.binaryPath,
-                  env: processEnv,
-                }),
+              : resolveProviderMaintenanceCapabilitiesEffect(
+                  openCodeUpdateFor(result.value.generation),
+                  {
+                    binaryPath: effectiveConfig.binaryPath,
+                    env: processEnv,
+                  },
+                ).pipe(
+                  Effect.map((capabilities) => ({
+                    ...capabilities,
+                    installedVersion: result.value.version,
+                  })),
+                ),
           ),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(FileSystem.FileSystem, fileSystem),

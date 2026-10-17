@@ -11,6 +11,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -474,18 +475,31 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
         });
         versionOutput.current = "shuvcode v2.0.28-shuv.1\n";
         const instance = yield* create({ binaryPath, serverUrl: "http://127.0.0.1:4096" }, http);
+        const refreshAndReadEnriched = Effect.gen(function* () {
+          const enriched = yield* instance.snapshot.streamChanges.pipe(
+            Stream.filter((snapshot) => snapshot.versionAdvisory !== undefined),
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          yield* instance.snapshot.refresh;
+          return Array.from(yield* Fiber.join(enriched))[0]!;
+        });
 
-        const outdated = yield* instance.snapshot.refresh;
+        const outdated = yield* refreshAndReadEnriched;
         assert.strictEqual(outdated.versionAdvisory?.status, "behind_latest");
 
         versionOutput.current = "shuvcode v2.0.30-shuv.1\n";
-        const restartPending = yield* instance.snapshot.refresh;
+        const restartPending = yield* refreshAndReadEnriched;
+        const maintenance = yield* instance.snapshot.resolveMaintenance({ fresh: true });
+        assert.strictEqual(maintenance.installedVersion, "2.0.30-shuv.1");
         assert.strictEqual(restartPending.version, "2.0.28-shuv.1");
         assert.strictEqual(restartPending.versionAdvisory?.status, "current");
         assert.include(restartPending.versionAdvisory?.message ?? "", "after it restarts");
 
         serverVersion = "2.0.30-shuv.1";
-        const restarted = yield* instance.snapshot.refresh;
+        const restarted = yield* refreshAndReadEnriched;
         assert.strictEqual(restarted.version, "2.0.30-shuv.1");
         assert.isNull(restarted.versionAdvisory?.message);
       }).pipe(Effect.scoped),

@@ -4,6 +4,8 @@ export interface ProviderMaintenanceCapabilities {
   readonly provider: ProviderDriverKind;
   readonly packageName: string | null;
   readonly update: ProviderMaintenanceCommandAction | null;
+  /** Installed executable version from a finite maintenance probe, when the adapter provides one. */
+  readonly installedVersion?: string | null;
   /**
    * Latest version reported by the installer that owns the executable.
    * `undefined` means the installer has no channel of its own and the npm

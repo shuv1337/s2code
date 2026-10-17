@@ -192,21 +192,8 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     yield* restartSnapshotEnrichment(nextSettings, nextSnapshot, nextGeneration);
     return nextSnapshot;
   });
-  const applySnapshot = (
-    nextSettings: Settings,
-    options?: { readonly forceRefresh?: boolean; readonly awaitEnrichment?: boolean },
-  ) =>
-    refreshSemaphore.withPermits(1)(
-      Effect.gen(function* () {
-        const snapshot = yield* applySnapshotBase(nextSettings, options);
-        if (!options?.awaitEnrichment) return snapshot;
-        const enrichmentFiber = yield* Ref.get(enrichmentFiberRef);
-        if (enrichmentFiber) {
-          yield* Fiber.await(enrichmentFiber);
-        }
-        return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
-      }),
-    );
+  const applySnapshot = (nextSettings: Settings, options?: { readonly forceRefresh?: boolean }) =>
+    refreshSemaphore.withPermits(1)(applySnapshotBase(nextSettings, options));
 
   /**
    * Runtime usage updates arrive between probes. They patch only
@@ -236,7 +223,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
 
   const refreshSnapshot = Effect.fn("refreshSnapshot")(function* () {
     const nextSettings = yield* input.getSettings;
-    return yield* applySnapshot(nextSettings, { forceRefresh: true, awaitEnrichment: true });
+    return yield* applySnapshot(nextSettings, { forceRefresh: true });
   });
 
   const hasProviderStatusDemand = Effect.gen(function* () {

@@ -475,6 +475,41 @@ describe("makeManagedServerProvider", () => {
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );
 
+  it.effect("does not block refreshes or settings changes on streaming enrichment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settingsChanges = yield* PubSub.unbounded<TestSettings>();
+        const settingsEnrichmentStarted = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.fromPubSub(settingsChanges),
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Effect.succeed(refreshedSnapshot),
+          enrichSnapshot: ({ settings }) =>
+            (settings.enabled
+              ? Effect.void
+              : Deferred.succeed(settingsEnrichmentStarted, undefined).pipe(Effect.asVoid)
+            ).pipe(Effect.andThen(Effect.never)),
+          refreshOnInterval: false,
+        });
+
+        const first = yield* provider.refresh.pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        assert.isDefined(first.pollUnsafe());
+        yield* Fiber.join(first);
+        const second = yield* provider.refresh.pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        assert.isDefined(second.pollUnsafe());
+        yield* Fiber.join(second);
+
+        yield* PubSub.publish(settingsChanges, { enabled: false });
+        yield* Deferred.await(settingsEnrichmentStarted);
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
   it.effect("ignores stale enrichment callbacks after a newer refresh advances generation", () =>
     Effect.scoped(
       Effect.gen(function* () {
