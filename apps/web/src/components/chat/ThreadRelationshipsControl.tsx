@@ -749,9 +749,9 @@ export function ThreadRelationshipsPanel(props: {
               key={agent.id}
               agent={agent}
               // Its provider instance belongs to the environment it runs in.
-              provider={serverConfigs
+              provider={providersByEnvironment
                 .get(agent.remoteChild.environmentId)
-                ?.providers.find((entry) => entry.instanceId === agent.providerInstanceId)}
+                ?.find((entry) => entry.instanceId === agent.providerInstanceId)}
             />
           ))}
         </ThreadLineageRowList>
