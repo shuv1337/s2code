@@ -162,9 +162,17 @@ describe("complete fork release assets", () => {
         const assets = prepareForkAssets(plan, directory);
         expect(
           assets.filter((name) => /\.(dmg|zip|AppImage|deb|exe|tar\.gz)$/.test(name)),
-        ).toHaveLength(15);
+        ).toHaveLength(20);
         const checksums = FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8");
-        for (const name of plan.cliAssets) expect(checksums).toContain(`  ${name}\n`);
+        for (let index = 0; index < plan.cliAssets.length; index++) {
+          const name = plan.cliAssets[index]!;
+          const legacyName = plan.cliLegacyAssets[index]!;
+          expect(checksums).toContain(`  ${name}\n`);
+          expect(checksums).toContain(`  ${legacyName}\n`);
+          expect(FS.readFileSync(Path.join(directory, legacyName))).toEqual(
+            FS.readFileSync(Path.join(directory, name)),
+          );
+        }
         for (const name of plan.feedAssets) {
           const feed = parseUpdateManifest(
             FS.readFileSync(Path.join(directory, name), "utf8"),

@@ -12,6 +12,7 @@ import {
   buildNpmPlatformPackages,
   NpmPackagesArchivesMissingError,
 } from "./build-npm-platform-packages.ts";
+import { cliArchiveFileName } from "@t3tools/shared/cliRelease";
 
 const VERSION = "1.2.3";
 const decodeManifest = Schema.decodeEffect(
@@ -52,7 +53,8 @@ const makeFakeArchives = Effect.fn("test.makeFakeArchives")(function* () {
   const archivesDir = path.join(root, "archives");
   yield* fs.makeDirectory(archivesDir);
   for (const key of KEYS) {
-    const stem = `t3-${VERSION}-${key}`;
+    const archiveName = cliArchiveFileName(VERSION, key);
+    const stem = archiveName.replace(/\.tar\.gz$/, "");
     const stage = path.join(root, "stage", key);
     const contentDir = path.join(stage, stem);
     for (const dir of [
@@ -77,7 +79,7 @@ const makeFakeArchives = Effect.fn("test.makeFakeArchives")(function* () {
       `#!/bin/sh\necho "stub ${key} $*"\nexit 7\n`,
     );
     yield* fs.chmod(path.join(contentDir, "t3"), 0o755);
-    const exit = yield* run("tar", ["-czf", path.join(archivesDir, `${stem}.tar.gz`), stem], {
+    const exit = yield* run("tar", ["-czf", path.join(archivesDir, archiveName), stem], {
       cwd: stage,
     });
     assert.equal(exit.exitCode, 0, exit.stderr);

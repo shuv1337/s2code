@@ -12,7 +12,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import {
   CLI_RELEASE_CHECKSUMS_FILE,
-  cliArchiveFileName,
+  cliArchiveFileNames,
   cliArchivePlatformKey,
   cliArchiveTarCommand,
   cliReleaseDownloadBaseUrl,
@@ -203,8 +203,6 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
   }
   const httpClient = input.httpClient;
   const baseUrl = cliReleaseDownloadBaseUrl(input.version, input.releaseBaseUrl);
-  const fileName = cliArchiveFileName(input.version, platformKey);
-
   input.onProgress?.({ stage: "download", received: 0, total: undefined });
   const checksums = parseChecksums(
     new TextDecoder().decode(
@@ -215,12 +213,15 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
       ),
     ),
   );
-  const expected = checksums.get(fileName);
-  if (expected === undefined) {
+  const selected = cliArchiveFileNames(input.version, platformKey)
+    .map((name) => [name, checksums.get(name)] as const)
+    .find((entry): entry is readonly [string, string] => entry[1] !== undefined);
+  if (selected === undefined) {
     return yield* new PinnedRuntimeInstallError({
-      step: `finding ${fileName} in the t3 release checksums`,
+      step: `finding a ${platformKey} archive in the t3 release checksums`,
     });
   }
+  const [fileName, expected] = selected;
   const archive = yield* fetchReleaseAsset(
     httpClient,
     `${baseUrl}/${fileName}`,

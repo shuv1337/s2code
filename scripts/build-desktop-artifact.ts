@@ -2856,6 +2856,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
       extendInfo: {
+        CFBundleDisplayName: resolveDesktopDisplayName(version),
         NSLocalNetworkUsageDescription:
           "S2Code connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
         NSScreenCaptureUsageDescription:

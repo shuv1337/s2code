@@ -187,6 +187,8 @@ if ($version -match '-preview\.') {
 $stem = "shuv2code-$version-win32-$arch"
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
+$legacyStem = "t3-$version-win32-$arch"
+$legacyArchive = "$legacyStem.zip"
 $commandName = if ($version -match '^[^-+]+-nightly\.') { "shuv2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "shuv2code-preview" } else { "shuv2code" }
 if (-not $env:SHUV2CODE_HOME) {
   if ($version -match '^[^-+]+-nightly\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-nightly" }
@@ -264,12 +266,17 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
       }
       throw
     }
+    $expected = (Get-Content (Join-Path $staging "SHA256SUMS") | Where-Object { $_ -match "\s\*?$([regex]::Escape($archive))$" } | Select-Object -First 1)
+    if (-not $expected) {
+      $stem = $legacyStem
+      $archive = $legacyArchive
+      $expected = (Get-Content (Join-Path $staging "SHA256SUMS") | Where-Object { $_ -match "\s\*?$([regex]::Escape($archive))$" } | Select-Object -First 1)
+    }
+    if (-not $expected) { Fail "no release archive for win32-$arch is listed in SHA256SUMS" }
     Fetch "$baseUrl/v$version/$archive" (Join-Path $staging $archive) -progress
 
     Step "Verifying the download..."
 
-    $expected = (Get-Content (Join-Path $staging "SHA256SUMS") | Where-Object { $_ -match "\s\*?$([regex]::Escape($archive))$" } | Select-Object -First 1)
-    if (-not $expected) { Fail "$archive is not listed in SHA256SUMS" }
     $expected = ($expected -split "\s+")[0].ToLowerInvariant()
     $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $staging $archive)).Hash.ToLowerInvariant()
     if ($actual -ne $expected) { Fail "checksum mismatch for $archive" }

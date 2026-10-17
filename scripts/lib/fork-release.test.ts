@@ -1,4 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Reads checked-in release recipes as contract fixtures.
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import { CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
 import {
   FORK_DESKTOP_MATRIX,
@@ -194,6 +197,7 @@ describe("fork release contract", () => {
       draft: false,
       assets: [
         ...value.cliAssets,
+        ...value.cliLegacyAssets,
         ...desktopAssetGroups(value.version).map((group) => group[0]!),
         ...value.feedAssets,
         "SHA256SUMS",
@@ -208,6 +212,19 @@ describe("fork release contract", () => {
         { ...release, assets: [] },
       ]),
     ).toEqual([{ tag_name: "v1.2.3", draft: false }]);
+  });
+  it("keeps AUR AppImage sources in the desktop release asset set", () => {
+    const stableRecipe = NodeFS.readFileSync(
+      NodePath.join(import.meta.dirname, "../../packaging/aur/shuv2code-bin/PKGBUILD"),
+      "utf8",
+    );
+    const nightlyRecipe = NodeFS.readFileSync(
+      NodePath.join(import.meta.dirname, "../../packaging/aur/shuv2code-nightly-bin/PKGBUILD"),
+      "utf8",
+    );
+    expect(stableRecipe).toContain('_appimage="S2Code-${pkgver}-x86_64.AppImage"');
+    expect(nightlyRecipe).toContain('_appimage="S2Code-${_release_version}-x86_64.AppImage"');
+    expect(desktopAssetGroups("1.2.3").flat()).toContain("S2Code-1.2.3-x86_64.AppImage");
   });
   it("exposes feeds and release/index only after binary and npm verification", async () => {
     const order: string[] = [];

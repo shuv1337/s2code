@@ -42,7 +42,7 @@ optdepends=('openai-codex: use the system-installed Codex CLI')
 options=('!debug' '!strip')
 
 _release_version="${pkgver/_nightly./-nightly.}"
-_appimage="T3-Code-${_release_version}-x86_64.AppImage"
+_appimage="S2Code-${_release_version}-x86_64.AppImage"
 source=(
   "$_appimage::https://github.com/shuv1337/shuv2code/releases/download/v${_release_version}/$_appimage"
   "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/shuv2code/v${_release_version}/LICENSE"

@@ -312,6 +312,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             );
             assert.equal(files.filter((file) => file.includes("/usr/share/metainfo/")).length, 1);
           }
+          if (platform === "mac") {
+            assert.equal(
+              (platformConfig.extendInfo as Record<string, unknown>).CFBundleDisplayName,
+              resolveDesktopDisplayName(version),
+            );
+            assert.equal(config.productName, resolveDesktopProductName(version));
+          }
           if (suffix === "preview") assert.notProperty(config, "publish");
         }
       }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),

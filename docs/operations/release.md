@@ -15,8 +15,10 @@ compares its digest before publication.
 
 CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-arm64`, `win32-x64`. **Intel macOS CLI/SEA is unsupported**; use the Intel
-desktop app. CLI release archives are named `shuv2code-<version>-<platform>-<arch>`;
-the internal executable remains `t3`. That does not authorize
+desktop app. CLI release archives are named `shuv2code-<version>-<platform>-<arch>` and
+temporarily include byte-identical `t3-<version>-<platform>-<arch>` aliases for installs
+from before the rename; both names have checksum entries. The internal executable remains
+`t3`. That does not authorize
 publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the public npm endpoints are `shuv2code` and

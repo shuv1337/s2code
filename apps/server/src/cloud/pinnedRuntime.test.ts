@@ -22,6 +22,7 @@ import {
 // stands in for tar and drops the executable where extraction would.
 const version = "1.2.3";
 const archiveName = `shuv2code-${version}-linux-x64.tar.gz`;
+const legacyArchiveName = `t3-${version}-linux-x64.tar.gz`;
 const archiveBytes = new TextEncoder().encode("not really a tarball");
 const archiveHex = (bytes: Uint8Array) =>
   Effect.promise(() => crypto.subtle.digest("SHA-256", bytes)).pipe(
@@ -95,6 +96,32 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       assert.deepEqual(commands, ["tar"]);
       assert.equal(yield* fs.readFileString(paths.sentinelPath), `${version}\n`);
       assert.isFalse(yield* fs.exists(path.join(paths.versionDir, "t3-runtime-archive")));
+    }),
+  );
+
+  it.effect("falls back to the pre-rename archive listed by an older release", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-legacy-" });
+      const requests: string[] = [];
+      const hex = yield* archiveHex(archiveBytes);
+      yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(`${hex}  ${legacyArchiveName}\n`, requests),
+        releaseBaseUrl: "https://releases.example/download",
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.void,
+      });
+      assert.deepEqual(requests, [
+        `https://releases.example/download/v${version}/SHA256SUMS`,
+        `https://releases.example/download/v${version}/${legacyArchiveName}`,
+      ]);
     }),
   );
 

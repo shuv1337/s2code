@@ -1,4 +1,8 @@
-import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
+import {
+  CLI_ARCHIVE_PLATFORM_KEYS,
+  cliArchiveFileName,
+  cliArchiveLegacyFileName,
+} from "@t3tools/shared/cliRelease";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 export const FORK_RELEASE_REPOSITORY = "shuv1337/shuv2code";
@@ -175,6 +179,9 @@ export function forkReleasePlan(input: {
     stagingTag: `release-${input.sha.slice(0, 12)}-${input.version}`,
     title: `${input.signing.unsigned ? "UNSIGNED — " : ""}S2Code ${input.channel === "nightly" ? "Nightly" : input.channel} v${input.version}`,
     cliAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(input.version, key)),
+    cliLegacyAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
+      cliArchiveLegacyFileName(input.version, key),
+    ),
     feedAssets:
       input.channel === "preview"
         ? []
@@ -300,7 +307,10 @@ export function forkReleaseIndex(
       }
       const prefix = resolveChannelIdentity(version).channel === "stable" ? "latest" : "nightly";
       return [
-        ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(version, key)),
+        ...CLI_ARCHIVE_PLATFORM_KEYS.flatMap((key) => [
+          cliArchiveFileName(version, key),
+          cliArchiveLegacyFileName(version, key),
+        ]),
         "SHA256SUMS",
         "release.json",
         `${prefix}-mac.yml`,
