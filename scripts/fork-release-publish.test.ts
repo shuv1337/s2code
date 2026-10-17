@@ -29,7 +29,16 @@ else if(command==='gh') {
  if(endpoint?.includes('/releases/tags/')) fail(404); // Published-only lookup cannot see this draft.
  if(endpoint?.endsWith('/releases?per_page=100')) {
    if(s.mode==='gh-error') fail(503);
-   save(); console.log(JSON.stringify([[{...s.release,id:999,tag_name:s.release.tag_name+'0'},s.release]]));
+   // Like GitHub, the list can lag a draft created moments ago. In draft-race
+   // a draft already exists but the list only shows it after a create attempt.
+   const listed=s.mode==='new-release' || (s.mode==='draft-race' && !s.posted) ? [] : [s.release];
+   save(); console.log(JSON.stringify([[{...s.release,id:999,tag_name:s.release.tag_name+'0'},...listed]]));
+ } else if(endpoint?.endsWith('/releases') && args.includes('POST')) {
+   s.posted=true;
+   if(s.mode!=='new-release') fail(422); // GitHub refuses a second release for this tag.
+   const need=['tag_name='+s.release.tag_name,'target_commitish='+s.release.target_commitish,'draft=true','prerelease='+s.prerelease,'name='+s.title];
+   if(need.some(arg=>!args.includes(arg)) || !args.some(arg=>arg.startsWith('body=') && arg.endsWith('Source: '+s.release.target_commitish+'.'))) fail(400);
+   save(); console.log(JSON.stringify(s.release));
  } else if(endpoint?.startsWith('https://uploads.github.com/')) {
    if(!endpoint.includes('/releases/1234/assets?')) fail(404);
    const name=new URL(endpoint).searchParams.get('name'); const bytes=fs.readFileSync(args[args.indexOf('--input')+1]);
@@ -82,6 +91,10 @@ globalThis.fetch=async input=>{
  throw new Error('Unexpected HTTP fixture request');
 };
 `;
+
+const createCount = (commands: string[][]) =>
+  commands.filter((args) => args.includes("POST") && args.some((arg) => arg.endsWith("/releases")))
+    .length;
 
 function publishFixture(
   mode = "resume",
@@ -140,6 +153,9 @@ function publishFixture(
         registry,
         tags,
         commands: [],
+        // What a create must send, so a dropped field fails the fixture.
+        prerelease: plan.channel !== "stable",
+        title: plan.title,
         release: {
           id: 1234,
           tag_name: plan.tag,
@@ -256,6 +272,24 @@ describe("fork publication fixtures", () => {
       expect(
         state.commands.some((args) => args.some((arg) => arg.includes("/releases/1234/assets?"))),
       ).toBe(false);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "creates the draft once and reads it by id while the release list still lags",
+    () => {
+      const { result, state } = publishFixture("new-release");
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(createCount(state.commands)).toBe(1);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "reuses a draft the list had not shown yet when GitHub refuses a second create",
+    () => {
+      const { result, state } = publishFixture("draft-race");
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(createCount(state.commands)).toBe(1);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
