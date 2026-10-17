@@ -48,9 +48,12 @@ const http = `import fs from 'node:fs';
 globalThis.fetch=async input=>{
  const s=JSON.parse(fs.readFileSync(process.env.FIXTURE_STATE,'utf8')); const url=new URL(String(input));
  if(url.hostname==='registry.npmjs.org') {
-   const parts=url.pathname.slice(1).split('/'); const name=decodeURIComponent(parts[0]);
+   const parts=url.pathname.slice(1).split('/');
    if(s.mode==='http-error') return new Response('PRIVATE_RESPONSE_BODY',{status:502});
-   if(parts[1]==='dist-tags') return Response.json(s.tags[name]??{});
+   // Like npm: tags live under /-/package/, and /<name>/dist-tags is a version lookup.
+   if(parts[0]==='-' && parts[1]==='package' && parts[3]==='dist-tags') return Response.json(s.tags[decodeURIComponent(parts[2])]??{});
+   if(parts[1]==='dist-tags') return Response.json('version not found: dist-tags',{status:404});
+   const name=decodeURIComponent(parts[0]);
    if(s.mode==='npm-error') return new Response(null,{status:404});
    if(!s.registry[name]) throw new Error('Unexpected registry package');
    return Response.json(s.registry[name]);

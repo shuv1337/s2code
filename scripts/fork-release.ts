@@ -344,6 +344,8 @@ export function inspectForkNpmPackages(directory: string, version: string) {
   }));
 }
 
+/** Fifteen-second polls: thirty minutes for npm's review of one version. */
+const NPM_REVIEW_POLLS = 120;
 async function registryVersion(
   pkg: { manifest: { name: string }; integrity: string },
   version: string,
@@ -373,15 +375,11 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const names = FS.readdirSync(assets).filter((name) => !name.startsWith("build-"));
   const packages = inspectForkNpmPackages("prepared/npm-packages", plan.version);
   const readTags = async (name: string) => {
-    const response = await releaseFetch(
-      `https://registry.npmjs.org/${encodeURIComponent(name)}/dist-tags`,
-      { signal: AbortSignal.timeout(30_000) },
-    );
+    // `/<name>/dist-tags` would be read as a version named "dist-tags".
+    const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
+    const response = await releaseFetch(url, { signal: AbortSignal.timeout(30_000) });
     if (response.status === 404) return {} as Record<string, string>; // absence is not an ownership/readiness check
-    if (!response.ok)
-      throw new Error(
-        `GET https://registry.npmjs.org/${encodeURIComponent(name)}/dist-tags failed (HTTP ${response.status}).`,
-      );
+    if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
     return (await response.json()) as Record<string, string>;
   };
   const assertTagNotBackwards = async (name: string) => {
@@ -512,10 +510,13 @@ async function publishPrepared(plan: ForkReleasePlan) {
         "--tag",
         plan.stagingTag,
       ]);
-    // Bounded propagation retries; these run only in CI, not in tests.
-    for (let attempt = 0; attempt < 6; attempt++) {
+    // npm reviews each new version before it becomes installable, which took
+    // up to about fifteen minutes for these packages. Wait well past that.
+    for (let attempt = 1; attempt <= NPM_REVIEW_POLLS; attempt++) {
       if (await registryVersion(pkg, plan.version)) return;
-      await Effect.runPromise(Effect.sleep("5 seconds"));
+      if (attempt % 4 === 0)
+        console.log(`Waiting for npm to finish reviewing ${pkg.manifest.name}@${plan.version}.`);
+      await Effect.runPromise(Effect.sleep("15 seconds"));
     }
     throw new Error("npm publication is not yet verifiable; the draft remains unavailable.");
   };
@@ -597,7 +598,12 @@ async function publishPrepared(plan: ForkReleasePlan) {
             continue;
           }
           run("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, tag]);
-          if ((await readTags(pkg.manifest.name))[tag] !== plan.version)
+          let promoted = false;
+          for (let attempt = 0; attempt < 6 && !promoted; attempt++) {
+            if (attempt > 0) await Effect.runPromise(Effect.sleep("5 seconds"));
+            promoted = (await readTags(pkg.manifest.name))[tag] === plan.version;
+          }
+          if (!promoted)
             throw new Error(
               "Fork dist-tag promotion is not yet verifiable; retry with the original prepared artifact.",
             );
