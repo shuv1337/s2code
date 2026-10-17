@@ -364,12 +364,16 @@ export const OpenCodeDriver: ProviderDriver<
         provider: DRIVER_KIND,
         packageName: null,
       });
+      const unavailableInstalledRuntime: ProviderMaintenanceCapabilities = {
+        ...noUpdate,
+        installedVersion: null,
+      };
       const maintenanceFor = (probed: typeof runtimeProbe.get) =>
         probed.pipe(
           Effect.option,
           Effect.flatMap((result) =>
             Option.isNone(result)
-              ? Effect.succeed(noUpdate)
+              ? Effect.succeed(unavailableInstalledRuntime)
               : resolveProviderMaintenanceCapabilitiesEffect(
                   openCodeUpdateFor(result.value.generation),
                   {

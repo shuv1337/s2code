@@ -749,6 +749,65 @@ describe("providerMaintenanceRunner", () => {
     ),
   );
 
+  it.effect("reports could not verify when the post-update installed probe fails", () =>
+    Effect.gen(function* () {
+      let capabilityReads = 0;
+      const installedCapabilities = makeProviderMaintenanceCapabilities({
+        provider: OPENCODE_DRIVER,
+        packageName: "shuvcode",
+        updateExecutable: "shuvcode",
+        updateArgs: ["upgrade"],
+        updateLockKey: "opencode-native",
+        installedVersion: "2.0.28-shuv.1",
+      });
+      const failedProbeCapabilities = makeProviderMaintenanceCapabilities({
+        provider: OPENCODE_DRIVER,
+        packageName: null,
+        updateExecutable: null,
+        updateArgs: [],
+        updateLockKey: null,
+        installedVersion: null,
+      });
+      const reachableExternalServer = {
+        ...baseOpenCodeProvider,
+        version: "2.0.28-shuv.1",
+        versionAdvisory: {
+          status: "unknown",
+          currentVersion: "2.0.28-shuv.1",
+          latestVersion: null,
+          updateCommand: null,
+          canUpdate: false,
+          checkedAt: "2026-10-17T12:00:00.000Z",
+          message: null,
+        },
+      } satisfies ServerProvider;
+      const { registry } = yield* makeRegistry(reachableExternalServer);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () => {
+          capabilityReads += 1;
+          return Effect.succeed(
+            capabilityReads === 3 ? failedProbeCapabilities : installedCapabilities,
+          );
+        },
+      });
+
+      const result = yield* updater.updateProvider(OPENCODE_DRIVER);
+
+      assert.strictEqual(capabilityReads, 3);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
+      assert.include(result.providers[0]?.updateState?.message ?? "", "could not verify");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("2.0.30-shuv.1"),
+          layerMockSpawner(() => ({ stdout: "updated" })),
+        ),
+      ),
+    ),
+  );
+
   it.effect("reports could not verify when installed-version verification times out", () =>
     Effect.gen(function* () {
       const verificationStarted = yield* Deferred.make<void>();

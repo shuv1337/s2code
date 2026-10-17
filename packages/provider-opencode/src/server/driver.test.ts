@@ -431,6 +431,7 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
         const unknown = yield* instance.snapshot.resolveMaintenance({ fresh: true });
         assert.isNull(unknown.update);
         assert.isNull(unknown.packageName);
+        assert.isNull(unknown.installedVersion);
 
         versionOutput.current = "1.18.32\n";
         const v1 = yield* instance.snapshot.resolveMaintenance({ fresh: true });
