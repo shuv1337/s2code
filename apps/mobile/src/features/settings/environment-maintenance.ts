@@ -45,6 +45,12 @@ export function canUpdateEnvironmentProvider(provider: ServerProvider) {
   );
 }
 
+export function getProviderRestartPendingMessage(provider: ServerProvider) {
+  return provider.versionAdvisory?.status === "current"
+    ? (provider.versionAdvisory.message ?? null)
+    : null;
+}
+
 const Releases = Schema.Array(
   Schema.Struct({
     tag_name: Schema.String,

@@ -1,4 +1,5 @@
 import { describe, it, assert } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
@@ -27,6 +28,8 @@ import * as ProviderRegistry from "./ProviderRegistry.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import {
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
@@ -716,32 +719,64 @@ describe("providerMaintenanceRunner", () => {
   );
 
   it.effect("verifies an external server update against its installed binary advisory", () =>
-    Effect.gen(function* () {
-      const { registry } = yield* makeRegistry({
-        ...baseOpenCodeProvider,
-        version: "2.0.28-shuv.1",
-        versionAdvisory: {
-          status: "current",
-          currentVersion: "2.0.30-shuv.1",
-          latestVersion: "2.0.30-shuv.1",
-          updateCommand: "shuvcode upgrade",
-          canUpdate: true,
-          checkedAt: "2026-10-17T12:00:00.000Z",
-          message:
-            "shuvcode 2.0.30-shuv.1 is installed; the running server is still 2.0.28-shuv.1 and will use the new version after it restarts.",
-        },
-      });
-      const updater = yield* makeTestRunner(registry);
+    Effect.scoped(
+      Effect.gen(function* () {
+        const rawServerSnapshot = {
+          ...baseOpenCodeProvider,
+          version: "2.0.28-shuv.1",
+        } satisfies ServerProvider;
+        const capabilities = makeProviderMaintenanceCapabilities({
+          provider: OPENCODE_DRIVER,
+          packageName: "shuvcode",
+          updateExecutable: "shuvcode",
+          updateArgs: ["upgrade"],
+          updateLockKey: "opencode-native",
+        });
+        const managed = yield* makeManagedServerProvider({
+          resolveMaintenance: () => Effect.succeed(capabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          refreshOnInterval: false,
+          initialSnapshot: () => Effect.succeed(rawServerSnapshot),
+          checkProvider: Effect.succeed(rawServerSnapshot),
+          enrichSnapshot: ({ snapshot, publishSnapshot }) =>
+            publishSnapshot({
+              ...snapshot,
+              versionAdvisory: {
+                status: "current",
+                currentVersion: "2.0.30-shuv.1",
+                latestVersion: "2.0.30-shuv.1",
+                updateCommand: "shuvcode upgrade",
+                canUpdate: true,
+                checkedAt: "2026-10-17T12:00:00.000Z",
+                message:
+                  "shuvcode 2.0.30-shuv.1 is installed; the running server is still 2.0.28-shuv.1 and will use the new version after it restarts.",
+              },
+            }),
+        });
+        const { registry, providersRef } = yield* makeRegistry(rawServerSnapshot);
+        const updater = yield* makeTestRunner({
+          ...registry,
+          getProviderMaintenanceCapabilitiesForInstance: () => Effect.succeed(capabilities),
+          refreshInstance: () =>
+            managed.refresh.pipe(
+              Effect.tap((snapshot) => Ref.set(providersRef, [snapshot])),
+              Effect.map((snapshot) => [snapshot]),
+            ),
+        });
 
-      const result = yield* updater.updateProvider(OPENCODE_DRIVER);
-      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
-      assert.notInclude(result.providers[0]?.updateState?.message ?? "", "still detects");
-    }).pipe(
+        const result = yield* updater.updateProvider(OPENCODE_DRIVER);
+        assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+        assert.notInclude(result.providers[0]?.updateState?.message ?? "", "still detects");
+      }),
+    ).pipe(
       Effect.provide(
         Layer.mergeAll(
           layerNonWindowsPlatform,
           layerLatestVersionHttpClient("2.0.30-shuv.1"),
           layerMockSpawner(() => ({ stdout: "already current" })),
+          TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
         ),
       ),
     ),

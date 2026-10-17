@@ -13,6 +13,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
@@ -199,6 +200,44 @@ it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         (yield* resolveUpdate("v1", NodePath.join(v2Prefix, "bin", "opencode"))).update,
       );
     }),
+);
+
+it.effect("recognizes owned and unowned Windows shuvcode shims without targeting OpenCode", () =>
+  Effect.gen(function* () {
+    const root = NodeFS.realpathSync(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-windows-shuvcode-update-")),
+    );
+    const ownedShim = NodePath.join(root, "shuvcode.cmd");
+    NodeFS.writeFileSync(ownedShim, "@echo off\r\n");
+    const manifest = NodePath.join(root, "node_modules", "shuvcode-node", "package.json");
+    NodeFS.mkdirSync(NodePath.dirname(manifest), { recursive: true });
+    NodeFS.writeFileSync(manifest, '{"name":"shuvcode-node"}');
+
+    const resolver = openCodeUpdateFor("v2");
+    const owned = yield* resolver.resolve({
+      binaryPath: "shuvcode.cmd",
+      resolvedCommandPath: ownedShim,
+      realCommandPath: ownedShim,
+      env: {},
+      platform: "win32",
+    });
+    assert.strictEqual(owned.packageName, "shuvcode-node");
+    assert.deepStrictEqual(owned.update?.args, ["upgrade"]);
+    assert.strictEqual(owned.update?.executable, ownedShim);
+
+    for (const extension of ["cmd", "bat", "exe", "ps1"] as const) {
+      const unownedPath = NodePath.join(root, ".bun", "bin", `shuvcode.${extension}`);
+      const unowned = yield* resolver.resolve({
+        binaryPath: `shuvcode.${extension}`,
+        resolvedCommandPath: unownedPath,
+        realCommandPath: unownedPath,
+        env: {},
+        platform: "win32",
+      });
+      assert.strictEqual(unowned.packageName, "shuvcode");
+      assert.isNull(unowned.update);
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -402,6 +441,53 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
         const v2 = yield* instance.snapshot.resolveMaintenance({ fresh: true });
         assert.strictEqual(v2.packageName, "@opencode/cli");
         assert.isNull(v2.update);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "refreshes installed and server versions for external-server advisories",
+    () =>
+      Effect.gen(function* () {
+        const root = NodeFS.realpathSync(
+          NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-external-shuvcode-refresh-")),
+        );
+        const binaryPath = NodePath.join(root, "shuvcode");
+        NodeFS.writeFileSync(binaryPath, "#!/bin/sh\n");
+        NodeFS.chmodSync(binaryPath, 0o755);
+        let serverVersion = "2.0.28-shuv.1";
+        const replay = replayOpenCodeServer(OPENCODE_2_RESPONSES, "");
+        const http = HttpClient.make((request, url) => {
+          if (url.hostname === "registry.npmjs.org") {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ version: "2.0.30-shuv.1" })),
+            );
+          }
+          if (url.pathname === "/api/info") {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json({ version: serverVersion, pid: 1234 }),
+              ),
+            );
+          }
+          return replay.execute(request);
+        });
+        versionOutput.current = "shuvcode v2.0.28-shuv.1\n";
+        const instance = yield* create({ binaryPath, serverUrl: "http://127.0.0.1:4096" }, http);
+
+        const outdated = yield* instance.snapshot.refresh;
+        assert.strictEqual(outdated.versionAdvisory?.status, "behind_latest");
+
+        versionOutput.current = "shuvcode v2.0.30-shuv.1\n";
+        const restartPending = yield* instance.snapshot.refresh;
+        assert.strictEqual(restartPending.version, "2.0.28-shuv.1");
+        assert.strictEqual(restartPending.versionAdvisory?.status, "current");
+        assert.include(restartPending.versionAdvisory?.message ?? "", "after it restarts");
+
+        serverVersion = "2.0.30-shuv.1";
+        const restarted = yield* instance.snapshot.refresh;
+        assert.strictEqual(restarted.version, "2.0.30-shuv.1");
+        assert.isNull(restarted.versionAdvisory?.message);
       }).pipe(Effect.scoped),
   );
 });

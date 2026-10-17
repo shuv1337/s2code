@@ -125,42 +125,57 @@ function shuvcodePackageFromCommandPath(commandPath: string): "shuvcode" | "shuv
 
 function isShuvcodeCommand(context: ProviderMaintenanceResolutionContext): boolean {
   return [context.binaryPath, context.resolvedCommandPath, context.realCommandPath].some(
-    (commandPath) => /(?:^|[/\\])shuvcode(?:\.exe)?$/i.test(commandPath),
+    (commandPath) => /(?:^|[/\\])shuvcode(?:\.(?:cmd|bat|exe|ps1))?$/i.test(commandPath),
   );
 }
+
+const shuvcodePackageFromWindowsShim = Effect.fn("shuvcodePackageFromWindowsShim")(function* (
+  context: ProviderMaintenanceResolutionContext,
+) {
+  if (context.platform !== "win32" || !isShuvcodeCommand(context)) return null;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const shimDirectory = path.dirname(context.resolvedCommandPath);
+  for (const packageName of ["shuvcode", "shuvcode-node"] as const) {
+    const manifest = path.join(shimDirectory, "node_modules", packageName, "package.json");
+    if (yield* fileSystem.exists(manifest).pipe(Effect.orElseSucceed(() => false))) {
+      return packageName;
+    }
+  }
+  return null;
+});
 
 function makeOpenCodeMaintenanceResolver(
   definition: Parameters<typeof makePackageManagedProviderMaintenanceResolver>[0],
 ): ProviderMaintenanceCapabilitiesResolver {
   const upstream = makePackageManagedProviderMaintenanceResolver(definition);
   return {
-    resolve: (context) => {
-      if (!context) return upstream.resolve(context);
-      const shuvcodePackage = [context.resolvedCommandPath, context.realCommandPath]
-        .map(shuvcodePackageFromCommandPath)
-        .find((packageName) => packageName !== null);
-      if (shuvcodePackage) {
-        return Effect.succeed(
-          makeProviderMaintenanceCapabilities({
+    resolve: (context) =>
+      Effect.gen(function* () {
+        if (!context) return yield* upstream.resolve(context);
+        const shuvcodePackage =
+          [context.resolvedCommandPath, context.realCommandPath]
+            .map(shuvcodePackageFromCommandPath)
+            .find((packageName) => packageName !== null) ??
+          (yield* shuvcodePackageFromWindowsShim(context));
+        if (shuvcodePackage) {
+          return makeProviderMaintenanceCapabilities({
             provider: definition.provider,
             packageName: shuvcodePackage,
             updateExecutable: context.resolvedCommandPath,
             updateArgs: ["upgrade"],
             updateLockKey: `${definition.provider}-native`,
             platform: context.platform,
-          }),
-        );
-      }
-      if (isShuvcodeCommand(context)) {
-        return Effect.succeed(
-          makeManualOnlyProviderMaintenanceCapabilities({
+          });
+        }
+        if (isShuvcodeCommand(context)) {
+          return makeManualOnlyProviderMaintenanceCapabilities({
             provider: definition.provider,
             packageName: "shuvcode",
-          }),
-        );
-      }
-      return upstream.resolve(context);
-    },
+          });
+        }
+        return yield* upstream.resolve(context);
+      }),
   };
 }
 
@@ -379,6 +394,24 @@ export const OpenCodeDriver: ProviderDriver<
                 Effect.andThen(cachedMaintenance({ fresh: true })),
               )
             : cachedMaintenance();
+      const resolveSnapshotMaintenance = usesExternalServer
+        ? Effect.gen(function* () {
+            const installedRuntime = yield* installedRuntimeProbe.refresh.pipe(Effect.option);
+            const maintenanceCapabilities = Option.isSome(installedRuntime)
+              ? yield* maintenanceFor(Effect.succeed(installedRuntime.value))
+              : noUpdate;
+            return {
+              maintenanceCapabilities,
+              installedRuntime: Option.getOrUndefined(installedRuntime),
+            };
+          })
+        : Effect.all({
+            maintenanceCapabilities: resolveMaintenance(),
+            installedRuntime: installedRuntimeProbe.get.pipe(
+              Effect.option,
+              Effect.map(Option.getOrUndefined),
+            ),
+          });
       const openCodeV1Adapter = yield* OpenCodeAdapterV2.OpenCodeAdapterV2Driver.create({
         instanceId,
         displayName,
@@ -573,15 +606,12 @@ export const OpenCodeDriver: ProviderDriver<
             makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
           checkProvider,
           enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
-            Effect.all({
-              maintenanceCapabilities: resolveMaintenance(),
-              installedRuntime: installedRuntimeProbe.get.pipe(Effect.option),
-            }).pipe(
+            resolveSnapshotMaintenance.pipe(
               Effect.flatMap(({ maintenanceCapabilities, installedRuntime }) =>
                 enrichOpenCodeSnapshotWithVersionAdvisory({
                   snapshot,
                   maintenanceCapabilities,
-                  installedRuntime: Option.getOrUndefined(installedRuntime),
+                  installedRuntime,
                   usesExternalServer,
                   enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 }),

@@ -734,9 +734,11 @@ export function ProviderInstanceCard({
   const VersionAdvisoryIcon = hasCompatibilityWarning ? AlertTriangleIcon : ArrowUpCircleIcon;
   const onRunVersionAction = readOnly
     ? undefined
-    : versionAdvisory?.targetVersion
-      ? onInstallRecommended
-      : onRunUpdate;
+    : versionAdvisory?.showUpdateAction === false
+      ? undefined
+      : versionAdvisory?.targetVersion
+        ? onInstallRecommended
+        : onRunUpdate;
   const urlAuthAction = liveProvider?.auth.action;
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
