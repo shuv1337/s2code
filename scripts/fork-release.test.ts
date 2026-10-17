@@ -58,6 +58,8 @@ function fixture(
           sha512: Crypto.createHash("sha512")
             .update(FS.readFileSync(Path.join(directory, url)))
             .digest("base64"),
+          // electron-builder writes this for AppImage entries only.
+          ...(url.endsWith(".AppImage") ? { blockMapSize: 211_644 } : {}),
         })),
       },
       { platformLabel: "fixture" },
