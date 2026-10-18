@@ -283,3 +283,20 @@ export const WatchPairingTokenResponse = Schema.Union([
   Schema.Struct({ status: Schema.Literal("expired") }),
 ]);
 export type WatchPairingTokenResponse = typeof WatchPairingTokenResponse.Type;
+
+export const WatchPairingCredentialIssueInput = Schema.Struct({
+  label: TrimmedString.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+});
+export type WatchPairingCredentialIssueInput = typeof WatchPairingCredentialIssueInput.Type;
+
+export const WatchPairingCredentialIssueResult = Schema.Struct({
+  credential: Schema.String,
+  issuedAt: Schema.DateTimeUtcFromString,
+  expiresAt: Schema.DateTimeUtcFromString,
+});
+export type WatchPairingCredentialIssueResult = typeof WatchPairingCredentialIssueResult.Type;
+
+export class WatchPairingCredentialIssueError extends Schema.TaggedError<WatchPairingCredentialIssueError>()(
+  "WatchPairingCredentialIssueError",
+  { message: Schema.String },
+) {}

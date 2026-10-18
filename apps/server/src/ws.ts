@@ -91,6 +91,7 @@ import {
   PersistChatAttachmentsError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  WatchPairingCredentialIssueError,
   type ProjectId,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -2256,6 +2257,26 @@ const layerWsRpc = (
             }
             return { providers };
           }),
+        [WS_METHODS.watchIssuePairingCredential]: (input) =>
+          serverAuth
+            .issueWatchPairingCredential({
+              issuer: currentSession,
+              label: input.label,
+              ttl: Duration.minutes(5),
+            })
+            .pipe(
+              Effect.map(({ credential, createdAt, expiresAt }) => ({
+                credential,
+                issuedAt: createdAt,
+                expiresAt,
+              })),
+              Effect.mapError(
+                (cause) =>
+                  new WatchPairingCredentialIssueError({
+                    message: cause.message,
+                  }),
+              ),
+            ),
         [WS_METHODS.mcpAppsCallTool]: (input) => mcpAppRequests.callTool(input),
         [WS_METHODS.mcpAppsToolInfo]: (input) => mcpAppRequests.toolInfo(input),
         [WS_METHODS.mcpAppsUpdateModelContext]: (input) => mcpAppRequests.updateModelContext(input),

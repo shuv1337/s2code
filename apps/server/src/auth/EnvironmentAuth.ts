@@ -1358,9 +1358,7 @@ export const make = Effect.gen(function* () {
       if (
         input.issuer.subject === MCP_CLIENT_SUBJECT ||
         input.issuer.subject === WATCH_CLIENT_SUBJECT ||
-        ![AuthAccessWriteScope, ...watchClientScopes].every((scope) =>
-          input.issuer.scopes.includes(scope),
-        )
+        !watchClientScopes.every((scope) => input.issuer.scopes.includes(scope))
       ) {
         return yield* new ServerAuthScopeNotGrantedError({});
       }

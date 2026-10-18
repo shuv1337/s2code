@@ -11,7 +11,10 @@ struct T3WatchApp: App {
       RootView()
         .environment(model)
         .task(id: "\(scenePhase)-\(model.accounts.selectedId ?? "unpaired")") {
-          if scenePhase == .active { await model.reconcile() }
+          if scenePhase == .active {
+            await model.processPendingPairingOffers()
+            await model.reconcile()
+          }
         }
     }
   }
@@ -24,6 +27,14 @@ struct RootView: View {
     content
       .sensoryFeedback(.success, trigger: model.isPaired) { wasPaired, isPaired in
         !wasPaired && isPaired
+      }
+      .alert("Pairing", isPresented: Binding(
+        get: { model.pairingNotice != nil },
+        set: { if !$0 { model.dismissPairingNotice() } }
+      )) {
+        Button("OK") { model.dismissPairingNotice() }
+      } message: {
+        Text(model.pairingNotice ?? "")
       }
   }
 

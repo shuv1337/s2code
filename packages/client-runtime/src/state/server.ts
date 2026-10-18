@@ -983,6 +983,11 @@ export function createServerEnvironmentAtoms<R, E>(
 
   return {
     configValueAtom,
+    issueWatchPairingCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:watch:issue-pairing-credential",
+      tag: WS_METHODS.watchIssuePairingCredential,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     runStorageCleanup: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:run-storage-cleanup",
       tag: WS_METHODS.serverRunStorageCleanup,
