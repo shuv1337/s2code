@@ -401,6 +401,19 @@ const make = Effect.gen(function* () {
       let task = records.subagents.find((candidate) => candidate.id === taskId);
       if (task?.remoteChild === undefined || task.remoteChild.threadId !== undefined) return;
       if (task.result !== null && task.remoteChild.stoppedThere === true) return;
+      // A launch that failed for good is never sent again: a Stop since has
+      // nothing here to reach there, and its uncertainty warning stands.
+      if (task.result !== null && task.remoteChild.launchError !== undefined) {
+        yield* complete(
+          parentThreadId,
+          taskId,
+          terminalStatus(task.status),
+          task.result,
+          "stopped",
+          task.remoteChild.stopCount,
+        );
+        return;
+      }
       const launch = task.remoteChild.launch;
       if (launch === undefined) {
         return yield* new OrchestratorMcpFailure({

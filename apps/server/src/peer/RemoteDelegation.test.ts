@@ -7,6 +7,7 @@ import {
   MessageId,
   NodeId,
   type OrchestrationV2Run,
+  type OrchestrationV2Subagent,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -1250,6 +1251,65 @@ it.effect.each(["lowered parent", "revoked link"] as const)(
         expect(yield* b.linkedSessions).toHaveLength(restriction === "revoked link" ? 0 : 1);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a Stop never launches a task whose recovered launch failed", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const linking = yield* layerLinkingEnvironment(laptop).pipe(Layer.build);
+      const taskId = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const before = yield* makeLaptop(database, offers, linking);
+          yield* linkTo(before.links, b, "full-access");
+          yield* seedParent(before);
+          const id = yield* recordPending(before);
+          yield* before.orchestrator.dispatch({
+            type: "thread.runtime-mode.set",
+            commandId: CommandId.make("command:lower-before-recovery"),
+            threadId: parentThreadId,
+            runtimeMode: "approval-required",
+          });
+          return id;
+        }),
+      );
+      const after = yield* makeLaptop(database, offers, linking);
+      yield* after.remote.start();
+      expect(yield* taskResult(after, taskId)).toMatchObject({ status: "failed" });
+      // The parent's mode is restored, then the parent is stopped.
+      yield* after.orchestrator.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("command:restore-after-recovery"),
+        threadId: parentThreadId,
+        runtimeMode: "full-access",
+      });
+      yield* after.threads.stopDelegatedTasks({
+        threadId: parentThreadId,
+        commandId: CommandId.make("command:stop:after-failed-launch"),
+      });
+      // Its follower, still backing off from the refusal, looks again.
+      let task: OrchestrationV2Subagent | undefined;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        task = (yield* after.orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+          (candidate) => candidate.id === taskId,
+        );
+        if (task?.remoteChild?.stoppedThere === true) break;
+        yield* TestClock.adjust(Duration.minutes(5));
+        yield* Effect.sleep(Duration.millis(50)).pipe(TestClock.withLive);
+      }
+      expect(yield* Ref.get(thread.launchIds)).toEqual([]);
+      expect(task?.remoteChild).toMatchObject({ stoppedThere: true, stopCount: 1 });
+      expect(task?.remoteChild?.launchError).toContain(
+        "If it was already accepted, work may still be running on Box.",
+      );
+      expect(yield* after.projections.getOpenRemoteDelegatedTasks).toEqual([]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
 it.effect.each(
