@@ -5,6 +5,8 @@ import PullRequestReviewGuides from "./Migrations/061_PullRequestReviewGuides.ts
 
 // Watch previews used 61/62 before the installed nightly reserved 61 for review guides.
 // Preserve those previews' existing receipt identities and outstanding pairing requests.
+// It leaves them at 62/63 in upstream's ledger; reconcileForkMigrationTrack then moves them
+// to the fork ledger.
 export const reconcileWatchPreviewMigration = Effect.fn("reconcileWatchPreviewMigration")(
   function* () {
     const sql = yield* SqlClient.SqlClient;

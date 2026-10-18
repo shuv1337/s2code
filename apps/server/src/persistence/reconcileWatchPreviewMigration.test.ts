@@ -3,23 +3,29 @@ import { makeMethods } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { runMigrations } from "./Migrations.ts";
-import Identity from "./Migrations/062_CommandReceiptIdentity.ts";
-import Pairing from "./Migrations/063_WatchPairingRequests.ts";
+import { forkMigrationManifest } from "./ForkMigrations.ts";
+import { migrationEntries, runMigrations } from "./Migrations.ts";
+import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
+import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
 
 const it = makeMethods(test);
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
+
+const upstreamAfter61 = migrationEntries
+  .filter(([id]) => id > 61)
+  .map(([id, name]) => [id, name] as const);
 
 it.effect("upgrades the installed nightly with review guides at 61", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* runMigrations({ toMigrationInclusive: 61 });
     yield* sql`INSERT INTO pull_request_review_guides VALUES ('github', 'owner/repo', 1, '{}')`;
-    assert.deepStrictEqual(yield* runMigrations(), [
-      [62, "CommandReceiptIdentity"],
-      [63, "WatchPairingRequests"],
-    ]);
+    assert.deepStrictEqual(yield* runMigrations(), upstreamAfter61);
+    assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
+      forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
+    );
     const columns = yield* sql<{ name: string }>`PRAGMA table_info(orchestration_command_receipts)`;
     assert.ok(columns.some((column) => column.name === "payload_fingerprint"));
     assert.equal((yield* sql`SELECT * FROM pull_request_review_guides`).length, 1);
@@ -45,11 +51,16 @@ it.effect.each([false, true])(
       yield* runMigrations();
       assert.deepStrictEqual(
         yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 61 ORDER BY migration_id`,
-        [
-          { migration_id: 61, name: "PullRequestReviewGuides" },
-          { migration_id: 62, name: "CommandReceiptIdentity" },
-          { migration_id: 63, name: "WatchPairingRequests" },
-        ],
+        [[61, "PullRequestReviewGuides"] as const, ...upstreamAfter61].map(
+          ([migration_id, name]) => ({
+            migration_id,
+            name,
+          }),
+        ),
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
+        forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
       );
       assert.equal((yield* sql`SELECT * FROM auth_watch_pairing_requests`).length, paired ? 1 : 0);
       assert.deepStrictEqual(yield* runMigrations(), []);

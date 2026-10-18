@@ -63,6 +63,8 @@ export interface VerifiedSession {
   /** The most an MCP client approved through OAuth may hand to the threads it drives. */
   readonly runtimeModeCeiling?: RuntimeMode;
   readonly watchRestriction?: WatchRestriction;
+  /** An MCP client that is another T3 Code environment's peer link. */
+  readonly peerLink?: true;
 }
 
 export type SessionCredentialChange =
@@ -381,6 +383,7 @@ export class SessionStore extends Context.Service<
       readonly proofKeyThumbprint?: string;
       readonly runtimeModeCeiling?: RuntimeMode;
       readonly watchRestriction?: WatchRestriction;
+      readonly peerLink?: boolean;
       /**
        * Atomically revoke active sessions with the same subject and method
        * before storing this session.
@@ -445,6 +448,8 @@ const SessionClaims = Schema.Struct({
   jkt: Schema.optionalKey(Schema.String),
   rtc: Schema.optionalKey(RuntimeMode),
   watch: Schema.optionalKey(WatchRestriction),
+  /** Signed, so a client cannot shed its peer link's limits. */
+  plk: Schema.optionalKey(Schema.Literal(1)),
   iat: Schema.Number,
   exp: Schema.Number,
 });
@@ -682,6 +687,7 @@ export const make = Effect.gen(function* () {
         ...(input?.proofKeyThumbprint ? { jkt: input.proofKeyThumbprint } : {}),
         ...(input?.runtimeModeCeiling ? { rtc: input.runtimeModeCeiling } : {}),
         ...(input?.watchRestriction ? { watch: input.watchRestriction } : {}),
+        ...(input?.peerLink === true ? { plk: 1 as const } : {}),
         iat: issuedAt.epochMilliseconds,
         exp: expiresAt.epochMilliseconds,
       };
@@ -864,6 +870,7 @@ export const make = Effect.gen(function* () {
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
         ...(claims.rtc ? { runtimeModeCeiling: claims.rtc } : {}),
         ...(claims.watch ? { watchRestriction: claims.watch } : {}),
+        ...(claims.plk === 1 ? { peerLink: true as const } : {}),
       } satisfies VerifiedSession;
     },
   );

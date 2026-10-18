@@ -12,6 +12,10 @@ import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
+// shuv2code fork: fork-only migrations run on their own track; see ForkMigrations.ts.
+import { divergentForkMigrations, runForkMigrations } from "./ForkMigrations.ts";
+import { reconcileForkMigrationTrack } from "./reconcileForkMigrationTrack.ts";
+import { reconcileWatchPreviewMigration } from "./reconcileWatchPreviewMigration.ts";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -75,9 +79,7 @@ import Migration0058 from "./Migrations/058_WebhookRelayDeliveries.ts";
 import Migration0059 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
-import Migration0062 from "./Migrations/062_CommandReceiptIdentity.ts";
-import Migration0063 from "./Migrations/063_WatchPairingRequests.ts";
-import { reconcileWatchPreviewMigration } from "./reconcileWatchPreviewMigration.ts";
+import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -153,8 +155,7 @@ export const migrationEntries = [
   [59, "McpAppModelContext", Migration0059],
   [60, "ThreadSnapshotWindowIndexes", Migration0060],
   [61, "PullRequestReviewGuides", Migration0061],
-  [62, "CommandReceiptIdentity", Migration0062],
-  [63, "WatchPairingRequests", Migration0063],
+  [62, "ThreadFailureLookupIndex", Migration0062],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -195,15 +196,23 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     toMigrationInclusive === undefined || toMigrationInclusive >= 55
       ? yield* reconcileV2PreviewMigration()
       : [];
-  const watchPreviewMigrations =
-    toMigrationInclusive === undefined || toMigrationInclusive >= 63
-      ? yield* reconcileWatchPreviewMigration()
-      : [];
+  // shuv2code fork: reconcile fork-track history, then run fork migrations
+  // after upstream's. `toMigrationInclusive` names an upstream id, so a partial
+  // run leaves the fork track alone. Only upstream's migrations are returned.
+  const fullRun = toMigrationInclusive === undefined;
+  const watchPreviewMigrations = fullRun ? yield* reconcileWatchPreviewMigration() : [];
+  const movedForkMigrations = fullRun ? yield* reconcileForkMigrationTrack() : [];
+  if (movedForkMigrations.length > 0) {
+    yield* Effect.log("Moved fork migrations to their own ledger").pipe(
+      Effect.annotateLogs({ moved: movedForkMigrations.map(([id, name]) => `${id}_${name}`) }),
+    );
+  }
   const executedMigrations = [
     ...previewMigrations,
     ...watchPreviewMigrations,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
+  if (fullRun) yield* runForkMigrations();
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
@@ -219,7 +228,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     readonly name: string;
   }>`SELECT migration_id, name FROM effect_sql_migrations`;
   const manifestNames = new Map<number, string>(migrationEntries.map(([id, name]) => [id, name]));
-  const divergent = recorded.flatMap((row) => {
+  const divergentUpstream = recorded.flatMap((row) => {
     const expected = manifestNames.get(row.migration_id);
     if (expected === undefined) {
       return [`${row.migration_id}:${row.name} (unknown to this build)`];
@@ -228,6 +237,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
       ? []
       : [`${row.migration_id}:${row.name} (this build: ${expected})`];
   });
+  const divergent = [...divergentUpstream, ...(yield* divergentForkMigrations())];
   if (divergent.length > 0) {
     yield* Effect.logWarning(
       "Database migration history diverges from this build; recorded migration ids are skipped, not reconciled by name.",
