@@ -4,8 +4,8 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "./Migrations.ts";
-import Identity from "./Migrations/062_CommandReceiptIdentity.ts";
-import Pairing from "./Migrations/063_WatchPairingRequests.ts";
+import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
+import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
 
 const it = makeMethods(test);
 
@@ -16,10 +16,14 @@ it.effect("upgrades the installed nightly with review guides at 61", () =>
     const sql = yield* SqlClient.SqlClient;
     yield* runMigrations({ toMigrationInclusive: 61 });
     yield* sql`INSERT INTO pull_request_review_guides VALUES ('github', 'owner/repo', 1, '{}')`;
-    assert.deepStrictEqual(yield* runMigrations(), [
-      [62, "CommandReceiptIdentity"],
-      [63, "WatchPairingRequests"],
-    ]);
+    assert.deepStrictEqual(yield* runMigrations(), []);
+    assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
+      [
+        { migration_id: 1, name: "CommandReceiptIdentity" },
+        { migration_id: 2, name: "WatchPairingRequests" },
+      ],
+    );
     const columns = yield* sql<{ name: string }>`PRAGMA table_info(orchestration_command_receipts)`;
     assert.ok(columns.some((column) => column.name === "payload_fingerprint"));
     assert.equal((yield* sql`SELECT * FROM pull_request_review_guides`).length, 1);
@@ -45,10 +49,13 @@ it.effect.each([false, true])(
       yield* runMigrations();
       assert.deepStrictEqual(
         yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 61 ORDER BY migration_id`,
+        [{ migration_id: 61, name: "PullRequestReviewGuides" }],
+      );
+      assert.deepStrictEqual(
+        yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
         [
-          { migration_id: 61, name: "PullRequestReviewGuides" },
-          { migration_id: 62, name: "CommandReceiptIdentity" },
-          { migration_id: 63, name: "WatchPairingRequests" },
+          { migration_id: 1, name: "CommandReceiptIdentity" },
+          { migration_id: 2, name: "WatchPairingRequests" },
         ],
       );
       assert.equal((yield* sql`SELECT * FROM auth_watch_pairing_requests`).length, paired ? 1 : 0);
