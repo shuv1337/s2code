@@ -821,6 +821,9 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
       const retried = yield* delegateToBox(a);
       expect(retried.taskId).toBe(delegated.taskId);
       expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toHaveLength(1);
+      expect(new Set(yield* Ref.get(thread.launchIds))).toEqual(
+        new Set([delegated.remoteChild.threadId]),
+      );
 
       yield* Ref.set(thread.reply, "All 412 tests pass on the box.");
       yield* Ref.set(thread.status, "completed");
@@ -882,6 +885,64 @@ it.effect("a task named only by environment inherits the parent's model, within 
         clientRequestId: "broader",
       });
       expect(broader.isError).toBe(true);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a task there stays within a narrower parent's modes and is fenced to the link", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      // The link allows full access; the parent runs with less.
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+      yield* a.orchestrator.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("command:lower-parent"),
+        threadId: parentThreadId,
+        runtimeMode: "approval-required",
+      });
+      yield* a.orchestrator.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.make("command:plan-parent"),
+        threadId: parentThreadId,
+        interactionMode: "plan",
+      });
+
+      for (const [clientRequestId, broader] of [
+        ["broader-runtime", { runtimeMode: "full-access" }],
+        ["broader-interaction", { interactionMode: "default" }],
+      ] as const) {
+        const refused = yield* a.call("delegate_task", {
+          task: "Run the suite on the box.",
+          target: { environmentId: box.environmentId },
+          clientRequestId,
+          ...broader,
+        });
+        expect(refused.isError, clientRequestId).toBe(true);
+      }
+      expect(yield* Ref.get(thread.launchIds)).toEqual([]);
+
+      const result = yield* a.call("delegate_task", {
+        task: "Run the suite on the box.",
+        target: { environmentId: box.environmentId },
+        clientRequestId: "inherited",
+      });
+      expect(result.isError, JSON.stringify(result.content)).toBe(false);
+      // The parent's modes, not the link's broader one.
+      expect(yield* Ref.get(thread.launchedWith)).toMatchObject({
+        runtimeMode: "approval-required",
+        interactionMode: "plan",
+      });
+      // The thread there is stamped with the link session it came through.
+      const [session] = yield* b.linkedSessions;
+      expect((yield* Ref.get(thread.linkOrigin))?.sessionId).toBe(session!.sessionId);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
