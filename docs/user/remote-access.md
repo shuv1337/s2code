@@ -260,7 +260,7 @@ Link two machines, such as your laptop and a VPS, and agents on one can launch,
 message, wait on and stop threads on the other. On the machine you will work
 from, open **Settings → Connections → Linked environments**, choose **Link**,
 and enter the other machine's address and a pairing code from it. From a
-terminal, use `t3 environment link <address> --pairing-code <code> --access <mode>`.
+terminal, use `s2c environment link <address> --pairing-code <code> --access <mode>`.
 
 - The access you pick is the most agents from this machine may do there. An
   agent also never gets more there than its own mode here.
