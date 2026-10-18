@@ -124,19 +124,25 @@ export function formatCliCommand(input: {
 export const forkCliCommand = (subcommand: string, version = packageJson.version) =>
   `${resolveChannelIdentity(version).executableName} ${subcommand}`;
 
-/** Proven npm bin, current fork executable/shim, or source runtime and entry; never an unrelated PATH command. */
-export const resolveCliCommand = Effect.fnUntraced(function* (
-  subcommand: string,
-  baseDir?: string,
+/**
+ * Proven npm bin, current fork executable/shim, or source runtime and entry;
+ * never an unrelated PATH command. `pathCommand` is set when the command starts
+ * with a path quoted by `quote`, which PowerShell runs only through `&`.
+ */
+const resolveCliInvocation = Effect.fnUntraced(function* (
+  commandArgs: string,
+  quote: (value: string) => string,
 ) {
-  const commandArgs =
-    baseDir === undefined ? subcommand : `${subcommand} ${formatCliHomeFlag(baseDir)}`;
   const args = yield* HostProcess.Arguments;
   const entry = args[1] ?? "";
   const installation = yield* resolveServerInstallation;
   if (installation?.kind === "npm-global") {
     const path = yield* Path.Path;
-    return `${shellWord(path.join(installation.prefix, "bin", PRODUCT_ID))} ${commandArgs}`;
+    return {
+      command: `${quote(path.join(installation.prefix, "bin", PRODUCT_ID))} ${commandArgs}`,
+      pathCommand: true,
+      launcher: false,
+    };
   }
   const runner =
     installation?.kind === "npx"
@@ -147,9 +153,18 @@ export const resolveCliCommand = Effect.fnUntraced(function* (
           ? "bunx"
           : detectCliRunner(entry);
   if (runner !== null)
-    return `${runner} ${suggestedPackageSpec(packageJson.version)} ${commandArgs}`;
+    return {
+      command: `${runner} ${suggestedPackageSpec(packageJson.version)} ${commandArgs}`,
+      pathCommand: false,
+      launcher: false,
+    };
   const launcher = yield* resolveInstallLauncher;
-  if (Option.isSome(launcher)) return `${shellWord(launcher.value)} ${commandArgs}`;
+  if (Option.isSome(launcher))
+    return {
+      command: `${quote(launcher.value)} ${commandArgs}`,
+      pathCommand: true,
+      launcher: true,
+    };
   if (entry && !entry.includes(".asar")) {
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
@@ -157,9 +172,23 @@ export const resolveCliCommand = Effect.fnUntraced(function* (
     const resolvedEntry = yield* fs
       .realPath(absoluteEntry)
       .pipe(Effect.orElseSucceed(() => absoluteEntry));
-    return `${shellWord(yield* HostProcess.ExecutablePath)} ${shellWord(resolvedEntry)} ${commandArgs}`;
+    return {
+      command: `${quote(yield* HostProcess.ExecutablePath)} ${quote(resolvedEntry)} ${commandArgs}`,
+      pathCommand: true,
+      launcher: false,
+    };
   }
-  return forkCliCommand(commandArgs);
+  return { command: forkCliCommand(commandArgs), pathCommand: false, launcher: false };
+});
+
+/** The fork command for POSIX shells and service files. */
+export const resolveCliCommand = Effect.fnUntraced(function* (
+  subcommand: string,
+  baseDir?: string,
+) {
+  const commandArgs =
+    baseDir === undefined ? subcommand : `${subcommand} ${formatCliHomeFlag(baseDir)}`;
+  return (yield* resolveCliInvocation(commandArgs, shellWord)).command;
 });
 
 const shellWord = (value: string) =>
@@ -230,16 +259,14 @@ export const resolveHostCliCommand = Effect.fnUntraced(function* (
   args: ReadonlyArray<string> = [],
 ) {
   const platform = yield* HostProcess.Platform;
-  const withArgs = (prefix: string) =>
-    [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
-  const command = yield* resolveCliCommand(subcommand);
-  const launcher = yield* resolveInstallLauncher;
-  if (Option.isNone(launcher) || command !== `${shellWord(launcher.value)} ${subcommand}`)
-    return { command: withArgs(command), launcher: false };
+  const quote = (value: string) => hostShellWord(platform, value);
+  const invocation = yield* resolveCliInvocation(subcommand, quote);
   // PowerShell runs a quoted path only through the call operator.
-  const quoted = hostShellWord(platform, launcher.value);
-  const call = platform === "win32" ? `& ${quoted}` : quoted;
-  return { command: withArgs(`${call} ${subcommand}`), launcher: true };
+  const call = platform === "win32" && invocation.pathCommand ? "& " : "";
+  return {
+    command: [`${call}${invocation.command}`, ...args.map(quote)].join(" "),
+    launcher: invocation.launcher,
+  };
 });
 
 /**

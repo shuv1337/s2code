@@ -20,6 +20,7 @@ T3CODE_CLERK_PUBLISHABLE_KEY=<publishable key>
 T3CODE_CLERK_JWT_TEMPLATE=<JWT template name>
 T3CODE_CLERK_CLI_OAUTH_CLIENT_ID=<public OAuth application client ID>
 T3CODE_RELAY_URL=https://relay.example.com
+T3CODE_CLOUD_MINT_PUBLIC_KEY="<relay mint Ed25519 public key, PEM>"
 ```
 
 Process variables take precedence over `.env.local`, then `.env`. Use these canonical names;

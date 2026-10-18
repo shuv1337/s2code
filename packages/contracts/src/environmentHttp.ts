@@ -45,6 +45,7 @@ import {
 } from "./environment.ts";
 import {
   DpopFailureReason,
+  EnvironmentId,
   CommandId,
   AuthSessionId,
   ThreadId,
@@ -457,11 +458,28 @@ export const AuthOtherClientSessionsRevokeResult = Schema.Struct({
 });
 export type AuthOtherClientSessionsRevokeResult = typeof AuthOtherClientSessionsRevokeResult.Type;
 
-class EnvironmentMetadataHttpApi extends HttpApiGroup.make("metadata").add(
-  HttpApiEndpoint.get("descriptor", "/.well-known/t3/environment", {
-    success: ExecutionEnvironmentDescriptor,
-  }),
-) {}
+export const PeerEnvironmentProof = Schema.Struct({
+  environmentId: EnvironmentId,
+  publicKey: Schema.String.check(Schema.isMaxLength(1024)),
+  signature: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{86}$/)),
+});
+export type PeerEnvironmentProof = typeof PeerEnvironmentProof.Type;
+
+class EnvironmentMetadataHttpApi extends HttpApiGroup.make("metadata")
+  .add(
+    HttpApiEndpoint.get("descriptor", "/.well-known/t3/environment", {
+      success: ExecutionEnvironmentDescriptor,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("proof", "/.well-known/t3/environment/proof", {
+      payload: Schema.Struct({
+        nonce: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/)),
+      }),
+      success: PeerEnvironmentProof,
+      error: EnvironmentInternalError,
+    }),
+  ) {}
 
 class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
   .add(

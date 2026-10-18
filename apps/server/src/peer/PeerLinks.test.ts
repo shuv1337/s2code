@@ -9,6 +9,14 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpBody from "effect/http/HttpBody";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
+import { EnvironmentHttpApi } from "@t3tools/contracts";
+import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
+import * as PeerProof from "./PeerProof.ts";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool, Toolkit } from "effect/ai";
 
@@ -304,6 +312,197 @@ it.effect(
         expect(self.reason).toBe("self");
         // Neither attempt spent the pairing code on a session.
         expect(yield* linkedSessions(b)).toEqual([]);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+const descriptorPath = "/.well-known/t3/environment";
+const proofPath = `${descriptorPath}/proof`;
+
+it.effect(
+  "rejects copied descriptors and replayed proofs before linking or sending a saved bearer",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const b = yield* serveB(box);
+        const a = yield* makeA(laptop);
+        const keys = yield* getOrCreateEnvironmentKeyPairFromSecretStore(b.secrets);
+        const replay = PeerProof.sign(box.environmentId, "A".repeat(43), keys);
+        const copied = {
+          [descriptorPath]: HttpServerResponse.jsonUnsafe(box),
+          [proofPath]: HttpServerResponse.jsonUnsafe(replay),
+        };
+        yield* a.links.link({
+          url: b.url,
+          pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+          access: "auto",
+        });
+        yield* Ref.set(b.responses, copied);
+        const failed = yield* probe(a).pipe(Effect.flip);
+        expect(failed.message).toContain("did not answer");
+        expect(yield* Ref.get(b.bearers)).toEqual([]);
+        expect((yield* a.links.list)[0]!.status).toBe("unreachable");
+
+        // The alternate serves the copied descriptor and a signature for an old nonce.
+        const alternate = b.url.replace("127.0.0.1", "localhost");
+        yield* Ref.set(b.responses, {});
+        const pairing = yield* b.auth.issuePairingCredential();
+        const c = yield* serveB(box).pipe(Effect.provide(Layer.fresh(NodeHttpServer.layerTest)));
+        yield* Ref.set(c.responses, copied);
+        const rejected = yield* a.links
+          .link({
+            url: b.url,
+            alternateUrls: [c.url],
+            pairingCode: pairing.credential,
+            access: "auto",
+          })
+          .pipe(Effect.flip);
+        expect(rejected.message).toContain(c.url);
+        expect(yield* Ref.get(c.bearers)).toEqual([]);
+        // A verified alias still accepts the unspent pairing code.
+        yield* a.links.link({
+          url: b.url,
+          alternateUrls: [alternate],
+          pairingCode: pairing.credential,
+          access: "auto",
+        });
+        yield* a.sql`UPDATE peer_environment_links SET urls_json = ${JSON.stringify([alternate])}`;
+        expect(yield* probe(a)).toMatchObject({ caller: "T3 Code · Laptop" });
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("refuses an alternate with the same environment id but a different signing key", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const b = yield* serveB(box);
+      const c = yield* serveB(box).pipe(Effect.provide(Layer.fresh(NodeHttpServer.layerTest)));
+      const a = yield* makeA(laptop);
+      const refused = yield* a.links
+        .link({
+          url: b.url,
+          alternateUrls: [c.url],
+          pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+          access: "auto",
+        })
+        .pipe(Effect.flip);
+      expect(refused.reason).toBe("incompatible");
+      expect(refused.message).toContain(c.url);
+      expect(yield* linkedSessions(b)).toEqual([]);
+      expect(yield* Ref.get(c.bearers)).toEqual([]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect.each([descriptorPath, proofPath])(
+  "refuses a redirect of %s at link time and re-resolution",
+  (path) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const b = yield* serveB(box);
+        const c = yield* serveB(box).pipe(Effect.provide(Layer.fresh(NodeHttpServer.layerTest)));
+        const a = yield* makeA(laptop);
+        yield* a.links.link({
+          url: b.url,
+          pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+          access: "auto",
+        });
+        yield* Ref.set(c.probes, 0);
+        yield* Ref.set(b.responses, {
+          [path]: HttpServerResponse.empty({
+            status: 302,
+            headers: { location: `${c.url}${path}` },
+          }),
+        });
+        expect((yield* a.links.resolve(box.environmentId).pipe(Effect.flip)).reason).toBe(
+          "unreachable",
+        );
+        yield* probe(a).pipe(Effect.flip);
+        expect((yield* a.links.list)[0]!.status).toBe("unreachable");
+        yield* a.links
+          .link({ url: b.url, pairingCode: "unused", access: "auto" })
+          .pipe(Effect.flip);
+        expect(yield* Ref.get(c.probes)).toBe(0);
+        expect(yield* Ref.get(b.bearers)).toEqual([]);
+        expect(yield* Ref.get(c.bearers)).toEqual([]);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("requires pairing again for a legacy row without a pinned key", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const b = yield* serveB(box);
+      const a = yield* makeA(laptop);
+      yield* a.links.link({
+        url: b.url,
+        pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+        access: "auto",
+      });
+      yield* a.sql`UPDATE peer_environment_links SET peer_public_key = NULL`;
+      const failed = yield* a.links.resolve(box.environmentId).pipe(Effect.flip);
+      expect(failed.reason).toBe("incompatible");
+      expect(failed.message).toContain("Link it again with a new pairing code");
+      expect((yield* a.links.list)[0]).toMatchObject({
+        status: "unreachable",
+        lastError: expect.stringContaining("Link it again with a new pairing code"),
+      });
+      expect(yield* Ref.get(b.bearers)).toEqual([]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "the public proof handler validates nonce length and uses the persistent environment key",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const b = yield* serveB(box);
+        const client = yield* HttpApiClient.make(EnvironmentHttpApi, { baseUrl: b.url }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+        );
+        const nonce = "B".repeat(43);
+        const proof = yield* client.metadata.proof({ payload: { nonce } });
+        const keys = yield* getOrCreateEnvironmentKeyPairFromSecretStore(b.secrets);
+        expect(PeerProof.verify(proof, nonce, box.environmentId, keys.publicKey)).toBe(true);
+        const http = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
+        for (const invalid of ["short", "A".repeat(44), "!".repeat(43)]) {
+          const response = yield* http.post(`${b.url}${proofPath}`, {
+            body: HttpBody.text(JSON.stringify({ nonce: invalid }), "application/json"),
+          });
+          expect(response.status).toBe(400);
+        }
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect.each(["/oauth/mcp/register", "/oauth/mcp/decision", "/oauth/mcp/token", "/mcp"])(
+  "does not follow credential-bearing redirects from %s",
+  (path) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const b = yield* serveB(box);
+        const c = yield* serveB(box).pipe(Effect.provide(Layer.fresh(NodeHttpServer.layerTest)));
+        const a = yield* makeA(laptop);
+        const pairing = yield* b.auth.issuePairingCredential();
+        if (path === "/mcp") {
+          yield* a.links.link({ url: b.url, pairingCode: pairing.credential, access: "auto" });
+        }
+        yield* Ref.set(b.responses, {
+          [path]: HttpServerResponse.empty({
+            status: 307,
+            headers: { location: `${c.url}${path}` },
+          }),
+        });
+        if (path === "/mcp") {
+          yield* probe(a).pipe(Effect.flip);
+        } else {
+          yield* a.links
+            .link({ url: b.url, pairingCode: pairing.credential, access: "auto" })
+            .pipe(Effect.flip);
+        }
+        expect(yield* Ref.get(c.requests)).toEqual([]);
+        expect(yield* Ref.get(c.bearers)).toEqual([]);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

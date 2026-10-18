@@ -1,4 +1,6 @@
 import {
+  AuthAccessReadScope,
+  AuthAccessWriteScope,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -16,6 +18,7 @@ import {
   AuthRelayWriteScope,
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
+  clientRpcRequiredScopes,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -72,6 +75,14 @@ describe("RPC authorization scopes", () => {
       AuthRelayReadScope,
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudInstallRelayClient)).toBe(AuthRelayWriteScope);
+  });
+
+  it("guards peer-link mutations on clients with the scope the server requires", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.peerLinksList)).toBe(AuthAccessReadScope);
+    for (const method of [WS_METHODS.peerLinksLink, WS_METHODS.peerLinksUnlink]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
+      expect(clientRpcRequiredScopes(method, undefined)).toEqual([AuthAccessWriteScope]);
+    }
   });
 
   it("requires permission to operate on a thread before uploading feedback", () => {

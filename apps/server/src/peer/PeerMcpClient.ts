@@ -12,6 +12,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
@@ -90,7 +91,11 @@ const responseJson = (contentType: string | undefined, text: string) =>
 
 const make = Effect.gen(function* () {
   const links = yield* PeerLinks.PeerLinks;
-  const httpClient = yield* HttpClient.HttpClient;
+  const httpClient = (yield* HttpClient.HttpClient).pipe(
+    HttpClient.transform((response) =>
+      response.pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
+    ),
+  );
   // One MCP session per peer and address, reused across calls. The peer keeps
   // sessions in memory, so a restart there answers 404 and we start a new one.
   const sessions = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
@@ -134,12 +139,18 @@ const make = Effect.gen(function* () {
               : `The linked environment refused to start an MCP session (HTTP ${initialized.status}).`,
         });
       }
-      yield* post(
+      const notified = yield* post(
         url,
         token,
         { jsonrpc: "2.0", method: "notifications/initialized" },
         { ...limitHeader, "mcp-session-id": sessionId, "mcp-protocol-version": PROTOCOL_VERSION },
       );
+      if (notified.status >= 300 && notified.status < 400) {
+        return yield* new OrchestratorMcpFailure({
+          code: "orchestration_error",
+          message: "The linked environment redirected MCP initialization.",
+        });
+      }
       return sessionId;
     });
 

@@ -18,9 +18,12 @@ CLI environment aliases are normalized to the corresponding `T3CODE_*` inputs
 at the process boundary; they are not substitutes for Vite or Expo build inputs.
 
 - Server runtime and bundled defaults: `T3CODE_HOSTED_APP_URL`,
-  `T3CODE_RELAY_URL`, `T3CODE_CLERK_PUBLISHABLE_KEY`,
-  `T3CODE_CLERK_CLI_OAUTH_CLIENT_ID`. The server build bakes the hosted origin
-  from `T3CODE_HOSTED_APP_URL`, the same name used at runtime.
+  `T3CODE_RELAY_URL`, `T3CODE_CLOUD_MINT_PUBLIC_KEY`,
+  `T3CODE_CLERK_PUBLISHABLE_KEY`, `T3CODE_CLERK_CLI_OAUTH_CLIENT_ID`. The
+  server build bakes the hosted origin from `T3CODE_HOSTED_APP_URL`, the same
+  name used at runtime. `T3CODE_CLOUD_MINT_PUBLIC_KEY` is the relay's Ed25519
+  credential-minting public key (PEM). An environment refuses a relay link
+  for any other relay URL or mint key, so set both or hosted linking fails.
 - Desktop build auth: `T3CODE_CLERK_PUBLISHABLE_KEY`,
   `T3CODE_CLERK_JWT_TEMPLATE`.
 - Web build: `VITE_HOSTED_APP_URL`, `VITE_HOSTED_APP_CHANNEL`,
