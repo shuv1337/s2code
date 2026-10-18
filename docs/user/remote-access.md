@@ -271,6 +271,9 @@ terminal, use `s2c environment link <address> --pairing-code <code> --access <mo
   outside agent. Revoke it there to end it. **Forget** on this machine only
   removes it here.
 - Links last 30 days. Link again with a new pairing code to renew one.
+- A link remembers the other machine's identity and only sends work to an
+  address that proves it. Links made by earlier versions, or to a machine whose
+  T3 Code data was reset, must be linked again with a new pairing code.
 
 An agent can also hand a task to a linked machine with `delegate_task`: it runs
 there as an ordinary thread, in the project with the same repository (or the
