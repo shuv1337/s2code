@@ -443,7 +443,10 @@ it.effect("requires pairing again for a legacy row without a pinned key", () =>
       const failed = yield* a.links.resolve(box.environmentId).pipe(Effect.flip);
       expect(failed.reason).toBe("incompatible");
       expect(failed.message).toContain("Link it again with a new pairing code");
-      expect((yield* a.links.list)[0]!.status).toBe("unreachable");
+      expect((yield* a.links.list)[0]).toMatchObject({
+        status: "unreachable",
+        lastError: expect.stringContaining("Link it again with a new pairing code"),
+      });
       expect(yield* Ref.get(b.bearers)).toEqual([]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),

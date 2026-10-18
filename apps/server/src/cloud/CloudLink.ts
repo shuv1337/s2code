@@ -97,7 +97,7 @@ import {
 } from "./config.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
-import { relayUrlConfig } from "./publicConfig.ts";
+import { cloudMintPublicKeyConfig, relayUrlConfig } from "./publicConfig.ts";
 import {
   filterRelayResponse,
   relayRequestError,
@@ -134,7 +134,8 @@ const RELAY_CONFIG_FIELD_MESSAGES = {
     "Relay issuer must be a secure absolute HTTPS URL outside the upstream hosted service.",
   environmentCredential: "Relay environment credential is required.",
   cloudUserId: "Cloud user id is required.",
-  cloudMintPublicKey: "Cloud mint public key must be a valid Ed25519 public key.",
+  cloudMintPublicKey:
+    "Cloud mint public key must match the key pinned for this environment's T3 Connect relay.",
 } as const;
 
 export class CloudLinkRelayConfigInvalidError extends Schema.TaggedError<CloudLinkRelayConfigInvalidError>()(
@@ -331,17 +332,32 @@ export function consumeCloudReplayGuards(input: {
   ).pipe(Effect.map((created) => created.every(Boolean)));
 }
 
+const ed25519PublicKeyDer = (publicKey: string) => {
+  try {
+    const key = NodeCrypto.createPublicKey(publicKey.replace(/\\n/g, "\n"));
+    return key.asymmetricKeyType === "ed25519" ? key.export({ type: "spki", format: "der" }) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The mint key verifies the public credential-minting route, so it must be the
+ * one pinned for the configured relay. With no pin, every key is refused.
+ */
 function validateCloudMintPublicKey(
   publicKey: string,
 ): Effect.Effect<void, CloudLinkRelayConfigInvalidError> {
   const invalid = new CloudLinkRelayConfigInvalidError({ field: "cloudMintPublicKey" });
-  return Effect.try({
-    try: () => NodeCrypto.createPublicKey(publicKey.replace(/\\n/g, "\n")),
-    catch: () => invalid,
-  }).pipe(
-    Effect.flatMap((key) =>
-      key.asymmetricKeyType === "ed25519" ? Effect.void : Effect.fail(invalid),
-    ),
+  return cloudMintPublicKeyConfig.pipe(
+    Effect.option,
+    Effect.flatMap((pinned) => {
+      const offered = ed25519PublicKeyDer(publicKey);
+      const expected = Option.isSome(pinned) ? ed25519PublicKeyDer(pinned.value) : null;
+      return offered !== null && expected !== null && offered.equals(expected)
+        ? Effect.void
+        : Effect.fail(invalid);
+    }),
   );
 }
 

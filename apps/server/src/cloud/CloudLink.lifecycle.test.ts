@@ -235,6 +235,9 @@ describe("releaseManagedTunnelOnShutdown", () => {
     return { store, values };
   }
 
+  const PINNED_MINT_KEY =
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAqZ2u2LjMoAyG2QTHXmITJ9w6RzZtVUAv394XCcPV0zE=\n-----END PUBLIC KEY-----";
+
   interface ReleaseHarness {
     readonly store: ServerSecretStore.ServerSecretStore["Service"];
     readonly applyConfigCalls: Array<unknown>;
@@ -244,6 +247,8 @@ describe("releaseManagedTunnelOnShutdown", () => {
     readonly respondEffect?: Effect.Effect<Response>;
     /** The relay this environment is configured for; `null` leaves hosted Connect off. */
     readonly relayUrl?: string | null | undefined;
+    /** The mint key pinned beside that relay. */
+    readonly cloudMintPublicKey?: string | undefined;
   }
 
   const writeLauncherState = (update: ServiceUpdateRecord) =>
@@ -350,7 +355,10 @@ describe("releaseManagedTunnelOnShutdown", () => {
             env:
               harness.relayUrl === null
                 ? {}
-                : { T3CODE_RELAY_URL: harness.relayUrl ?? "https://relay.example.test" },
+                : {
+                    T3CODE_RELAY_URL: harness.relayUrl ?? "https://relay.example.test",
+                    T3CODE_CLOUD_MINT_PUBLIC_KEY: harness.cloudMintPublicKey ?? PINNED_MINT_KEY,
+                  },
           }),
         ),
         Effect.scoped,
@@ -779,6 +787,15 @@ describe("releaseManagedTunnelOnShutdown", () => {
         name: "the upstream relay",
         relayUrl: undefined,
         payload: { relayUrl: "https://relay.t3coderelay.com" },
+      },
+      {
+        name: "a mint key other than the pinned one",
+        relayUrl: undefined,
+        payload: {
+          cloudMintPublicKey:
+            "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMY09Vo5CzEA6aEkhB/0h27t4Qs71SHS1fTSI4K0KvZQ=\n-----END PUBLIC KEY-----\n",
+        },
+        field: "cloudMintPublicKey",
       },
       {
         name: "an upstream issuer",
@@ -1397,6 +1414,14 @@ describe("releaseManagedTunnelOnShutdown", () => {
         managedTunnelActive: false,
       });
       expect(values.has(CLOUD_ENDPOINT_RUNTIME_CONFIG)).toBe(false);
-    }).pipe(provideReleaseHarness({ store: failingStore, applyConfigCalls, requests }));
+    }).pipe(
+      provideReleaseHarness({
+        store: failingStore,
+        applyConfigCalls,
+        requests,
+        cloudMintPublicKey:
+          "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMY09Vo5CzEA6aEkhB/0h27t4Qs71SHS1fTSI4K0KvZQ=\n-----END PUBLIC KEY-----\n",
+      }),
+    );
   });
 });

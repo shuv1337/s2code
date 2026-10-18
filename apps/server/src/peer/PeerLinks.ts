@@ -141,6 +141,12 @@ const peerOrigin = (url: string) => {
   return Effect.succeed(parsed.origin);
 };
 
+/** A link made before identity pinning or the linked-work fence; only linking again fixes it. */
+const isLegacyRow = (row: PeerLinkRow) => row.fenced !== 1 || row.peer_public_key === null;
+
+const relinkMessage = (label: string) =>
+  `The link to ${label} was made by an older T3 Code. Link it again with a new pairing code from ${label}.`;
+
 /** Whether a peer holds a linked agent to its limits and keeps its work within its link. */
 const linkLimitsHold = (peer: { readonly capabilities: ExecutionEnvironmentCapabilities }) =>
   peer.capabilities.mcpModeLimitHeader === true && peer.capabilities.linkFence === true;
@@ -435,7 +441,7 @@ const make = Effect.gen(function* () {
   const statusOf = (link: PeerLink, row: PeerLinkRow, now: DateTime.Utc) =>
     DateTime.isLessThanOrEqualTo(link.expiresAt, now)
       ? Effect.succeed<PeerLinkStatus>("expired")
-      : row.fenced !== 1 || row.peer_public_key === null
+      : isLegacyRow(row)
         ? Effect.succeed<PeerLinkStatus>("unreachable")
         : Effect.findFirst(link.urls, (url) =>
             verifiedDescriptor(url, link.environmentId, row.peer_public_key!).pipe(
@@ -455,7 +461,11 @@ const make = Effect.gen(function* () {
       (row) =>
         Effect.gen(function* () {
           const link = yield* toLink(row);
-          return { ...link, status: yield* statusOf(link, row, now) };
+          const status = yield* statusOf(link, row, now);
+          // Say why a legacy link cannot be used instead of implying the peer is down.
+          return isLegacyRow(row) && status !== "expired"
+            ? { ...link, status, lastError: relinkMessage(link.label) }
+            : { ...link, status };
         }),
       { concurrency: "unbounded" },
     );
@@ -501,10 +511,10 @@ const make = Effect.gen(function* () {
       }
       // Old links either lack a peer identity pin or were issued without the
       // linked-work fence. Neither can be upgraded by an unauthenticated probe.
-      if (row.value.fenced !== 1 || row.value.peer_public_key === null) {
+      if (isLegacyRow(row.value) || row.value.peer_public_key === null) {
         return yield* new PeerLinkError({
           reason: "incompatible",
-          message: `The link to ${link.label} was made by an older T3 Code. Link it again with a new pairing code from ${link.label}.`,
+          message: relinkMessage(link.label),
         });
       }
       const publicKey = row.value.peer_public_key;

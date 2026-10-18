@@ -13,6 +13,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 
 declare const __T3CODE_BUILD_RELAY_URL__: string | undefined;
+declare const __T3CODE_BUILD_CLOUD_MINT_PUBLIC_KEY__: string | undefined;
 declare const __T3CODE_BUILD_HOSTED_APP_URL__: string | undefined;
 declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
 declare const __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: string | undefined;
@@ -105,6 +106,23 @@ export function makeRelayUrlConfig(fallback = buildTimeRelayUrl) {
 }
 
 export const relayUrlConfig = makeRelayUrlConfig();
+
+const buildTimeCloudMintPublicKey = readBuildTimeValue(
+  typeof __T3CODE_BUILD_CLOUD_MINT_PUBLIC_KEY__ === "undefined"
+    ? undefined
+    : __T3CODE_BUILD_CLOUD_MINT_PUBLIC_KEY__,
+);
+
+/**
+ * The relay's credential-minting key, pinned beside its URL. A relay config
+ * carrying any other key is refused, so a client cannot plant its own.
+ */
+export function makeCloudMintPublicKeyConfig(fallback = buildTimeCloudMintPublicKey) {
+  const runtimeConfig = Config.NonEmptyString("T3CODE_CLOUD_MINT_PUBLIC_KEY");
+  return fallback ? runtimeConfig.pipe(Config.withDefault(fallback)) : runtimeConfig;
+}
+
+export const cloudMintPublicKeyConfig = makeCloudMintPublicKeyConfig();
 
 export const hostedAppUrlConfig = makePublicValueConfig(
   "T3CODE_HOSTED_APP_URL",
