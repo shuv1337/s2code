@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -241,6 +242,8 @@ describe("releaseManagedTunnelOnShutdown", () => {
     readonly onRequest?: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<void>;
     readonly respond?: () => Response;
     readonly respondEffect?: Effect.Effect<Response>;
+    /** The relay this environment is configured for; `null` leaves hosted Connect off. */
+    readonly relayUrl?: string | null | undefined;
   }
 
   const writeLauncherState = (update: ServiceUpdateRecord) =>
@@ -340,6 +343,15 @@ describe("releaseManagedTunnelOnShutdown", () => {
           ServerConfigModule.layerTest("/", { prefix: "t3-http-release-test-" }).pipe(
             Layer.provideMerge(NodeServices.layer),
           ),
+        ),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromEnv({
+            env:
+              harness.relayUrl === null
+                ? {}
+                : { T3CODE_RELAY_URL: harness.relayUrl ?? "https://relay.example.test" },
+          }),
         ),
         Effect.scoped,
       );
@@ -751,6 +763,59 @@ describe("releaseManagedTunnelOnShutdown", () => {
         },
       }),
     );
+  });
+
+  describe("refuses a relay config the environment is not configured for", () => {
+    const cloudMintPublicKey =
+      "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAqZ2u2LjMoAyG2QTHXmITJ9w6RzZtVUAv394XCcPV0zE=\n-----END PUBLIC KEY-----";
+    const cases = [
+      { name: "hosted Connect is off", relayUrl: null, payload: {} },
+      {
+        name: "a different relay",
+        relayUrl: undefined,
+        payload: { relayUrl: "https://relay.attacker.test" },
+      },
+      {
+        name: "the upstream relay",
+        relayUrl: undefined,
+        payload: { relayUrl: "https://relay.t3coderelay.com" },
+      },
+      {
+        name: "an upstream issuer",
+        relayUrl: undefined,
+        payload: { relayIssuer: "https://clerk.t3.codes" },
+        field: "relayIssuer",
+      },
+    ] as const;
+    it.effect.each(cases)("$name", (testCase) => {
+      const { store, values } = makeMemorySecretStore([]);
+      return Effect.gen(function* () {
+        const link = yield* CloudLink.CloudLink;
+        const error = yield* Effect.flip(
+          link.applyRelayConfig({
+            relayUrl: "https://relay.example.test",
+            cloudUserId: "user-123",
+            environmentCredential: "credential",
+            cloudMintPublicKey,
+            endpointRuntime: null,
+            ...testCase.payload,
+          }),
+        );
+        expect(error).toMatchObject({
+          _tag: "CloudLinkRelayConfigInvalidError",
+          field: "field" in testCase ? testCase.field : "relayUrl",
+        });
+        expect(values.has(RELAY_URL_SECRET)).toBe(false);
+        expect(values.has(RELAY_ENVIRONMENT_CREDENTIAL_SECRET)).toBe(false);
+      }).pipe(
+        provideReleaseHarness({
+          store,
+          applyConfigCalls: [],
+          requests: [],
+          relayUrl: testCase.relayUrl,
+        }),
+      );
+    });
   });
 
   it.effect("clears the revoked mark when the environment is linked again", () => {

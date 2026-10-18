@@ -25,6 +25,8 @@ import ForkMigration0002 from "./ForkMigrations/0002_WatchPairingRequests.ts";
 import ForkMigration0003 from "./ForkMigrations/0003_PeerLinks.ts";
 import ForkMigration0004 from "./ForkMigrations/0004_PeerLinkFence.ts";
 
+import ForkMigration0005 from "./ForkMigrations/0005_PeerLinkPublicKey.ts";
+
 export const FORK_MIGRATIONS_TABLE = "shuv_fork_sql_migrations";
 
 export const forkMigrationEntries = [
@@ -32,6 +34,7 @@ export const forkMigrationEntries = [
   [2, "WatchPairingRequests", ForkMigration0002],
   [3, "PeerLinks", ForkMigration0003],
   [4, "PeerLinkFence", ForkMigration0004],
+  [5, "PeerLinkPublicKey", ForkMigration0005],
 ] as const;
 
 export const forkMigrationManifest = forkMigrationEntries.map(([id, name]) => [id, name] as const);

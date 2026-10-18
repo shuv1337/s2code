@@ -252,6 +252,35 @@ it.layer(NodeServices.layer)("host CLI commands", (it) => {
   );
 });
 
+it.layer(NodeServices.layer)("source-install host commands", (it) => {
+  it.effect("calls a source runtime and entry through PowerShell on Windows", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const checkout = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
+      const entry = path.join(checkout, "my src", "bin.mjs");
+      yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+      yield* fs.writeFileString(entry, "");
+      const hostCommand = (platform: NodeJS.Platform) =>
+        resolveHostCliCommand("doctor").pipe(
+          Effect.provideService(HostProcess.ExecutablePath, "C:\\Program Files\\nodejs\\node.exe"),
+          Effect.provideService(HostProcess.Arguments, ["node", entry]),
+          Effect.provideService(HostProcess.WorkingDirectory, checkout),
+          Effect.provideService(HostProcess.IsExecutable, false),
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.provideService(HostProcess.Environment, { PATH: "" }),
+        );
+      expect(yield* hostCommand("win32")).toEqual({
+        command: `& "C:\\Program Files\\nodejs\\node.exe" "${entry}" doctor`,
+        launcher: false,
+      });
+      expect((yield* hostCommand("linux")).command).toBe(
+        `'C:\\Program Files\\nodejs\\node.exe' '${entry}' doctor`,
+      );
+    }).pipe(Effect.scoped),
+  );
+});
+
 it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
   it.effect("recognizes runner caches for both script and executable packages", () =>
     Effect.gen(function* () {

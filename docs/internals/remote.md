@@ -74,8 +74,14 @@ Unlinking on the linking side only forgets the token.
   runs on the linking side first, so a read-only or ended caller is refused
   before anything is sent.
 - **The token goes only to an address that proves it is the linked
-  environment**: its descriptor must report the linked environment id. A LAN
-  address that now belongs to another machine never receives it.
+  environment.** The environment id is public, so a matching descriptor is not
+  enough: linking pins the peer's Ed25519 environment key, every address must
+  sign a fresh nonce with it ([PeerProof](../../apps/server/src/peer/PeerProof.ts)),
+  and no peer request follows a redirect. A copied descriptor, a replayed
+  proof, or an address that moved to another machine never receives the
+  token. A live relay that forwards the nonce to the real peer still passes;
+  only the transport (https or the tailnet) stands between it and the token.
+  Links made before the pin must be linked again.
 - **All callers on one side share the link's single session on the other**,
   so idempotency keys are hashed with the caller's namespace before they
   leave. Without that, two agents reusing a key would collide on the far side.

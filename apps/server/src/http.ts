@@ -47,6 +47,8 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as PeerProof from "./peer/PeerProof.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { WEBHOOK_ROUTE_PREFIX } from "./scheduledTasks/ScheduledTaskService.ts";
 import {
   browserApiCorsAllowedHeaders,
@@ -317,13 +319,22 @@ export const layerServerEnvironmentHttpApi = HttpApiBuilder.group(
   "metadata",
   Effect.fnUntraced(function* (handlers) {
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-    return handlers.handle(
-      "descriptor",
-      Effect.fn("environment.metadata.descriptor")(function* (args) {
-        yield* annotateEnvironmentRequest(args.endpoint.name);
-        return yield* serverEnvironment.getDescriptor;
-      }, traceRelayRequest),
-    );
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    return handlers
+      .handle(
+        "descriptor",
+        Effect.fn("environment.metadata.descriptor")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          return yield* serverEnvironment.getDescriptor;
+        }, traceRelayRequest),
+      )
+      .handle("proof", ({ payload }) =>
+        PeerProof.create(payload.nonce).pipe(
+          Effect.provideService(ServerEnvironment.ServerEnvironment, serverEnvironment),
+          Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
+          Effect.catch((cause) => failEnvironmentInternal("internal_error", cause)),
+        ),
+      );
   }),
 );
 

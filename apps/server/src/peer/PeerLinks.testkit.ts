@@ -12,6 +12,7 @@ import * as Ref from "effect/Ref";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServer from "effect/http/HttpServer";
+import type * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
@@ -65,6 +66,10 @@ export const servePeer = <E, R>(
     const descriptor = yield* Ref.make(initial);
     const bearers = yield* Ref.make<ReadonlyArray<string>>([]);
     const probes = yield* Ref.make(0);
+    const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+    const responses = yield* Ref.make<
+      Readonly<Record<string, HttpServerResponse.HttpServerResponse>>
+    >({});
     const layerEnvironment = Layer.succeed(ServerEnvironment.ServerEnvironment, {
       getEnvironmentId: Ref.get(descriptor).pipe(Effect.map((current) => current.environmentId)),
       getDescriptor: Ref.get(descriptor),
@@ -85,11 +90,13 @@ export const servePeer = <E, R>(
           if (request.url.startsWith("/.well-known/t3/environment")) {
             yield* Ref.update(probes, (count) => count + 1);
           }
+          yield* Ref.update(requests, (seen) => [...seen, request.url]);
           const authorization = request.headers.authorization;
           if (authorization !== undefined) {
             yield* Ref.update(bearers, (seen) => [...seen, authorization]);
           }
-          return yield* httpEffect;
+          const override = (yield* Ref.get(responses))[request.url];
+          return override ?? (yield* httpEffect);
         }),
       { global: true },
     );
@@ -126,6 +133,9 @@ export const servePeer = <E, R>(
     return {
       url,
       auth,
+      responses,
+      requests,
+      secrets: Context.get(authContext, ServerSecretStore.ServerSecretStore),
       descriptor,
       bearers,
       /** How often its descriptor was asked for, as a probe of whether it answers. */

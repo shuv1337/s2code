@@ -41,7 +41,8 @@ import {
   signRelayJwt,
   verifyRelayJwt,
 } from "@t3tools/shared/relayJwt";
-import { isSecureRelayUrl } from "@t3tools/shared/relayUrl";
+import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
+import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -128,8 +129,9 @@ export const CLOUD_REPLAY_MARKER_PREFIXES = [
 ] as const;
 const MANAGED_ENDPOINT_PROVISION_REQUEST_TIMEOUT = Duration.minutes(2);
 const RELAY_CONFIG_FIELD_MESSAGES = {
-  relayUrl: "Relay URL must be a secure absolute HTTPS URL.",
-  relayIssuer: "Relay issuer must be a secure absolute HTTPS URL.",
+  relayUrl: "Relay URL must be the T3 Connect relay this environment is configured for.",
+  relayIssuer:
+    "Relay issuer must be a secure absolute HTTPS URL outside the upstream hosted service.",
   environmentCredential: "Relay environment credential is required.",
   cloudUserId: "Cloud user id is required.",
   cloudMintPublicKey: "Cloud mint public key must be a valid Ed25519 public key.",
@@ -343,11 +345,21 @@ function validateCloudMintPublicKey(
   );
 }
 
+/**
+ * A relay config may only point this environment at the relay it is configured
+ * for. Without one, hosted Connect is off and every relay is refused.
+ */
 function invalidRelayConfigField(
   payload: RelayEnvironmentConfigRequest,
+  configuredRelayUrl: string | null,
 ): CloudLinkRelayConfigInvalidError["field"] | null {
-  if (!isSecureRelayUrl(payload.relayUrl)) return "relayUrl";
-  if (payload.relayIssuer !== undefined && !isSecureRelayUrl(payload.relayIssuer)) {
+  if (
+    configuredRelayUrl === null ||
+    normalizeSecureRelayUrl(payload.relayUrl) !== configuredRelayUrl
+  ) {
+    return "relayUrl";
+  }
+  if (payload.relayIssuer !== undefined && forkHostedOrigin(payload.relayIssuer) === null) {
     return "relayIssuer";
   }
   if (payload.environmentCredential.trim().length === 0) return "environmentCredential";
@@ -355,14 +367,16 @@ function invalidRelayConfigField(
   return null;
 }
 
-function validateRelayConfigPayload(
-  payload: RelayEnvironmentConfigRequest,
-): Effect.Effect<void, CloudLinkRelayConfigInvalidError> {
-  const field = invalidRelayConfigField(payload);
-  return field === null
-    ? Effect.void
-    : Effect.fail(new CloudLinkRelayConfigInvalidError({ field }));
-}
+const validateRelayConfigPayload = (payload: RelayEnvironmentConfigRequest) =>
+  requireRelayUrl.pipe(
+    Effect.option,
+    Effect.flatMap((configured) => {
+      const field = invalidRelayConfigField(payload, Option.getOrNull(configured));
+      return field === null
+        ? Effect.void
+        : Effect.fail(new CloudLinkRelayConfigInvalidError({ field }));
+    }),
+  );
 
 function normalizePemForSignedPayload(value: string): string {
   return value.trim();

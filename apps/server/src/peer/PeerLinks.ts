@@ -24,11 +24,13 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as HttpClient from "effect/http/HttpClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import { isLocalLoopbackHost, isTailnetHost } from "@t3tools/shared/hostClassification";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as PeerProof from "./PeerProof.ts";
 
 /** The redirect registered for a link. Nothing ever listens there: the code comes back in the response. */
 const LINK_REDIRECT_URI = "http://127.0.0.1/t3code-peer-link";
@@ -87,6 +89,7 @@ interface PeerLinkRow {
   readonly last_reached_at: string | null;
   readonly last_error: string | null;
   readonly fenced: number;
+  readonly peer_public_key: string | null;
 }
 
 const decodeUrls = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)));
@@ -131,7 +134,7 @@ const peerOrigin = (url: string) => {
     return Effect.fail(
       new PeerLinkError({
         reason: "unreachable",
-        message: `${url} is plain http, which would send the link's credentials unencrypted. Use its https address, or its Tailscale address.`,
+        message: `${url} is plain http, which would send the link's credentials unencrypted. Use its https address, or its Tailscale MagicDNS (*.ts.net) name or Tailscale IPv6 address.`,
       }),
     );
   }
@@ -146,7 +149,11 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
-  const httpClient = yield* HttpClient.HttpClient;
+  const httpClient = (yield* HttpClient.HttpClient).pipe(
+    HttpClient.transform((response) =>
+      response.pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
+    ),
+  );
   const environment = yield* ServerEnvironment.ServerEnvironment;
 
   /** A fresh name for one link's token; the row records it. */
@@ -167,6 +174,29 @@ const make = Effect.gen(function* () {
       Effect.timeout(probeTimeout(origin)),
       Effect.option,
     );
+
+  const prove = (origin: string, environmentId: EnvironmentId, pinnedKey?: string) =>
+    Effect.gen(function* () {
+      const nonce = Base64Url.encode(yield* crypto.randomBytes(32).pipe(Effect.orDie));
+      const client = yield* clientFor(origin);
+      const proof = yield* client.metadata.proof({ payload: { nonce } });
+      return PeerProof.verify(proof, nonce, environmentId, pinnedKey ?? proof.publicKey)
+        ? Option.some(proof.publicKey)
+        : Option.none<string>();
+    }).pipe(
+      Effect.timeout(probeTimeout(origin)),
+      Effect.catch(() => Effect.succeed(Option.none<string>())),
+    );
+
+  const verifiedDescriptor = (origin: string, environmentId: EnvironmentId, publicKey: string) =>
+    Effect.gen(function* () {
+      const descriptor = yield* describe(origin);
+      if (Option.isNone(descriptor) || descriptor.value.environmentId !== environmentId) {
+        return Option.none();
+      }
+      const proof = yield* prove(origin, environmentId, publicKey);
+      return Option.isSome(proof) ? descriptor : Option.none();
+    });
 
   const toLink = (row: PeerLinkRow) =>
     Effect.gen(function* () {
@@ -337,6 +367,22 @@ const make = Effect.gen(function* () {
           message: `${peer.label} runs a T3 Code version that cannot keep a linked agent's limits. Update it, then link again.`,
         });
       }
+      const publicKey = yield* prove(primary, peer.environmentId);
+      if (Option.isNone(publicKey)) {
+        return yield* new PeerLinkError({
+          reason: "incompatible",
+          message: `${primary} did not prove its environment identity. Update it, then link again.`,
+        });
+      }
+      for (const alternate of origins.slice(1)) {
+        const found = yield* verifiedDescriptor(alternate, peer.environmentId, publicKey.value);
+        if (Option.isNone(found) || !linkLimitsHold(found.value)) {
+          return yield* new PeerLinkError({
+            reason: "incompatible",
+            message: `${alternate} did not prove the same environment identity and link limits as ${primary}.`,
+          });
+        }
+      }
       const issued = yield* signIn(primary, input, `T3 Code · ${self.label}`);
       const now = yield* DateTime.now;
       const linked: PeerLink = {
@@ -360,15 +406,16 @@ const make = Effect.gen(function* () {
       yield* sql`
         INSERT INTO peer_environment_links (
           environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
-          last_reached_at, last_error, fenced
+          last_reached_at, last_error, fenced, peer_public_key
         ) VALUES (
           ${linked.environmentId}, ${secretName}, ${linked.label}, ${urlsJson}, ${linked.access},
           ${DateTime.formatIso(linked.linkedAt)}, ${DateTime.formatIso(linked.expiresAt)},
-          ${DateTime.formatIso(now)}, NULL, 1
+          ${DateTime.formatIso(now)}, NULL, 1, ${publicKey.value}
         )
         ON CONFLICT (environment_id) DO UPDATE SET
           secret_name = excluded.secret_name,
           fenced = excluded.fenced,
+          peer_public_key = excluded.peer_public_key,
           label = excluded.label,
           urls_json = excluded.urls_json,
           access = excluded.access,
@@ -385,27 +432,31 @@ const make = Effect.gen(function* () {
       return linked;
     });
 
-  const statusOf = (link: PeerLink, now: DateTime.Utc) =>
+  const statusOf = (link: PeerLink, row: PeerLinkRow, now: DateTime.Utc) =>
     DateTime.isLessThanOrEqualTo(link.expiresAt, now)
       ? Effect.succeed<PeerLinkStatus>("expired")
-      : Effect.findFirst(link.urls, (url) =>
-          describe(url).pipe(
-            Effect.map(
-              (found) => Option.isSome(found) && found.value.environmentId === link.environmentId,
+      : row.fenced !== 1 || row.peer_public_key === null
+        ? Effect.succeed<PeerLinkStatus>("unreachable")
+        : Effect.findFirst(link.urls, (url) =>
+            verifiedDescriptor(url, link.environmentId, row.peer_public_key!).pipe(
+              Effect.map((found) => Option.isSome(found) && linkLimitsHold(found.value)),
             ),
-          ),
-        ).pipe(
-          Effect.map((answered): PeerLinkStatus =>
-            Option.isSome(answered) ? "reachable" : "unreachable",
-          ),
-        );
+          ).pipe(
+            Effect.map((answered): PeerLinkStatus =>
+              Option.isSome(answered) ? "reachable" : "unreachable",
+            ),
+          );
 
   const list: PeerLinks["Service"]["list"] = Effect.gen(function* () {
-    const links = yield* Effect.forEach(yield* readRows, toLink);
+    const rows = yield* readRows;
     const now = yield* DateTime.now;
     return yield* Effect.forEach(
-      links,
-      (link) => statusOf(link, now).pipe(Effect.map((status) => ({ ...link, status }))),
+      rows,
+      (row) =>
+        Effect.gen(function* () {
+          const link = yield* toLink(row);
+          return { ...link, status: yield* statusOf(link, row, now) };
+        }),
       { concurrency: "unbounded" },
     );
   });
@@ -448,14 +499,15 @@ const make = Effect.gen(function* () {
           message: `The link to ${link.label} expired. Link it again with a new pairing code from ${link.label}.`,
         });
       }
-      // Its token was issued before links were marked as links, so the peer
-      // never fences the work it carries, whatever version it runs now.
-      if (row.value.fenced !== 1) {
+      // Old links either lack a peer identity pin or were issued without the
+      // linked-work fence. Neither can be upgraded by an unauthenticated probe.
+      if (row.value.fenced !== 1 || row.value.peer_public_key === null) {
         return yield* new PeerLinkError({
           reason: "incompatible",
           message: `The link to ${link.label} was made by an older T3 Code. Link it again with a new pairing code from ${link.label}.`,
         });
       }
+      const publicKey = row.value.peer_public_key;
       const stored = yield* secrets.get(row.value.secret_name).pipe(Effect.catch(failStorage));
       if (Option.isNone(stored)) {
         return yield* new PeerLinkError({
@@ -463,11 +515,10 @@ const make = Effect.gen(function* () {
           message: `The link to ${link.label} lost its credential. Link it again.`,
         });
       }
-      // The token goes only to an address that proves it is this peer, so a
-      // reused LAN address or a moved hostname never receives it.
+      // A copied descriptor or recorded proof is insufficient to release the token.
       let fenced = true;
       const url = yield* Effect.findFirst(link.urls, (candidate) =>
-        describe(candidate).pipe(
+        verifiedDescriptor(candidate, environmentId, publicKey).pipe(
           Effect.map((found) => {
             if (Option.isNone(found) || found.value.environmentId !== environmentId) return false;
             fenced = linkLimitsHold(found.value);
