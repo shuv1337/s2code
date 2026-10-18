@@ -1,4 +1,3 @@
-// This policy is independent of Shell so lifecycle and authorization can be tested without a desktop.
 export const DBUS_NAME = "io.github.shuv1337.shuv2code.SnapShot";
 export const DBUS_PATH = "/io/github/shuv1337/shuv2code/SnapShot";
 export const CLIENT_NAMES = [

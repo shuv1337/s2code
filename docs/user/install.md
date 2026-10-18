@@ -59,13 +59,14 @@ Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` a
 an upstream home, live database, or shared runtime cache; use a separate home.
 Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 
-| Task                                             | Command                                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| Start the server and open the web app            | `shuv2code-nightly`                                                      |
-| Start the server without a browser               | `shuv2code-nightly serve`                                                |
-| Keep it running in the background (macOS, Linux) | `shuv2code-nightly service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `shuv2code-nightly update`                                               |
-| Remove it again                                  | `shuv2code-nightly uninstall`                                            |
+| Task                                             | Command                                                                                |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Start the server and open the web app            | `shuv2code-nightly`                                                                    |
+| Start the server without a browser               | `shuv2code-nightly serve`                                                              |
+| Keep it running in the background (macOS, Linux) | `shuv2code-nightly service install` ([details](./background-service.md))               |
+| Move to the newest release                       | `shuv2code-nightly update`                                                             |
+| Reclaim database space                           | `shuv2code-nightly doctor` ([details](./background-service.md#reclaim-database-space)) |
+| Remove it again                                  | `shuv2code-nightly uninstall`                                                          |
 
 These examples use `shuv2code-nightly`, the command a default install creates.
 Stable (`shuv2code`) and preview (`shuv2code-preview`) are reached only by setting

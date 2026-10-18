@@ -65,6 +65,41 @@ it.effect("moves fork migrations out of upstream's ledger, keeping when they ran
   }).pipe(Effect.provide(database)),
 );
 
+// Today's live databases: upstream 1..61, then fork rows holding upstream's 62
+// and 63. Upstream's V2 check rejects foreign names at V2 ids, so the fork
+// track must be reconciled before it runs, or startup fails.
+it.effect("boots a database with fork rows at upstream's 62 and 63 under the V2 check", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations({ toMigrationInclusive: 61 });
+    yield* Identity;
+    yield* Pairing;
+    yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES
+      (62, 'CommandReceiptIdentity'), (63, 'WatchPairingRequests')`;
+    yield* sql`INSERT INTO auth_watch_pairing_requests
+      (device_code_hash, user_code, status, created_at, expires_at)
+      VALUES ('live-hash', 'LIVE01', 'pending', '2026-10-12', '2026-10-13')`;
+
+    assert.deepStrictEqual(yield* runMigrations(), [
+      [62, "ThreadFailureLookupIndex"],
+      [63, "DropUnusedV1Projections"],
+    ]);
+    assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
+      migrationEntries.map(([migration_id, name]) => ({ migration_id, name })),
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
+      forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT device_code_hash, user_code FROM auth_watch_pairing_requests`,
+      [{ device_code_hash: "live-hash", user_code: "LIVE01" }],
+    );
+    assert.deepStrictEqual(yield* runMigrations(), []);
+  }).pipe(Effect.provide(database)),
+);
+
 it.effect("refuses to move fork migrations with upstream ones recorded after them", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

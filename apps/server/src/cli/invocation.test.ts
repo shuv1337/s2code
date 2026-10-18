@@ -17,6 +17,7 @@ vi.mock("../../package.json", async (importOriginal) => {
 
 import {
   formatCliCommand,
+  resolveHostCliCommand,
   resolveRootCliCommand,
   resolveServerInstallation,
   resolveCliCommand,
@@ -111,7 +112,6 @@ it("formats serve suggestions to match the launching command", () => {
 });
 
 it.layer(NodeServices.layer)("root CLI commands", (it) => {
-  /** `sudo t3 browser setup` as this process would render it, with `t3` on PATH or not. */
   const rootCommand = (input: {
     readonly node: string;
     readonly entry: string;
@@ -127,7 +127,6 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       Effect.provideService(HostProcess.Environment, { PATH: input.path ?? "", ...input.env }),
     );
 
-  /** A directory holding an executable `t3`, to stand in for one on PATH. */
   const pathWithT3 = Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -176,13 +175,12 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
         entry: "/tmp/.mount_T3abc/resources/app.asar/apps/server/dist/bin.mjs",
         env: { T3CODE_CLI_PATH: shim },
       };
-      // The desktop app's shim, quoted for the shell and run as root as is.
       expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
-      // Another command on PATH must not redirect this install's recovery action.
+
       expect(yield* rootCommand({ ...desktop, path: yield* pathWithT3 })).toBe(
         `sudo '${shim}' browser setup`,
       );
-      // A standalone binary names itself.
+
       expect(
         yield* rootCommand({
           node: "/opt/t3/t3",
@@ -190,7 +188,7 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
           executable: true,
         }),
       ).toBe("sudo /opt/t3/t3 browser setup");
-      // A stale shim path, then no launcher at all, fall back to plain `t3`.
+
       expect(
         yield* rootCommand({ ...desktop, env: { T3CODE_CLI_PATH: path.join(home, "gone") } }),
       ).toBe('sudo env "PATH=$PATH" shuv2code browser setup');
@@ -200,6 +198,55 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       });
       expect(yield* rootCommand({ ...desktop, env: { T3CODE_CLI_PATH: upstreamShim } })).toBe(
         'sudo env "PATH=$PATH" shuv2code browser setup',
+      );
+    }).pipe(Effect.scoped),
+  );
+});
+
+it.layer(NodeServices.layer)("host CLI commands", (it) => {
+  it.effect("renders a PowerShell command line on Windows", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const shim = path.join(home, "shuv2code.cmd");
+      yield* fs.writeFileString(
+        shim,
+        "@echo off\r\nREM Written by shuv2code: runs the desktop app's bundled CLI.\r\n",
+      );
+      const hostCommand = (
+        platform: NodeJS.Platform,
+        env: Record<string, string>,
+        baseDir = "C:\\Users\\Jane Doe\\.t3",
+      ) =>
+        resolveHostCliCommand("doctor", ["--base-dir", baseDir]).pipe(
+          Effect.provideService(
+            HostProcess.ExecutablePath,
+            "C:\\Program Files\\S2Code\\s2code.exe",
+          ),
+          Effect.provideService(HostProcess.Arguments, [
+            "C:\\Program Files\\S2Code\\s2code.exe",
+            "C:\\Program Files\\S2Code\\resources\\app.asar\\apps\\server\\dist\\bin.mjs",
+          ]),
+          Effect.provideService(HostProcess.IsExecutable, false),
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.provideService(HostProcess.Environment, { PATH: "", ...env }),
+        );
+      // The desktop shim is called through `&`, and each argument is quoted
+      // the PowerShell way: no POSIX single quotes anywhere.
+      expect((yield* hostCommand("win32", { T3CODE_CLI_PATH: shim })).command).toBe(
+        `& "${shim}" doctor "--base-dir" "C:\\Users\\Jane Doe\\.t3"`,
+      );
+      expect((yield* hostCommand("win32", {})).command).toBe(
+        'shuv2code doctor "--base-dir" "C:\\Users\\Jane Doe\\.t3"',
+      );
+      // Typographic quotes also delimit PowerShell strings; doubling keeps them.
+      expect((yield* hostCommand("win32", {}, "C:\\T3\\\u201CArchive\u201D")).command).toBe(
+        'shuv2code doctor "--base-dir" "C:\\T3\\\u201C\u201CArchive\u201D\u201D"',
+      );
+      // POSIX hosts keep single quotes for the same input.
+      expect((yield* hostCommand("linux", { T3CODE_CLI_PATH: shim })).command).toMatch(
+        / doctor --base-dir 'C:\\Users\\Jane Doe\\\.t3'$/,
       );
     }).pipe(Effect.scoped),
   );

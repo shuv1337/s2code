@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
-  AuthAdministrativeScopes,
+  AuthStandardClientScopes,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
   EnvironmentHttpApi,
@@ -39,7 +39,7 @@ const request = (token: string) =>
       headers: { authorization: `Bearer ${token}` },
     }),
   );
-const issuer = { subject: "admin", scopes: AuthAdministrativeScopes };
+const issuer = { subject: "admin", scopes: AuthStandardClientScopes };
 const client = { deviceType: "unknown" as const };
 
 it.layer(NodeServices.layer)("Watch auth", (it) => {
@@ -178,6 +178,35 @@ it.layer(NodeServices.layer)("Watch auth", (it) => {
             .pipe(Effect.flip),
         ).toMatchObject({ _tag: "ServerAuthScopeNotGrantedError" });
       }
+    }).pipe(Effect.provide(layer)),
+  );
+
+  // Default pairings now carry access and relay management. A Watch credential
+  // minted from one, or exchanged asking for them, still gets only Watch's scopes.
+  it.effect("caps Watch credentials at Watch scopes whatever the issuer or request holds", () =>
+    Effect.gen(function* () {
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const grant = yield* auth.issueWatchPairingCredential({
+        issuer,
+        restriction: { threadIds: [ThreadId.make("thread-a")] },
+      });
+      expect(grant.scopes).toEqual(watchClientScopes);
+      const token = yield* auth.exchangeBootstrapCredentialForAccessToken(
+        grant.credential,
+        [...AuthStandardClientScopes],
+        client,
+      );
+      expect(token.scope.split(" ").toSorted()).toEqual([...watchClientScopes].toSorted());
+      const session = yield* auth.authenticateWatchClient(request(token.access_token));
+      expect(session.scopes).toEqual(watchClientScopes);
+      expect(session.restriction).toEqual({ threadIds: [ThreadId.make("thread-a")] });
+      expect(
+        yield* auth
+          .issueWatchPairingCredential({
+            issuer: { subject: session.subject, scopes: AuthStandardClientScopes },
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({ _tag: "ServerAuthScopeNotGrantedError" });
     }).pipe(Effect.provide(layer)),
   );
 

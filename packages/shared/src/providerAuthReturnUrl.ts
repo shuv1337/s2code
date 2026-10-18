@@ -1,7 +1,6 @@
 import { isLoopbackHost } from "./preview.ts";
 import { forkHostedOrigin } from "./hostedConfig.ts";
 
-/** Hosted returns require an explicitly configured fork origin; local returns need none. */
 export function providerAuthReturnUrl(
   value: string | undefined,
   hostedAppUrl?: string,

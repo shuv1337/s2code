@@ -13,18 +13,7 @@ import packageJson from "../../package.json" with { type: "json" };
 
 export type CliRunner = "npx" | "pnpm dlx" | "bunx";
 
-/**
- * How the CLI was launched, judged by where its entry script lives. Each
- * package runner executes out of a distinctive cache/temp layout:
- *
- *   npx      ~/.npm/_npx/<hash>/node_modules/...
- *   pnpm dlx ~/.cache/pnpm/dlx/..., $PNPM_HOME/.pnpm/dlx/...,
- *            or %LOCALAPPDATA%/pnpm-cache/dlx/... on Windows
- *   bunx     ~/.bun/install/cache/... or $TMPDIR/bunx-<uid>-<spec>/...
- *
- * Global installs and repo checkouts match none of these and return null.
- * Detection is best-effort; unknown installs never imply npm ownership.
- */
+/** Detection is best-effort; unknown installs never imply npm ownership. */
 function detectCliRunner(entryPath: string): CliRunner | null {
   const path = entryPath.replaceAll("\\", "/");
   if (path.includes("/_npx/")) {
@@ -70,8 +59,6 @@ export const resolveServerInstallation = Effect.gen(function* () {
       ? null
       : ({ kind: runner === "pnpm dlx" ? "pnpm-dlx" : runner } satisfies ServerInstallation);
   }
-  // A global prefix can contain runner-like names; prove its ownership first.
-  // Windows shims and other package managers need their own ownership proof.
   if (platform === "win32") return null;
   const prefix = match[1] || "/";
   if (
@@ -121,10 +108,6 @@ function suggestedPackageSpec(version: string): string {
       : PRODUCT_ID;
 }
 
-/**
- * Render a context-free fork command: runner paths keep their package runner
- * and channel tag; other paths use the channel-owned command name.
- */
 export function formatCliCommand(input: {
   readonly subcommand: string;
   readonly entryPath: string;
@@ -179,7 +162,6 @@ export const resolveCliCommand = Effect.fnUntraced(function* (
   return forkCliCommand(commandArgs);
 });
 
-/** Quotes `value` for a POSIX shell when it needs it. */
 const shellWord = (value: string) =>
   /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
 export const formatCliHomeFlag = (baseDir: string) => `--base-dir ${shellWord(baseDir)}`;
@@ -223,22 +205,46 @@ const resolveInstallLauncher = Effect.gen(function* () {
 });
 
 /**
- * Track whether the rendered command is a self-contained launcher, so sudo
- * need not preserve a user-installed Node's PATH for it.
+ * Quotes `value` for PowerShell, the default Windows terminal. Always quoted,
+ * so a path reads the same whether or not it holds a space. Inside double
+ * quotes `"` and its typographic forms (which also end the string) double,
+ * and `$` and the backtick are escaped so nothing expands.
  */
-const resolveHostCliCommand = Effect.fnUntraced(function* (subcommand: string) {
+const powershellWord = (value: string) =>
+  `"${value
+    .replaceAll("`", "``")
+    .replaceAll("$", "`$")
+    .replace(/["\u201C\u201D\u201E]/g, "$&$&")}"`;
+
+/** Quotes a word for the host's shell: POSIX, or PowerShell on Windows. */
+const hostShellWord = (platform: NodeJS.Platform, value: string) =>
+  platform === "win32" ? powershellWord(value) : shellWord(value);
+
+/**
+ * The fork command for a person to run on this host, with `args` quoted for the
+ * host's shell. `launcher` tracks whether it is a self-contained launcher, so
+ * sudo need not preserve a user-installed Node's PATH for it.
+ */
+export const resolveHostCliCommand = Effect.fnUntraced(function* (
+  subcommand: string,
+  args: ReadonlyArray<string> = [],
+) {
+  const platform = yield* HostProcess.Platform;
+  const withArgs = (prefix: string) =>
+    [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
   const command = yield* resolveCliCommand(subcommand);
   const launcher = yield* resolveInstallLauncher;
-  return {
-    command,
-    launcher: Option.isSome(launcher) && command === `${shellWord(launcher.value)} ${subcommand}`,
-  };
+  if (Option.isNone(launcher) || command !== `${shellWord(launcher.value)} ${subcommand}`)
+    return { command: withArgs(command), launcher: false };
+  // PowerShell runs a quoted path only through the call operator.
+  const quoted = hostShellWord(platform, launcher.value);
+  const call = platform === "win32" ? `& ${quoted}` : quoted;
+  return { command: withArgs(`${call} ${subcommand}`), launcher: true };
 });
 
 /**
- * Fork setup as root, for an operation a person runs once on the host. `sudo`
- * resets PATH on most distributions, which drops a user-installed Node (nvm,
- * fnm, a tarball) and with it package runners, so the command carries
+ * `sudo` resets PATH on most distributions, which drops a user-installed Node
+ * (nvm, fnm, a tarball) and with it package runners, so the command carries
  * PATH through unless Node is on root's PATH too. An absolute launcher needs
  * neither.
  */
@@ -253,7 +259,6 @@ export const resolveRootCliCommand = (subcommand: string) =>
     return systemNode ? `sudo ${command}` : `sudo env "PATH=$PATH" ${command}`;
   });
 
-/** Debian and Ubuntu's sudo `secure_path`, minus snap. */
 const ROOT_PATH_DIRECTORIES = [
   "/usr/local/sbin",
   "/usr/local/bin",

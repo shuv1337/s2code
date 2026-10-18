@@ -187,8 +187,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* (
   const serviceInstallCommand = yield* resolveCliCommand("service install", serverConfig.baseDir);
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
-  // Archive-distributed targets download from GitHub Releases. The client is
-  // optional so callers without one (tests, npm-only hosts) still construct.
   const httpClient = yield* HttpClient.HttpClient;
   const releaseBaseUrl = Option.getOrUndefined(
     yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option),
@@ -212,8 +210,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* (
     )
       return yield* failWith(SEPARATE_CHANNEL_INSTALL_MESSAGE);
     if (capability === "desktop-managed") {
-      // The desktop feed selects the exact same-channel release to download;
-      // the result carries what it actually got.
       if (desktopAppUpdate.available) {
         return yield* desktopAppUpdate.run(reportProgress);
       }
