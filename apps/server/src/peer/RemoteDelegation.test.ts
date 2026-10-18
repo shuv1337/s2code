@@ -126,8 +126,6 @@ interface BoxThread {
   readonly holdFirstStop: Ref.Ref<boolean>;
   readonly stopStarted: Deferred.Deferred<void>;
   readonly releaseStop: Deferred.Deferred<void>;
-  /** The next stop there is applied whole, but its acknowledgement never reaches here. */
-  readonly loseStopAck: Ref.Ref<boolean>;
   /** Messages sent to the thread there after its launch, each starting a later run. */
   readonly sent: Ref.Ref<ReadonlyArray<string>>;
 }
@@ -166,7 +164,6 @@ const makeBoxThread = Effect.gen(function* () {
     holdFirstStop: yield* Ref.make(false),
     stopStarted: yield* Deferred.make<void>(),
     releaseStop: yield* Deferred.make<void>(),
-    loseStopAck: yield* Ref.make(false),
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
   } satisfies BoxThread;
 });
@@ -415,13 +412,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
             Effect.as({ sequence: 0, storedEvents: [] } as never),
           )
         : Effect.die(`The box does not expect ${command.type}`),
-    stopDelegatedTasks: (input) =>
-      recordStop(input.commandId, "delegated-tasks").pipe(
-        Effect.andThen(Ref.getAndSet(thread.loseStopAck, false)),
-        Effect.flatMap((lost) =>
-          lost ? Effect.die("The acknowledgement was lost.") : Effect.void,
-        ),
-      ),
+    stopDelegatedTasks: (input) => recordStop(input.commandId, "delegated-tasks"),
     sendToThread: (input) =>
       Ref.update(thread.sent, (seen) => [...seen, input.text]).pipe(
         Effect.as({
@@ -1785,32 +1776,6 @@ it.effect("cancel ends the task here even when the link is gone", () =>
       expect(task?.status).toBe("cancelled");
       expect(task?.result).toContain("could not be stopped in Box");
       expect(yield* Ref.get(thread.interrupted)).toBe(0);
-    }),
-  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
-);
-
-it.effect("a cancel whose acknowledgement was lost is stopped there once", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const thread = yield* makeBoxThread;
-      const b = yield* serveBox(thread);
-      const offers = yield* SubscriptionRef.make<
-        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
-      >([]);
-      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
-      const a = yield* makeLaptop(database, offers);
-      yield* a.remote.start();
-      yield* linkTo(a.links, b, "full-access");
-      yield* seedParent(a);
-      const delegated = yield* delegateToBox(a);
-      // The box applies the cancel's stop, but its acknowledgement never comes back.
-      yield* Ref.set(thread.loseStopAck, true);
-      yield* a.call("task_cancel", { taskId: delegated.taskId, clientRequestId: "cancel-lost" });
-      expect(yield* taskResult(a, delegated.taskId)).toMatchObject({ status: "cancelled" });
-      // The follower sends that stop again, which the box recognises as the same one.
-      yield* stoppedTask(a, delegated.taskId);
-      expect(yield* Ref.get(thread.stops)).toEqual(["thread.stop", "delegated-tasks"]);
-      expect(yield* Ref.get(thread.interrupted)).toBe(1);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

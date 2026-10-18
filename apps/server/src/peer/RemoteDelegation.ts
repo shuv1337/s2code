@@ -913,10 +913,7 @@ const make = Effect.gen(function* () {
       }
       // A link that is gone or a machine that is down still cancels the task
       // here; its follower keeps trying to stop it there, across restarts.
-      // It sends the follower's key, so a stop whose acknowledgement was lost
-      // is recognised there when the follower sends it again.
-      const owed = remote.stopCount === undefined ? "stop" : `stop-${remote.stopCount}`;
-      const unstopped = yield* stopThere(there, attached, owed, reason).pipe(
+      const unstopped = yield* stopThere(there, attached, key, reason).pipe(
         Effect.as(undefined),
         Effect.catch((error) => Effect.succeed(error.message)),
       );
