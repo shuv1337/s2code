@@ -3,6 +3,7 @@ import { makeMethods } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { forkMigrationManifest } from "./ForkMigrations.ts";
 import { migrationEntries, runMigrations } from "./Migrations.ts";
 import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
@@ -19,10 +20,7 @@ it.effect("runs fork migrations on their own ledger after upstream's", () =>
     yield* runMigrations();
     assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
-      [
-        { migration_id: 1, name: "CommandReceiptIdentity" },
-        { migration_id: 2, name: "WatchPairingRequests" },
-      ],
+      forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
     );
     const [upstream] = yield* sql<{ id: number }>`
       SELECT MAX(migration_id) AS id FROM effect_sql_migrations`;
@@ -56,7 +54,7 @@ it.effect("moves fork migrations out of upstream's ledger, keeping when they ran
     );
     assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name, created_at FROM shuv_fork_sql_migrations
-        ORDER BY migration_id`,
+        WHERE name IN ('CommandReceiptIdentity', 'WatchPairingRequests') ORDER BY migration_id`,
       [
         { migration_id: 1, name: "CommandReceiptIdentity", created_at: "2026-10-10 10:00:00" },
         { migration_id: 2, name: "WatchPairingRequests", created_at: "2026-10-12 12:00:00" },

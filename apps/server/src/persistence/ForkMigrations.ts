@@ -7,8 +7,12 @@
  * ids would make upstream's migration at that id never run. Keeping
  * `Migrations.ts` identical to upstream's lets upstream migrations merge as is.
  *
- * Add fork-only migrations here, numbered after the last entry, never in
- * `Migrations.ts`.
+ * `Migrations.ts` holds only migrations already on upstream's main branch.
+ * Add fork-only migrations here, numbered after the last entry, and so are
+ * migrations ported from upstream pull requests that upstream has not merged:
+ * their ids are not final until it does. When upstream merges one, add a
+ * reconcile step that records upstream's id as applied for databases that ran
+ * it on this track, then drop it here.
  */
 
 import * as Effect from "effect/Effect";
@@ -17,12 +21,17 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import ForkMigration0001 from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import ForkMigration0002 from "./ForkMigrations/0002_WatchPairingRequests.ts";
+// Upstream peer links (pingdotgg/t3code#16655, #16695), unmerged upstream as 063/064.
+import ForkMigration0003 from "./ForkMigrations/0003_PeerLinks.ts";
+import ForkMigration0004 from "./ForkMigrations/0004_PeerLinkFence.ts";
 
 export const FORK_MIGRATIONS_TABLE = "shuv_fork_sql_migrations";
 
 export const forkMigrationEntries = [
   [1, "CommandReceiptIdentity", ForkMigration0001],
   [2, "WatchPairingRequests", ForkMigration0002],
+  [3, "PeerLinks", ForkMigration0003],
+  [4, "PeerLinkFence", ForkMigration0004],
 ] as const;
 
 export const forkMigrationManifest = forkMigrationEntries.map(([id, name]) => [id, name] as const);

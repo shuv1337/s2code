@@ -3,6 +3,7 @@ import { makeMethods } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { forkMigrationManifest } from "./ForkMigrations.ts";
 import { migrationEntries, runMigrations } from "./Migrations.ts";
 import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
@@ -23,10 +24,7 @@ it.effect("upgrades the installed nightly with review guides at 61", () =>
     assert.deepStrictEqual(yield* runMigrations(), upstreamAfter61);
     assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
-      [
-        { migration_id: 1, name: "CommandReceiptIdentity" },
-        { migration_id: 2, name: "WatchPairingRequests" },
-      ],
+      forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
     );
     const columns = yield* sql<{ name: string }>`PRAGMA table_info(orchestration_command_receipts)`;
     assert.ok(columns.some((column) => column.name === "payload_fingerprint"));
@@ -62,10 +60,7 @@ it.effect.each([false, true])(
       );
       assert.deepStrictEqual(
         yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
-        [
-          { migration_id: 1, name: "CommandReceiptIdentity" },
-          { migration_id: 2, name: "WatchPairingRequests" },
-        ],
+        forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
       );
       assert.equal((yield* sql`SELECT * FROM auth_watch_pairing_requests`).length, paired ? 1 : 0);
       assert.deepStrictEqual(yield* runMigrations(), []);
