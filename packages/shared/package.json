@@ -139,6 +139,10 @@
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"
     },
+    "./terminalOutput": {
+      "types": "./src/terminalOutput.ts",
+      "import": "./src/terminalOutput.ts"
+    },
     "./toolOutput": {
       "types": "./src/toolOutput.ts",
       "import": "./src/toolOutput.ts"
@@ -246,6 +250,10 @@
     "./keybindings": {
       "types": "./src/keybindings.ts",
       "import": "./src/keybindings.ts"
+    },
+    "./threadTranscript": {
+      "types": "./src/threadTranscript.ts",
+      "import": "./src/threadTranscript.ts"
     },
     "./threadReference": {
       "types": "./src/threadReference.ts",

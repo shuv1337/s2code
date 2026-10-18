@@ -66,10 +66,6 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
   yield* Effect.log("[cli] Applied development icon overrides to dist/client");
 });
 
-// ---------------------------------------------------------------------------
-// build subcommand
-// ---------------------------------------------------------------------------
-
 const buildCmd = Command.make(
   "build",
   {
@@ -104,10 +100,6 @@ const buildCmd = Command.make(
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
-
-// ---------------------------------------------------------------------------
-// build-exe subcommand
-// ---------------------------------------------------------------------------
 
 const buildExeCmd = Command.make(
   "build-exe",
@@ -164,10 +156,6 @@ const buildExeCmd = Command.make(
   ),
 );
 
-// ---------------------------------------------------------------------------
-// publish subcommand
-// ---------------------------------------------------------------------------
-
 /**
  * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
  * every `@shuv2code/t3-<platform>.tgz` first, `shuv2code.tgz` last, so
@@ -191,8 +179,6 @@ const publishCmd = Command.make(
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
-      // npm runs with cwd set to the packages dir below, so tarball paths are
-      // resolved once here rather than joined twice.
       const packagesDir = path.resolve(config.packagesDir);
       const scopeDir = path.join(packagesDir, "@shuv2code");
       const launcherTarball = path.join(packagesDir, "shuv2code.tgz");
@@ -246,7 +232,6 @@ const publishCmd = Command.make(
         );
       });
 
-      // Each publish takes about 17s, so the platform packages go at once.
       yield* publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish });
     }),
 ).pipe(
@@ -254,10 +239,6 @@ const publishCmd = Command.make(
     "Publish the complete @shuv2code platform set and then the shuv2code launcher to npm.",
   ),
 );
-
-// ---------------------------------------------------------------------------
-// root command
-// ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
   Command.withDescription("T3 server build & publish CLI."),

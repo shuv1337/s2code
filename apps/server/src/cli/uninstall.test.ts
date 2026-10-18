@@ -73,6 +73,7 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
             logPath: path.join(root, "upstream.log"),
           }),
           install: () => Effect.die("not invoked"),
+          withStopped: () => Effect.die("not invoked"),
           restart: Effect.succeed(false),
           uninstall: Effect.sync(() => {
             removals++;

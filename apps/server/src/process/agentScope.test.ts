@@ -8,10 +8,18 @@ import { describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import * as Layer from "effect/Layer";
 import { ChildProcessSpawner } from "effect/process";
 
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
-import { agentSliceMemoryLimits, classifyScope, make, type ScopeState } from "./agentScope.ts";
+import {
+  agentSliceMemoryLimits,
+  classifyScope,
+  make,
+  ownedAgentSlice,
+  type ScopeState,
+} from "./agentScope.ts";
 
 const GiB = 1024 ** 3;
 
@@ -28,7 +36,6 @@ describe("classifyScope", () => {
     expect(classifyScope({ ...running, activeState: "failed", result: "oom-kill" })).toBe(
       "oom-killed",
     );
-    // The agent pipe can close before systemd handles the kill.
     expect(classifyScope({ ...running, oomKills: 1 })).toBe("stopping");
     expect(classifyScope({ ...running, populated: false })).toBe("stopping");
     expect(classifyScope({ ...running, activeState: "deactivating" })).toBe("stopping");
@@ -55,14 +62,13 @@ describe("agentSliceMemoryLimits", () => {
   });
 });
 
-// Runs the real service against a fake user manager. `units` holds the
-// ActiveState and Result that `systemctl show` reports for each scope.
 const withFakeSystemd = <A, E>(
   body: (input: {
     readonly scope: Effect.Success<typeof make>;
     readonly units: Map<string, { activeState: string; result: string }>;
     readonly calls: Array<{ command: string; args: ReadonlyArray<string> }>;
     readonly awaitReset: (unit: string) => Effect.Effect<void>;
+    readonly stateDir: string;
   }) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
@@ -111,22 +117,34 @@ const withFakeSystemd = <A, E>(
       Effect.provideService(HostProcess.Platform, "linux"),
       Effect.provideService(HostProcess.Environment, { PATH: bin, XDG_RUNTIME_DIR: "/run/user/1" }),
     );
+    const { stateDir } = yield* ServerConfig.ServerConfig;
     return yield* body({
       scope,
       units,
       calls,
       awaitReset: (unit) => Deferred.await(resetSignal(unit)),
+      stateDir,
     }).pipe(
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(bin, { recursive: true, force: true }))),
     );
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-scope-" }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ),
+  );
 
 const unitOf = (launch: { readonly args: ReadonlyArray<string> }) =>
   launch.args.find((arg) => arg.startsWith("--unit="))?.slice("--unit=".length) ?? "";
 
+const sliceOf = (launch: { readonly args: ReadonlyArray<string> }) =>
+  launch.args.find((arg) => arg.startsWith("--slice="))?.slice("--slice=".length) ?? "";
+
 describe("AgentScope service", () => {
   it.effect("creates and limits the fork slice for both agents and terminals", () =>
-    withFakeSystemd(({ scope, calls }) =>
+    withFakeSystemd(({ scope, calls, stateDir }) =>
       Effect.gen(function* () {
         const agent = yield* scope.wrap({
           command: "agent",
@@ -135,8 +153,9 @@ describe("AgentScope service", () => {
           threadId: "thread",
         });
         const terminal = yield* scope.wrap({ command: "agent", args: [], name: "terminal" });
+        expect(ownedAgentSlice(stateDir)).toMatch(/^app-shuv2code-agents-[0-9a-f]{12}\.slice$/);
         for (const launch of [agent, terminal]) {
-          expect(launch.args).toContain("--slice=app-shuv2code-agents.slice");
+          expect(launch.args).toContain(`--slice=${ownedAgentSlice(stateDir)}`);
           expect(unitOf(launch)).toMatch(/^shuv2code-(claude|terminal)-[0-9a-f]{8}\.scope$/);
         }
         const probe = calls.find(({ args }) => args.includes("--scope"));
@@ -159,7 +178,7 @@ describe("AgentScope service", () => {
   it.effect(
     "inspects and cleans only its exact tracked scopes, never upstream or other fork scopes",
     () =>
-      withFakeSystemd(({ scope, units, calls, awaitReset }) =>
+      withFakeSystemd(({ scope, units, calls, awaitReset, stateDir }) =>
         Effect.gen(function* () {
           const foreign = new Map([
             ["app-t3code-agents.slice", { activeState: "failed", result: "oom-kill" }],
@@ -199,7 +218,9 @@ describe("AgentScope service", () => {
           expect(cleanup.map(({ args }) => args[2]).sort()).toEqual([...own].sort());
           const inspection = calls.filter(({ args }) => args[1] === "show");
           expect(inspection.length).toBeGreaterThan(0);
-          expect(inspection.every(({ args }) => own.includes(args[2] ?? ""))).toBe(true);
+          // Besides its scopes, it inspects only this server's own slice at startup.
+          const inspectable = [...own, ownedAgentSlice(stateDir)];
+          expect(inspection.every(({ args }) => inspectable.includes(args[2] ?? ""))).toBe(true);
           expect(
             calls.some(
               ({ args }) =>
@@ -218,16 +239,13 @@ describe("AgentScope service", () => {
         units.set(unitOf(first), { activeState: "failed", result: "oom-kill" });
         const second = yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
         units.set(unitOf(second), { activeState: "active", result: "success" });
-        // The older scope was OOM-killed, but the newest one is still running.
         expect(yield* scope.oomKilled("a")).toBe(false);
 
         units.set(unitOf(second), { activeState: "failed", result: "oom-kill" });
         expect(yield* scope.oomKilled("a")).toBe(true);
-        // A retried failure reads the same, even after the failed unit is reset.
         units.delete(unitOf(second));
         expect(yield* scope.oomKilled("a")).toBe(true);
 
-        // The next session may run without a scope, for example on Cursor.
         yield* scope.clear("a");
         expect(yield* scope.oomKilled("a")).toBe(false);
       }),
@@ -244,6 +262,36 @@ describe("AgentScope service", () => {
         }
         units.set(unitOf(live), { activeState: "failed", result: "oom-kill" });
         expect(yield* scope.oomKilled("live")).toBe(true);
+      }),
+    ),
+  );
+
+  it.effect("stops agents a killed server left before the first launch", () =>
+    withFakeSystemd(({ scope, units, calls, stateDir }) =>
+      Effect.gen(function* () {
+        units.set(ownedAgentSlice(stateDir), { activeState: "active", result: "success" });
+        const agent = yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
+        const stops = calls.filter(({ args: [, verb] }) => verb === "stop").map(({ args }) => args);
+        expect(stops).toEqual([["--user", "stop", ownedAgentSlice(stateDir)]]);
+        expect(sliceOf(agent)).toBe(ownedAgentSlice(stateDir));
+        expect(agent.args).toContain("--property=TimeoutStopSec=10s");
+        const terminal = yield* scope.wrap({
+          command: "agent",
+          args: [],
+          name: "terminal",
+          survivesRestart: true,
+        });
+        expect(sliceOf(terminal)).toBe("app-shuv2code-agents.slice");
+        expect(calls.filter(({ args: [, verb] }) => verb === "stop")).toHaveLength(1);
+      }),
+    ),
+  );
+
+  it.effect("leaves a quiet slice alone", () =>
+    withFakeSystemd(({ scope, calls }) =>
+      Effect.gen(function* () {
+        yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
+        expect(calls.filter(({ args: [, verb] }) => verb === "stop")).toEqual([]);
       }),
     ),
   );

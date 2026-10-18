@@ -51,12 +51,13 @@ describe("desktop Codex callback helper", () => {
     });
     expect(received).toBe(expected);
   });
-  it("returns hosted web to the exact instance and environment without putting the code in its query", async () => {
+  it("returns the web app to the exact instance and environment without putting the code in its query", async () => {
     const authorizationUrl = request(await freePort());
     const expected = callback(authorizationUrl);
     const input = {
       authorizationUrl,
-      returnUrl: "https://app.t3.codes/settings/providers?environmentId=remote-one&instanceId=work",
+      returnUrl:
+        "http://127.0.0.1:3773/settings/providers?environmentId=remote-one&instanceId=work",
       environmentId: EnvironmentId.make("remote-one"),
       instanceId: ProviderInstanceId.make("work"),
       flowId: "flow-one",

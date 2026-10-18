@@ -101,7 +101,6 @@ function assertOwnership(installed: Buffer | undefined, entry: Buffer | undefine
     throw new Error("Cannot establish capture helper ownership without its fork desktop entry.");
 }
 
-/** No install on launch: writes happen only after the user chooses Install helper. */
 export class KdeCaptureSetup {
   private readonly paths: KdeCapturePaths;
   constructor(paths: KdeCapturePaths) {
@@ -170,7 +169,6 @@ export class KdeCaptureSetup {
     const entry = await regularFile(desktop);
     const installed = await regularFile(executable);
     assertOwnership(installed, entry);
-    // Never overwrite/follow a symlink, including the installation directory itself.
     const directory = NodePath.dirname(executable);
     if (action === "remove-kde-helper") {
       await NodeFSP.unlink(executable).catch((error: NodeJS.ErrnoException) => {
@@ -206,7 +204,6 @@ export class KdeCaptureSetup {
     await run("kbuildsycoca6", ["--noincremental"]);
     // AppImages change XDG search paths, and KService caches are also locale-specific.
     // Refresh Plasma's cache in its session environment, not just the app's cache.
-    // Non-systemd sessions use the direct refresh and atomic directory notification above.
     await run("systemd-run", [
       "--user",
       "--quiet",
