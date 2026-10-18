@@ -39,6 +39,7 @@ function resolveOptions(config, options) {
     swiftVersion: options.swiftVersion ?? null,
     strictConcurrency: options.strictConcurrency ?? "complete",
     displayName: options.displayName ?? config.name,
+    iconProject: options.iconProject ?? null,
     marketingVersion: config.ios?.version ?? config.version ?? "1.0",
     buildNumber: config.ios?.buildNumber ?? "1",
   };
@@ -114,10 +115,14 @@ function listSourceFiles(sourcesRoot) {
   return { swiftFiles: swiftFiles.sort(), assetCatalog };
 }
 
-function buildSettings(opts, mainSwiftVersion, { assetCatalogRoot, debug }) {
+function buildSettings(opts, mainSwiftVersion, { assetCatalogRoot, debug, iconName }) {
   const hasAsset = (name) => assetCatalogRoot && fs.existsSync(path.join(assetCatalogRoot, name));
   const settings = {
-    ...(hasAsset("AppIcon.appiconset") ? { ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon" } : {}),
+    ...(iconName
+      ? { ASSETCATALOG_COMPILER_APPICON_NAME: iconName }
+      : hasAsset("AppIcon.appiconset")
+        ? { ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon" }
+        : {}),
     ...(hasAsset("AccentColor.colorset")
       ? { ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: "AccentColor" }
       : {}),
@@ -273,6 +278,42 @@ function applyWatchTarget(project, opts, { projectName, platformProjectRoot, pro
     sourceBuildFiles.push(ref(buildFileUuid, `${name} in Sources`));
   }
   const resourceBuildFiles = [];
+  let iconName = null;
+  if (opts.iconProject) {
+    const iconProject = path.resolve(projectRoot, opts.iconProject);
+    const iconProjectName = path.basename(iconProject);
+    if (!fs.statSync(iconProject, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`withT3Watch: Icon Composer project not found at ${iconProject}.`);
+    }
+    if (path.extname(iconProjectName) !== ".icon") {
+      throw new Error(`withT3Watch: iconProject must point to a .icon directory.`);
+    }
+    iconName = path.basename(iconProjectName, ".icon");
+    const fileRefUuid = id(`file:${iconProjectName}`);
+    const buildFileUuid = id(`build:${iconProjectName}`);
+    put(
+      objects,
+      "PBXFileReference",
+      fileRefUuid,
+      {
+        includeInIndex: 0,
+        lastKnownFileType: "unknown",
+        name: q(iconProjectName),
+        path: q(`${opts.targetName}/${iconProjectName}`),
+        sourceTree: "SOURCE_ROOT",
+      },
+      iconProjectName,
+    );
+    put(
+      objects,
+      "PBXBuildFile",
+      buildFileUuid,
+      { fileRef: fileRefUuid, fileRef_comment: iconProjectName },
+      `${iconProjectName} in Resources`,
+    );
+    groupChildren.push(ref(fileRefUuid, iconProjectName));
+    resourceBuildFiles.push(ref(buildFileUuid, `${iconProjectName} in Resources`));
+  }
   if (assetCatalog) {
     const fileRefUuid = id(`file:${assetCatalog}`);
     const buildFileUuid = id(`build:${assetCatalog}`);
@@ -418,6 +459,7 @@ function applyWatchTarget(project, opts, { projectName, platformProjectRoot, pro
         buildSettings: buildSettings(opts, mainSwiftVersion, {
           assetCatalogRoot,
           debug: name === "Debug",
+          iconName,
         }),
         name: q(name),
       },
@@ -620,6 +662,12 @@ function withWatchTargetFiles(config, opts) {
     (cfg) => {
       const dir = path.join(cfg.modRequest.platformProjectRoot, opts.targetName);
       fs.mkdirSync(dir, { recursive: true });
+      if (opts.iconProject) {
+        const source = path.resolve(cfg.modRequest.projectRoot, opts.iconProject);
+        const destination = path.join(dir, path.basename(source));
+        fs.rmSync(destination, { recursive: true, force: true });
+        fs.cpSync(source, destination, { recursive: true });
+      }
       // Users point the Watch at `npx t3` servers on their LAN over plain
       // HTTP, the same reason the iPhone app allows arbitrary loads.
       fs.writeFileSync(
@@ -629,7 +677,7 @@ function withWatchTargetFiles(config, opts) {
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Record instructions to transcribe on your T3 server.</string>
+  <string>Record instructions to transcribe on your S2Code server.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoads</key>

@@ -28,7 +28,7 @@ struct SetupView: View {
         start
       }
     }
-    .navigationTitle("T3 Watch")
+    .navigationTitle("S2Code")
     .task { await model.resumeDevicePairing() }
   }
 

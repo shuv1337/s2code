@@ -499,6 +499,7 @@ const config: ExpoConfig = {
         // attach one to its App ID, so requesting it only breaks device signing.
         groupIdentifier: null,
         displayName: variant.displayName,
+        iconProject: variant.assets.iosIcon,
       },
     ],
     "./plugins/withAndroidCleartextTraffic.cjs",

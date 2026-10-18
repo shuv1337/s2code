@@ -162,7 +162,7 @@ struct ThreadView: View {
             Label("Plan awaiting review", systemImage: "list.bullet.clipboard")
           }
         } footer: {
-          Text("Respond on another T3 client.")
+          Text("Respond on another S2Code client.")
         }
         .foregroundStyle(stale ? Color.secondary : .orange)
       }

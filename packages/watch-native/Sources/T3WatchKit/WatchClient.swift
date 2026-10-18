@@ -174,7 +174,7 @@ public struct WatchClient: Sendable {
 
   /// Starts device-code pairing. Unauthenticated; the user approves `userCode` on the environment.
   public static func startPairing(
-    origin: URL, clientLabel: String = "T3 Watch", session: URLSession = .shared,
+    origin: URL, clientLabel: String = "S2Code Watch", session: URLSession = .shared,
     transport: (any WatchHTTPTransport)? = nil
   ) async throws(WatchClientError) -> WatchPairingStart {
     struct Body: Encodable {

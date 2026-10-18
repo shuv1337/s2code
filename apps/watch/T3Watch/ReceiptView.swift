@@ -137,7 +137,7 @@ struct ReceiptView: View {
       Text("\(message) (\(code))").font(.caption2)
     case .unresolvable(let reason):
       Label("Outcome unknown", systemImage: "questionmark.diamond").foregroundStyle(.yellow)
-      Text("\(reason) Check the thread in T3.").font(.caption2)
+      Text("\(reason) Check the thread in S2Code.").font(.caption2)
     }
   }
 
