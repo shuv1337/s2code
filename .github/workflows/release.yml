@@ -246,3 +246,21 @@ jobs:
           path: prepared
       - name: Draft, verify, publish npm when ready, expose feeds and index last
         run: node scripts/fork-release.ts publish --execute
+      # Runs only after the publish step succeeds; a Discord failure never fails the release.
+      - name: Announce the release on Discord
+        continue-on-error: true
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          npm_args=()
+          if [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then npm_args=(--npm shuv2code); fi
+          status=0
+          bash .github/scripts/notify-discord-release.sh \
+            --project S2Code \
+            --version "v${RELEASE_VERSION}" \
+            "${npm_args[@]}" \
+            --link "release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${RELEASE_VERSION}" \
+            || status=$?
+          # Exit 2 means the webhook secret is unset: skip quietly.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then exit "$status"; fi
