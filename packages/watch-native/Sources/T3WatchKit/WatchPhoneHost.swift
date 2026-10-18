@@ -32,7 +32,9 @@ private struct PhoneHTTPTransport: WatchHTTPTransport {
   func send(_ request: URLRequest) async throws -> WatchHTTPResponse {
     let task = Task { try await DirectWatchTransport(session: session).send(request) }
     let background = await MainActor.run {
-      UIApplication.shared.beginBackgroundTask(withName: "S2Code Watch request") { task.cancel() }
+      UIApplication.shared.beginBackgroundTask(withName: "S2Code Watch request") { @Sendable in
+        task.cancel()
+      }
     }
     do {
       let response = try await withTaskCancellationHandler { try await task.value }

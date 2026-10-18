@@ -87,6 +87,26 @@ public final class T3NativeControlsModule: Module {
     AsyncFunction("shareFileFromSource") { (url: URL, title: String, identifier: String, promise: Promise) in
       try self.shareFile(url: url, title: title, sourceIdentifier: identifier, promise: promise)
     }.runOnQueue(.main)
+
+    AsyncFunction("getWatchCompanionStatus") { () -> [String: Any] in
+      MainActor.assumeIsolated { T3WatchPairing.companionStatus }
+    }.runOnQueue(.main)
+
+  }
+
+  @JS
+  @MainActor
+  func offerWatchPairing(origin: String, credential: String, mode: String, label: String,
+    issuedAt: String, expiresAt: String) async throws -> String {
+    guard let origin = URL(string: origin) else { throw URLError(.badURL) }
+    return try await T3WatchPairing.offer(
+      origin: origin,
+      credential: credential,
+      mode: mode,
+      label: label,
+      issuedAt: issuedAt,
+      expiresAt: expiresAt
+    )
   }
 
   // UIKit presenters are main-actor isolated rather than run on the JS thread
