@@ -90,17 +90,18 @@ public final class WatchPairingOfferStore: Sendable {
   private let state: Mutex<WatchPairingOfferQueue>
 
   public init(
-    directory: URL, fileName: String = "watch-pairing-offers.json", now: Date = Date()
+    directory: URL, fileName: String = "watch-pairing-offers.json", now: Date = Date(),
+    read: ((URL) throws -> Data?)? = nil
   ) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     fileURL = directory.appendingPathComponent(fileName)
-    let saved = (try? Data(contentsOf: fileURL)).flatMap {
-      try? JSONDecoder.watch.decode(WatchPairingOfferQueue.self, from: $0)
-    }
-    var restored = saved ?? WatchPairingOfferQueue()
+    let savedData = try (read ?? Self.read)(fileURL)
+    var restored = try savedData.map {
+      try JSONDecoder.watch.decode(WatchPairingOfferQueue.self, from: $0)
+    } ?? WatchPairingOfferQueue()
     restored.prune(now: now)
     state = Mutex(restored)
-    if FileManager.default.fileExists(atPath: fileURL.path) {
+    if savedData != nil {
       try Self.persist(restored, to: fileURL)
     }
   }
@@ -145,6 +146,11 @@ public final class WatchPairingOfferStore: Sendable {
     var values = URLResourceValues()
     values.isExcludedFromBackup = true
     try protectedURL.setResourceValues(values)
+  }
+
+  private static func read(_ fileURL: URL) throws -> Data? {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+    return try Data(contentsOf: fileURL)
   }
 }
 

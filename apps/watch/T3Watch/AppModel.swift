@@ -35,7 +35,8 @@ final class AppModel {
   let store: SubmissionStore?
   private(set) var cache: SnapshotCache?
   private let pairingStore: PairingStore?
-  private let pairingOfferStore: WatchPairingOfferStore?
+  private var pairingOfferStore: WatchPairingOfferStore?
+  private let pairingOfferDirectory: URL?
   private let accountStore: any EnvironmentAccountStore
   private var pairingTask: Task<Void, Never>?
   private var pairingRuns = PairingRunGate()
@@ -44,17 +45,27 @@ final class AppModel {
   init(credentialStore: any CredentialStore = KeychainCredentialStore(),
     accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
     self.accountStore = accountStore
+    let directory: URL?
     do {
-      let directory = try WatchStorage.directory()
-      store = try SubmissionStore(directory: directory)
-      pairingStore = try? PairingStore(directory: directory)
-      pairingOfferStore = try? WatchPairingOfferStore(directory: directory)
+      directory = try WatchStorage.directory()
     } catch {
+      directory = nil
+      startupError = "Local storage unavailable: \(error.localizedDescription)"
+    }
+    pairingOfferDirectory = directory
+    pairingOfferStore = nil
+    if let directory {
+      do {
+        store = try SubmissionStore(directory: directory)
+      } catch {
+        store = nil
+        startupError = "Local storage unavailable: \(error.localizedDescription)"
+      }
+      pairingStore = try? PairingStore(directory: directory)
+    } else {
       store = nil
       cache = nil
       pairingStore = nil
-      pairingOfferStore = nil
-      startupError = "Local storage unavailable: \(error.localizedDescription)"
     }
     do {
       accounts = try loadEnvironmentAccounts(from: accountStore, migrating: credentialStore)
@@ -103,7 +114,12 @@ final class AppModel {
   }
 
   func receivePairingOffer(_ offer: WatchPairingOffer) async throws -> WatchPairingDelivery {
-    guard let pairingOfferStore else { throw SetupError.pairingStorageUnavailable }
+    let pairingOfferStore: WatchPairingOfferStore
+    do {
+      pairingOfferStore = try openPairingOfferStore()
+    } catch {
+      throw SetupError.pairingStorageUnavailable
+    }
     guard try pairingOfferStore.enqueue(offer, now: Date()) else {
       throw SetupError.invalidPairingOffer
     }
@@ -115,7 +131,7 @@ final class AppModel {
 
   @discardableResult
   func processPendingPairingOffers() async -> WatchPairingDelivery {
-    guard let pairingOfferStore else { return .queued }
+    guard let pairingOfferStore = try? openPairingOfferStore() else { return .queued }
     return await pairingOfferProcessor.process(
       next: {
         try pairingOfferStore.next(
@@ -180,15 +196,19 @@ final class AppModel {
     var next = accounts
     let removed = next.selected
     if let id = next.selectedId { next.remove(id) }
-    let previousCutoff = removed.flatMap { pairingOfferStore?.removalCutoff(for: $0.credentials.origin) }
+    var cutoffStore: WatchPairingOfferStore?
+    var previousCutoff: Date?
     do {
       if let removed {
-        try pairingOfferStore?.setRemovalCutoff(Date(), for: removed.credentials.origin)
+        let pairingOfferStore = try openPairingOfferStore()
+        cutoffStore = pairingOfferStore
+        previousCutoff = pairingOfferStore.removalCutoff(for: removed.credentials.origin)
+        try pairingOfferStore.setRemovalCutoff(Date(), for: removed.credentials.origin)
       }
       try accountStore.save(next)
     } catch {
       if let removed {
-        try? pairingOfferStore?.setRemovalCutoff(previousCutoff, for: removed.credentials.origin)
+        try? cutoffStore?.setRemovalCutoff(previousCutoff, for: removed.credentials.origin)
       }
       startupError = "Could not remove environment: \(error.localizedDescription)"
       return
@@ -299,6 +319,14 @@ final class AppModel {
       url.host() != nil
     else { throw SetupError.invalidOrigin }
     return url
+  }
+
+  private func openPairingOfferStore() throws -> WatchPairingOfferStore {
+    if let pairingOfferStore { return pairingOfferStore }
+    guard let pairingOfferDirectory else { throw SetupError.pairingStorageUnavailable }
+    let opened = try WatchPairingOfferStore(directory: pairingOfferDirectory)
+    pairingOfferStore = opened
+    return opened
   }
 
   private func configure(_ account: WatchEnvironmentAccount) {

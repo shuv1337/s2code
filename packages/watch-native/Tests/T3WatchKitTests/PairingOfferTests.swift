@@ -7,6 +7,10 @@ private enum PairingAttemptFailure: Error {
   case transport
 }
 
+private enum PairingOfferReadFailure: Error {
+  case protectedDataUnavailable
+}
+
 @MainActor
 private final class PairingAttemptHarness {
   private var completions: [Int: CheckedContinuation<Void, any Error>] = [:]
@@ -91,6 +95,33 @@ struct PairingOfferTests {
     #expect(try restored.next(now: now.addingTimeInterval(11), phoneReachable: true) == nil)
     let values = try restored.fileURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
     #expect(values.isExcludedFromBackup == true)
+  }
+
+  @Test func failedReadPreservesExistingDataAndLaterOpenRecovers() throws {
+    let now = Date(timeIntervalSince1970: 2_750)
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let expected = offer(issuedAt: now, expiresAt: now.addingTimeInterval(300))
+    let store = try WatchPairingOfferStore(directory: directory, now: now)
+    #expect(try store.enqueue(expected, now: now))
+    try store.setRemovalCutoff(now.addingTimeInterval(-1), for: origin)
+    let originalData = try Data(contentsOf: store.fileURL)
+    var protectedDataAvailable = false
+    let read: (URL) throws -> Data? = { url in
+      guard protectedDataAvailable else { throw PairingOfferReadFailure.protectedDataUnavailable }
+      return try Data(contentsOf: url)
+    }
+
+    #expect(throws: PairingOfferReadFailure.self) {
+      _ = try WatchPairingOfferStore(directory: directory, now: now, read: read)
+    }
+    #expect(try Data(contentsOf: store.fileURL) == originalData)
+
+    protectedDataAvailable = true
+    let recovered = try WatchPairingOfferStore(directory: directory, now: now, read: read)
+    #expect(try recovered.next(now: now, phoneReachable: true) == expected)
+    #expect(recovered.removalCutoff(for: origin) == now.addingTimeInterval(-1))
   }
 
   @Test func delayedOfferIssuedBeforeRemovalIsIgnored() {
