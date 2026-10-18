@@ -2263,7 +2263,11 @@ const layerWsRpc = (
               ttl: Duration.minutes(5),
             })
             .pipe(
-              Effect.map(({ credential, expiresAt }) => ({ credential, expiresAt })),
+              Effect.map(({ credential, createdAt, expiresAt }) => ({
+                credential,
+                issuedAt: createdAt,
+                expiresAt,
+              })),
               Effect.mapError(
                 (cause) =>
                   new WatchPairingCredentialIssueError({

@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import {
   AuthProvidersManageScope,
   AuthOrchestrationReadScope,
@@ -7,9 +7,10 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import * as DateTime from "effect/DateTime";
 import { AsyncResult } from "effect/reactivity";
-import { useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, AppState, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
@@ -86,21 +87,36 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   } | null>(null);
   const checkController = useRef<AbortController | null>(null);
   const [watchStatus, setWatchStatus] = useState<WatchCompanionStatus | null>(null);
+  const watchStatusRequest = useRef(0);
   useEffect(() => () => checkController.current?.abort(), []);
-  useEffect(() => {
-    let active = true;
+  const refreshWatchStatus = useCallback(() => {
+    const request = ++watchStatusRequest.current;
     void getWatchCompanionStatus().then(
       (status) => {
-        if (active) setWatchStatus(status);
+        if (request === watchStatusRequest.current) setWatchStatus(status);
       },
       () => {
-        if (active) setWatchStatus(null);
+        if (request === watchStatusRequest.current) setWatchStatus(null);
       },
     );
-    return () => {
-      active = false;
-    };
   }, []);
+  useFocusEffect(
+    useCallback(() => {
+      refreshWatchStatus();
+      return () => {
+        watchStatusRequest.current += 1;
+      };
+    }, [refreshWatchStatus]),
+  );
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshWatchStatus();
+    });
+    return () => {
+      subscription.remove();
+      watchStatusRequest.current += 1;
+    };
+  }, [refreshWatchStatus]);
 
   const connected = environment?.isEnabled === true && environment.connectionState === "connected";
   const allowed =
@@ -222,6 +238,8 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
         credential: credential.value.credential,
         mode: watchPairingMode(origin),
         label: environment.environmentLabel,
+        issuedAt: DateTime.formatIso(credential.value.issuedAt),
+        expiresAt: DateTime.formatIso(credential.value.expiresAt),
       });
       setNotice(
         delivery === "paired"

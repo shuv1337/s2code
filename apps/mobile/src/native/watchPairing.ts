@@ -9,6 +9,8 @@ export type WatchPairingOffer = {
   readonly credential: string;
   readonly mode: "automatic" | "phone";
   readonly label: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
 };
 
 export async function getWatchCompanionStatus(): Promise<WatchCompanionStatus | null> {

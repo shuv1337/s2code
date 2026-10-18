@@ -19,6 +19,7 @@ final class AppModel {
   private(set) var startupError: String?
   private(set) var authError: String?
   private(set) var pairing: PairingSession.State = .idle
+  private(set) var pairingNotice: String?
   /// Per thread, bumped whenever one of its receipts commits, so the visible thread refetches.
   private(set) var commitEpochs: [String: Int] = [:]
   var path: [Route] = []
@@ -34,9 +35,13 @@ final class AppModel {
   let store: SubmissionStore?
   private(set) var cache: SnapshotCache?
   private let pairingStore: PairingStore?
+  private let pairingOfferStore: WatchPairingOfferStore?
   private let accountStore: any EnvironmentAccountStore
   private var pairingTask: Task<Void, Never>?
-  private var pairingRun = 0
+  private var pairingRuns = PairingRunGate()
+  private var processingPairingOffers = false
+  private var pairingOfferProcessingRuns = PairingRunGate()
+  private var currentPairingOfferId: UUID?
 
   init(credentialStore: any CredentialStore = KeychainCredentialStore(),
     accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
@@ -45,10 +50,12 @@ final class AppModel {
       let directory = try WatchStorage.directory()
       store = try SubmissionStore(directory: directory)
       pairingStore = try? PairingStore(directory: directory)
+      pairingOfferStore = try? WatchPairingOfferStore(directory: directory)
     } catch {
       store = nil
       cache = nil
       pairingStore = nil
+      pairingOfferStore = nil
       startupError = "Local storage unavailable: \(error.localizedDescription)"
     }
     do {
@@ -57,7 +64,9 @@ final class AppModel {
     } catch { startupError = "Could not load paired environments: \(error.localizedDescription)" }
     WatchConnectivityBridge.shared.activate(pairingReceiver: { [weak self] offer in
       guard let self else { throw CancellationError() }
-      try await self.acceptPairingOffer(offer)
+      return try await self.receivePairingOffer(offer)
+    }, availabilityReceiver: { [weak self] in
+      await self?.processPendingPairingOffers()
     })
   }
 
@@ -69,7 +78,8 @@ final class AppModel {
     guard credential.trimmingCharacters(in: .whitespaces).hasPrefix("watch.") else {
       throw SetupError.invalidCredential
     }
-    try await complete(origin: url, credential: credential, mode: pairingMode, runId: pairingRun)
+    try await complete(
+      origin: url, credential: credential, mode: pairingMode, runId: pairingRuns.current)
   }
 
   /// Device-code pairing: shows a code to approve on the environment, then exchanges the
@@ -81,18 +91,71 @@ final class AppModel {
 
   func acceptPairingOffer(_ offer: WatchPairingOffer) async throws {
     pairingTask?.cancel()
-    pairingRun += 1
-    let runId = pairingRun
+    let runId = pairingRuns.begin()
     pairingMode = offer.mode
-    pairing = .exchanging(origin: offer.origin)
+    setPairing(.exchanging(origin: offer.origin), runId: runId)
     do {
       try await complete(origin: offer.origin, credential: offer.credential, mode: offer.mode,
         runId: runId, label: offer.label)
-      pairing = .paired
+      setPairing(.paired, runId: runId)
     } catch {
-      pairing = .failed(error.localizedDescription)
+      setPairing(.failed(error.localizedDescription), runId: runId)
       throw error
     }
+  }
+
+  func receivePairingOffer(_ offer: WatchPairingOffer) async throws -> WatchPairingDelivery {
+    guard let pairingOfferStore else { throw SetupError.pairingStorageUnavailable }
+    guard try pairingOfferStore.enqueue(offer, now: Date()) else {
+      throw SetupError.invalidPairingOffer
+    }
+    if let currentPairingOfferId, currentPairingOfferId != offer.id {
+      pairingRuns.invalidate()
+    }
+    return await processPendingPairingOffers()
+  }
+
+  @discardableResult
+  func processPendingPairingOffers() async -> WatchPairingDelivery {
+    guard !processingPairingOffers, let pairingOfferStore else { return .queued }
+    processingPairingOffers = true
+    let processingRun = pairingOfferProcessingRuns.current
+    defer {
+      processingPairingOffers = false
+      currentPairingOfferId = nil
+    }
+    var delivery = WatchPairingDelivery.queued
+    while true {
+      guard pairingOfferProcessingRuns.accepts(processingRun) else { return delivery }
+      let offer: WatchPairingOffer
+      do {
+        guard let next = try pairingOfferStore.next(
+          now: Date(), phoneReachable: WatchConnectivityBridge.shared.isReachable)
+        else { return delivery }
+        offer = next
+      } catch {
+        pairingNotice = "Could not read pending pairing: \(error.localizedDescription)"
+        return delivery
+      }
+      currentPairingOfferId = offer.id
+      do {
+        try await acceptPairingOffer(offer)
+        try pairingOfferStore.remove(offer.id)
+        pairingNotice = "Paired with \(offer.label)."
+        delivery = .paired
+      } catch is CancellationError {
+        guard pairingOfferProcessingRuns.accepts(processingRun) else { return delivery }
+        continue
+      } catch {
+        pairingNotice = "Could not pair with \(offer.label): \(error.localizedDescription)"
+        if Self.shouldRetryPairingOffer(after: error) { return delivery }
+        try? pairingOfferStore.remove(offer.id)
+      }
+    }
+  }
+
+  func dismissPairingNotice() {
+    pairingNotice = nil
   }
 
   /// Resumes polling a code persisted before the app was suspended or killed.
@@ -104,7 +167,11 @@ final class AppModel {
   /// The cancelled runner forgets the code itself; the next `run` waits for it to finish.
   func cancelDevicePairing() {
     pairingTask?.cancel()
-    pairingRun += 1
+    if currentPairingOfferId != nil {
+      pairingOfferProcessingRuns.invalidate()
+      try? pairingOfferStore?.removeAll()
+    }
+    pairingRuns.invalidate()
     pairing = .idle
   }
 
@@ -129,8 +196,18 @@ final class AppModel {
 
   func unpair() {
     var next = accounts
+    let removed = next.selected
     if let id = next.selectedId { next.remove(id) }
-    do { try accountStore.save(next) } catch {
+    let previousCutoff = removed.flatMap { pairingOfferStore?.removalCutoff(for: $0.credentials.origin) }
+    do {
+      if let removed {
+        try pairingOfferStore?.setRemovalCutoff(Date(), for: removed.credentials.origin)
+      }
+      try accountStore.save(next)
+    } catch {
+      if let removed {
+        try? pairingOfferStore?.setRemovalCutoff(previousCutoff, for: removed.credentials.origin)
+      }
       startupError = "Could not remove environment: \(error.localizedDescription)"
       return
     }
@@ -182,8 +259,7 @@ final class AppModel {
   private func run(_ session: PairingSession) {
     let previous = pairingTask
     previous?.cancel()
-    pairingRun += 1
-    let runId = pairingRun
+    let runId = pairingRuns.begin()
     pairing = session.state
     let mode = pairingMode
     let runner = PairingRunner(store: pairingStore, transport: WatchConnectivityBridge.shared.transport(mode: mode))
@@ -201,12 +277,12 @@ final class AppModel {
   }
 
   private func setPairing(_ state: PairingSession.State, runId: Int) {
-    guard runId == pairingRun else { return }
+    guard pairingRuns.accepts(runId) else { return }
     pairing = state
   }
 
   private func finishPairing(runId: Int) {
-    guard runId == pairingRun else { return }
+    guard pairingRuns.accepts(runId) else { return }
     pairingTask = nil
   }
 
@@ -219,7 +295,7 @@ final class AppModel {
     let probe = WatchClient(baseURL: url, credentials: InMemoryCredentialStore(credentials), transport: transport)
     let capabilities = try await probe.capabilities()
     try Task.checkCancellation()
-    guard runId == pairingRun else { throw CancellationError() }
+    guard pairingRuns.accepts(runId) else { throw CancellationError() }
     credentials.environmentId = capabilities.environmentId
     var next = accounts
     let label: String
@@ -259,15 +335,23 @@ final class AppModel {
     commitEpochs = [:]
     path = []
   }
+
+  private static func shouldRetryPairingOffer(after error: any Error) -> Bool {
+    guard let error = error as? WatchClientError else { return false }
+    if case .transport = error { return true }
+    return false
+  }
 }
 
 enum SetupError: LocalizedError {
-  case invalidOrigin, invalidCredential
+  case invalidOrigin, invalidCredential, invalidPairingOffer, pairingStorageUnavailable
 
   var errorDescription: String? {
     switch self {
     case .invalidOrigin: "Enter the environment URL, e.g. https://host:13773."
     case .invalidCredential: "Paste the credential from `pair --watch`; it starts with \"watch.\"."
+    case .invalidPairingOffer: "This phone pairing offer is expired or was removed."
+    case .pairingStorageUnavailable: "Pending phone pairing could not be stored."
     }
   }
 }

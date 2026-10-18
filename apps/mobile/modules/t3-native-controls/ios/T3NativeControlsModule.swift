@@ -96,14 +96,16 @@ public final class T3NativeControlsModule: Module {
 
   @JS
   @MainActor
-  func offerWatchPairing(origin: String, credential: String, mode: String, label: String) async throws
-    -> String {
+  func offerWatchPairing(origin: String, credential: String, mode: String, label: String,
+    issuedAt: String, expiresAt: String) async throws -> String {
     guard let origin = URL(string: origin) else { throw URLError(.badURL) }
     return try await T3WatchPairing.offer(
       origin: origin,
       credential: credential,
       mode: mode,
-      label: label
+      label: label,
+      issuedAt: issuedAt,
+      expiresAt: expiresAt
     )
   }
 

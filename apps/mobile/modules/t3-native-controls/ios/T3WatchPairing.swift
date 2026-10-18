@@ -4,10 +4,13 @@ import UIKit
 import WatchConnectivity
 
 private struct T3WatchPairingOffer: Codable {
+  var id: UUID
   var origin: URL
   var credential: String
   var mode: String
   var label: String
+  var issuedAt: String
+  var expiresAt: String
 }
 
 private struct T3WatchPairingReply: Codable {
@@ -62,15 +65,19 @@ enum T3WatchPairing {
     ]
   }
 
-  static func offer(origin: URL, credential: String, mode: String, label: String) async throws
-    -> String {
+  static func offer(origin: URL, credential: String, mode: String, label: String,
+    issuedAt: String, expiresAt: String) async throws -> String {
     guard WCSession.isSupported() else { throw unavailable() }
     let session = WCSession.default
     guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else {
       throw unavailable()
     }
-    let data = try JSONEncoder().encode(
-      T3WatchPairingOffer(origin: origin, credential: credential, mode: mode, label: label))
+    guard parseDate(issuedAt) != nil, parseDate(expiresAt) != nil else {
+      throw invalidReply()
+    }
+    let data = try JSONEncoder().encode(T3WatchPairingOffer(
+      id: UUID(), origin: origin, credential: credential, mode: mode, label: label,
+      issuedAt: issuedAt, expiresAt: expiresAt))
     guard data.count <= 64 * 1_024 else { throw invalidReply() }
     guard session.isReachable else {
       session.transferUserInfo([pairingUserInfoKey: data])
@@ -118,5 +125,11 @@ enum T3WatchPairing {
     NSError(domain: "T3WatchPairing", code: 2, userInfo: [
       NSLocalizedDescriptionKey: "The Apple Watch returned an invalid pairing response.",
     ])
+  }
+
+  private static func parseDate(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
   }
 }

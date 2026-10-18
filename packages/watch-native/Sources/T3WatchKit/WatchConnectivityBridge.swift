@@ -5,20 +5,6 @@ import WatchConnectivity
 import UIKit
 #endif
 
-public struct WatchPairingOffer: Codable, Hashable, Sendable {
-  public var origin: URL
-  public var credential: String
-  public var mode: WatchConnectionMode
-  public var label: String
-
-  public init(origin: URL, credential: String, mode: WatchConnectionMode, label: String) {
-    self.origin = origin
-    self.credential = credential
-    self.mode = mode
-    self.label = label
-  }
-}
-
 public struct WatchCompanionStatus: Sendable {
   public var isPaired: Bool
   public var isWatchAppInstalled: Bool
@@ -29,10 +15,6 @@ public struct WatchCompanionStatus: Sendable {
     self.isWatchAppInstalled = isWatchAppInstalled
     self.phoneLabel = phoneLabel
   }
-}
-
-public enum WatchPairingDelivery: String, Codable, Sendable {
-  case paired, queued
 }
 
 private struct WatchPairingReply: Codable {
@@ -61,11 +43,14 @@ private final class RelayReplyHandler: @unchecked Sendable {
 
 @MainActor
 public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
-  public typealias PairingReceiver = @MainActor @Sendable (WatchPairingOffer) async throws -> Void
+  public typealias PairingReceiver =
+    @MainActor @Sendable (WatchPairingOffer) async throws -> WatchPairingDelivery
+  public typealias AvailabilityReceiver = @MainActor @Sendable () async -> Void
   public static let shared = WatchConnectivityBridge()
   private let session: WCSession?
   private var server: WatchRelayServer?
   private var pairingReceiver: PairingReceiver?
+  private var availabilityReceiver: AvailabilityReceiver?
   private nonisolated static let pairingUserInfoKey = "dev.shuv.s2code.watch-pairing"
 
   private override init() {
@@ -73,9 +58,11 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
     super.init()
   }
 
-  public func activate(server: WatchRelayServer? = nil, pairingReceiver: PairingReceiver? = nil) {
+  public func activate(server: WatchRelayServer? = nil, pairingReceiver: PairingReceiver? = nil,
+    availabilityReceiver: AvailabilityReceiver? = nil) {
     if let server { self.server = server }
     if let pairingReceiver { self.pairingReceiver = pairingReceiver }
+    if let availabilityReceiver { self.availabilityReceiver = availabilityReceiver }
     guard let session else { return }
     session.delegate = self
     session.activate()
@@ -182,8 +169,7 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
             throw WatchClientError.transport(code: URLError.cannotConnectToHost.rawValue,
               description: "Open S2Code on your Apple Watch and try again.")
           }
-          try await receiver(offer)
-          reply = WatchPairingReply(delivery: .paired)
+          reply = WatchPairingReply(delivery: try await receiver(offer))
         } catch {
           reply = WatchPairingReply(error: error.localizedDescription)
         }
@@ -205,8 +191,13 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
     guard let data = userInfo[Self.pairingUserInfoKey] as? Data,
       let offer = try? JSONDecoder.watch.decode(WatchPairingOffer.self, from: data) else { return }
     Task { @MainActor [weak self] in
-      try? await self?.pairingReceiver?(offer)
+      _ = try? await self?.pairingReceiver?(offer)
     }
+  }
+
+  public nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+    guard session.isReachable else { return }
+    Task { @MainActor [weak self] in await self?.availabilityReceiver?() }
   }
 
   #if os(iOS)

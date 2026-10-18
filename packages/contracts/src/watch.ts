@@ -291,6 +291,7 @@ export type WatchPairingCredentialIssueInput = typeof WatchPairingCredentialIssu
 
 export const WatchPairingCredentialIssueResult = Schema.Struct({
   credential: Schema.String,
+  issuedAt: Schema.DateTimeUtcFromString,
   expiresAt: Schema.DateTimeUtcFromString,
 });
 export type WatchPairingCredentialIssueResult = typeof WatchPairingCredentialIssueResult.Type;
