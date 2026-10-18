@@ -3,7 +3,7 @@ import {
   subagentDetailPreview,
 } from "@t3tools/client-runtime/state/subagent-display";
 import { isActiveSubagentStatus } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { OrchestrationV2Subagent } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2Subagent, ThreadId } from "@t3tools/contracts";
 
 const PROMPT_TITLE_LIMIT = 80;
 
@@ -16,6 +16,29 @@ export interface SubagentRowPresentation {
   readonly tone: SubagentRowTone;
   readonly live: boolean;
   readonly canOpenThread: boolean;
+  /** The linked environment the task runs in, when it runs in one. */
+  readonly runsOn: string | null;
+}
+
+/**
+ * Where an agent's thread opens: here, or in the linked environment that runs
+ * it. Null when there is no thread, or this app is not connected to that
+ * environment.
+ */
+export function subagentThreadTarget(
+  subagent: Pick<OrchestrationV2Subagent, "childThreadId" | "remoteChild">,
+  environmentId: EnvironmentId,
+  isKnownEnvironment: (environmentId: EnvironmentId) => boolean,
+): { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null {
+  if (subagent.childThreadId !== null) {
+    return { environmentId, threadId: subagent.childThreadId };
+  }
+  const remote = subagent.remoteChild;
+  return remote !== undefined &&
+    remote.threadId !== undefined &&
+    isKnownEnvironment(remote.environmentId)
+    ? { environmentId: remote.environmentId, threadId: remote.threadId }
+    : null;
 }
 
 function rowTitle(subagent: Pick<OrchestrationV2Subagent, "title" | "prompt">): string {
@@ -58,16 +81,26 @@ function rowStatusLabel(status: OrchestrationV2Subagent["status"]): string {
 export function resolveSubagentRowPresentation(
   subagent: Pick<
     OrchestrationV2Subagent,
-    "title" | "prompt" | "status" | "progress" | "result" | "childThreadId"
+    "title" | "prompt" | "status" | "progress" | "result" | "childThreadId" | "remoteChild"
   >,
+  canOpenRemote = false,
 ): SubagentRowPresentation {
   const live = isActiveSubagentStatus(subagent.status);
   return {
     title: rowTitle(subagent),
-    detail: subagentDetailPreview(subagent),
-    statusLabel: rowStatusLabel(subagent.status),
+    detail: subagentDetailPreview({
+      ...subagent,
+      result: subagent.remoteChild?.launchError ?? subagent.result,
+    }),
+    statusLabel:
+      live && subagent.remoteChild !== undefined && subagent.remoteChild.threadId === undefined
+        ? "Launching"
+        : rowStatusLabel(subagent.status),
     tone: rowTone(subagent.status),
     live,
-    canOpenThread: subagent.childThreadId !== null,
+    canOpenThread:
+      subagent.childThreadId !== null ||
+      (subagent.remoteChild?.threadId !== undefined && canOpenRemote),
+    runsOn: subagent.remoteChild?.label ?? null,
   };
 }

@@ -77,14 +77,11 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudInstallRelayClient)).toBe(AuthRelayWriteScope);
   });
 
-  it("guards peer links on clients with the access scopes the server requires", () => {
-    for (const [method, scope] of [
-      [WS_METHODS.peerLinksList, AuthAccessReadScope],
-      [WS_METHODS.peerLinksLink, AuthAccessWriteScope],
-      [WS_METHODS.peerLinksUnlink, AuthAccessWriteScope],
-    ] as const) {
-      expect(requiredScopeForRpcMethod(method)).toBe(scope);
-      expect(clientRpcRequiredScopes(method, undefined)).toEqual([scope]);
+  it("guards peer-link mutations on clients with the scope the server requires", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.peerLinksList)).toBe(AuthAccessReadScope);
+    for (const method of [WS_METHODS.peerLinksLink, WS_METHODS.peerLinksUnlink]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
+      expect(clientRpcRequiredScopes(method, undefined)).toEqual([AuthAccessWriteScope]);
     }
   });
 
