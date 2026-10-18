@@ -89,13 +89,20 @@ public final class WatchPairingOfferStore: Sendable {
   public nonisolated let fileURL: URL
   private let state: Mutex<WatchPairingOfferQueue>
 
-  public init(directory: URL, fileName: String = "watch-pairing-offers.json") throws {
+  public init(
+    directory: URL, fileName: String = "watch-pairing-offers.json", now: Date = Date()
+  ) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     fileURL = directory.appendingPathComponent(fileName)
     let saved = (try? Data(contentsOf: fileURL)).flatMap {
       try? JSONDecoder.watch.decode(WatchPairingOfferQueue.self, from: $0)
     }
-    state = Mutex(saved ?? WatchPairingOfferQueue())
+    var restored = saved ?? WatchPairingOfferQueue()
+    restored.prune(now: now)
+    state = Mutex(restored)
+    if FileManager.default.fileExists(atPath: fileURL.path) {
+      try Self.persist(restored, to: fileURL)
+    }
   }
 
   @discardableResult
@@ -126,9 +133,18 @@ public final class WatchPairingOfferStore: Sendable {
   private func update<T>(_ body: (inout WatchPairingOfferQueue) -> T) throws -> T {
     try state.withLock { state in
       let result = body(&state)
-      try JSONEncoder.watch.encode(state).write(to: fileURL, options: [.atomic])
+      try Self.persist(state, to: fileURL)
       return result
     }
+  }
+
+  private static func persist(_ state: WatchPairingOfferQueue, to fileURL: URL) throws {
+    try JSONEncoder.watch.encode(state).write(
+      to: fileURL, options: [.atomic, .completeFileProtection])
+    var protectedURL = fileURL
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try protectedURL.setResourceValues(values)
   }
 }
 
@@ -148,5 +164,96 @@ public struct PairingRunGate: Sendable {
 
   public func accepts(_ runId: Int) -> Bool {
     runId == current
+  }
+}
+
+/// Serializes offer attempts while preserving one wakeup that arrives during an in-flight attempt.
+/// A replacement or cancellation invalidates every outcome from the superseded attempt.
+@MainActor
+public final class WatchPairingOfferProcessor {
+  public private(set) var currentOfferID: UUID?
+  public private(set) var isProcessing = false
+  private var pendingDrain = false
+  private var generation = 0
+
+  public init() {}
+
+  public func supersedeCurrent(with offerID: UUID) -> Bool {
+    guard let currentOfferID, currentOfferID != offerID else { return false }
+    generation += 1
+    self.currentOfferID = nil
+    return true
+  }
+
+  public func cancel() {
+    generation += 1
+    currentOfferID = nil
+    pendingDrain = false
+  }
+
+  @discardableResult
+  public func process(
+    next: () throws -> WatchPairingOffer?,
+    attempt: (WatchPairingOffer) async throws -> Void,
+    remove: (UUID) throws -> Void,
+    shouldRetainAfterFailure: (any Error) -> Bool,
+    onPaired: (WatchPairingOffer) -> Void,
+    onFailed: (WatchPairingOffer, any Error) -> Void,
+    onReadFailed: (any Error) -> Void
+  ) async -> WatchPairingDelivery {
+    guard !isProcessing else {
+      pendingDrain = true
+      return .queued
+    }
+    isProcessing = true
+    defer {
+      isProcessing = false
+      currentOfferID = nil
+    }
+
+    var delivery = WatchPairingDelivery.queued
+    repeat {
+      pendingDrain = false
+      let offer: WatchPairingOffer
+      do {
+        guard let pending = try next() else { return delivery }
+        offer = pending
+      } catch {
+        onReadFailed(error)
+        return delivery
+      }
+
+      currentOfferID = offer.id
+      let attemptGeneration = generation
+      do {
+        try await attempt(offer)
+      } catch {
+        guard accepts(offer.id, generation: attemptGeneration) else { continue }
+        onFailed(offer, error)
+        if !shouldRetainAfterFailure(error) { try? remove(offer.id) }
+        currentOfferID = nil
+        continue
+      }
+
+      guard accepts(offer.id, generation: attemptGeneration) else { continue }
+      do {
+        try remove(offer.id)
+      } catch {
+        guard accepts(offer.id, generation: attemptGeneration) else { continue }
+        onFailed(offer, error)
+        currentOfferID = nil
+        continue
+      }
+      guard accepts(offer.id, generation: attemptGeneration) else { continue }
+      onPaired(offer)
+      delivery = .paired
+      currentOfferID = nil
+    } while pendingDrain
+
+    return delivery
+  }
+
+  private func accepts(_ offerID: UUID, generation: Int) -> Bool {
+    self.generation == generation && currentOfferID == offerID
   }
 }

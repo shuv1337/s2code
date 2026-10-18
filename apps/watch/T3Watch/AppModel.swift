@@ -39,9 +39,7 @@ final class AppModel {
   private let accountStore: any EnvironmentAccountStore
   private var pairingTask: Task<Void, Never>?
   private var pairingRuns = PairingRunGate()
-  private var processingPairingOffers = false
-  private var pairingOfferProcessingRuns = PairingRunGate()
-  private var currentPairingOfferId: UUID?
+  private let pairingOfferProcessor = WatchPairingOfferProcessor()
 
   init(credentialStore: any CredentialStore = KeychainCredentialStore(),
     accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
@@ -109,7 +107,7 @@ final class AppModel {
     guard try pairingOfferStore.enqueue(offer, now: Date()) else {
       throw SetupError.invalidPairingOffer
     }
-    if let currentPairingOfferId, currentPairingOfferId != offer.id {
+    if pairingOfferProcessor.supersedeCurrent(with: offer.id) {
       pairingRuns.invalidate()
     }
     return await processPendingPairingOffers()
@@ -117,41 +115,25 @@ final class AppModel {
 
   @discardableResult
   func processPendingPairingOffers() async -> WatchPairingDelivery {
-    guard !processingPairingOffers, let pairingOfferStore else { return .queued }
-    processingPairingOffers = true
-    let processingRun = pairingOfferProcessingRuns.current
-    defer {
-      processingPairingOffers = false
-      currentPairingOfferId = nil
-    }
-    var delivery = WatchPairingDelivery.queued
-    while true {
-      guard pairingOfferProcessingRuns.accepts(processingRun) else { return delivery }
-      let offer: WatchPairingOffer
-      do {
-        guard let next = try pairingOfferStore.next(
+    guard let pairingOfferStore else { return .queued }
+    return await pairingOfferProcessor.process(
+      next: {
+        try pairingOfferStore.next(
           now: Date(), phoneReachable: WatchConnectivityBridge.shared.isReachable)
-        else { return delivery }
-        offer = next
-      } catch {
-        pairingNotice = "Could not read pending pairing: \(error.localizedDescription)"
-        return delivery
-      }
-      currentPairingOfferId = offer.id
-      do {
-        try await acceptPairingOffer(offer)
-        try pairingOfferStore.remove(offer.id)
-        pairingNotice = "Paired with \(offer.label)."
-        delivery = .paired
-      } catch is CancellationError {
-        guard pairingOfferProcessingRuns.accepts(processingRun) else { return delivery }
-        continue
-      } catch {
-        pairingNotice = "Could not pair with \(offer.label): \(error.localizedDescription)"
-        if Self.shouldRetryPairingOffer(after: error) { return delivery }
-        try? pairingOfferStore.remove(offer.id)
-      }
-    }
+      },
+      attempt: { [weak self] offer in
+        guard let self else { throw CancellationError() }
+        try await self.acceptPairingOffer(offer)
+      },
+      remove: { try pairingOfferStore.remove($0) },
+      shouldRetainAfterFailure: Self.shouldRetryPairingOffer,
+      onPaired: { [weak self] offer in self?.pairingNotice = "Paired with \(offer.label)." },
+      onFailed: { [weak self] offer, error in
+        self?.pairingNotice = "Could not pair with \(offer.label): \(error.localizedDescription)"
+      },
+      onReadFailed: { [weak self] error in
+        self?.pairingNotice = "Could not read pending pairing: \(error.localizedDescription)"
+      })
   }
 
   func dismissPairingNotice() {
@@ -167,8 +149,8 @@ final class AppModel {
   /// The cancelled runner forgets the code itself; the next `run` waits for it to finish.
   func cancelDevicePairing() {
     pairingTask?.cancel()
-    if currentPairingOfferId != nil {
-      pairingOfferProcessingRuns.invalidate()
+    if pairingOfferProcessor.isProcessing {
+      pairingOfferProcessor.cancel()
       try? pairingOfferStore?.removeAll()
     }
     pairingRuns.invalidate()
