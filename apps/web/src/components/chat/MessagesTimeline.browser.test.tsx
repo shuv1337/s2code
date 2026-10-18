@@ -5,7 +5,6 @@ import {
   EnvironmentId,
   MessageId,
   RunId,
-  ThreadId,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import { act, createRef, useState, type ComponentProps, type ReactElement } from "react";
@@ -826,16 +825,13 @@ describe("MessagesTimeline history and thread links", () => {
   });
 
   it("opens the parent thread from the top of an empty subagent timeline", async () => {
-    const onOpenThread = vi.fn();
-    await renderTimeline([], {
-      onOpenThread,
-      parentThreadLink: { threadId: ThreadId.make("thread-parent"), title: "Architecture audit" },
-    });
+    const open = vi.fn();
+    await renderTimeline([], { parentThreadLink: { title: "Architecture audit", open } });
     expect(text()).toContain("Subagent of");
     expect(text()).toContain("Architecture audit");
     expect(text()).not.toContain("Send a message to start the conversation");
     await click(button("Open parent thread"));
-    expect(onOpenThread).toHaveBeenCalledWith("thread-parent");
+    expect(open).toHaveBeenCalledOnce();
   });
 
   it("does not render the transient V2 interruption request", async () => {
