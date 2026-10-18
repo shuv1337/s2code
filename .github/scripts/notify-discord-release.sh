@@ -148,24 +148,23 @@ print(json.dumps({"content": os.environ["CONTENT"]}))
 PY
 )
 
-TMP_BODY="$(mktemp)"
-trap 'rm -f "$TMP_BODY"' EXIT
-
+# Never print curl diagnostics or the response body: either can contain parts of the webhook URL.
+CURL_STATUS=0
 HTTP_CODE=$(
-  curl -sS -o "$TMP_BODY" -w "%{http_code}" \
+  curl -s -o /dev/null -w "%{http_code}" \
     -X POST \
     -H "Content-Type: application/json" \
     --data "$PAYLOAD" \
-    "$WEBHOOK_URL"
-)
+    "$WEBHOOK_URL" 2>/dev/null
+) || CURL_STATUS=$?
+
+if [[ "$CURL_STATUS" -ne 0 ]]; then
+  echo "error: Discord webhook request failed (curl exit ${CURL_STATUS})" >&2
+  exit 1
+fi
 
 if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "204" ]]; then
   echo "error: Discord webhook failed: HTTP ${HTTP_CODE}" >&2
-  if [[ -s "$TMP_BODY" ]]; then
-    # body may contain the URL if Discord echoes it; keep stderr short
-    head -c 400 "$TMP_BODY" >&2 || true
-    echo >&2
-  fi
   exit 1
 fi
 
