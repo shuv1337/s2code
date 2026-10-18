@@ -160,10 +160,18 @@ it.layer(NodeServices.layer)("Watch auth", (it) => {
       }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("requires access management and every delegated scope to mint Watch grants", () =>
+  it.effect("requires every Watch scope from the issuer to mint Watch grants", () =>
     Effect.gen(function* () {
       const auth = yield* EnvironmentAuth.EnvironmentAuth;
-      for (const scopes of [watchClientScopes, ["access:write"] as const]) {
+      const grant = yield* auth.issueWatchPairingCredential({
+        issuer: { subject: "ordinary", scopes: watchClientScopes },
+      });
+      expect(grant.scopes).toEqual(watchClientScopes);
+      for (const scopes of [
+        ["orchestration:read"] as const,
+        ["orchestration:operate"] as const,
+        ["access:write"] as const,
+      ]) {
         expect(
           yield* auth
             .issueWatchPairingCredential({ issuer: { subject: "ordinary", scopes } })

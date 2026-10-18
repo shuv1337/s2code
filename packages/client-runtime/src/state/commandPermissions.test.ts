@@ -59,6 +59,20 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("requires the destination operate grant to issue Watch pairing credentials", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const pairing = createCommandPermissions(runtime, WS_METHODS.watchIssuePairingCredential);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(pairing.permissionAtom(env))).toBe(false);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(pairing.permissionAtom(env))).toBe(true);
+        yield* pairing.authorize(registry, env);
+      }),
+    ),
+  );
+
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

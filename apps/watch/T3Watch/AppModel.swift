@@ -41,7 +41,6 @@ final class AppModel {
   init(credentialStore: any CredentialStore = KeychainCredentialStore(),
     accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
     self.accountStore = accountStore
-    WatchConnectivityBridge.shared.activate()
     do {
       let directory = try WatchStorage.directory()
       store = try SubmissionStore(directory: directory)
@@ -56,6 +55,10 @@ final class AppModel {
       accounts = try loadEnvironmentAccounts(from: accountStore, migrating: credentialStore)
       if let selected = accounts.selected { configure(selected) }
     } catch { startupError = "Could not load paired environments: \(error.localizedDescription)" }
+    WatchConnectivityBridge.shared.activate(pairingReceiver: { [weak self] offer in
+      guard let self else { throw CancellationError() }
+      try await self.acceptPairingOffer(offer)
+    })
   }
 
   var isPaired: Bool { client != nil }
@@ -74,6 +77,22 @@ final class AppModel {
   func startDevicePairing(origin: String) throws {
     let url = try parseOrigin(origin)
     run(PairingSession().applying(.start(origin: url), now: Date()))
+  }
+
+  func acceptPairingOffer(_ offer: WatchPairingOffer) async throws {
+    pairingTask?.cancel()
+    pairingRun += 1
+    let runId = pairingRun
+    pairingMode = offer.mode
+    pairing = .exchanging(origin: offer.origin)
+    do {
+      try await complete(origin: offer.origin, credential: offer.credential, mode: offer.mode,
+        runId: runId, label: offer.label)
+      pairing = .paired
+    } catch {
+      pairing = .failed(error.localizedDescription)
+      throw error
+    }
   }
 
   /// Resumes polling a code persisted before the app was suspended or killed.
@@ -193,7 +212,8 @@ final class AppModel {
 
   /// Exchange, capabilities probe, then Keychain save. The credential is single-use, so a failure
   /// after the exchange means pairing again.
-  private func complete(origin url: URL, credential: String, mode: WatchConnectionMode, runId: Int) async throws {
+  private func complete(origin url: URL, credential: String, mode: WatchConnectionMode, runId: Int,
+    label offeredLabel: String? = nil) async throws {
     let transport = WatchConnectivityBridge.shared.transport(mode: mode)
     var credentials = try await WatchClient.exchange(origin: url, credential: credential, transport: transport)
     let probe = WatchClient(baseURL: url, credentials: InMemoryCredentialStore(credentials), transport: transport)
@@ -203,7 +223,8 @@ final class AppModel {
     credentials.environmentId = capabilities.environmentId
     var next = accounts
     let label: String
-    if case .waitingForApproval(let pending, _) = pairing { label = pending.environment.label }
+    if let offeredLabel { label = offeredLabel }
+    else if case .waitingForApproval(let pending, _) = pairing { label = pending.environment.label }
     else { label = url.host() ?? "Environment" }
     let account = WatchEnvironmentAccount(credentials: credentials, label: label, mode: mode)
     next.upsert(account)

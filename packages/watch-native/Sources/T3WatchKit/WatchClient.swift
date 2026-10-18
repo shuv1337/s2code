@@ -153,7 +153,7 @@ public struct WatchClient: Sendable {
       ("client_device_type", deviceType),
     ]
     if let clientLabel { fields.append(("client_label", clientLabel)) }
-    var request = URLRequest(url: buildURL(base: origin, segments: ["oauth", "token"], query: []))
+    var request = URLRequest(url: try buildURL(base: origin, segments: ["oauth", "token"], query: []))
     request.httpMethod = "POST"
     request.timeoutInterval = 15
     request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -207,7 +207,7 @@ public struct WatchClient: Sendable {
     origin: URL, segments: [String], body: Body, session: URLSession,
     transport: (any WatchHTTPTransport)?
   ) async throws(WatchClientError) -> T {
-    var request = URLRequest(url: buildURL(base: origin, segments: segments, query: []))
+    var request = URLRequest(url: try buildURL(base: origin, segments: segments, query: []))
     request.httpMethod = "POST"
     request.timeoutInterval = 15
     request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -226,8 +226,8 @@ public struct WatchClient: Sendable {
     return try await send(request)
   }
 
-  private func url(_ segments: [String], query: [(String, String)] = []) -> URL {
-    Self.buildURL(base: baseURL, segments: segments, query: query)
+  private func url(_ segments: [String], query: [(String, String)] = []) throws(WatchClientError) -> URL {
+    try Self.buildURL(base: baseURL, segments: segments, query: query)
   }
 
   private func authorizedRequest(url: URL) throws(WatchClientError) -> URLRequest {
@@ -303,7 +303,8 @@ public struct WatchClient: Sendable {
     return .http(status: status, bodyPrefix: prefix)
   }
 
-  static func buildURL(base: URL, segments: [String], query: [(String, String)]) -> URL {
+  static func buildURL(base: URL, segments: [String], query: [(String, String)])
+    throws(WatchClientError) -> URL {
     var string = base.absoluteString
     while string.hasSuffix("/") { string.removeLast() }
     string += "/" + segments.map(encodeComponent).joined(separator: "/")
@@ -311,7 +312,8 @@ public struct WatchClient: Sendable {
       string += "?" + query.map { "\(encodeComponent($0.0))=\(encodeComponent($0.1))" }
         .joined(separator: "&")
     }
-    return URL(string: string)!
+    guard let result = URL(string: string) else { throw .decoding("invalid request URL") }
+    return result
   }
 
   /// RFC 3986 unreserved characters only; thread IDs contain `:` and `%`.

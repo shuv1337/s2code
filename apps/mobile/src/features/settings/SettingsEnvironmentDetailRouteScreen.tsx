@@ -19,7 +19,15 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 import { environmentSession, useEnvironmentScope, readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useRemoteConnections } from "../../state/use-remote-environment-registry";
+import {
+  useRemoteConnections,
+  useSavedRemoteConnection,
+} from "../../state/use-remote-environment-registry";
+import {
+  getWatchCompanionStatus,
+  offerWatchPairing,
+  type WatchCompanionStatus,
+} from "../../native/watchPairing";
 import { ConnectionEnvironmentRow } from "../connection/ConnectionEnvironmentRow";
 import { EnvironmentRoutesSection } from "./EnvironmentRoutesSection";
 import { SettingsActionRow } from "./components/SettingsActionRow";
@@ -32,6 +40,7 @@ import {
   getProviderRestartPendingMessage,
   supportsEnvironmentUpdate,
 } from "./environment-maintenance";
+import { watchPairingMode } from "./watch-pairing";
 
 export function SettingsEnvironmentDetailRouteScreen({
   route,
@@ -51,6 +60,7 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const connections = useRemoteConnections();
+  const savedConnection = useSavedRemoteConnection(environmentId);
   const environment = connections.connectedEnvironments.find(
     (entry) => entry.environmentId === environmentId,
   );
@@ -61,6 +71,10 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   const updateServer = useAtomCommand(serverEnvironment.updateServer);
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider);
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders);
+  const issueWatchPairingCredential = useAtomCommand(serverEnvironment.issueWatchPairingCredential);
+  const canIssueWatchPairingCredential = useAtomValue(
+    serverEnvironment.issueWatchPairingCredential.permissionAtom(environmentId),
+  );
   const [connectionExpanded, setConnectionExpanded] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const pendingRef = useRef(false);
@@ -71,7 +85,22 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
     targetVersion: string | null;
   } | null>(null);
   const checkController = useRef<AbortController | null>(null);
+  const [watchStatus, setWatchStatus] = useState<WatchCompanionStatus | null>(null);
   useEffect(() => () => checkController.current?.abort(), []);
+  useEffect(() => {
+    let active = true;
+    void getWatchCompanionStatus().then(
+      (status) => {
+        if (active) setWatchStatus(status);
+      },
+      () => {
+        if (active) setWatchStatus(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const connected = environment?.isEnabled === true && environment.connectionState === "connected";
   const allowed =
@@ -89,6 +118,7 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
   const version = config?.environment.serverVersion;
   const checkedRelease = release?.fromVersion === version ? release : null;
   const capabilities = config?.environment.capabilities;
+  const watchAvailable = watchStatus?.isPaired === true && watchStatus.isWatchAppInstalled === true;
 
   async function run(label: string, action: () => Promise<void>) {
     if (pendingRef.current) return;
@@ -169,6 +199,38 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
     });
   }
 
+  function requestWatchPairing() {
+    if (
+      busy ||
+      !canIssueWatchPairingCredential ||
+      !watchAvailable ||
+      !savedConnection ||
+      !environment
+    )
+      return;
+    void run("watch", async () => {
+      const credential = await issueWatchPairingCredential({
+        environmentId,
+        input: {
+          label: `${watchStatus.phoneLabel} Apple Watch`.slice(0, 64),
+        },
+      });
+      if (AsyncResult.isFailure(credential)) throw squashAtomCommandFailure(credential);
+      const origin = new URL(savedConnection.httpBaseUrl).origin;
+      const delivery = await offerWatchPairing({
+        origin,
+        credential: credential.value.credential,
+        mode: watchPairingMode(origin),
+        label: environment.environmentLabel,
+      });
+      setNotice(
+        delivery === "paired"
+          ? "Apple Watch paired."
+          : "Pairing sent. Open S2Code on Apple Watch within five minutes.",
+      );
+    });
+  }
+
   return (
     <SettingsScreen title={environment?.environmentLabel ?? "Environment"}>
       <ScreenScrollView
@@ -207,6 +269,17 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                 })
               }
             />
+            {watchAvailable ? (
+              <SettingsSection title="Apple Watch">
+                <SettingsActionRow
+                  icon="applewatch"
+                  label="Pair Apple Watch"
+                  disabled={busy || !canIssueWatchPairingCredential || savedConnection === null}
+                  loading={pending === "watch"}
+                  onPress={requestWatchPairing}
+                />
+              </SettingsSection>
+            ) : null}
             {!connected ? (
               <Text className="px-2 text-sm text-foreground-muted">
                 Connect this environment to manage it.

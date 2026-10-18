@@ -49,6 +49,7 @@ import IconDatabase from "@tabler/icons-react-native/IconDatabase";
 import IconDeviceDesktop from "@tabler/icons-react-native/IconDeviceDesktop";
 import IconDeviceLaptop from "@tabler/icons-react-native/IconDeviceLaptop";
 import IconDeviceMobile from "@tabler/icons-react-native/IconDeviceMobile";
+import IconDeviceWatch from "@tabler/icons-react-native/IconDeviceWatch";
 import IconDots from "@tabler/icons-react-native/IconDots";
 import IconPlusMinus from "@tabler/icons-react-native/IconPlusMinus";
 import IconDotsVertical from "@tabler/icons-react-native/IconDotsVertical";
@@ -208,6 +209,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "info.circle": IconInfoCircle,
   internaldrive: IconDatabase,
   iphone: IconDeviceMobile,
+  applewatch: IconDeviceWatch,
   keyboard: IconKeyboard,
   laptopcomputer: IconDeviceLaptop,
   link: IconLink,
