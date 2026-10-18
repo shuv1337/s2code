@@ -16,6 +16,42 @@ private final class RelayHTTPStub: WatchHTTPTransport, Sendable {
 }
 
 struct RelayTests {
+  @Test @MainActor func watchConnectivityCallbacksRunOffMainActor() async throws {
+    let expected = Data("reply".utf8)
+    let replyCompletion = WatchConnectivityContinuation()
+    let replyCallbacks = WatchConnectivityCallbacks(completion: replyCompletion)
+    let replyHandler: @Sendable (Data) -> Void = replyCallbacks.replyHandler
+    let replyResult = Task {
+      try await withCheckedThrowingContinuation { continuation in
+        replyCompletion.install(continuation)
+      }
+    }
+
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global(qos: .utility).async {
+        replyHandler(expected)
+        continuation.resume()
+      }
+    }
+    #expect(try await replyResult.value == expected)
+
+    let errorCompletion = WatchConnectivityContinuation()
+    let errorCallbacks = WatchConnectivityCallbacks(completion: errorCompletion)
+    let errorHandler: @Sendable (any Error) -> Void = errorCallbacks.errorHandler
+    let errorResult = Task {
+      try await withCheckedThrowingContinuation { continuation in
+        errorCompletion.install(continuation)
+      }
+    }
+    await withCheckedContinuation { continuation in
+      OperationQueue().addOperation {
+        errorHandler(URLError(.networkConnectionLost))
+        continuation.resume()
+      }
+    }
+    await #expect(throws: URLError.self) { try await errorResult.value }
+  }
+
   func recordingRequest() -> URLRequest {
     var request = URLRequest(url: URL(string: "https://shuvdev.example:3790/api/watch/v1/threads/test/transcription")!)
     request.httpMethod = "POST"

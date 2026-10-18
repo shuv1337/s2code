@@ -86,8 +86,13 @@ enum T3WatchPairing {
     let response = try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { continuation in
         completion.install(continuation)
-        session.sendMessageData(data, replyHandler: { completion.finish(.success($0)) },
-          errorHandler: { completion.finish(.failure($0)) })
+        let replyHandler: @Sendable (Data) -> Void = { @Sendable data in
+          completion.finish(.success(data))
+        }
+        let errorHandler: @Sendable (any Error) -> Void = { @Sendable error in
+          completion.finish(.failure(error))
+        }
+        session.sendMessageData(data, replyHandler: replyHandler, errorHandler: errorHandler)
       }
     } onCancel: {
       completion.finish(.failure(CancellationError()))

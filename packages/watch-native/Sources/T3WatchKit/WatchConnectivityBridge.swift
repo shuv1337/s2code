@@ -1,6 +1,5 @@
 #if os(iOS) || os(watchOS)
 import Foundation
-import Synchronization
 import WatchConnectivity
 #if os(iOS)
 import UIKit
@@ -41,41 +40,23 @@ private struct WatchPairingReply: Codable {
   var error: String? = nil
 }
 
-/// Callback completion is arbitrated under a lock: cancellation, deadline and WCSession may race.
-private final class RelayContinuation: Sendable {
-  private struct State {
-    var continuation: CheckedContinuation<Data, any Error>?
-    var result: Result<Data, any Error>?
-    var completed = false
-  }
-  private let state = Mutex(State())
+/// Apple owns this non-Sendable closure and permits one reply. The lock makes moving it from the
+/// delegate queue into asynchronous processing safe and prevents duplicate invocation.
+private final class RelayReplyHandler: @unchecked Sendable {
+  private let lock = NSLock()
+  private var callback: ((Data) -> Void)?
 
-  func install(_ continuation: CheckedContinuation<Data, any Error>) {
-    let ready = state.withLock { state -> Result<Data, any Error>? in
-      if let result = state.result { return result }
-      state.continuation = continuation
-      return nil
-    }
-    if let ready { continuation.resume(with: ready) }
+  init(call: @escaping (Data) -> Void) {
+    callback = call
   }
 
-  func finish(_ result: Result<Data, any Error>) {
-    let continuation = state.withLock { state -> CheckedContinuation<Data, any Error>? in
-      guard !state.completed else { return nil }
-      state.completed = true
-      state.result = result
-      let continuation = state.continuation
-      state.continuation = nil
-      return continuation
-    }
-    continuation?.resume(with: result)
+  func call(_ data: Data) {
+    lock.lock()
+    let call = callback
+    callback = nil
+    lock.unlock()
+    call?(data)
   }
-}
-
-/// Apple calls the reply closure on an arbitrary delegate queue. Ownership moves exactly once
-/// into the receive task; it is never invoked concurrently or retained by the relay server.
-private struct RelayReplyHandler: @unchecked Sendable {
-  let call: (Data) -> Void
 }
 
 @MainActor
@@ -124,7 +105,7 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
       session.transferUserInfo([Self.pairingUserInfoKey: data])
       return .queued
     }
-    let completion = RelayContinuation()
+    let completion = WatchConnectivityContinuation()
     let timer = Task {
       do { try await Task.sleep(for: .seconds(20)) } catch { return }
       completion.finish(.failure(URLError(.timedOut)))
@@ -133,8 +114,9 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
     let dataReply = try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { continuation in
         completion.install(continuation)
-        session.sendMessageData(data, replyHandler: { completion.finish(.success($0)) },
-          errorHandler: { error in completion.finish(.failure(error)) })
+        let callbacks = WatchConnectivityCallbacks(completion: completion)
+        session.sendMessageData(data, replyHandler: callbacks.replyHandler,
+          errorHandler: callbacks.errorHandler)
       }
     } onCancel: { completion.finish(.failure(CancellationError())) }
     let reply = try JSONDecoder.watch.decode(WatchPairingReply.self, from: dataReply)
@@ -160,7 +142,7 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
     }
     let data = try JSONEncoder.watch.encode(message)
     guard data.count <= WatchRelay.maxMessageBytes else { throw WatchRelay.Failure.invalidRequest }
-    let completion = RelayContinuation()
+    let completion = WatchConnectivityContinuation()
     let timer = Task {
       do { try await Task.sleep(for: .seconds(12)) } catch { return }
       completion.finish(.failure(URLError(.timedOut)))
@@ -173,13 +155,14 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
           completion.finish(.failure(CancellationError()))
           return
         }
-        session.sendMessageData(data, replyHandler: { completion.finish(.success($0)) },
-          errorHandler: { _ in
-            // The counterpart may have received it. Receipt reconciliation decides admission.
-            completion.finish(.failure(WatchClientError.transport(
-              code: URLError.networkConnectionLost.rawValue,
-              description: "iPhone relay connection lost. Retry to check delivery.")))
-          })
+        let callbacks = WatchConnectivityCallbacks(completion: completion, mapError: { @Sendable _ in
+          // The counterpart may have received it. Receipt reconciliation decides admission.
+          WatchClientError.transport(
+            code: URLError.networkConnectionLost.rawValue,
+            description: "iPhone relay connection lost. Retry to check delivery.")
+        })
+        session.sendMessageData(data, replyHandler: callbacks.replyHandler,
+          errorHandler: callbacks.errorHandler)
       }
     } onCancel: { completion.finish(.failure(CancellationError())) }
     guard reply.count <= WatchRelay.maxMessageBytes else { throw WatchRelay.Failure.invalidRequest }
