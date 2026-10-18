@@ -71,7 +71,7 @@ public final class WatchConnectivityBridge: NSObject, WCSessionDelegate {
   public func exchange(_ message: WatchRelay.Message) async throws -> WatchRelay.Reply {
     guard let session, session.activationState == .activated, session.isReachable else {
       throw WatchClientError.transport(code: URLError.notConnectedToInternet.rawValue,
-        description: "iPhone unavailable. Open T3 Code on your iPhone and try again.")
+        description: "iPhone unavailable. Open S2Code on your iPhone and try again.")
     }
     let data = try JSONEncoder.watch.encode(message)
     guard data.count <= WatchRelay.maxMessageBytes else { throw WatchRelay.Failure.invalidRequest }

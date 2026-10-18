@@ -215,7 +215,7 @@ public struct PairingRunner: Sendable {
     store: PairingStore?,
     urlSession: URLSession = .shared,
     transport: (any WatchHTTPTransport)? = nil,
-    clientLabel: String = "T3 Watch",
+    clientLabel: String = "S2Code Watch",
     clock: @escaping @Sendable () -> Date = { Date() },
     sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
       try await Task.sleep(for: .seconds($0))

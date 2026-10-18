@@ -202,7 +202,7 @@ extension ClientTests {
     #expect(request.method == "POST" && request.url == "http://127.0.0.1:13773/api/watch/v1/pairing/start")
     #expect(request.headers["Authorization"] == nil)
     #expect(request.headers["Content-Type"] == "application/json")
-    #expect(try jsonObject(request.body) == ["protocolVersion": 1, "clientLabel": "T3 Watch"])
+    #expect(try jsonObject(request.body) == ["protocolVersion": 1, "clientLabel": "S2Code Watch"])
   }
 
   @Test func pollPairingPostsDeviceCode() async throws {
