@@ -2619,6 +2619,43 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect("branch PR lookup returns null for an unrecognized source control host", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const calls: SourceControlHost.SourceControlProcessInput[] = [];
+      const gitLabProvider = yield* GitLabSourceControlProvider.make.pipe(
+        Effect.provide(
+          GitLabCli.layer.pipe(
+            Layer.provide(
+              TestSourceControlHost.layer({
+                process: {
+                  run: (input) =>
+                    Effect.sync(() => {
+                      calls.push(input);
+                      return fakeGhOutput("[]");
+                    }),
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+      const { manager } = yield* makeManager({
+        sourceControlProvider: {
+          ...gitLabProvider,
+          kind: SourceControlProviderKind.make("unknown"),
+        },
+      });
+
+      expect(yield* manager.branchPullRequest({ cwd: repoDir, branch: "main" })).toBeNull();
+      expect(calls).toHaveLength(0);
+    }),
+  );
+
   it.effect(
     "status ignores unrelated fork PRs when the current branch tracks the same repository",
     () =>

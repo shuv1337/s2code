@@ -5,6 +5,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
 import { AuthenticationError, Cursor, CursorSdkError } from "./sdk.ts";
@@ -18,6 +19,7 @@ export class CursorSdkCatalogError extends Schema.TaggedError<CursorSdkCatalogEr
   "CursorSdkCatalogError",
   {
     authenticationFailure: Schema.Boolean,
+    retryable: Schema.Boolean,
     cause: Schema.Defect(),
   },
 ) {
@@ -54,12 +56,26 @@ export interface CursorSdkCatalogProbes {
 const sdkRequest = <A>(tryRequest: () => Promise<A>) =>
   Effect.tryPromise({
     try: tryRequest,
-    catch: (cause) =>
-      new CursorSdkCatalogError({
-        authenticationFailure: isAuthenticationFailure(cause),
+    catch: (cause) => {
+      const authenticationFailure = isAuthenticationFailure(cause);
+      return new CursorSdkCatalogError({
+        authenticationFailure,
+        retryable: !authenticationFailure && cause instanceof CursorSdkError && cause.isRetryable,
         cause,
-      }),
+      });
+    },
   });
+
+// A probe that races network bring-up at boot would otherwise publish a failed
+// status that only clears on the next foreground-gated health refresh.
+const retryTransientFailures = <A>(effect: Effect.Effect<A, CursorSdkCatalogError>) =>
+  effect.pipe(
+    Effect.retry({
+      while: (error) => error.retryable,
+      schedule: Schedule.exponential("500 millis"),
+      times: 4,
+    }),
+  );
 
 const liveProbes: CursorSdkCatalogProbes = {
   readUser: (apiKey) => sdkRequest(() => Cursor.me({ apiKey })),
@@ -78,8 +94,8 @@ export const makeCursorSdkCatalog = Effect.fn("CursorSdkCatalog.make")(function*
     read: (apiKey) =>
       Effect.all(
         {
-          user: probes.readUser(apiKey),
-          models: Cache.get(modelCache, apiKey),
+          user: retryTransientFailures(probes.readUser(apiKey)),
+          models: retryTransientFailures(Cache.get(modelCache, apiKey)),
         },
         { concurrency: "unbounded" },
       ),

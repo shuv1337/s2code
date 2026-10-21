@@ -313,11 +313,12 @@ export const make = Effect.gen(function* () {
     const candidates = threads.filter((thread) => isAutoSettlementCandidate(thread, nowMs));
 
     const settleThread = Effect.fn("ThreadSettlementServiceV2.settleThread")(
-      function* (thread: (typeof candidates)[number], pullRequest: SettlementPullRequest | null) {
-        const currentSettings = resolveProjectSettings(
-          yield* settingsService.getSettings,
-          thread.projectId,
-        ).settings;
+      function* (
+        thread: (typeof candidates)[number],
+        pullRequest: SettlementPullRequest | null,
+        serverSettings: typeof settings,
+      ) {
+        const currentSettings = resolveProjectSettings(serverSettings, thread.projectId).settings;
         const decisionNow = yield* DateTime.now;
         const settledAt = resolveAutoSettlementAt({
           thread,
@@ -353,7 +354,7 @@ export const make = Effect.gen(function* () {
 
     const lookupCandidates = (yield* Effect.forEach(
       candidates,
-      (thread) => settleThread(thread, null),
+      (thread) => settleThread(thread, null, settings),
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
@@ -499,9 +500,14 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const pullRequest = yield* pullRequestFor(group);
           if (pullRequest === undefined) return;
-          yield* Effect.forEach(group, (thread) => settleThread(thread, pullRequest), {
-            discard: true,
-          });
+          // Re-read after the lookup's network wait, once per group: reading
+          // settings materializes every stored provider secret.
+          const currentSettings = yield* settingsService.getSettings;
+          yield* Effect.forEach(
+            group,
+            (thread) => settleThread(thread, pullRequest, currentSettings),
+            { discard: true },
+          );
         }).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
