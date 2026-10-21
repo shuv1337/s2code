@@ -1778,9 +1778,6 @@ export const make = Effect.gen(function* () {
     const parsedByNumber = new Map<number, PullRequestInfo>();
 
     const provider = yield* sourceControlProvider(cwd);
-    // An unrecognized host has no change-request API to ask, so it has no PRs.
-    // Failing here would make every status refresh and settlement sweep log it.
-    if (provider.kind === "unknown") return null;
     const probe = headBranchProbe(provider, headContext.headSelectors, "all");
     for (const headSelector of probe.headSelectors) {
       const pullRequests = yield* provider.listChangeRequests({
