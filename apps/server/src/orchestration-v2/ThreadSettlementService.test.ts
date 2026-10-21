@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderError, SourceControlProviderKind } from "@t3tools/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import {
@@ -24,6 +24,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -544,6 +545,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const snapshotReads = yield* Queue.unbounded<number>();
   const candidateReads = yield* Ref.make<ReadonlyArray<string | undefined>>([]);
   const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
+  const settingsReadCount = yield* Ref.make(0);
   const settingsChanges = yield* PubSub.unbounded<ContractServerSettings>();
   const mergedPullRequests = yield* PubSub.unbounded<PullRequestService.PullRequestMergeEvent>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
@@ -610,7 +612,9 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const serverSettings = ServerSettings.ServerSettingsService.of({
     start: Effect.void,
     ready: Effect.void,
-    getSettings: Ref.get(settings),
+    getSettings: Ref.update(settingsReadCount, (count) => count + 1).pipe(
+      Effect.andThen(Ref.get(settings)),
+    ),
     updateSettings,
     updateProviderInstance: () => Effect.die("Unexpected provider mutation"),
     withSettingsSnapshot: (use) => Ref.get(settings).pipe(Effect.flatMap(use)),
@@ -682,6 +686,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     snapshotReadCount,
     snapshotReads,
     candidateReads,
+    settingsReadCount,
     commands,
     branchCalls,
     summaryCalls,
@@ -804,6 +809,75 @@ describe("ThreadSettlementServiceV2 worker", () => {
           expect(commands[0]?.settledAt).toEqual(thread.latestRunCompletedAt);
           expect(commands[0]?.snapshotAt).toEqual(thread.updatedAt);
         }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("reads settings once per sweep stage rather than once per thread", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const threads = Array.from({ length: 6 }, (_, index) =>
+          makeThread(`branch-thread-${index}`, {
+            branch: "feature",
+            latestRunCompletedAt: DateTime.makeUnsafe(NOW),
+          }),
+        );
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot(threads),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
+          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          expect(yield* Ref.get(fixture.branchCalls)).toHaveLength(1);
+          // Reading settings materializes every stored provider secret.
+          expect(yield* Ref.get(fixture.settingsReadCount)).toBeLessThan(threads.length);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("skips an unrecognized host's branch without a warning or settling", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const logs: Array<{ readonly logLevel: string; readonly message: unknown }> = [];
+        const logger = Logger.make(({ logLevel, message }) => {
+          logs.push({ logLevel, message });
+        });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("unrecognized-host", {
+              branch: "feature",
+              latestRunCompletedAt: DateTime.makeUnsafe(NOW),
+            }),
+          ]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
+          branchPullRequest: ({ cwd }) =>
+            Effect.fail(
+              new SourceControlProviderError({
+                provider: SourceControlProviderKind.make("unknown"),
+                operation: "listChangeRequests",
+                cwd,
+                detail: "No unknown source control provider is registered.",
+              }),
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          expect(yield* Ref.get(fixture.branchCalls)).toHaveLength(1);
+          expect(yield* Ref.get(fixture.commands)).toHaveLength(0);
+          expect(logs.filter((log) => log.logLevel === "Warn")).toEqual([]);
+        }).pipe(
+          Effect.provide(
+            fixture.layer.pipe(
+              Layer.provideMerge(Logger.layer([logger], { mergeWithExisting: false })),
+            ),
+          ),
+        );
       }),
     ),
   );

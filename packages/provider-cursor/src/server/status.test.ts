@@ -216,6 +216,7 @@ describe("checkCursorProviderStatus", () => {
             Effect.fail(
               new CursorSdkCatalog.CursorSdkCatalogError({
                 authenticationFailure: true,
+                retryable: false,
                 cause: new Error("unauthorized"),
               }),
             ),

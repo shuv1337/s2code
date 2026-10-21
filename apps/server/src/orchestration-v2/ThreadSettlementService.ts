@@ -3,6 +3,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
+  SourceControlProviderError,
   type ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
@@ -15,7 +16,9 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
@@ -33,6 +36,21 @@ export interface SettlementPullRequest {
   readonly state: "open" | "closed" | "merged";
   readonly closedAt?: string | null;
   readonly mergedAt?: string | null;
+}
+
+const isSourceControlProviderError = Schema.is(SourceControlProviderError);
+
+// A remote whose host no source control provider recognizes fails every branch
+// lookup the same way. The group is still skipped, but a stack trace per sweep
+// is pure log churn.
+function isUnrecognizedHostLookup(cause: Cause.Cause<unknown>): boolean {
+  const error = Cause.findErrorOption(cause);
+  return (
+    Option.isSome(error) &&
+    isSourceControlProviderError(error.value) &&
+    error.value.provider === "unknown" &&
+    error.value.operation === "listChangeRequests"
+  );
 }
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -313,11 +331,12 @@ export const make = Effect.gen(function* () {
     const candidates = threads.filter((thread) => isAutoSettlementCandidate(thread, nowMs));
 
     const settleThread = Effect.fn("ThreadSettlementServiceV2.settleThread")(
-      function* (thread: (typeof candidates)[number], pullRequest: SettlementPullRequest | null) {
-        const currentSettings = resolveProjectSettings(
-          yield* settingsService.getSettings,
-          thread.projectId,
-        ).settings;
+      function* (
+        thread: (typeof candidates)[number],
+        pullRequest: SettlementPullRequest | null,
+        serverSettings: typeof settings,
+      ) {
+        const currentSettings = resolveProjectSettings(serverSettings, thread.projectId).settings;
         const decisionNow = yield* DateTime.now;
         const settledAt = resolveAutoSettlementAt({
           thread,
@@ -353,7 +372,7 @@ export const make = Effect.gen(function* () {
 
     const lookupCandidates = (yield* Effect.forEach(
       candidates,
-      (thread) => settleThread(thread, null),
+      (thread) => settleThread(thread, null, settings),
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
@@ -499,17 +518,26 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const pullRequest = yield* pullRequestFor(group);
           if (pullRequest === undefined) return;
-          yield* Effect.forEach(group, (thread) => settleThread(thread, pullRequest), {
-            discard: true,
-          });
+          // Re-read after the lookup's network wait, once per group: reading
+          // settings materializes every stored provider secret.
+          const currentSettings = yield* settingsService.getSettings;
+          yield* Effect.forEach(
+            group,
+            (thread) => settleThread(thread, pullRequest, currentSettings),
+            { discard: true },
+          );
         }).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.failCause(cause)
-              : Effect.logWarning("automatic thread settlement skipped", {
-                  threadIds: group.map((thread) => thread.id),
-                  cause: Cause.pretty(cause),
-                }),
+              : isUnrecognizedHostLookup(cause)
+                ? Effect.logDebug("automatic thread settlement skipped: unrecognized host", {
+                    threadIds: group.map((thread) => thread.id),
+                  })
+                : Effect.logWarning("automatic thread settlement skipped", {
+                    threadIds: group.map((thread) => thread.id),
+                    cause: Cause.pretty(cause),
+                  }),
           ),
         ),
       { concurrency: 8, discard: true },
