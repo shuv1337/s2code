@@ -42,17 +42,15 @@ export function grokUsageResponseToLimits(
   response: typeof GrokUsageResponse.Type,
   checkedAt: string,
 ) {
-  const usedPercent = response.config?.creditUsagePercent;
-  if (usedPercent === undefined || !Number.isFinite(usedPercent)) {
-    // A billing read that succeeded but carries no percentage is an account
-    // with nothing metered yet, not one that can never report: xAI omits the
-    // field entirely (rather than sending 0) until usage registers, then fills
-    // it in.
-    return makeUsageLimits({ checkedAt, windows: [] });
-  }
   const period = response.config?.currentPeriod;
   const periodType = period?.type?.replace(/^USAGE_PERIOD_TYPE_/, "");
   const kind = periodType === "WEEKLY" ? "weekly" : periodType === "MONTHLY" ? "monthly" : "other";
+  // Grok omits zero usage. A recognized billing period distinguishes that
+  // response from an account that supplied no subscription allowance.
+  const usedPercent = response.config?.creditUsagePercent ?? (kind !== "other" ? 0 : undefined);
+  if (usedPercent === undefined || !Number.isFinite(usedPercent)) {
+    return makeUsageLimits({ checkedAt, windows: [] });
+  }
   const reset = period?.end ? DateTime.make(period.end) : Option.none();
   const window: ServerProviderUsageWindow = {
     id: "subscription",

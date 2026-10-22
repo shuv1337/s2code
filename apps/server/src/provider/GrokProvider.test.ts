@@ -578,7 +578,12 @@ describe("Grok usage limits", () => {
   });
 
   it("does not invent allowance or reset dates when billing omits them", () => {
-    for (const response of [{}, { config: {} }, { config: { creditUsagePercent: NaN } }]) {
+    for (const response of [
+      {},
+      { config: {} },
+      { config: { currentPeriod: { type: "USAGE_PERIOD_TYPE_UNKNOWN" } } },
+      { config: { creditUsagePercent: NaN, currentPeriod: { type: "WEEKLY" } } },
+    ]) {
       const limits = grokUsageResponseToLimits(response, checkedAt);
       expect(limits.windows).toEqual([]);
       expect(limits.unavailable).toBeUndefined();
@@ -601,6 +606,54 @@ describe("Grok usage limits", () => {
 });
 
 it.layer(NodeServices.layer)("readGrokAccount", (it) => {
+  it.effect("preserves a billing period when Grok omits zero usage", () =>
+    Effect.gen(function* () {
+      for (const kind of ["weekly", "monthly"] as const) {
+        const { usageLimits } = yield* readGrokAccount({
+          GROK_AUTH: '{"https://accounts.x.ai/sign-in":{"key":"session-token"}}',
+        }).pipe(
+          Effect.provideService(
+            FileSystem.FileSystem,
+            FileSystem.makeNoop({ readFileString: () => Effect.succeed("") }),
+          ),
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.succeed(
+                HttpClientResponse.fromWeb(
+                  request,
+                  Response.json({
+                    config: {
+                      currentPeriod: {
+                        type: `USAGE_PERIOD_TYPE_${kind.toUpperCase()}`,
+                        start: "2026-10-21T02:30:16.863135+00:00",
+                        end: "2026-10-28T02:30:16.863135+00:00",
+                      },
+                      isUnifiedBillingUser: true,
+                      onDemandCap: { val: 0 },
+                      onDemandUsed: { val: 0 },
+                      prepaidBalance: { val: 0 },
+                    },
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+        expect(usageLimits.unavailable).toBeUndefined();
+        expect(usageLimits.windows).toEqual([
+          {
+            id: "subscription",
+            kind,
+            label: kind === "weekly" ? "Weekly" : "Monthly",
+            usedPercent: 0,
+            resetsAt: "2026-10-28T02:30:16.863Z",
+          },
+        ]);
+      }
+    }),
+  );
+
   it.effect("reads the configured Grok home and prefers the current login scope to legacy", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
