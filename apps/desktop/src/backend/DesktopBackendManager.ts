@@ -83,6 +83,8 @@ export interface PreflightFailure {
   readonly reason: string;
   readonly fatal: boolean;
   readonly retryLimit?: number;
+  /** Set when an existing local server blocked startup; there is nothing to fall back to. */
+  readonly localServerAttach?: boolean;
 }
 
 interface BackendProcessExit {

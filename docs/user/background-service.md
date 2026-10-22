@@ -20,6 +20,13 @@ Examples use stable. Nightly uses `shuv2code-nightly`; preview uses
 `shuv2code-preview`. For npm/runner/source installs, use the exact invocation
 printed by the server, not an upstream `t3` command.
 
+The desktop app uses a running service instead of starting its own server, and
+quitting the app leaves the service running. When the app has updated past the
+service, it moves the service to its own version on launch, interrupting work
+running in it. The app's network access setting does not apply to the service,
+which listens on `127.0.0.1` unless `SHUV2CODE_HOST` is set in its environment;
+use [Tailscale Serve](./remote-access.md) to reach it from other devices.
+
 Uninstalling the service leaves your projects, threads, and settings intact.
 Running `shuv2code service install` again repairs a service that `shuv2code service status`
 reports as broken.

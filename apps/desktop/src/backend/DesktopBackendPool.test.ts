@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -43,7 +44,14 @@ function makeStubInstance(
   };
 }
 
-function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+function layerPool(
+  labelRef: Ref.Ref<string>,
+  overrides: {
+    readonly resolvePrimary?: Effect.Effect<DesktopBackendStartConfig>;
+    readonly showErrorBox?: (title: string, content: string) => Effect.Effect<void>;
+    readonly quit?: Effect.Effect<void>;
+  } = {},
+) {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -79,15 +87,22 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
         }),
         DesktopBrowserHost.layer,
         Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {
-          resolvePrimary: Effect.die("unexpected primary config resolve"),
+          resolvePrimary:
+            overrides.resolvePrimary ?? Effect.die("unexpected primary config resolve"),
           resolvePrimaryLabel: Ref.get(labelRef),
           resolveWsl: () => Effect.die("unexpected WSL config resolve"),
           currentBootstrapToken: Effect.die("unexpected bootstrap token read"),
         } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]),
         DesktopAppSettings.layerTest(),
         DesktopWslEnvironment.layerTest(),
-        ElectronDialog.layer,
-        ElectronApp.layer,
+        Layer.succeed(ElectronDialog.ElectronDialog, {
+          ...ElectronDialog.make,
+          ...(overrides.showErrorBox ? { showErrorBox: overrides.showErrorBox } : {}),
+        }),
+        Layer.succeed(ElectronApp.ElectronApp, {
+          ...ElectronApp.make,
+          ...(overrides.quit ? { quit: overrides.quit } : {}),
+        }),
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected window create"),
           ensureMain: Effect.die("unexpected window ensure"),
@@ -153,6 +168,61 @@ describe("DesktopBackendPool", () => {
         yield* Ref.set(labelRef, "WSL (Ubuntu)");
 
         assert.equal(yield* primary.label, "WSL (Ubuntu)");
+      }),
+    ),
+  );
+
+  it.effect("reports a blocked local server attach immediately without touching WSL settings", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const dialogs: string[] = [];
+        let quits = 0;
+        const labelRef = yield* Ref.make("Local environment");
+        const reason = "Cannot attach to the existing local server. Refusing to downgrade.";
+        const context = yield* Layer.build(
+          layerPool(labelRef, {
+            resolvePrimary: Effect.succeed({
+              executablePath: "/electron",
+              args: ["/server/bin.mjs"],
+              entryPath: "/server/bin.mjs",
+              cwd: "/server",
+              env: {},
+              bootstrap: {
+                mode: "desktop",
+                noBrowser: true,
+                port: 3773,
+                t3Home: "/tmp/t3",
+                host: "127.0.0.1",
+                desktopBootstrapToken: "token",
+                tailscaleServeEnabled: false,
+                tailscaleServePort: 443,
+              },
+              bootstrapDelivery: "fd3",
+              extendEnv: true,
+              httpBaseUrl: new URL("http://127.0.0.1:3773"),
+              captureOutput: true,
+              preflightFailure: Option.some({
+                reason,
+                fatal: true,
+                retryLimit: 1,
+                localServerAttach: true,
+              }),
+            }),
+            showErrorBox: (title) => Effect.sync(() => void dialogs.push(title)),
+            quit: Effect.sync(() => {
+              quits += 1;
+            }),
+          }),
+        );
+        const pool = Context.get(context, DesktopBackendPool.DesktopBackendPool);
+        const settings = Context.get(context, DesktopAppSettings.DesktopAppSettings);
+        const before = yield* settings.get;
+
+        yield* (yield* pool.primary).start;
+
+        assert.deepEqual(dialogs, ["Can't connect to the running server"]);
+        assert.equal(quits, 1);
+        assert.deepEqual(yield* settings.get, before);
       }),
     ),
   );

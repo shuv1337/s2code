@@ -19,7 +19,6 @@ import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
-import * as DesktopLocalServerAttach from "../backend/DesktopLocalServerAttach.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -204,13 +203,7 @@ const bootstrap = Effect.gen(function* () {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
   }
 
-  const attachment =
-    !environment.isDevelopment && !(settings.wslOnly && settings.wslBackendEnabled)
-      ? yield* DesktopLocalServerAttach.discover(environment)
-      : null;
-  const backendPortSelection = attachment
-    ? { port: attachment.port, selectedByScan: false }
-    : yield* resolveDesktopBackendPort(environment.configuredBackendPort);
+  const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
   const backendPort = backendPortSelection.port;
   yield* logBootstrapInfo(
     backendPortSelection.selectedByScan

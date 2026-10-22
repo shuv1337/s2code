@@ -11,6 +11,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schedule from "effect/Schedule";
+import { ChildProcessSpawner } from "effect/process";
 import { HttpClient } from "effect/http";
 import * as DesktopLocalServerAttach from "./DesktopLocalServerAttach.ts";
 import * as PlatformError from "effect/PlatformError";
@@ -763,6 +765,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const httpClient = yield* HttpClient.HttpClient;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
   const wslServerTree = yield* DesktopWslServerTree.DesktopWslServerTree;
   const settings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -842,21 +845,56 @@ export const make = Effect.gen(function* () {
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
     );
     if (environment.isDevelopment) return config;
-    const attachment = yield* DesktopLocalServerAttach.discover(environment).pipe(
+    const discover = DesktopLocalServerAttach.discover(environment).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, environment.path),
       Effect.provideService(HttpClient.HttpClient, httpClient),
+    );
+    const attachment = yield* discover.pipe(
+      Effect.catchTags({
+        LocalServiceVersionMismatch: (mismatch) =>
+          Effect.gen(function* () {
+            yield* Effect.logInfo("moving the background service to the desktop version", {
+              serverVersion: mismatch.serverVersion,
+              appVersion: environment.appVersion,
+            });
+            yield* DesktopLocalServerAttach.updateServiceToAppVersion({
+              executablePath: config.executablePath,
+              entryArgs: config.args.slice(0, config.args.indexOf(config.entryPath) + 1),
+              env: { ...config.env, SHUV2CODE_HOME: environment.baseDir },
+              appVersion: environment.appVersion,
+            }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+            // The restarted service publishes its attachment record shortly after `update` exits.
+            return yield* discover.pipe(
+              Effect.filterOrFail(
+                (record) => record !== null,
+                () =>
+                  new DesktopLocalServerAttach.LocalServerAttachmentError({
+                    reason: "The background service did not come back after its update.",
+                  }),
+              ),
+              Effect.retry({
+                while: (error) => error._tag === "LocalServerAttachmentError",
+                schedule: Schedule.spaced("500 millis"),
+                times: 120,
+              }),
+            );
+          }),
+      }),
       Effect.match({ onFailure: (error) => ({ error }), onSuccess: (record) => ({ record }) }),
     );
     if ("error" in attachment)
       return {
         ...config,
         preflightFailure: Option.some({
-          reason: "Cannot attach to the existing local server. Check its version and availability.",
+          reason: `Cannot attach to the existing local server. ${attachment.error.message}`,
           fatal: true,
+          retryLimit: 1,
+          localServerAttach: true,
         }),
       };
     if (!attachment.record) return config;
+    yield* serverExposure.configureFromSettings({ port: attachment.record.port });
     return {
       ...config,
       attachedPid: attachment.record.pid,

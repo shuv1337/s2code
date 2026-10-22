@@ -55,7 +55,9 @@ describe("local desktop attachment", () => {
     "stale",
     "stale-with-live-runtime",
     "version",
+    "service-version",
     "legacy",
+    "legacy-service",
     "unavailable",
     "auth-rejected",
   ] as const)("%s", (scenario) =>
@@ -68,6 +70,11 @@ describe("local desktop attachment", () => {
           path.join(stateDir, "server-runtime.json"),
           JSON.stringify({ pid: process.pid }),
         );
+      } else if (scenario === "legacy-service") {
+        yield* fs.writeFileString(
+          path.join(stateDir, "server-runtime.json"),
+          JSON.stringify({ pid: process.pid, serviceManaged: true, serverVersion: "older" }),
+        );
       } else if (scenario !== "absent") {
         yield* fs.writeFileString(
           path.join(stateDir, LOCAL_SERVER_ATTACHMENT_FILE),
@@ -76,8 +83,16 @@ describe("local desktop attachment", () => {
             ...(scenario === "stale" || scenario === "stale-with-live-runtime"
               ? { pid: 2147483647 }
               : {}),
-            ...(scenario === "version" ? { serverVersion: "older" } : {}),
+            ...(scenario === "version" || scenario === "service-version"
+              ? { serverVersion: "older" }
+              : {}),
           }),
+        );
+      }
+      if (scenario === "service-version") {
+        yield* fs.writeFileString(
+          path.join(stateDir, "server-runtime.json"),
+          JSON.stringify({ pid: process.pid, serviceManaged: true }),
         );
       }
       if (scenario === "stale-with-live-runtime") {
@@ -105,7 +120,9 @@ describe("local desktop attachment", () => {
             : http,
         ),
       );
-      if (
+      if (scenario === "service-version" || scenario === "legacy-service") {
+        assert.equal((yield* Effect.flip(result))._tag, "LocalServiceVersionMismatch");
+      } else if (
         scenario === "version" ||
         scenario === "stale-with-live-runtime" ||
         scenario === "legacy" ||
