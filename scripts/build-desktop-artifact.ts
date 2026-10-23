@@ -2891,10 +2891,18 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     buildConfig.deb = {
       packageName: identity.executableName,
-      replaces: [legacyIdentity.executableName],
-      conflicts: [legacyIdentity.executableName],
-      // FPM runs outside the staged app directory, so source paths must be absolute.
+      // DebOptions has no Replaces or Conflicts fields. electron-builder 26
+      // rejects those unknown properties, and with more than one of them the
+      // validator collapses the failure into "configuration.deb should be null".
+      // fpm 1.17 writes these flags into the control file, but only when they
+      // appear before the first source=dest mapping. Provides stays unset so
+      // this package is not a stand-in for the previous name.
       fpm: [
+        "--replaces",
+        legacyIdentity.executableName,
+        "--conflicts",
+        legacyIdentity.executableName,
+        // FPM runs outside the staged app directory, so source paths must be absolute.
         `${path.join(repoRoot, "apps/desktop/resources/linux", `${identity.appId}.metainfo.xml`)}=/usr/share/metainfo/${identity.appId}.metainfo.xml`,
         `${path.join(repoRoot, "apps/desktop/resources/linux", `legacy-${identity.executableName}.sh`)}=/usr/bin/${legacyIdentity.executableName}`,
         `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/${identity.executableName}/copyright`,

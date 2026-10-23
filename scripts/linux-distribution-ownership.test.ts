@@ -58,8 +58,16 @@ const upstreamPaths = [
 function noUpstreamPaths(files: string[]) {
   expect(files.filter((file) => upstreamPaths.some((pattern) => pattern.test(file)))).toEqual([]);
 }
-const configFor = (version: string) =>
-  createBuildConfig("linux", "AppImage", version, false, false, undefined, undefined).pipe(
+const configFor = (version: string, platform: "linux" | "mac" | "win" = "linux") =>
+  createBuildConfig(
+    platform,
+    platform === "mac" ? "dmg" : platform === "linux" ? "AppImage" : "nsis",
+    version,
+    false,
+    false,
+    undefined,
+    undefined,
+  ).pipe(
     Effect.provide(
       Layer.mergeAll(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })), NodeServices.layer),
     ),
@@ -86,11 +94,17 @@ it.effect(
           identity.scheme,
           identity.scheme.replace("s2code", "shuv2code"),
         ]);
-        expect(deb).toMatchObject({
-          replaces: [identity.executableName.replace("s2code", "shuv2code")],
-          conflicts: [identity.executableName.replace("s2code", "shuv2code")],
-        });
+        const legacyPackage = identity.executableName.replace("s2code", "shuv2code");
+        expect(deb.fpm.slice(0, 4)).toEqual([
+          "--replaces",
+          legacyPackage,
+          "--conflicts",
+          legacyPackage,
+        ]);
+        expect(deb.fpm).not.toContain("--provides");
         expect(deb).not.toHaveProperty("provides");
+        expect(deb).not.toHaveProperty("replaces");
+        expect(deb).not.toHaveProperty("conflicts");
         // electron-builder 26.15.6 FpmTarget maps the app tree to /opt/<sanitizedProductName>,
         // executableName to desktop/icons, and the after-install script creates its command link.
         // This reconstructed inventory is not proof of final package contents:
@@ -106,7 +120,9 @@ it.effect(
           ...[16, 22, 24, 32, 48, 64, 128, 256, 512].map(
             (size) => `/usr/share/icons/hicolor/${size}x${size}/apps/${linux.executableName}.png`,
           ),
-          ...deb.fpm.map((mapping) => mapping.slice(mapping.indexOf("=") + 1)),
+          ...deb.fpm
+            .filter((mapping) => mapping.includes("=/"))
+            .map((mapping) => mapping.slice(mapping.indexOf("=") + 1)),
         ];
         const metainfo = deb.fpm.find((mapping) => mapping.includes("/usr/share/metainfo/"))!;
         const [source, destination] = metainfo.split("=");
@@ -124,6 +140,29 @@ it.effect(
         manifests.push(files);
       }
     }),
+);
+
+it.effect("accepts linux, mac, and windows build configs in the electron-builder 26 schema", () =>
+  Effect.gen(function* () {
+    const desktopRequire = NodeModule.createRequire(
+      NodePath.join(repoRoot, "apps/desktop/package.json"),
+    );
+    const builderRequire = NodeModule.createRequire(desktopRequire.resolve("electron-builder"));
+    const { validateConfiguration } = builderRequire(
+      "app-builder-lib/out/util/config/config.js",
+    ) as {
+      validateConfiguration: (
+        config: object,
+        logger: { readonly isEnabled: boolean },
+      ) => Promise<void>;
+    };
+    for (const version of versions) {
+      for (const platform of ["linux", "mac", "win"] as const) {
+        const config = yield* configFor(version, platform);
+        yield* Effect.promise(() => validateConfiguration(config, { isEnabled: false }));
+      }
+    }
+  }),
 );
 
 // Only host-tool portability is stubbed: package() itself runs from the real recipes.
