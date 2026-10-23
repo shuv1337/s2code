@@ -52,7 +52,11 @@ it
       await NodeFSP.writeFile(NodePath.join(cache, ".install-complete"), "1.2.3\n");
     }
     const env = {
-      ...process.env,
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !/^(?:S2CODE|SHUV2CODE)_/.test(key.toUpperCase()),
+        ),
+      ),
       T3CODE_HOME: "/unowned-upstream-home",
       SHUV2CODE_HOME: kind === "legacy-unit" ? undefined : directory,
     };
@@ -78,8 +82,8 @@ it
         });
         child.once("exit", () => reject(new Error(`Launcher exited before pausing: ${message}`)));
       });
-      assert.include(message, "shuv2code service install");
-      assert.include(message, "SHUV2CODE_HOME");
+      assert.include(message, "s2code service install");
+      assert.include(message, "S2CODE_HOME");
       assert.isNull(child.exitCode);
     } finally {
       child.kill("SIGTERM");

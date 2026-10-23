@@ -1,4 +1,5 @@
-import { HOSTED_APP_CHANNEL } from "~/branding";
+import { APP_VERSION, HOSTED_APP_CHANNEL } from "~/branding";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/contracts";
@@ -530,9 +531,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "cli-command",
-    title: "shuv2code command",
+    title: `${resolveChannelIdentity(APP_VERSION).executableName} command`,
     to: "/settings/general",
-    searchTerms: ["cli terminal shell path install command line"],
+    searchTerms: ["cli terminal shell path install command line s2c shuv2code"],
     desktopOnly: true,
   },
   {
@@ -751,7 +752,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "pull-request-links-open-in-app",
-    title: "Open pull requests in T3 Code",
+    title: "Open pull requests in S2Code",
     to: "/settings/integrations",
     searchTerms: ["pr links github browser external click default pull request view panel"],
   },

@@ -107,19 +107,24 @@ function shellSingleQuote(value) {
 }
 
 export function makeDevelopmentEnvironmentScript(environment) {
+  const firstNonblank = (...values) =>
+    values.find((value) => typeof value === "string" && value.trim().length > 0);
   const envEntries = [
     ["VITE_DEV_SERVER_URL", environment.VITE_DEV_SERVER_URL],
     ["T3CODE_PORT", environment.T3CODE_PORT],
     ["T3CODE_HOME", environment.T3CODE_HOME],
-    ["SHUV2CODE_PORT", environment.SHUV2CODE_PORT ?? environment.T3CODE_PORT],
-    ["SHUV2CODE_HOME", environment.SHUV2CODE_HOME],
+    [
+      "S2CODE_PORT",
+      firstNonblank(environment.S2CODE_PORT, environment.SHUV2CODE_PORT, environment.T3CODE_PORT),
+    ],
+    ["S2CODE_HOME", firstNonblank(environment.S2CODE_HOME, environment.SHUV2CODE_HOME)],
     ["T3CODE_COMMIT_HASH", environment.T3CODE_COMMIT_HASH],
     ["T3CODE_OTLP_TRACES_URL", environment.T3CODE_OTLP_TRACES_URL],
     ["T3CODE_OTLP_EXPORT_INTERVAL_MS", environment.T3CODE_OTLP_EXPORT_INTERVAL_MS],
     ["T3CODE_OTLP_HEADERS", environment.T3CODE_OTLP_HEADERS],
     ["T3CODE_OTLP_PROTOCOL", environment.T3CODE_OTLP_PROTOCOL],
     ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
-    ["SHUV2CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
+    ["S2CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   return [
     ...envEntries.map(

@@ -73,7 +73,7 @@ export function resolveVersionMismatch(
   return {
     clientVersion: normalizedClientVersion,
     serverVersion: normalizedServerVersion,
-    hint: "Version mismatch. Try syncing the client and server to the same T3 Code version.",
+    hint: "Version mismatch. Try syncing the client and server to the same S2Code version.",
   };
 }
 
@@ -104,14 +104,17 @@ export function supportsServerUpdateThreadContinuation(
 export function manualServerUpdateCommand(
   targetVersion: string,
   installation?: ServerInstallation,
+  packageName: "s2code" | "shuv2code" = "s2code",
 ): string {
   if (installation?.kind === "npm-global") {
     const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
-    return `npm install --global --prefix ${prefix} shuv2code@${targetVersion}`;
+    // Older servers did not report the package name and only installed shuv2code.
+    const installedPackage = installation.packageName ?? "shuv2code";
+    return `npm install --global --prefix ${prefix} ${installedPackage}@${targetVersion}`;
   }
   const runner =
     installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";
-  return `${runner} shuv2code@${targetVersion}`;
+  return `${runner} ${packageName}@${targetVersion}`;
 }
 
 export function serverUpdateGuidance(capability: ServerSelfUpdateCapability): string {

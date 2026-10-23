@@ -5,7 +5,7 @@
       "layers": [
         {
           "image-name": "text.svg",
-          "name": "shuv2code mark",
+          "name": "s2code mark",
           "position": { "scale": 1.5, "translation-in-points": [0, 0] }
         }
       ],

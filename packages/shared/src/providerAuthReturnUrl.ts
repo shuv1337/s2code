@@ -12,6 +12,10 @@ export function providerAuthReturnUrl(
       [
         "t3code:",
         "t3code-dev:",
+        "s2code:",
+        "s2code-dev:",
+        "s2code-nightly:",
+        "s2code-preview:",
         "shuv2code:",
         "shuv2code-dev:",
         "shuv2code-nightly:",

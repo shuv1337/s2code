@@ -30,7 +30,12 @@ describe("ExecutionEnvironmentDescriptor", () => {
 
   it("decodes old, recognized and future manual installation descriptors", () => {
     expect(decodeDescriptor(descriptor).capabilities.serverInstallation).toBeUndefined();
-    for (const installation of [{ kind: "npx" }, { kind: "npm-global", prefix: "/opt/node" }]) {
+    for (const installation of [
+      { kind: "npx" },
+      { kind: "npm-global", prefix: "/opt/node" },
+      { kind: "npm-global", prefix: "/opt/node", packageName: "s2code" },
+      { kind: "npm-global", prefix: "/opt/node", packageName: "shuv2code" },
+    ]) {
       expect(
         decodeDescriptor({
           ...descriptor,
@@ -38,7 +43,11 @@ describe("ExecutionEnvironmentDescriptor", () => {
         }).capabilities.serverInstallation,
       ).toEqual(installation);
     }
-    for (const installation of [{ kind: "future-manager" }, { kind: "npm-global" }]) {
+    for (const installation of [
+      { kind: "future-manager" },
+      { kind: "npm-global" },
+      { kind: "npm-global", prefix: "/opt/node", packageName: "unrelated-package" },
+    ]) {
       expect(
         decodeDescriptor({
           ...descriptor,

@@ -170,7 +170,8 @@ describe("WSL runtime cache", () => {
         buildWslRuntimeInvalidateScript("digest", version),
       ];
       for (const script of scripts) {
-        expect(script).toContain(`$HOME/.shuv2code-v2-${channel}/wsl-runtime`);
+        expect(script).toContain(`channel_home="$HOME/.s2code-v2-${channel}"`);
+        expect(script).toContain(`legacy_home="$HOME/.shuv2code-v2-${channel}"`);
         expect(script).not.toContain("$HOME/.shuv2code-v2/wsl-runtime");
       }
     },
@@ -196,7 +197,7 @@ describe("WSL runtime cache", () => {
       "b".repeat(64),
     );
 
-    expect(script).toContain('runtime_parent="$HOME/.shuv2code-v2/wsl-runtime"');
+    expect(script).toContain('runtime_parent="$channel_home/wsl-runtime"');
     expect(script).toContain('  [ -f "$ready_marker" ] &&');
     expect(script).toContain('    runtime_entry_runs "$runtime_root" &&');
     expect(script).toContain("if runtime_is_ready; then");
@@ -378,7 +379,7 @@ describe("WSL runtime cache", () => {
     const script = buildWslRuntimeInvalidateScript("1.2.3/x64");
 
     expect(script).toContain(
-      'rm -f "$HOME/.shuv2code-v2/wsl-runtime/1.2.3_x64/.t3code-wsl-runtime-ready"',
+      'rm -f "$channel_home/wsl-runtime/1.2.3_x64/.t3code-wsl-runtime-ready"',
     );
     expect(script).not.toContain("rm -rf");
   });

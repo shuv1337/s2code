@@ -85,6 +85,10 @@ export function codexCallbackUrl(value: string, redirectUri: string, state: stri
 export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false) {
   const returnProtocol = URL.canParse(input.returnUrl) ? new URL(input.returnUrl).protocol : "";
   const scheme = [
+    "s2code:",
+    "s2code-dev:",
+    "s2code-nightly:",
+    "s2code-preview:",
     "shuv2code:",
     "shuv2code-dev:",
     "shuv2code-nightly:",
@@ -92,8 +96,8 @@ export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false
   ].includes(returnProtocol)
     ? returnProtocol.slice(0, -1)
     : development
-      ? "shuv2code-dev"
-      : "shuv2code";
+      ? "s2code-dev"
+      : "s2code";
   const url = new URL(`${scheme}://auth/codex`);
   url.searchParams.set("request", encodeHandoff(input));
   return url.toString();
@@ -102,13 +106,13 @@ export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false
 export function readCodexAuthHandoff(
   value: string,
   development: boolean,
-  scheme = development ? "shuv2code-dev" : "shuv2code",
+  scheme = development ? "s2code-dev" : "s2code",
 ) {
   try {
     const url = new URL(value);
     if (
       value.length > 32_768 ||
-      url.protocol !== `${scheme}:` ||
+      ![`${scheme}:`, `${scheme.replace(/^s2code(?=-|$)/, "shuv2code")}:`].includes(url.protocol) ||
       url.host !== "auth" ||
       url.pathname !== "/codex" ||
       url.username ||
@@ -131,7 +135,7 @@ export function codexAuthDeliveryUrl(input: CodexAuthHandoff, callbackUrl: strin
   const request = codexAuthorizationRequest(input.authorizationUrl);
   codexCallbackUrl(callbackUrl, request.redirectUri, request.state);
   const destination = providerAuthReturnUrl(input.returnUrl);
-  if (!destination) throw new Error("Invalid T3 Code return address.");
+  if (!destination) throw new Error("Invalid S2Code return address.");
   const url = new URL(destination);
   const delivery = {
     environmentId: input.environmentId,

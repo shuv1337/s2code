@@ -1,4 +1,4 @@
-# Install shuv2code
+# Install S2Code
 
 S2Code runs coding agents on your computer and lets you control them from its
 desktop, web, or mobile app. Set up the machine where the agents will work first.
@@ -10,9 +10,10 @@ launch S2Code and configure providers afterwards.
 
 ## Command line
 
-The fork has no published release yet. Use a source checkout until fork artifacts
-are available; do not substitute upstream's `t3` package or installers.
-The following release-installer commands apply once fork releases are published.
+The commands below require a release built for the S2Code name. Earlier releases
+use `shuv2code`; existing installations can keep updating in place. For a fresh
+installation, choose a release with `s2code` CLI archives. Do not substitute
+upstream's `t3` package or installers.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
@@ -25,56 +26,62 @@ irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps
 ```
 
 The fork publishes nightly builds only, so the installer follows the nightly train
-and installs the `shuv2code-nightly` command to `~/.local/bin`. If your shell
+and installs the `s2code-nightly` command to `~/.local/bin`. If your shell
 reports `command not found` afterwards, that directory is not on your `PATH` yet;
-the installer prints the line to add. Set `SHUV2CODE_VERSION` to pin an exact version.
+the installer prints the line to add. Set `S2CODE_VERSION` to pin an exact version.
 
 ### Keep upstream and fork installations separate
 
-A default install follows the nightly train, so shuv2code uses
-`~/.shuv2code-v2-nightly`. Set `SHUV2CODE_HOME` for a different
-home, `SHUV2CODE_PORT` for a server port, and `SHUV2CODE_RELEASE_BASE_URL` for a
-release-download mirror. Public settings use the `SHUV2CODE_` prefix; inherited
+A fresh default install follows the nightly train and uses
+`~/.s2code-v2-nightly`. Existing verified `~/.shuv2code-v2-nightly` installations
+continue using their current home. The same rule applies to stable and preview.
+If both old and new homes contain state, select one explicitly; they are never merged.
+Set `S2CODE_HOME` for a different
+home, `S2CODE_PORT` for a server port, and `S2CODE_RELEASE_BASE_URL` for a
+release-download mirror. Public settings use the `S2CODE_` prefix. Legacy
+`SHUV2CODE_*` settings remain accepted; a nonempty `S2CODE_*` value wins.
+Existing `shuv2code*` command aliases remain supported. Inherited
 upstream `T3CODE_` settings are ignored, with a notice for `T3CODE_HOME`, even
 when a service-launcher context is inherited. Older maintainer-local fork
-services must be stopped and reinstalled with explicit `SHUV2CODE_HOME` before
+services must be stopped and reinstalled with explicit `S2CODE_HOME` before
 updating; their old `T3CODE_HOME` setting is not adopted.
 If the binary was already updated, an old unit or unmarked active runtime pauses
 without starting a server. Its log says **Service paused until reinstall** rather
-than repeatedly restarting. Reinstall with `shuv2code-nightly service install`
-using the same explicit, verified fork `SHUV2CODE_HOME`; upstream homes are still refused.
+than repeatedly restarting. Reinstall with `s2code-nightly service install`
+using the same explicit, verified fork `S2CODE_HOME`; upstream homes are still refused.
 
 An empty custom home is claimed automatically. Historical installations in the
-exact stable default home remain usable; nightly/preview homes must be empty or
+exact legacy stable default home remain usable; other nonempty default homes must be
 already fork-marked. Runtime caches without product metadata
 are downloaded again, never reused based on their directory name.
 An existing custom home without product metadata is refused: verify offline
 that it belongs exclusively to this fork before adding `.product-identity`
-containing `shuv2code`. Do not use this to adopt upstream state.
-Runtime installs write `.install-product` containing `shuv2code` and a separate
+containing `s2code`. Existing markers containing `shuv2code` remain valid and are
+not rewritten. Do not use this to adopt upstream state.
+Runtime installs write `.install-product` containing `s2code` and a separate
 version-only `.install-complete`, compatible with retained service launchers.
 Foreign-marked caches and paths outside the owned home are never replaced.
 
-Upstream import is not supported. Never point `SHUV2CODE_HOME` or `--base-dir` at
+Upstream import is not supported. Never point `S2CODE_HOME` or `--base-dir` at
 an upstream home, live database, or shared runtime cache; use a separate home.
-Setting `SHUV2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
+Setting `S2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 
-| Task                                             | Command                                                                                |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Start the server and open the web app            | `shuv2code-nightly`                                                                    |
-| Start the server without a browser               | `shuv2code-nightly serve`                                                              |
-| Keep it running in the background (macOS, Linux) | `shuv2code-nightly service install` ([details](./background-service.md))               |
-| Move to the newest release                       | `shuv2code-nightly update`                                                             |
-| Reclaim database space                           | `shuv2code-nightly doctor` ([details](./background-service.md#reclaim-database-space)) |
-| Remove it again                                  | `shuv2code-nightly uninstall`                                                          |
+| Task                                             | Command                                                                             |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Start the server and open the web app            | `s2code-nightly`                                                                    |
+| Start the server without a browser               | `s2code-nightly serve`                                                              |
+| Keep it running in the background (macOS, Linux) | `s2code-nightly service install` ([details](./background-service.md))               |
+| Move to the newest release                       | `s2code-nightly update`                                                             |
+| Reclaim database space                           | `s2code-nightly doctor` ([details](./background-service.md#reclaim-database-space)) |
+| Remove it again                                  | `s2code-nightly uninstall`                                                          |
 
-These examples use `shuv2code-nightly`, the command a default install creates.
-Stable (`shuv2code`) and preview (`shuv2code-preview`) are reached only by setting
-`SHUV2CODE_CHANNEL`, and neither train is published today. A published npm install uses
-the fork package `shuv2code`; uninstall only that proven package/prefix, never `t3`.
+These examples use `s2code-nightly`, the command a default install creates.
+Stable (`s2code`) and preview (`s2code-preview`) are reached only by setting
+`S2CODE_CHANNEL`, and neither train is published today. A published npm install uses
+the fork package `s2code`; uninstall only that proven package/prefix, never `t3`.
 
-Run `shuv2code-nightly help` or `shuv2code-nightly --help` for the full reference. To start in
-a new working directory, use an explicit path such as `shuv2code-nightly ./my-project`. A bare
+Run `s2code-nightly help` or `s2code-nightly --help` for the full reference. To start in
+a new working directory, use an explicit path such as `s2code-nightly ./my-project`. A bare
 directory name is accepted only if it already exists.
 
 If the command or its `start` subcommand reports an already running server, connect to that server
@@ -82,7 +89,7 @@ instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
 Do not use `npx t3` to try this fork: it downloads upstream. Once the fork npm
-package is published, `npx shuv2code` runs the newest nightly, because nightly
+package is published, `npx s2code` runs the newest nightly, because nightly
 is the only train this fork publishes.
 
 ### Intel Macs
@@ -92,8 +99,8 @@ run a server there, build it from source with Node.js 24 and `vp`
 ([Install vp](https://github.com/shuv1337/shuv2code#install-vp)):
 
 ```bash
-git clone https://github.com/shuv1337/shuv2code
-cd shuv2code && vp i && vp run build:desktop
+git clone https://github.com/shuv1337/shuv2code s2code
+cd s2code && vp i && vp run build:desktop
 node apps/server/dist/bin.mjs
 ```
 
@@ -104,23 +111,22 @@ update it with `git pull` and a rebuild.
 
 ### Fork release channels
 
-Only nightly is published. Stable and nightly shuv2code are separate installations
-and can run together. They keep separate settings, connections, browser profiles,
-local server data, background services, and update feeds. Stable uses
-`~/.shuv2code-v2`; nightly uses `~/.shuv2code-v2-nightly`. Install the other
-channel separately rather than switching an installed app's update feed. If you
-override the data home, choose a different directory for each channel.
+Only nightly is published. Fresh installations use `~/.s2code-v2-nightly`;
+upgraded installations keep their existing `~/.shuv2code-v2-nightly` data.
+The desktop app keeps its existing Electron profile name so saved connections
+and credentials remain available. No directory migration is needed.
 
-Desktop builds update automatically only when they are signed. A release titled
-UNSIGNED ships at least one platform without a signature; update those installs
-by downloading the new build.
+macOS and Windows desktop builds update automatically only when signed; Linux
+updates use checksums. A release titled UNSIGNED identifies which platforms need
+to be updated by downloading the new build.
 
 Preview (including PR builds) is a third, independent installation using
-`~/.shuv2code-v2-preview`. It does not update automatically; replace it manually.
-Channel links use `shuv2code://`, `shuv2code-nightly://`, or
-`shuv2code-preview://`, respectively. Development owns only `shuv2code-dev://`.
+`~/.s2code-v2-preview`. It does not update automatically; replace it manually.
+Channel links use `s2code://`, `s2code-nightly://`, or
+`s2code-preview://`, respectively. Development owns `s2code-dev://`. The corresponding `shuv2code*://`
+schemes remain registered so existing automation and auth callbacks continue to work.
 Stream Deck and other automation must use the intended channel's scheme, for
-example `shuv2code-nightly://threads/<environment-id>/<thread-id>` for nightly.
+example `s2code-nightly://threads/<environment-id>/<thread-id>` for nightly.
 
 Older local nightly builds used the shared stable home. A new nightly launch
 leaves that data untouched and logs its location; open stable to access it.
@@ -129,7 +135,7 @@ apps and their services first, back up the source, then copy into the separate
 nightly home while everything is offline. Do not share or link a live database.
 
 When a verified fork release is published, download the intended channel from
-[shuv2code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
+[S2Code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
 available yet, build the fork from source rather than installing upstream as a
 substitute. Artifacts keep the `S2Code-<version>-<arch>` file naming, but the
 installed package identities, commands, icons and desktop entries are fork-owned
@@ -141,14 +147,14 @@ is configured here.
 | ------------------ | -------------------------------------------- |
 | Windows, macOS     | Fork GitHub release installer                |
 | Debian, Ubuntu     | `sudo apt install ./S2Code-VERSION-ARCH.deb` |
-| Arch Linux stable  | `shuv2code-bin` recipe                       |
-| Arch Linux nightly | `shuv2code-nightly-bin` recipe               |
+| Arch Linux stable  | `s2code-bin` recipe                          |
+| Arch Linux nightly | `s2code-nightly-bin` recipe                  |
 
 Stable and nightly Linux packages can be installed side by side with each other
-and upstream. Their commands are `shuv2code` and `shuv2code-nightly`. Preview has
+and upstream. Their commands are `s2code` and `s2code-nightly`. Preview has
 its own Debian identity, but no AUR package. The fork AUR recipes are implemented;
-once published, install them with `yay -S shuv2code-bin` or
-`yay -S shuv2code-nightly-bin`. Until then, use GitHub Releases or build the recipes
+once published, install them with `yay -S s2code-bin` or
+`yay -S s2code-nightly-bin`. Until then, use GitHub Releases or build the recipes
 against an actual fork release.
 
 `brew install --cask t3-code`, `scoop install extras/t3code`, and
@@ -180,11 +186,11 @@ take longer.
 With the desktop app already running on the same machine:
 
 ```bash
-shuv2code-nightly app
+s2code-nightly app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `shuv2code-nightly app ../my-project`, to open another directory. It requires
+Pass a path, such as `s2code-nightly app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 

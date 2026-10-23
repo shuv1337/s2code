@@ -95,7 +95,7 @@ Source in `apps/desktop/gnome-extension`, UUID `snap-shot@shuv1337.github.io`. G
 installed extension at login, so setup distinguishes "installed, needs logout" from "discovered but
 disabled" and compares loaded and installed versions.
 
-The extension trusts callers that own `io.github.shuv1337.shuv2code.SnapShot.Client` (or its
+The extension trusts callers that own `io.github.shuv1337.s2code.SnapShot.Client` (or its
 development/nightly/preview variant) on the same connection. This is GNOME's trusted-session-client pattern, not authentication
 against a hostile process on the user's bus.
 

@@ -19,7 +19,11 @@ import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
+import { PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
@@ -1094,7 +1098,7 @@ export const WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE = {
   to: WSL_RUNTIME_ARCHIVE_HASH_NAME,
 } as const;
 
-// The WSL runtime is the Linux CLI release archive (shuv2code-<version>-linux-<arch>
+// The WSL runtime is the Linux CLI release archive (s2code-<version>-linux-<arch>
 // .tar.gz, built by scripts/build-cli-archive.ts) copied in verbatim, so WSL
 // runs the exact bytes a Linux user downloads. This one predicate decides both
 // whether the archive is staged and whether the packaging config ships it:
@@ -1681,7 +1685,7 @@ const BuildEnvConfig = Config.all({
   verbose: Config.Boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.Boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.String("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
-  // Path to the Linux CLI release archive (shuv2code-<version>-linux-x64.tar.gz) built
+  // Path to the Linux CLI release archive (s2code-<version>-linux-x64.tar.gz) built
   // by the build_linux_cli CI job. The Windows build embeds it verbatim as the
   // WSL runtime.
   wslRuntime: Config.String("T3CODE_DESKTOP_WSL_RUNTIME").pipe(Config.option),
@@ -2635,13 +2639,17 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   updateChannel: "latest" | "nightly",
 ) {
   const env = yield* Config.all({
-    updateRepository: Config.String("SHUV2CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
+    updateRepository: Config.String("S2CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
+    legacyUpdateRepository: Config.String("SHUV2CODE_DESKTOP_UPDATE_REPOSITORY").pipe(
+      Config.option,
+    ),
     githubRepository: Config.String("GITHUB_REPOSITORY").pipe(Config.option),
   });
   const rawRepo = (
     Option.getOrUndefined(env.updateRepository)?.trim() ||
+    Option.getOrUndefined(env.legacyUpdateRepository)?.trim() ||
     Option.getOrUndefined(env.githubRepository)?.trim() ||
-    "shuv1337/shuv2code"
+    PRODUCT_RELEASE_REPOSITORY
   ).trim();
   if (!rawRepo) return undefined;
 
@@ -2703,10 +2711,10 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(version: string): string {
-  if (resolveChannelIdentity(version).channel === "preview") return "shuv2code (Preview)";
+  if (resolveChannelIdentity(version).channel === "preview") return "S2Code (Preview)";
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "shuv2code (Nightly)"
-    : (desktopPackageJson.productName ?? "shuv2code");
+    ? "S2Code (Nightly)"
+    : (desktopPackageJson.productName ?? "S2Code");
 }
 
 export function resolveDesktopDisplayName(version: string): string {
@@ -2731,10 +2739,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   arch?: typeof BuildArch.Type,
 ) {
   const identity = resolveChannelIdentity(version);
+  const legacyIdentity = resolveLegacyChannelIdentity(version);
+  const schemes = [identity.scheme, legacyIdentity.scheme];
   const buildConfig: Record<string, unknown> = {
     appId: identity.appId,
     extraMetadata: { name: identity.executableName },
-    protocols: [{ name: identity.executableName, schemes: [identity.scheme] }],
+    protocols: [{ name: identity.executableName, schemes }],
     productName: resolveDesktopProductName(version),
     copyright: "Copyright © 2026 S2Code contributors",
     artifactName: "S2Code-${version}-${arch}.${ext}",
@@ -2807,8 +2817,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
       protocols: [
         {
-          name: "shuv2code",
-          schemes: [identity.scheme],
+          name: "s2code",
+          schemes,
         },
         {
           name: "Web site URL",
@@ -2868,8 +2878,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // t3code:// OAuth callbacks to the app.
       protocols: [
         {
-          name: "shuv2code",
-          schemes: [identity.scheme],
+          name: "s2code",
+          schemes,
         },
       ],
       desktop: {
@@ -2881,9 +2891,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     buildConfig.deb = {
       packageName: identity.executableName,
+      replaces: [legacyIdentity.executableName],
+      conflicts: [legacyIdentity.executableName],
       // FPM runs outside the staged app directory, so source paths must be absolute.
       fpm: [
         `${path.join(repoRoot, "apps/desktop/resources/linux", `${identity.appId}.metainfo.xml`)}=/usr/share/metainfo/${identity.appId}.metainfo.xml`,
+        `${path.join(repoRoot, "apps/desktop/resources/linux", `legacy-${identity.executableName}.sh`)}=/usr/bin/${legacyIdentity.executableName}`,
         `${path.join(repoRoot, "LICENSE")}=/usr/share/doc/${identity.executableName}/copyright`,
       ],
       // Debian 13 and Ubuntu 24.04 renamed some for 64-bit time; the old name
@@ -3297,7 +3310,7 @@ export const validateWindowsPackagedPayload = Effect.fn(
   readonly appExecutableName: string;
   readonly targetArch: typeof BuildArch.Type;
   // The version the embedded Linux CLI archive must carry; its top-level
-  // directory is named shuv2code-<version>-linux-<arch>.
+  // directory is named s2code-<version>-linux-<arch>.
   readonly appVersion: string;
   readonly expectWslRuntime?: boolean;
   readonly fileLimit?: number;
@@ -3845,7 +3858,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
       : undefined;
   const stagePackageJson: StagePackageJson = {
-    name: "shuv2code",
+    name: "s2code",
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
@@ -3857,7 +3870,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       "S2Code is an open-source desktop app for coding agents. Work with your existing agent subscriptions, review code changes, and run commands in your projects. Connect from desktop, web, or mobile to continue working remotely.",
     license: "MIT",
     // Required by the .deb control file.
-    homepage: "https://github.com/shuv1337/shuv2code",
+    homepage: `https://github.com/${PRODUCT_RELEASE_REPOSITORY}`,
     author: "shuv1337",
     main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(
@@ -4137,7 +4150,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   ),
   wslRuntime: Flag.String("wsl-runtime").pipe(
     Flag.withDescription(
-      "Path to the Linux CLI release archive (shuv2code-<version>-linux-x64.tar.gz) to embed as the WSL runtime of a Windows build (env: T3CODE_DESKTOP_WSL_RUNTIME).",
+      "Path to the Linux CLI release archive (s2code-<version>-linux-x64.tar.gz) to embed as the WSL runtime of a Windows build (env: T3CODE_DESKTOP_WSL_RUNTIME).",
     ),
     Flag.optional,
   ),

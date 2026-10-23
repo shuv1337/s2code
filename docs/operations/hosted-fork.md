@@ -10,10 +10,26 @@ Direct and Tailscale pairing remain available. With no hosted origin configured,
 pairing uses the server's same-origin `/pair#token=…` URL without a `host` query.
 Upstream hosted origins and auth accounts are not fork defaults.
 
+## Inherited marketing references
+
+The marketing source retains T3 Code's `/legal`, `/privacy-policy`,
+`/terms-of-service`, and `/security-policy` pages as explicitly labeled upstream
+references. Their company names, service descriptions, dates, and policy claims
+describe T3 Tools and T3 Code; they are not S2Code policies. Do not turn them into
+fork policies by replacing product names or configuration examples. Fork telemetry
+controls are documented separately in the [product usage guide](../user/telemetry.md).
+
+The `/95` page is an inherited upstream promotional demo. Its artwork, terminal
+command, and developer-count claims describe T3 Code. It is labeled
+as an upstream reference and its T3 Code download/source links stay upstream.
+The main fork page likewise attributes inherited user counts and testimonials to
+T3 Code; screenshot descriptions may name the upstream product shown. These
+references do not establish fork service ownership or a published S2Code website.
+
 ## Client configuration names
 
 These are the internal names the binaries/builds actually read, not deployment
-switches. Leave hosted settings unset for normal fork use. Public `SHUV2CODE_*`
+switches. Leave hosted settings unset for normal fork use. Public `S2CODE_*`
 CLI environment aliases are normalized to the corresponding `T3CODE_*` inputs
 at the process boundary; they are not substitutes for Vite or Expo build inputs.
 

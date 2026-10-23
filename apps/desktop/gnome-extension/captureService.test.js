@@ -4,6 +4,7 @@ import {
   CLIENT_NAMES,
   DBUS_NAME,
   DBUS_PATH,
+  LEGACY_DBUS_NAME,
   isWaylandSession,
 } from "./captureService.js";
 import bundle from "./bundle.json" with { type: "json" };
@@ -32,7 +33,10 @@ it("ships only caller identities claimed by the real desktop entry resolver", ()
     expect(resolveLinuxDesktopEntryName(dev, version)).toBe(`${appId}.desktop`);
     return appId;
   });
-  expect(callers.map(gnomeCaptureClientName)).toEqual(CLIENT_NAMES);
+  expect(CLIENT_NAMES).toEqual([
+    ...callers.map(gnomeCaptureClientName),
+    ...callers.map((appId) => gnomeCaptureClientName(appId).replace(DBUS_NAME, LEGACY_DBUS_NAME)),
+  ]);
   expect(new Set(callers.map(gnomeCaptureClientName)).size).toBe(4);
 });
 
@@ -42,7 +46,7 @@ it.each([`${DBUS_NAME}.Client.nightly`, `${DBUS_NAME}.Client.preview`])(
     const { service, snapshots } = fixture({
       getNameOwner: async (name) => (name === client ? ":1.23" : null),
     });
-    await expect(service.capture(":1.23")).rejects.toThrow("Only shuv2code");
+    await expect(service.capture(":1.23")).rejects.toThrow("Only S2Code");
     expect(snapshots()).toBe(0);
   },
 );
@@ -53,7 +57,7 @@ it.each(["com.t3tools.T3Code.SnapShot", "com.t3tools.T3Code.Development.SnapShot
     const { service, snapshots } = fixture({
       getNameOwner: async (name) => (name === upstream ? ":1.23" : null),
     });
-    await expect(service.capture(":1.23")).rejects.toThrow("Only shuv2code");
+    await expect(service.capture(":1.23")).rejects.toThrow("Only S2Code");
     expect(snapshots()).toBe(0);
   },
 );
@@ -80,7 +84,7 @@ function fixture(overrides = {}) {
 
 it("rejects other clients before looking at the active window", async () => {
   const { service, snapshots } = fixture();
-  await expect(service.capture(":1.99")).rejects.toThrow("Only shuv2code");
+  await expect(service.capture(":1.99")).rejects.toThrow("Only S2Code");
   expect(snapshots()).toBe(0);
   expect(await service.capture(":1.23")).toBe("pixels");
 });
@@ -95,7 +99,7 @@ it("rechecks the name owner on each capture", async () => {
   const { service } = fixture({ getNameOwner: async () => owner });
   expect(await service.capture(owner)).toBe("pixels");
   owner = ":1.24";
-  await expect(service.capture(":1.23")).rejects.toThrow("Only shuv2code");
+  await expect(service.capture(":1.23")).rejects.toThrow("Only S2Code");
 });
 
 it("rejects locked and non-Wayland sessions without taking a screenshot", async () => {
@@ -151,7 +155,7 @@ it("rejects concurrent requests and clears busy after a failed capture", async (
   await expect(service.capture(":1.23")).rejects.toThrow("already in progress");
   finish(new Error("gone"));
   await expect(first).rejects.toThrow("gone");
-  await expect(service.capture(":1.99")).rejects.toThrow("Only shuv2code");
+  await expect(service.capture(":1.99")).rejects.toThrow("Only S2Code");
 });
 
 it("prepares focus/effects only after pixels and identity have been captured", async () => {

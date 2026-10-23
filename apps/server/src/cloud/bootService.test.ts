@@ -69,6 +69,24 @@ it("survives the kernel OOM-killing a greedy agent child", () => {
   expect(unit).toContain("OOMPolicy=continue");
 });
 
+it("prefers the canonical service home over either legacy spelling", () => {
+  expect(
+    BootService.bootServiceBaseDirOf(
+      "Environment=T3CODE_HOME=/upstream\nEnvironment=SHUV2CODE_HOME=/legacy\nEnvironment=S2CODE_HOME=/canonical\n",
+    ),
+  ).toBe("/canonical");
+  expect(
+    BootService.bootServiceBaseDirOf(
+      "<key>SHUV2CODE_HOME</key><string>/legacy</string><key>S2CODE_HOME</key><string>/canonical</string>",
+    ),
+  ).toBe("/canonical");
+  expect(
+    BootService.bootServiceBaseDirOf(
+      'Environment=S2CODE_HOME=""\nEnvironment=SHUV2CODE_HOME=/legacy\n',
+    ),
+  ).toBe("/legacy");
+});
+
 const macRuntime = "/Users/theo/.t3/runtime/versions/1.2.3/t3";
 const macPlan = {
   program: [macRuntime, "__service-launcher"],
@@ -131,17 +149,17 @@ it.each(["nightly", "preview"])(
     const plan = {
       ...linuxPlan,
       version: `1.2.3-${channel}.20261014.1`,
-      baseDir: `/home/theo/.shuv2code-v2-${channel}`,
+      baseDir: `/home/theo/.s2code-v2-${channel}`,
     };
     const unit = BootService.renderBootServiceUnit(plan);
-    expect(unit).toContain(`T3_BOOT_SERVICE_UNIT=shuv2code-v2-${channel}.service`);
-    expect(unit).toContain(`SHUV2CODE_HOME=/home/theo/.shuv2code-v2-${channel}`);
+    expect(unit).toContain(`T3_BOOT_SERVICE_UNIT=s2code-v2-${channel}.service`);
+    expect(unit).toContain(`S2CODE_HOME=/home/theo/.s2code-v2-${channel}`);
     const plist = BootService.renderBootServicePlist(plan, {
       homeDir: "/home/theo",
       environmentPath: "/usr/bin",
     });
-    expect(plist).toContain(`<string>dev.shuv.shuv2code.v2.${channel}.service</string>`);
-    expect(plist).toContain(`<string>dev.shuv.shuv2code.v2.${channel}.service.plist</string>`);
+    expect(plist).toContain(`<string>dev.shuv.s2code.v2.${channel}.service</string>`);
+    expect(plist).toContain(`<string>dev.shuv.s2code.v2.${channel}.service.plist</string>`);
   },
 );
 
@@ -152,12 +170,12 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-boot-service-test-" });
-  const baseDir = path.join(home, ".shuv2code-v2");
+  const baseDir = path.join(home, ".s2code-v2");
   const statePath = path.join(baseDir, "runtime", "service-state.json");
   const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3", platform);
   yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
-  yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "shuv2code\n");
-  yield* fs.writeFileString(path.join(runtime.versionDir, ".install-product"), "shuv2code\n");
+  yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "s2code\n");
+  yield* fs.writeFileString(path.join(runtime.versionDir, ".install-product"), "s2code\n");
   yield* fs.writeFileString(runtime.entryPath, "#!/bin/sh\n");
   yield* fs.writeFileString(runtime.sentinelPath, "1.2.3\n");
 
@@ -185,15 +203,15 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       const failed = command === control.failCommand;
       if (!failed && command === "loginctl enable-linger --no-ask-password 501")
         control.linger = "yes";
-      if (!failed && command === "systemctl --user enable shuv2code-v2.service")
+      if (!failed && command === "systemctl --user enable s2code-v2.service")
         control.enabled = true;
-      if (!failed && command === "systemctl --user restart shuv2code-v2.service")
+      if (!failed && command === "systemctl --user restart s2code-v2.service")
         control.active = true;
       // A stop that fails (a timeout, say) has still stopped the service.
-      if (command === "systemctl --user stop shuv2code-v2.service") control.active = false;
+      if (command === "systemctl --user stop s2code-v2.service") control.active = false;
       if (
         control.stateAfterStop !== undefined &&
-        (command === "systemctl --user stop shuv2code-v2.service" ||
+        (command === "systemctl --user stop s2code-v2.service" ||
           command.startsWith("launchctl bootout --wait "))
       ) {
         yield* fs.writeFileString(statePath, control.stateAfterStop).pipe(Effect.orDie);
@@ -235,7 +253,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       yield* fs.makeDirectory(path.dirname(paths.entryPath), { recursive: true });
       yield* fs.writeFileString(paths.entryPath, "#!/bin/sh\n");
       yield* fs.writeFileString(paths.sentinelPath, `${cliVersion}\n`);
-      yield* fs.writeFileString(path.join(paths.versionDir, ".install-product"), "shuv2code\n");
+      yield* fs.writeFileString(path.join(paths.versionDir, ".install-product"), "s2code\n");
       return yield* BootService.make({
         baseDir: serviceBaseDir,
         logsDir: path.join(serviceBaseDir, "userdata", "logs"),
@@ -272,6 +290,97 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
 
 it.layer(NodeServices.layer)("boot service install", (it) => {
   it.effect.each(["linux", "darwin"] as const)(
+    "repairs and removes the existing legacy unit without creating a second service on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        const { service, makeService, fs, commands } = yield* makeHarness(platform);
+        const plan = yield* service.install();
+        const legacyUnitPath = plan.unitPath.replace("s2code", "shuv2code");
+        const legacyUnit = (yield* fs.readFileString(plan.unitPath))
+          .replaceAll("s2code-v2.service", "shuv2code-v2.service")
+          .replaceAll("dev.shuv.s2code.v2.service", "dev.shuv.shuv2code.v2.service")
+          .replaceAll("S2CODE_HOME", "SHUV2CODE_HOME");
+        yield* fs.writeFileString(legacyUnitPath, legacyUnit);
+        yield* fs.remove(plan.unitPath);
+        commands.length = 0;
+        const upgraded = yield* makeService();
+        expect((yield* upgraded.status).unitPath).toBe(legacyUnitPath);
+        expect((yield* upgraded.install()).unitPath).toBe(legacyUnitPath);
+        expect(yield* fs.exists(plan.unitPath)).toBe(false);
+        expect(yield* fs.readFileString(legacyUnitPath)).toContain("S2CODE_HOME");
+        expect(commands.some((command) => command.includes("shuv2code"))).toBe(true);
+        expect(yield* upgraded.uninstall).toBe(true);
+        expect(yield* fs.exists(legacyUnitPath)).toBe(false);
+      }),
+  );
+
+  it.effect.each(["linux", "darwin"] as const)(
+    "reports duplicate services on %s and removes both without deleting state",
+    (platform) =>
+      Effect.gen(function* () {
+        const { service, makeService, fs, commands, statePath } = yield* makeHarness(platform);
+        const plan = yield* service.install();
+        const contents = yield* fs.readFileString(plan.unitPath);
+        const legacyUnitPath = plan.unitPath.replace("s2code", "shuv2code");
+        yield* fs.writeFileString(legacyUnitPath, contents);
+        const duplicate = yield* makeService();
+        const status = yield* duplicate.status;
+        expect(status.unitPath).toBe(legacyUnitPath);
+        expect(status.problems).toContain("duplicate-service");
+        expect(status.current).toBe(false);
+        commands.length = 0;
+        const error = yield* duplicate.install().pipe(Effect.flip);
+        expect(error._tag).toBe("BootServicePrerequisiteError");
+        expect(error.message).toContain("service uninstall");
+        yield* duplicate.restart.pipe(Effect.flip);
+        yield* duplicate
+          .withStopped(Effect.die("must not run with a duplicate service"))
+          .pipe(Effect.flip);
+        expect(commands).toEqual([]);
+        expect(yield* fs.readFileString(plan.unitPath)).toBe(contents);
+        expect(yield* fs.readFileString(legacyUnitPath)).toBe(contents);
+        const state = yield* fs.readFileString(statePath);
+        expect(yield* duplicate.uninstall).toBe(true);
+        expect(yield* fs.exists(plan.unitPath)).toBe(false);
+        expect(yield* fs.exists(legacyUnitPath)).toBe(false);
+        expect(yield* fs.readFileString(statePath)).toBe(state);
+        const repaired = yield* makeService();
+        expect((yield* repaired.install()).unitPath).toBe(plan.unitPath);
+      }),
+  );
+
+  it.effect.each(["legacy", "canonical"] as const)(
+    "leaves the %s unit for another home untouched",
+    (foreign) =>
+      Effect.gen(function* () {
+        const { service, makeService, fs, commands } = yield* makeHarness();
+        const plan = yield* service.install();
+        const contents = yield* fs.readFileString(plan.unitPath);
+        const legacyUnitPath = plan.unitPath.replace("s2code", "shuv2code");
+        const foreignContents = contents.replaceAll(plan.baseDir, `${plan.baseDir}-other`);
+        yield* fs.writeFileString(
+          legacyUnitPath,
+          foreign === "legacy" ? foreignContents : contents,
+        );
+        if (foreign === "canonical") yield* fs.writeFileString(plan.unitPath, foreignContents);
+        const selected = yield* makeService();
+        const ownedPath = foreign === "legacy" ? plan.unitPath : legacyUnitPath;
+        const foreignPath = foreign === "legacy" ? legacyUnitPath : plan.unitPath;
+        expect((yield* selected.status).unitPath).toBe(ownedPath);
+        expect((yield* selected.install()).unitPath).toBe(ownedPath);
+        commands.length = 0;
+        expect(yield* selected.uninstall).toBe(true);
+        expect(yield* fs.exists(ownedPath)).toBe(false);
+        expect(yield* fs.readFileString(foreignPath)).toBe(foreignContents);
+        expect(
+          commands
+            .filter((command) => command.includes("disable"))
+            .every((command) => command.includes(ownedPath.split("/").at(-1)!)),
+        ).toBe(true);
+      }),
+  );
+
+  it.effect.each(["linux", "darwin"] as const)(
     "keeps channel service paths separate on %s",
     (platform) =>
       Effect.gen(function* () {
@@ -283,8 +392,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           expect(status.unitPath).not.toBe(stable.unitPath);
           expect(status.unitPath).toContain(
             platform === "linux"
-              ? `shuv2code-v2-${channel}.service`
-              : `dev.shuv.shuv2code.v2.${channel}.service.plist`,
+              ? `s2code-v2-${channel}.service`
+              : `dev.shuv.s2code.v2.${channel}.service.plist`,
           );
         }
       }),
@@ -340,7 +449,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         );
         expect(yield* fs.readFileString(statePath)).toBe(before);
         expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
-        expect(commands).not.toContain("systemctl --user stop shuv2code-v2.service");
+        expect(commands).not.toContain("systemctl --user stop s2code-v2.service");
       }),
   );
 
@@ -414,7 +523,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect((yield* service.status).installed).toBe(false);
       // The stop can block up to systemd's 90s TimeoutStopSec; the runner's
       // 60s default would cancel it mid-shutdown.
-      expect(timeouts.get("systemctl --user disable --now shuv2code-v2.service")).toEqual(
+      expect(timeouts.get("systemctl --user disable --now s2code-v2.service")).toEqual(
         Duration.seconds(120),
       );
     }),
@@ -487,11 +596,11 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         ).toEqual(
           platform === "linux"
             ? [
-                "systemctl --user stop shuv2code-v2.service",
-                "systemctl --user restart shuv2code-v2.service",
+                "systemctl --user stop s2code-v2.service",
+                "systemctl --user restart s2code-v2.service",
               ]
             : [
-                "launchctl bootout --wait gui/501/dev.shuv.shuv2code.v2.service",
+                "launchctl bootout --wait gui/501/dev.shuv.s2code.v2.service",
                 `launchctl bootstrap gui/501 ${plan.unitPath}`,
               ],
         );
@@ -614,7 +723,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(control.active).toBe(true);
 
       // A failed stop skips the operation but still starts the service again.
-      control.failCommand = "systemctl --user stop shuv2code-v2.service";
+      control.failCommand = "systemctl --user stop s2code-v2.service";
       let ran = false;
       const stopFailure = yield* service
         .withStopped(
@@ -637,11 +746,11 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       commands.length = 0;
       yield* service.withStopped(Effect.sync(() => commands.push("repair")));
       expect(commands).toEqual([
-        "systemctl --user is-enabled shuv2code-v2.service",
-        "systemctl --user is-active shuv2code-v2.service",
-        "systemctl --user stop shuv2code-v2.service",
+        "systemctl --user is-enabled s2code-v2.service",
+        "systemctl --user is-active s2code-v2.service",
+        "systemctl --user stop s2code-v2.service",
         "repair",
-        "systemctl --user restart shuv2code-v2.service",
+        "systemctl --user restart s2code-v2.service",
       ]);
       expect(control.active).toBe(true);
       // A running unit the user disabled is started again but stays disabled.
@@ -653,8 +762,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       control.enabled = false;
       commands.length = 0;
       yield* service.withStopped(Effect.sync(() => commands.push("repair")));
-      expect(commands).toContain("systemctl --user stop shuv2code-v2.service");
-      expect(commands).not.toContain("systemctl --user restart shuv2code-v2.service");
+      expect(commands).toContain("systemctl --user stop s2code-v2.service");
+      expect(commands).not.toContain("systemctl --user restart s2code-v2.service");
       expect(control.active).toBe(false);
       control.enabled = true;
       control.active = true;
@@ -681,10 +790,10 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
         ),
       ).toEqual([
-        "systemctl --user stop shuv2code-v2.service",
+        "systemctl --user stop s2code-v2.service",
         "systemctl --user daemon-reload",
-        "systemctl --user enable shuv2code-v2.service",
-        "systemctl --user restart shuv2code-v2.service",
+        "systemctl --user enable s2code-v2.service",
+        "systemctl --user restart s2code-v2.service",
       ]);
     }),
   );
@@ -697,7 +806,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const path = yield* Path.Path;
       const otherHome = yield* fs.makeTempDirectoryScoped({ prefix: "t3-other-home-" });
 
-      const other = yield* makeService(undefined, "1.2.3", path.join(otherHome, ".shuv2code-v2"));
+      const other = yield* makeService(undefined, "1.2.3", path.join(otherHome, ".s2code-v2"));
       expect(yield* other.restart).toBe(false);
       expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([]);
     }),
@@ -717,9 +826,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
         ),
       ).toEqual([
-        "systemctl --user stop shuv2code-v2.service",
+        "systemctl --user stop s2code-v2.service",
         "systemctl --user daemon-reload",
-        "systemctl --user restart shuv2code-v2.service",
+        "systemctl --user restart s2code-v2.service",
       ]);
     }),
   );
@@ -738,9 +847,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
         ),
       ).toEqual([
-        "systemctl --user stop shuv2code-v2.service",
+        "systemctl --user stop s2code-v2.service",
         "systemctl --user daemon-reload",
-        "systemctl --user restart shuv2code-v2.service",
+        "systemctl --user restart s2code-v2.service",
       ]);
     }),
   );
@@ -772,8 +881,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
             (command) => command.startsWith("systemctl ") && !command.includes("show-environment"),
           ),
         ).toEqual([
-          "systemctl --user stop shuv2code-v2.service",
-          "systemctl --user restart shuv2code-v2.service",
+          "systemctl --user stop s2code-v2.service",
+          "systemctl --user restart s2code-v2.service",
         ]);
       }
     }),
@@ -795,7 +904,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       expect(
         plan.unitPath.endsWith(
-          path.join("Library", "LaunchAgents", "dev.shuv.shuv2code.v2.service.plist"),
+          path.join("Library", "LaunchAgents", "dev.shuv.s2code.v2.service.plist"),
         ),
       ).toBe(true);
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
@@ -817,9 +926,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(commands.some((command) => command.startsWith("systemctl "))).toBe(false);
       // A bootout can block up to the plist's 90s ExitTimeOut; the runner's
       // 60s default would cancel it and let bootstrap race a loaded job.
-      expect(
-        timeouts.get("launchctl bootout --wait gui/501/dev.shuv.shuv2code.v2.service"),
-      ).toEqual(Duration.seconds(120));
+      expect(timeouts.get("launchctl bootout --wait gui/501/dev.shuv.s2code.v2.service")).toEqual(
+        Duration.seconds(120),
+      );
     }),
   );
 
@@ -834,8 +943,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const error = yield* service.install().pipe(Effect.flip);
       expect(error._tag).toBe("BootServiceCommandError");
       expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
-        "launchctl bootout --wait gui/501/dev.shuv.shuv2code.v2.service",
-        "launchctl enable gui/501/dev.shuv.shuv2code.v2.service",
+        "launchctl bootout --wait gui/501/dev.shuv.s2code.v2.service",
+        "launchctl enable gui/501/dev.shuv.s2code.v2.service",
         `launchctl bootstrap gui/501 ${plistPath}`,
         `launchctl bootstrap gui/501 ${plistPath}`,
       ]);
@@ -897,7 +1006,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     Effect.gen(function* () {
       const { service, control } = yield* makeHarness("darwin");
       yield* service.install();
-      control.failCommand = "launchctl bootout --wait gui/501/dev.shuv.shuv2code.v2.service";
+      control.failCommand = "launchctl bootout --wait gui/501/dev.shuv.s2code.v2.service";
 
       yield* service.install();
       expect((yield* service.status).current).toBe(true);
@@ -928,7 +1037,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         );
         expect(serviceStateHasPendingUpdate(yield* fs.readFileString(statePath))).toBe(true);
         expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
-          "launchctl bootout --wait gui/501/dev.shuv.shuv2code.v2.service",
+          "launchctl bootout --wait gui/501/dev.shuv.s2code.v2.service",
           `launchctl bootstrap gui/501 ${plistPath}`,
         ]);
       }

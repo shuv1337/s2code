@@ -128,6 +128,7 @@ describe("complete fork release assets", () => {
       const manifests = [
         ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => npmPlatformPackageManifest(key, "1.2.3", {})),
         npmLauncherPackageManifest("1.2.3", CLI_ARCHIVE_PLATFORM_KEYS),
+        npmLauncherPackageManifest("1.2.3", CLI_ARCHIVE_PLATFORM_KEYS, "shuv2code"),
       ];
       const packageDirectory = NodePath.join(directory, "package");
       NodeFS.mkdirSync(packageDirectory);
@@ -162,10 +163,15 @@ describe("complete fork release assets", () => {
         const assets = prepareForkAssets(plan, directory);
         expect(
           assets.filter((name) => /\.(dmg|zip|AppImage|deb|exe|tar\.gz)$/.test(name)),
-        ).toHaveLength(20);
+        ).toHaveLength(25);
         const checksums = FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8");
         for (let index = 0; index < plan.cliAssets.length; index++) {
           const name = plan.cliAssets[index]!;
+          const previousName = plan.cliPreviousAssets[index]!;
+          expect(checksums).toContain(`  ${previousName}\n`);
+          expect(FS.readFileSync(Path.join(directory, previousName))).toEqual(
+            FS.readFileSync(Path.join(directory, name)),
+          );
           const legacyName = plan.cliLegacyAssets[index]!;
           expect(checksums).toContain(`  ${name}\n`);
           expect(checksums).toContain(`  ${legacyName}\n`);

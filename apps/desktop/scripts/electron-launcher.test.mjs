@@ -33,11 +33,19 @@ describe("electron development launcher", () => {
       "if [ -z \"${T3CODE_OTLP_PROTOCOL:-}\" ]; then export T3CODE_OTLP_PROTOCOL='http/protobuf'; fi",
     );
     assert.notInclude(environmentScript, "\nexport VITE_DEV_SERVER_URL=");
-    assert.notInclude(environmentScript, "export SHUV2CODE_HOME=");
+    assert.notInclude(environmentScript, "export S2CODE_HOME=");
     assert.include(
       makeDevelopmentEnvironmentScript({ SHUV2CODE_HOME: "/fork" }),
-      "export SHUV2CODE_HOME='/fork'",
+      "export S2CODE_HOME='/fork'",
     );
+    const fallback = makeDevelopmentEnvironmentScript({
+      S2CODE_HOME: " ",
+      SHUV2CODE_HOME: "/legacy",
+      S2CODE_PORT: " ",
+      SHUV2CODE_PORT: "3210",
+    });
+    assert.include(fallback, "export S2CODE_HOME='/legacy'");
+    assert.include(fallback, "export S2CODE_PORT='3210'");
   });
 
   it("keeps the launcher script free of volatile environment values", () => {

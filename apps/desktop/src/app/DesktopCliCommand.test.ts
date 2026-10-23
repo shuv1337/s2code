@@ -14,12 +14,19 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 const environmentFor = (
   path: Path.Path,
-  input: { home: string; baseDir: string; platform?: NodeJS.Platform; isPackaged?: boolean },
+  input: {
+    home: string;
+    baseDir: string;
+    platform?: NodeJS.Platform;
+    isPackaged?: boolean;
+    appVersion?: string;
+  },
 ) =>
   DesktopEnvironment.DesktopEnvironment.of({
     path,
     platform: input.platform ?? "linux",
     isPackaged: input.isPackaged ?? true,
+    appVersion: input.appVersion ?? "1.0.0",
     homeDirectory: input.home,
     baseDir: input.baseDir,
     stateDir: path.join(input.baseDir, "userdata"),
@@ -28,7 +35,13 @@ const environmentFor = (
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
 const commandIn = (
-  input: { home: string; baseDir?: string; platform?: NodeJS.Platform; isPackaged?: boolean },
+  input: {
+    home: string;
+    baseDir?: string;
+    platform?: NodeJS.Platform;
+    isPackaged?: boolean;
+    appVersion?: string;
+  },
   spawner?: ChildProcessSpawner.ChildProcessSpawner["Service"],
 ) =>
   Effect.gen(function* () {
@@ -99,17 +112,17 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped();
       const command = yield* commandIn({ home });
-      const link = path.join(home, ".local", "bin", "shuv2code");
+      const link = path.join(home, ".local", "bin", "s2code");
 
       expect(yield* command.state).toEqual({ supported: true, installedPath: null, onPath: false });
       const installed = yield* command.install;
       expect(installed.installedPath).toBe(link);
-      expect(yield* fs.readLink(link)).toBe(path.join(home, ".t3", "bin", "shuv2code"));
+      expect(yield* fs.readLink(link)).toBe(path.join(home, ".t3", "bin", "s2code"));
       expect((yield* command.install).installedPath).toBe(link);
 
       expect((yield* command.uninstall).installedPath).toBeNull();
       expect(yield* fs.exists(link)).toBe(false);
-      expect(yield* fs.exists(path.join(home, ".t3", "bin", "shuv2code"))).toBe(true);
+      expect(yield* fs.exists(path.join(home, ".t3", "bin", "s2code"))).toBe(true);
     }).pipe(Effect.scoped),
   );
 
@@ -119,17 +132,52 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped();
       const command = yield* commandIn({ home });
-      const theirs = path.join(home, ".local", "bin", "shuv2code");
+      const theirs = path.join(home, ".local", "bin", "s2code");
       yield* fs.makeDirectory(path.dirname(theirs), { recursive: true });
       yield* fs.writeFileString(theirs, "npm's t3\n");
       yield* fs.makeDirectory(path.join(home, "bin"), { recursive: true });
-      yield* fs.symlink(path.join(home, "gone"), path.join(home, "bin", "shuv2code"));
+      yield* fs.symlink(path.join(home, "gone"), path.join(home, "bin", "s2code"));
 
       const error = yield* Effect.flip(command.install);
-      expect(error.message).toContain("Another t3 command is already installed");
+      expect(error.message).toContain("Another s2code command is already installed");
       yield* command.uninstall;
       expect(yield* fs.readFileString(theirs)).toBe("npm's t3\n");
-      expect(yield* fs.readLink(path.join(home, "bin", "shuv2code"))).toBe(path.join(home, "gone"));
+      expect(yield* fs.readLink(path.join(home, "bin", "s2code"))).toBe(path.join(home, "gone"));
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps another channel's shared aliases when installing and removing nightly", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const stableHome = path.join(home, ".s2code");
+      const nightlyHome = path.join(home, ".s2code-nightly");
+      const stable = yield* commandIn({ home, baseDir: stableHome });
+      const nightly = yield* commandIn({
+        home,
+        baseDir: nightlyHome,
+        appVersion: "1.0.0-nightly.1",
+      });
+      yield* stable.install;
+      yield* nightly.install;
+      const bin = path.join(home, ".local", "bin");
+      for (const name of ["s2code", "s2c", "shuv2code"]) {
+        expect(yield* fs.readLink(path.join(bin, name))).toBe(
+          path.join(stableHome, "bin", "s2code"),
+        );
+      }
+      expect(yield* fs.readLink(path.join(bin, "shuv2code-nightly"))).toBe(
+        path.join(nightlyHome, "bin", "s2code-nightly"),
+      );
+      yield* nightly.uninstall;
+      for (const name of ["s2code", "s2c", "shuv2code"]) {
+        expect(yield* fs.readLink(path.join(bin, name))).toBe(
+          path.join(stableHome, "bin", "s2code"),
+        );
+      }
+      expect(yield* fs.exists(path.join(bin, "s2code-nightly"))).toBe(false);
+      expect(yield* fs.exists(path.join(bin, "shuv2code-nightly"))).toBe(false);
     }).pipe(Effect.scoped),
   );
 
@@ -144,10 +192,10 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const after = yield* commandIn({ home, baseDir: path.join(home, "new-t3") });
       expect((yield* after.state).installedPath).toBe(link);
       expect((yield* after.install).installedPath).toBe(link);
-      expect(yield* fs.readLink(link!)).toBe(path.join(home, "new-t3", "bin", "shuv2code"));
+      expect(yield* fs.readLink(link!)).toBe(path.join(home, "new-t3", "bin", "s2code"));
       yield* after.uninstall;
-      expect(yield* fs.exists(path.join(home, ".local", "bin", "shuv2code"))).toBe(false);
-      expect(yield* fs.exists(path.join(home, "bin", "shuv2code"))).toBe(false);
+      expect(yield* fs.exists(path.join(home, ".local", "bin", "s2code"))).toBe(false);
+      expect(yield* fs.exists(path.join(home, "bin", "s2code"))).toBe(false);
     }).pipe(Effect.scoped),
   );
 
@@ -159,11 +207,11 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const binary = path.join(home, "native-t3");
       yield* fs.writeFileString(binary, `${"\0".repeat(64 * 1024)}${DesktopCliShim.MARKER}`);
       yield* fs.makeDirectory(path.join(home, ".local", "bin"), { recursive: true });
-      yield* fs.symlink(binary, path.join(home, ".local", "bin", "shuv2code"));
+      yield* fs.symlink(binary, path.join(home, ".local", "bin", "s2code"));
       const command = yield* commandIn({ home });
       expect((yield* command.state).installedPath).toBeNull();
       yield* command.uninstall;
-      expect(yield* fs.readLink(path.join(home, ".local", "bin", "shuv2code"))).toBe(binary);
+      expect(yield* fs.readLink(path.join(home, ".local", "bin", "s2code"))).toBe(binary);
     }).pipe(Effect.scoped),
   );
 
@@ -174,21 +222,21 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const home = yield* fs.makeTempDirectoryScoped();
       const shadow = path.join(home, "shadow");
       yield* fs.makeDirectory(shadow);
-      yield* fs.writeFileString(path.join(shadow, "shuv2code"), "#!/bin/sh\n", { mode: 0o755 });
+      yield* fs.writeFileString(path.join(shadow, "s2code"), "#!/bin/sh\n", { mode: 0o755 });
       process.env.PATH = [shadow, path.join(home, ".local", "bin")].join(":");
 
       const command = yield* commandIn({ home });
-      const theirs = path.join(shadow, "shuv2code");
+      const theirs = path.join(shadow, "s2code");
       expect((yield* command.state).shadowedBy).toBe(theirs);
       const error = yield* Effect.flip(command.install);
       expect(error.message).toContain(theirs);
-      expect(yield* fs.exists(path.join(home, ".local", "bin", "shuv2code"))).toBe(false);
+      expect(yield* fs.exists(path.join(home, ".local", "bin", "s2code"))).toBe(false);
 
       yield* fs.remove(theirs);
       const installed = yield* command.install;
       expect(installed).toMatchObject({
         onPath: true,
-        installedPath: path.join(home, ".local", "bin", "shuv2code"),
+        installedPath: path.join(home, ".local", "bin", "s2code"),
       });
       expect(installed.shadowedBy).toBeUndefined();
     }).pipe(Effect.scoped),
@@ -210,11 +258,30 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       registry.failReads = false;
       const launcherDir = DesktopCliShim.launcherPath(
         environmentFor(yield* Path.Path, { home, baseDir: `${home}/.t3`, platform: "win32" }),
-      ).replace(/[\\/]shuv2code\.cmd$/, "");
+      ).replace(/[\\/]s2code\.cmd$/, "");
       yield* command.install;
       expect(registry.path).toBe(`${userPath};${launcherDir}`);
       yield* command.uninstall;
       expect(registry.path).toBe(userPath);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("removes only owned Windows command aliases", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const { registry, spawner } = fakePowerShell("C:\\Tools");
+      const command = yield* commandIn({ home, platform: "win32" }, spawner);
+      yield* command.install;
+      const bin = path.join(home, ".t3", "bin");
+      yield* fs.writeFileString(path.join(bin, "s2c.cmd"), "user launcher");
+      yield* command.uninstall;
+      expect(registry.path).toBe("C:\\Tools");
+      expect(yield* fs.exists(path.join(bin, "s2code.cmd"))).toBe(false);
+      expect(yield* fs.exists(path.join(bin, "shuv2code.cmd"))).toBe(false);
+      expect(yield* fs.readFileString(path.join(bin, "s2c.cmd"))).toBe("user launcher");
+      expect((yield* command.install).installedPath).toBe(path.join(bin, "s2code.cmd"));
     }).pipe(Effect.scoped),
   );
 

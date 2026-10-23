@@ -72,13 +72,13 @@ export function formatServiceStatus(
     return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return `shuv2code service\n  Status: not installed\n  Next: Run \`${command("service install")}\`.`;
+    return `s2code service\n  Status: not installed\n  Next: Run \`${command("service install")}\`.`;
   }
   if (
     status.installedVersion !== undefined &&
     !isSameInstallationChannel(cliVersion, status.installedVersion)
   )
-    return `shuv2code service\n  Installed version: ${status.installedVersion}\n  Unit: ${status.unitPath}\n  Logs: ${status.logPath}\n  ${SEPARATE_CHANNEL_INSTALL_MESSAGE}`;
+    return `s2code service\n  Installed version: ${status.installedVersion}\n  Unit: ${status.unitPath}\n  Logs: ${status.logPath}\n  ${SEPARATE_CHANNEL_INSTALL_MESSAGE}`;
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
     (problem) =>
@@ -91,7 +91,7 @@ export function formatServiceStatus(
   ) {
     return [
       "T3 Code service",
-      `  Status: installed · shuv2code@${installedVersion} (newer than this shuv2code@${cliVersion} CLI)`,
+      `  Status: installed · s2code@${installedVersion} (newer than this s2code@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
@@ -100,11 +100,13 @@ export function formatServiceStatus(
   }
   return [
     "T3 Code service",
-    `  Status: ${status.current ? `installed · shuv2code@${installedVersion}` : "needs an update or repair"}`,
+    `  Status: ${status.current ? `installed · s2code@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : [`  Next: Run \`${command("service install")}\` to repair it.`]),
+    ...(status.current || status.problems?.includes("duplicate-service")
+      ? []
+      : [`  Next: Run \`${command("service install")}\` to repair it.`]),
   ].join("\n");
 }
 
@@ -135,12 +137,12 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
           yield* Console.log(
-            `T3 Code service is already installed with shuv2code@${packageJson.version}.`,
+            `T3 Code service is already installed with s2code@${packageJson.version}.`,
           );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with shuv2code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with s2code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -160,11 +162,11 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
         );
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
-          yield* Console.log(`T3 Code service is already using shuv2code@${packageJson.version}.`);
+          yield* Console.log(`T3 Code service is already using s2code@${packageJson.version}.`);
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with shuv2code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with s2code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -183,7 +185,7 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
         const restarted = yield* service.restart;
         yield* Console.log(
           restarted
-            ? `Restarted the T3 Code service${status.installedVersion === undefined ? "" : ` on shuv2code@${status.installedVersion}`}.`
+            ? `Restarted the T3 Code service${status.installedVersion === undefined ? "" : ` on s2code@${status.installedVersion}`}.`
             : "T3 Code service is not installed.",
         );
       }),
@@ -253,7 +255,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
   ) {
     yield* Console.log(
-      `A newer shuv2code@${status.installedVersion} background service is installed. Leaving it unchanged.`,
+      `A newer s2code@${status.installedVersion} background service is installed. Leaving it unchanged.`,
     );
     return false;
   }

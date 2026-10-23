@@ -35,7 +35,7 @@ import { triageCommand } from "./cli/triage.ts";
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 const connectPublicConfigMissingMessage =
-  "Hosted Connect is unavailable: configure a fork-owned service first. Upstream accounts are separate. Use shuv2code pair for direct or Tailscale access.";
+  "Hosted Connect is unavailable: configure a fork-owned service first. Upstream accounts are separate. Use s2code pair for direct or Tailscale access.";
 
 class ConnectPublicConfigMissingError extends CliError.UserError {
   override get message() {
@@ -51,7 +51,7 @@ const connectUnavailableCommand = Command.make("connect", {
   Command.withHandler(() =>
     Effect.fail(
       new CliError.ShowHelp({
-        commandPath: ["t3", "connect"],
+        commandPath: ["s2code", "connect"],
         errors: [new ConnectPublicConfigMissingError({ cause: connectPublicConfigMissingMessage })],
       }),
     ),
@@ -59,14 +59,14 @@ const connectUnavailableCommand = Command.make("connect", {
 );
 
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
-  Command.make("shuv2code", { ...sharedServerCommandFlags }).pipe(
-    Command.withDescription("Run the shuv2code server."),
+  Command.make("s2code", { ...sharedServerCommandFlags }).pipe(
+    Command.withDescription("Run the s2code server."),
     Command.withHandler(runDefaultServerCommand),
     Command.withSubcommands([
       Command.make("help").pipe(
         Command.withDescription("Show command help."),
         Command.withHandler(() =>
-          Effect.fail(new CliError.ShowHelp({ commandPath: ["t3"], errors: [] })),
+          Effect.fail(new CliError.ShowHelp({ commandPath: ["s2code"], errors: [] })),
         ),
       ),
       acpMcpBridgeCommand,

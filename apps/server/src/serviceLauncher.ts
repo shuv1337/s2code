@@ -839,7 +839,7 @@ export async function main(): Promise<void> {
   const baseDir = process.env.T3CODE_HOME?.trim();
   if (baseDir === undefined || baseDir === "") {
     await pauseForServiceReinstall(
-      "This service unit does not provide SHUV2CODE_HOME. Inherited T3CODE_HOME is not fork ownership proof.",
+      "This service unit does not provide S2CODE_HOME. Inherited T3CODE_HOME is not fork ownership proof.",
     );
     return;
   }
@@ -868,7 +868,7 @@ async function pauseForServiceReinstall(reason: string): Promise<void> {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     process.stderr.write(
-      `${reason} Reinstall with shuv2code service install using the same explicit SHUV2CODE_HOME. Service paused until reinstall; no server was started.\n`,
+      `${reason} Reinstall with s2code service install using the same explicit S2CODE_HOME. Service paused until reinstall; no server was started.\n`,
     );
   });
 }

@@ -29,6 +29,20 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
       const shared = NodePath.join(home, ".shuv2code-v2", "userdata");
       NodeFS.mkdirSync(shared, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(shared, "statev2.sqlite"), "original-state");
+      NodeFS.writeFileSync(
+        NodePath.join(home, ".shuv2code-v2", ".product-identity"),
+        "shuv2code\n",
+      );
+      const inheritedHome = NodePath.join(root, "inherited-home");
+      NodeFS.mkdirSync(inheritedHome);
+      NodeFS.writeFileSync(NodePath.join(inheritedHome, ".product-identity"), "shuv2code\n");
+      NodeFS.writeFileSync(NodePath.join(inheritedHome, "sentinel"), "untouched");
+      const inheritedEnv = {
+        ...process.env,
+        S2CODE_HOME: inheritedHome,
+        SHUV2CODE_HOME: inheritedHome,
+        SHUV2CODE_INSTALL_BIN_DIR: inheritedHome,
+      };
       for (const channel of ["stable", "nightly", "preview"]) {
         const suffix = channel === "stable" ? "" : `-${channel}`;
         const channelHome = NodePath.join(home, `.shuv2code-v2${suffix}`);
@@ -42,7 +56,7 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
         }
         const version = `1.2.3${channel === "stable" ? "" : `-${channel}.20261014.1`}`;
         // Stable emulates a pre-rename release; the other channels exercise the preferred name.
-        const stem = `${channel === "stable" ? "t3" : "shuv2code"}-${version}-${platform}-${arch}`;
+        const stem = `${channel === "stable" ? "t3" : "s2code"}-${version}-${platform}-${arch}`;
         const source = NodePath.join(root, stem);
         const release = NodePath.join(root, "mirror", `v${version}`);
         NodeFS.mkdirSync(source);
@@ -57,14 +71,17 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
           .digest("hex");
         NodeFS.writeFileSync(NodePath.join(release, "SHA256SUMS"), `${hash}  ${stem}.tar.gz\n`);
         const env = {
-          ...process.env,
+          ...Object.fromEntries(
+            Object.entries(inheritedEnv).filter(([name]) => !/^(?:S2CODE|SHUV2CODE)_/i.test(name)),
+          ),
           HOME: home,
           T3CODE_HOME: NodePath.join(root, ".t3"),
+          S2CODE_HOME: "",
           SHUV2CODE_HOME: "",
-          SHUV2CODE_CHANNEL: channel,
-          SHUV2CODE_VERSION: version,
-          SHUV2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-          SHUV2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+          S2CODE_CHANNEL: channel,
+          S2CODE_VERSION: version,
+          S2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+          S2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
         };
         const child = NodeChildProcess.spawn(
           "sh",
@@ -111,7 +128,7 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
         ).toBe(version);
         expect(
           NodeChildProcess.execFileSync(
-            NodePath.join(root, "bin", `shuv2code${suffix}`),
+            NodePath.join(root, "bin", `s2code${suffix}`),
             ["--version"],
             { encoding: "utf8" },
           ).trim(),
@@ -120,7 +137,14 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
       expect(NodeFS.readFileSync(NodePath.join(shared, "statev2.sqlite"), "utf8")).toBe(
         "original-state",
       );
+      expect(NodeFS.readdirSync(inheritedHome).sort()).toEqual([".product-identity", "sentinel"]);
+      expect(NodeFS.readFileSync(NodePath.join(inheritedHome, "sentinel"), "utf8")).toBe(
+        "untouched",
+      );
       expect(NodeFS.readdirSync(NodePath.join(root, "bin")).sort()).toEqual([
+        "s2code",
+        "s2code-nightly",
+        "s2code-preview",
         "shuv2code",
         "shuv2code-nightly",
         "shuv2code-preview",

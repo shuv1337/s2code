@@ -32,11 +32,14 @@ import {
   type ServiceState,
 } from "./serviceProtocol.ts";
 
-import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
 import { forkCliCommand } from "../cli/invocation.ts";
 import packageJson from "../../package.json" with { type: "json" };
-const serviceIdentity = (version = "") => {
-  const identity = resolveChannelIdentity(version);
+const serviceIdentity = (version = "", legacy = false) => {
+  const identity = legacy ? resolveLegacyChannelIdentity(version) : resolveChannelIdentity(version);
   return {
     unitFile: `${identity.serviceName}.service`,
     label: identity.serviceLabel,
@@ -65,20 +68,22 @@ function quoteSystemdValue(value: string): string {
  * unescaped the same way `quoteSystemdValue` produced it.
  */
 export function bootServiceBaseDirOf(contents: string): string | undefined {
-  const systemd = /^Environment=(?:SHUV2CODE|T3CODE)_HOME=(.*)$/m.exec(contents)?.[1];
-  if (systemd !== undefined) {
-    const raw = systemd.trim();
-    const unquoted =
-      raw.startsWith('"') && raw.endsWith('"')
-        ? raw.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\\\", "\\")
-        : raw;
-    return unquoted.replaceAll("%%", "%");
-  }
-  const plist = /<key>(?:SHUV2CODE|T3CODE)_HOME<\/key>\s*<string>([^<]*)<\/string>/.exec(
-    contents,
-  )?.[1];
-  if (plist !== undefined) {
-    return plist.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  for (const prefix of ["S2CODE", "SHUV2CODE", "T3CODE"]) {
+    const systemd = new RegExp(`^Environment=${prefix}_HOME=(.*)$`, "m").exec(contents)?.[1];
+    if (systemd !== undefined) {
+      const raw = systemd.trim();
+      const unquoted =
+        raw.startsWith('"') && raw.endsWith('"')
+          ? raw.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\\\", "\\")
+          : raw;
+      if (unquoted.trim()) return unquoted.replaceAll("%%", "%");
+    }
+    const plist = new RegExp(`<key>${prefix}_HOME</key>\\s*<string>([^<]*)</string>`).exec(
+      contents,
+    )?.[1];
+    if (plist?.trim()) {
+      return plist.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+    }
   }
   return undefined;
 }
@@ -89,6 +94,7 @@ export interface BootServicePlan {
   readonly logPath: string;
   readonly unitPath: string;
   readonly version?: string;
+  readonly legacyIdentity?: boolean;
 }
 
 /** Pure renderer: service units cannot rely on the user's shell or PATH. */
@@ -96,15 +102,15 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
   // The user manager has no reliable network-online target; server networking retries itself.
   return [
     "[Unit]",
-    "Description=shuv2code server",
+    "Description=S2Code server",
     "StartLimitIntervalSec=300",
     "StartLimitBurst=5",
     "",
     "[Service]",
     "Type=simple",
     "WorkingDirectory=%h",
-    `Environment=SHUV2CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
-    `Environment=${BOOT_SERVICE_UNIT_ENV}=${serviceIdentity(plan.version).unitFile}`,
+    `Environment=S2CODE_HOME=${quoteSystemdValue(plan.baseDir)}`,
+    `Environment=${BOOT_SERVICE_UNIT_ENV}=${serviceIdentity(plan.version, plan.legacyIdentity).unitFile}`,
     `ExecStart=${plan.program.map(quoteSystemdValue).join(" ")}`,
     // Let the launcher mark an explicit stop before it signals the server.
     // systemd still SIGKILLs the whole cgroup if graceful shutdown times out.
@@ -158,7 +164,7 @@ export function renderBootServicePlist(
     `<plist version="1.0">`,
     `<dict>`,
     `  <key>Label</key>`,
-    `  <string>${serviceIdentity(plan.version).label}</string>`,
+    `  <string>${serviceIdentity(plan.version, plan.legacyIdentity).label}</string>`,
     `  <key>ProgramArguments</key>`,
     `  <array>`,
     ...plan.program.map((argument) => `    <string>${escapeXmlText(argument)}</string>`),
@@ -167,10 +173,10 @@ export function renderBootServicePlist(
     `  <dict>`,
     `    <key>PATH</key>`,
     `    <string>${escapeXmlText(options.environmentPath)}</string>`,
-    `    <key>SHUV2CODE_HOME</key>`,
+    `    <key>S2CODE_HOME</key>`,
     `    <string>${escapeXmlText(plan.baseDir)}</string>`,
     `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
-    `    <string>${serviceIdentity(plan.version).plistFile}</string>`,
+    `    <string>${serviceIdentity(plan.version, plan.legacyIdentity).plistFile}</string>`,
     `  </dict>`,
     `  <key>WorkingDirectory</key>`,
     `  <string>${escapeXmlText(options.homeDir)}</string>`,
@@ -228,8 +234,9 @@ function systemdManager(input: {
   readonly path: Path.Path;
   readonly homeDir: string;
   readonly version: string;
+  readonly legacyIdentity?: boolean;
 }): BootServiceManager {
-  const BOOT_SERVICE_UNIT_FILE = serviceIdentity(input.version).unitFile;
+  const BOOT_SERVICE_UNIT_FILE = serviceIdentity(input.version, input.legacyIdentity).unitFile;
   const unitPath = input.path.join(
     input.homeDir,
     ".config",
@@ -297,9 +304,11 @@ function launchdManager(input: {
   readonly uid: number;
   readonly environmentPath: string;
   readonly version: string;
+  readonly legacyIdentity?: boolean;
 }): BootServiceManager {
   const { plistFile: BOOT_SERVICE_PLIST_FILE, label: BOOT_SERVICE_LAUNCHD_LABEL } = serviceIdentity(
     input.version,
+    input.legacyIdentity,
   );
   const unitPath = input.path.join(
     input.homeDir,
@@ -377,16 +386,23 @@ function selectBootServiceManager(input: {
   readonly path: Path.Path;
   readonly environmentPath: string;
   readonly version: string;
+  readonly legacyIdentity?: boolean;
 }): BootServiceManager | undefined {
   if (input.homeDir === "") {
     return undefined;
   }
   if (input.platform === "linux") {
-    return systemdManager({ path: input.path, homeDir: input.homeDir, version: input.version });
+    return systemdManager({
+      path: input.path,
+      homeDir: input.homeDir,
+      version: input.version,
+      legacyIdentity: input.legacyIdentity ?? false,
+    });
   }
   if (input.platform === "darwin" && input.uid !== undefined) {
     return launchdManager({
       version: input.version,
+      legacyIdentity: input.legacyIdentity ?? false,
       path: input.path,
       homeDir: input.homeDir,
       uid: input.uid,
@@ -438,6 +454,7 @@ const BootServiceProblem = Schema.Literals([
   "service-disabled",
   "service-stopped",
   "restart-pending",
+  "duplicate-service",
 ]);
 type BootServiceProblem = typeof BootServiceProblem.Type;
 
@@ -452,6 +469,8 @@ export function formatBootServiceProblem(
   const version = input.version ?? packageJson.version;
   const command = input.command ?? ((subcommand) => forkCliCommand(subcommand, version));
   switch (problem) {
+    case "duplicate-service":
+      return `Both old and new service names serve this home. Run \`${command("service uninstall")}\` to remove both, then \`${command("service install")}\` to install one service. Your data is kept.`;
     case "user-manager-unavailable":
       return "Cannot reach the systemd user manager. Run `systemctl --user status` in a login session for the service user. Install your distribution's systemd user-session support if it is missing; do not run T3 with sudo.";
     case "linger-unavailable":
@@ -566,6 +585,8 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const installerPath = yield* Config.String("PATH").pipe(Config.withDefault(""));
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const servesHome = (installed: string | undefined) =>
+    installed !== undefined && path.resolve(installed) === path.resolve(input.baseDir);
   const runner = yield* ProcessRunner.ProcessRunner;
   const host = input.host ?? { execPath: hostExecPath };
   const xmlSafeInstallerDirectories = installerPath.split(":").filter(
@@ -589,7 +610,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ]),
   ).join(":");
 
-  const detectedManager = selectBootServiceManager({
+  const currentManager = selectBootServiceManager({
     version: input.cliVersion,
     platform,
     homeDir,
@@ -597,8 +618,34 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     path,
     environmentPath,
   });
+  const legacyManager = selectBootServiceManager({
+    version: input.cliVersion,
+    platform,
+    homeDir,
+    uid,
+    path,
+    environmentPath,
+    legacyIdentity: true,
+  });
+  const legacyUnit =
+    legacyManager === undefined
+      ? Option.none<string>()
+      : yield* fs.readFileString(legacyManager.unitPath).pipe(Effect.option);
+  const currentUnit =
+    currentManager === undefined
+      ? Option.none<string>()
+      : yield* fs.readFileString(currentManager.unitPath).pipe(Effect.option);
+  const legacyServesHome =
+    Option.isSome(legacyUnit) && servesHome(bootServiceBaseDirOf(legacyUnit.value));
+  const currentServesHome =
+    Option.isSome(currentUnit) && servesHome(bootServiceBaseDirOf(currentUnit.value));
+  const duplicateServices = legacyServesHome && currentServesHome;
+  const legacyIdentity = Option.isSome(legacyUnit) && (legacyServesHome || !currentServesHome);
+  // Retain an installed unit name so updates cannot create a second boot service.
+  const detectedManager = legacyIdentity ? legacyManager : currentManager;
   const { unitFile: BOOT_SERVICE_UNIT_FILE, label: BOOT_SERVICE_LAUNCHD_LABEL } = serviceIdentity(
     input.cliVersion,
+    legacyIdentity,
   );
   const unitPath = detectedManager?.unitPath ?? "";
   const logPath = path.join(input.logsDir, BOOT_SERVICE_LOG_FILE);
@@ -625,6 +672,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       }),
     ).pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
   const plan: BootServicePlan = {
+    legacyIdentity,
     version: input.cliVersion,
     program: [runtimePaths.entryPath, "__service-launcher"],
     baseDir: input.baseDir,
@@ -748,6 +796,16 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     readonly start?: boolean;
   }) {
     const manager = yield* requireManager;
+    if (duplicateServices)
+      return yield* new BootServicePrerequisiteError({ problem: "duplicate-service" });
+    const selectedUnit = legacyIdentity ? legacyUnit : currentUnit;
+    if (Option.isSome(selectedUnit) && !servesHome(bootServiceBaseDirOf(selectedUnit.value))) {
+      return yield* new BootServiceInstallError({
+        cause: new Error(
+          "The service belongs to a different home. Select its explicit S2CODE_HOME before updating it.",
+        ),
+      });
+    }
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -895,13 +953,12 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const restart: BootService["Service"]["restart"] = Effect.gen(function* () {
     const manager = yield* requireManager;
+    if (duplicateServices)
+      return yield* new BootServicePrerequisiteError({ problem: "duplicate-service" });
     const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
     if (Option.isNone(unit)) return false;
     const installedBaseDir = bootServiceBaseDirOf(unit.value);
-    if (
-      installedBaseDir === undefined ||
-      path.resolve(installedBaseDir) !== path.resolve(input.baseDir)
-    ) {
+    if (!servesHome(installedBaseDir)) {
       return false;
     }
     yield* runSteps(manager.stop);
@@ -922,14 +979,13 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   ): Effect.Effect<A, E | BootServiceError, R> =>
     Effect.gen(function* () {
       if (detectedManager === undefined) return yield* operation;
+      if (duplicateServices)
+        return yield* new BootServicePrerequisiteError({ problem: "duplicate-service" });
       const manager = detectedManager;
       const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
       if (Option.isNone(unit)) return yield* operation;
       const installedBaseDir = bootServiceBaseDirOf(unit.value);
-      if (
-        installedBaseDir === undefined ||
-        path.resolve(installedBaseDir) !== path.resolve(input.baseDir)
-      ) {
+      if (!servesHome(installedBaseDir)) {
         return yield* operation;
       }
       // `is-active` fails while a crash-looping unit sits in `activating
@@ -973,19 +1029,21 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     }).pipe(Effect.withSpan("cloud.boot_service.with_stopped"));
 
   const uninstall: BootService["Service"]["uninstall"] = Effect.gen(function* () {
-    const manager = yield* requireManager;
-    if (
-      !(yield* fs
-        .exists(unitPath)
-        .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause }))))
-    )
-      return false;
-    yield* runSteps(manager.deactivate);
-    yield* fs
-      .remove(unitPath)
-      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-    yield* runSteps(manager.finalize);
-    return true;
+    yield* requireManager;
+    let removed = false;
+    for (const manager of [legacyManager, currentManager]) {
+      if (manager === undefined) continue;
+      const installedUnit = yield* fs.readFileString(manager.unitPath).pipe(Effect.option);
+      if (Option.isNone(installedUnit) || !servesHome(bootServiceBaseDirOf(installedUnit.value)))
+        continue;
+      yield* runSteps(manager.deactivate);
+      yield* fs
+        .remove(manager.unitPath)
+        .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+      yield* runSteps(manager.finalize);
+      removed = true;
+    }
+    return removed;
   }).pipe(Effect.withSpan("cloud.boot_service.uninstall"));
 
   const status: BootService["Service"]["status"] = Effect.gen(function* () {
@@ -1012,6 +1070,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         : contents;
     const problems: BootServiceProblem[] =
       detectedManager.kind === "systemd" ? [...(yield* readSystemdProblems(true))] : [];
+    if (duplicateServices) problems.push("duplicate-service");
     if (yield* fs.exists(restartPendingPath)) problems.push("restart-pending");
     return {
       supported: true,

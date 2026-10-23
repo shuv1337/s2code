@@ -13,13 +13,13 @@ browser.
 You can add more computers before continuing:
 
 - **T3 Connect** connects computers that are signed in to your account.
-  [Install the CLI](./install.md#command-line) and run `shuv2code connect` on each
-  computer you want to add, then start the fork or run `shuv2code serve` so the
+  [Install the CLI](./install.md#command-line) and run `s2code connect` on each
+  computer you want to add, then start the fork or run `s2code serve` so the
   computer stays available.
 - **Add a computer** connects directly to a server on your network or tailnet.
-  Start the server with `shuv2code serve`, then run `shuv2code pair --tailscale` and paste
-  the pairing link. You can also run `shuv2code serve --host <address>` and use
-  `shuv2code pair` when the server is already reachable on your network.
+  Start the server with `s2code serve`, then run `s2code pair --tailscale` and paste
+  the pairing link. You can also run `s2code serve --host <address>` and use
+  `s2code pair` when the server is already reachable on your network.
 
 Saved computers and computers discovered through T3 Connect are selected by
 default. Uncheck any you do not want to set up; this does not disconnect them.

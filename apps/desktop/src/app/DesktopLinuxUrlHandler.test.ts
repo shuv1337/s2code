@@ -223,7 +223,10 @@ describe("DesktopLinuxUrlHandler", () => {
           recorded.files[0]?.content,
           'Exec="/home/alice/Applications/S2Code.AppImage" %U',
         );
-        assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/shuv2code;");
+        assert.include(
+          recorded.files[0]?.content,
+          "MimeType=x-scheme-handler/s2code;x-scheme-handler/shuv2code;",
+        );
         assert.deepEqual(recorded.commands, [
           {
             command: "update-desktop-database",
@@ -231,7 +234,12 @@ describe("DesktopLinuxUrlHandler", () => {
           },
           {
             command: "xdg-mime",
-            args: ["default", "com.t3tools.T3Code.desktop", "x-scheme-handler/shuv2code"],
+            args: [
+              "default",
+              "com.t3tools.T3Code.desktop",
+              "x-scheme-handler/s2code",
+              "x-scheme-handler/shuv2code",
+            ],
           },
         ]);
       });
@@ -259,7 +267,8 @@ describe("DesktopLinuxUrlHandler", () => {
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: "/home/alice/Applications/S2Code.AppImage",
-          scheme: "shuv2code",
+          scheme: "s2code",
+          additionalSchemes: ["shuv2code"],
           iconPath: "/home/alice/.local/share/icons/com.t3tools.T3Code.desktop.png",
         }),
       });
@@ -273,7 +282,12 @@ describe("DesktopLinuxUrlHandler", () => {
         },
         {
           command: "xdg-mime",
-          args: ["default", "com.t3tools.T3Code.desktop", "x-scheme-handler/shuv2code"],
+          args: [
+            "default",
+            "com.t3tools.T3Code.desktop",
+            "x-scheme-handler/s2code",
+            "x-scheme-handler/shuv2code",
+          ],
         },
       ]);
     });
@@ -288,7 +302,8 @@ describe("DesktopLinuxUrlHandler", () => {
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: "/home/alice/Applications/S2Code.AppImage",
-          scheme: "shuv2code",
+          scheme: "s2code",
+          additionalSchemes: ["shuv2code"],
           iconPath,
         }),
       });

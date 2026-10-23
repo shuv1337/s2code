@@ -9,7 +9,7 @@ import {
   type AgentSystemdScope,
 } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
+import { LEGACY_PRODUCT_ID, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -23,7 +23,7 @@ import * as ProcessRunner from "../processRunner.ts";
  * All fork environments, development servers, and release channels deliberately
  * share one agents/terminals budget per systemd user manager, even though channels
  * are independent installations. A runaway in one can kill an agent in another.
- * app-shuv2code-agents.slice is below app-shuv2code.slice, whose parent app.slice
+ * app-s2code-agents.slice is below app-s2code.slice, whose parent app.slice
  * also contains the server service. Keep the service's CPUWeight/IOWeight: the
  * intermediate fork slice still competes with it; renaming does not remove that.
  *
@@ -34,10 +34,16 @@ import * as ProcessRunner from "../processRunner.ts";
  */
 const AGENT_SLICE = `app-${PRODUCT_ID}-agents.slice`;
 
-export function ownedAgentSlice(stateDir: string): string {
+export function ownedAgentSlice(stateDir: string, productId: string = PRODUCT_ID): string {
   const hash = NodeCrypto.createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
-  return `app-${PRODUCT_ID}-agents-${hash}.slice`;
+  return `app-${productId}-agents-${hash}.slice`;
 }
+
+/** A pre-rename server left its agents under the old product's slice name. */
+export const leftoverAgentSlices = (stateDir: string) => [
+  ownedAgentSlice(stateDir),
+  ownedAgentSlice(stateDir, LEGACY_PRODUCT_ID),
+];
 
 const GiB = 1024 ** 3;
 
@@ -144,27 +150,29 @@ export const make = Effect.gen(function* () {
   // session never work in the same worktree.
   const stopLeftoverAgents = (systemctl: string) =>
     Effect.gen(function* () {
-      const shown = yield* run(systemctl, [
-        "--user",
-        "show",
-        ownedSlice,
-        "--property=ActiveState,ControlGroup",
-      ]);
-      if (shown._tag === "None") return;
-      const values = parseKeyValues(shown.value.stdout);
-      if (values.get("ActiveState") !== "active") return;
-      const controlGroup = values.get("ControlGroup") ?? "";
-      const events = controlGroup ? yield* readCgroupFile(controlGroup, "cgroup.events") : "";
-      if (parseCgroupCounter(events, "populated") === 0) return;
-      yield* Effect.logWarning("Stopping agents left by a previous server", { slice: ownedSlice });
-      const stopped = yield* runner
-        .run({ command: systemctl, args: ["--user", "stop", ownedSlice], timeout: "30 seconds" })
-        .pipe(Effect.option);
-      if (stopped._tag === "None" || stopped.value.code !== 0) {
-        yield* Effect.logWarning("Could not stop agents left by a previous server", {
-          slice: ownedSlice,
-          stderr: stopped._tag === "Some" ? stopped.value.stderr.trim() : undefined,
-        });
+      for (const slice of leftoverAgentSlices(stateDir)) {
+        const shown = yield* run(systemctl, [
+          "--user",
+          "show",
+          slice,
+          "--property=ActiveState,ControlGroup",
+        ]);
+        if (shown._tag === "None") continue;
+        const values = parseKeyValues(shown.value.stdout);
+        if (values.get("ActiveState") !== "active") continue;
+        const controlGroup = values.get("ControlGroup") ?? "";
+        const events = controlGroup ? yield* readCgroupFile(controlGroup, "cgroup.events") : "";
+        if (parseCgroupCounter(events, "populated") === 0) continue;
+        yield* Effect.logWarning("Stopping agents left by a previous server", { slice });
+        const stopped = yield* runner
+          .run({ command: systemctl, args: ["--user", "stop", slice], timeout: "30 seconds" })
+          .pipe(Effect.option);
+        if (stopped._tag === "None" || stopped.value.code !== 0) {
+          yield* Effect.logWarning("Could not stop agents left by a previous server", {
+            slice,
+            stderr: stopped._tag === "Some" ? stopped.value.stderr.trim() : undefined,
+          });
+        }
       }
     });
 

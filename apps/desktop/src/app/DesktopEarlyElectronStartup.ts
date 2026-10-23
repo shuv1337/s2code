@@ -162,7 +162,7 @@ export function resolveEarlyLinuxElectronOptions(
   return {
     isDevelopment,
     linuxWmClass: isDevelopment
-      ? "shuv2code-dev"
+      ? "s2code-dev"
       : resolveChannelIdentity(input.appVersion ?? "").executableName,
     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment, input.appVersion),
     passwordStore: resolveLinuxPasswordStoreSwitch({

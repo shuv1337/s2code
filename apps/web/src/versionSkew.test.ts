@@ -22,7 +22,7 @@ import {
 } from "./versionSkew";
 
 const MISMATCH_HINT =
-  "Version mismatch. Try syncing the client and server to the same T3 Code version.";
+  "Version mismatch. Try syncing the client and server to the same S2Code version.";
 
 describe("versionSkew", () => {
   it("updates only the proven npm prefix and safely quotes its path", () => {
@@ -34,13 +34,33 @@ describe("versionSkew", () => {
     ).toBe("npm install --global --prefix '/opt/maria'\\''s node' shuv2code@0.0.45");
   });
 
-  it("keeps runner and unknown commands as relaunches", () => {
-    expect(manualServerUpdateCommand("0.0.45")).toBe("npx shuv2code@0.0.45");
-    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe("npx shuv2code@0.0.45");
-    expect(manualServerUpdateCommand("0.0.45", { kind: "pnpm-dlx" })).toBe(
-      "pnpm dlx shuv2code@0.0.45",
+  it("retains the detected global package when its aliases overlap another install", () => {
+    expect(
+      manualServerUpdateCommand("2.0.0", {
+        kind: "npm-global",
+        prefix: "/opt/node",
+        packageName: "s2code",
+      }),
+    ).toBe("npm install --global --prefix '/opt/node' s2code@2.0.0");
+    expect(
+      manualServerUpdateCommand("2.0.0", {
+        kind: "npm-global",
+        prefix: "/opt/node",
+        packageName: "shuv2code",
+      }),
+    ).toBe("npm install --global --prefix '/opt/node' shuv2code@2.0.0");
+    expect(manualServerUpdateCommand("1.0.0", { kind: "npx" }, "shuv2code")).toBe(
+      "npx shuv2code@1.0.0",
     );
-    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx shuv2code@0.0.45");
+  });
+
+  it("keeps runner and unknown commands as relaunches", () => {
+    expect(manualServerUpdateCommand("0.0.45")).toBe("npx s2code@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe("npx s2code@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "pnpm-dlx" })).toBe(
+      "pnpm dlx s2code@0.0.45",
+    );
+    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx s2code@0.0.45");
   });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";

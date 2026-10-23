@@ -156,7 +156,7 @@ export function AgentActivity(
   const deepLinkRow = attentionRow ?? row0;
   const deepLink =
     deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
-      ? `shuv2code://${deepLinkRow.deepLink.slice(1)}`
+      ? `s2code://${deepLinkRow.deepLink.slice(1)}`
       : null;
 
   type SFName = NonNullable<ComponentProps<typeof Image>["systemName"]>;

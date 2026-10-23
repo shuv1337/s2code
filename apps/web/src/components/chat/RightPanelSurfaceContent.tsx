@@ -121,7 +121,7 @@ export function RightPanelSurfaceContent(props: {
         return (
           <PullRequestsUnavailableState
             title="Pull requests unavailable"
-            error="Update this environment's shuv2code server to browse pull requests."
+            error="Update this environment's S2Code server to browse pull requests."
           />
         );
       }

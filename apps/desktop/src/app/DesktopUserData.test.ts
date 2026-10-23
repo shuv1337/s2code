@@ -8,6 +8,36 @@ import * as PlatformError from "effect/PlatformError";
 import { resolveUserDataPath } from "./DesktopUserData.ts";
 import * as Logger from "effect/Logger";
 
+it.effect.each(["stable", "nightly", "preview"])(
+  "reopens the existing %s V2 profile without copying its credentials",
+  (channel) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-profile-upgrade-" });
+      const suffix = channel === "stable" ? "" : `-${channel}`;
+      const oldProfile = path.join(directory, `shuv2code-v2${suffix}`);
+      const newProfile = path.join(directory, `s2code-v2${suffix}`);
+      yield* fs.makeDirectory(oldProfile);
+      yield* fs.writeFileString(path.join(oldProfile, "Local State"), "encrypted credentials");
+      const resolve = resolveUserDataPath({
+        appDataDirectory: directory,
+        isDevelopment: false,
+        platform: "win32",
+        appVersion: channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`,
+      });
+      assert.equal(yield* resolve, oldProfile);
+      assert.isFalse(yield* fs.exists(newProfile));
+      yield* fs.makeDirectory(newProfile);
+      yield* fs.writeFileString(path.join(newProfile, "Local State"), "unrelated profile");
+      assert.equal(yield* resolve, oldProfile);
+      assert.equal(
+        yield* fs.readFileString(path.join(oldProfile, "Local State")),
+        "encrypted credentials",
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect.each(["nightly", "preview"])(
   "uses a separate %s profile and leaves the old shared home untouched",
   (channel) =>
@@ -15,11 +45,11 @@ it.effect.each(["nightly", "preview"])(
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "desktop-channel-home-" });
-      const shared = path.join(home, ".shuv2code-v2");
+      const shared = path.join(home, ".s2code-v2");
       yield* fs.makeDirectory(shared);
       yield* fs.writeFileString(path.join(shared, "statev2.sqlite"), "original-db");
       const warnings: string[] = [];
-      const baseDir = path.join(home, `.shuv2code-v2-${channel}`);
+      const baseDir = path.join(home, `.s2code-v2-${channel}`);
       const profile = yield* resolveUserDataPath({
         appDataDirectory: home,
         homeDirectory: home,

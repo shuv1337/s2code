@@ -91,13 +91,14 @@ export function cliArchivePlatformKey(platform: BuildPlatform, arch: BuildArch):
 }
 
 export function cliArchiveStem(version: string, platform: BuildPlatform, arch: BuildArch): string {
+  // Installed PowerShell installers require this root even through an archive alias.
   return `shuv2code-${version}-${cliArchivePlatformKey(platform, arch)}`;
 }
 
 export function cliArchiveFileName(version: string, platform: BuildPlatform, arch: BuildArch) {
   // gzip rather than xz: GNU tar needs an external xz binary for -J, which
   // minimal hosts lack, while every tar (and Node's zlib) handles gzip alone.
-  return `${cliArchiveStem(version, platform, arch)}.${platform === "win" ? "zip" : "tar.gz"}`;
+  return `s2code-${version}-${cliArchivePlatformKey(platform, arch)}.${platform === "win" ? "zip" : "tar.gz"}`;
 }
 
 export function windowsSystemTar(): string {

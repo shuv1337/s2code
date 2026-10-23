@@ -7,7 +7,7 @@ machine. That machine must stay running and reachable while you work.
 
 This fork has no configured hosted web or Connect service. Upstream T3 accounts
 and hosted domains do not enable it. The app explains this state in Connections;
-`shuv2code connect` remains unavailable until a fork-owned service is configured.
+`s2code connect` remains unavailable until a fork-owned service is configured.
 Use direct LAN or Tailscale pairing below. Local agents, SSH, CLI installation
 and desktop releases do not require a hosted account.
 
@@ -21,12 +21,12 @@ Connections**, sign in, and enable **T3 Connect** for that environment.
 For a command-line host, run:
 
 ```bash
-shuv2code connect
+s2code connect
 ```
 
 Follow the sign-in instructions. Setup offers a
 [background service](./background-service.md); if you decline it, start the
-server with `shuv2code serve`. Saving your sign-in alone does not make the machine
+server with `s2code serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same T3 Connect account and choose the
@@ -51,13 +51,13 @@ For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
 address:
 
 ```bash
-shuv2code serve --host <private-ip>
+s2code serve --host <private-ip>
 ```
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-shuv2code pair
+s2code pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -136,13 +136,13 @@ HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
 To start a command-line server with Tailscale HTTPS:
 
 ```bash
-shuv2code serve --tailscale-serve
+s2code serve --tailscale-serve
 ```
 
 For an already-running server:
 
 ```bash
-shuv2code pair --tailscale
+s2code pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
@@ -154,7 +154,7 @@ tailscale serve --https=443 off
 ```
 
 If that port is already in use, choose another with
-`--tailscale-serve-port`. See `shuv2code pair --help` for other pairing options.
+`--tailscale-serve-port`. See `s2code pair --help` for other pairing options.
 
 ### Hosted web app
 
@@ -175,7 +175,7 @@ credentials, and agent work stay on the remote machine.
 
 The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
 `tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
-The first launch downloads the fork server to its channel home (stable: `~/.shuv2code-v2/runtime`) on the host, so
+The first launch downloads the fork server to its channel home (stable: `~/.s2code-v2/runtime`) on the host, so
 it takes longer than later ones.
 Provider CLIs must be on the `PATH` of a non-interactive login shell there;
 check with:
@@ -190,8 +190,8 @@ running is left alone.
 
 Each desktop app keeps one session on the host for its SSH connection and reuses
 it when it reconnects. Revoke sessions you no longer use in **Settings →
-Connections** on the host, or on a headless host with `shuv2code auth session list` and
-`shuv2code auth session revoke <id>`. A desktop that can still sign in over SSH pairs
+Connections** on the host, or on a headless host with `s2code auth session list` and
+`s2code auth session revoke <id>`. A desktop that can still sign in over SSH pairs
 again on its next connect.
 
 For Antigravity's Google callback on a remote host, see
@@ -233,7 +233,7 @@ the server says so at startup, and browser tabs and HTML previews show the
 command to run on the host:
 
 ```sh
-sudo shuv2code browser setup
+sudo s2code browser setup
 ```
 
 The server shows the exact line for how you started it, such as
@@ -246,7 +246,7 @@ any missing libraries with apt. It is safe to run again. Without `sudo`, it
 only reports what it would change.
 
 The browser always runs in Chrome's sandbox. Where you cannot change the host,
-set `SHUV2CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
+set `S2CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
 
 ## Connect an outside agent
 
@@ -273,7 +273,7 @@ terminal, use `s2c environment link <address> --pairing-code <code> --access <mo
 - Links last 30 days. Link again with a new pairing code to renew one.
 - A link remembers the other machine's identity and only sends work to an
   address that proves it. Links made by earlier versions, or to a machine whose
-  T3 Code data was reset, must be linked again with a new pairing code.
+  S2Code data was reset, must be linked again with a new pairing code.
 
 An agent can also hand a task to a linked machine with `delegate_task`: it runs
 there as an ordinary thread, in the project with the same repository (or the
@@ -287,7 +287,7 @@ fails with that reason.
 On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `shuv2code auth --help`.
+management is available through `s2code auth --help`.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -295,11 +295,11 @@ expires.
 To choose a token's permissions, pass `--scope` once for each scope you want:
 
 ```sh
-shuv2code pair --scope orchestration:read --scope relay:read
+s2code pair --scope orchestration:read --scope relay:read
 ```
 
 The selected scopes replace the default permissions. The same option works with
-`shuv2code auth pairing create` and `shuv2code auth session issue`; each command's
+`s2code auth pairing create` and `s2code auth session issue`; each command's
 `--help` lists the available scopes. Without `--scope`, pairing tokens and issued
 bearer sessions get every permission, including managing access and T3 Connect.
 A terminal or a full-access agent on the host can reach those as well, so a
@@ -341,9 +341,9 @@ revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped. When T3 Connect rejects a host's link, the host
 shows that it was removed from T3 Connect. To link it again, turn on
 **T3 Connect** in **Settings → Connections** on a desktop host, or run
-`shuv2code connect link` on a command-line host and then restart S2Code there. A
+`s2code connect link` on a command-line host and then restart S2Code there. A
 command-line host that released its tunnel when it last stopped may link itself
-again on its next start; run `shuv2code connect unlink` on that host to keep it off.
+again on its next start; run `s2code connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on
 that device; it stays registered to your account.
 
@@ -358,8 +358,8 @@ S2Code once it has been offline for seven days. That environment shows a message
 asking you to update. Start S2Code on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
 
-On a command-line host, `shuv2code connect unlink` disables exposure while retaining
-your login; `shuv2code connect logout` also clears that login. Background-service
+On a command-line host, `s2code connect unlink` disables exposure while retaining
+your login; `s2code connect logout` also clears that login. Background-service
 [removal](./background-service.md#manage-the-service) is separate.
 
 Treat pairing URLs and authorization codes as passwords. Do not include them in
@@ -367,23 +367,23 @@ screenshots, logs, or bug reports.
 
 ## T3 Connect troubleshooting
 
-Run `shuv2code connect status` on the host to inspect saved authorization and link
+Run `s2code connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
-offline, run `shuv2code service status` and read the displayed log. If it disappears
+offline, run `s2code service status` and read the displayed log. If it disappears
 when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
 
-| Error                                                     | Recovery                                                                                                                                                         |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart S2Code on the host.                                                                                               |
-| `auth_invalid` or `invalid_bearer`                        | Run `shuv2code connect login`. If credentials were revoked, run `shuv2code connect logout`, then `shuv2code connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update S2Code, then restart it.                                                                                                  |
-| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                                    |
-| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                                  |
+| Error                                                     | Recovery                                                                                                                                                |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart S2Code on the host.                                                                                      |
+| `auth_invalid` or `invalid_bearer`                        | Run `s2code connect login`. If credentials were revoked, run `s2code connect logout`, then `s2code connect` again. Restart the server after signing in. |
+| Expired or invalid link proof                             | Check the host's date and time, update S2Code, then restart it.                                                                                         |
+| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                           |
+| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                         |
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart shuv2code-v2.service` for the stable background service
-(use `shuv2code-v2-nightly.service` or `shuv2code-v2-preview.service` for those channels). For a
-foreground server, stop it and run `shuv2code serve` again with your usual options.
+the unit printed by `s2code-nightly service status` with `systemctl --user restart`;
+upgraded installations may retain a `shuv2code` unit name. For a
+foreground server, stop it and run `s2code serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both

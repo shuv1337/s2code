@@ -1,7 +1,7 @@
 {
   "uuid": "snap-shot@shuv1337.github.io",
-  "dbusName": "io.github.shuv1337.shuv2code.SnapShot",
-  "dbusPath": "/io/github/shuv1337/shuv2code/SnapShot",
+  "dbusName": "io.github.shuv1337.s2code.SnapShot",
+  "dbusPath": "/io/github/shuv1337/s2code/SnapShot",
   "files": [
     "metadata.json",
     "extension.js",

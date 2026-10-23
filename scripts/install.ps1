@@ -1,32 +1,41 @@
-# Installs the T3 Code CLI from a GitHub Release archive on Windows. Needs
+# Installs the S2Code CLI from a GitHub Release archive on Windows. Needs
 # only PowerShell 5.1+; no Node, npm, or compiler.
 #
 #   irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 #
 # Environment:
-#   SHUV2CODE_CHANNEL           release train to follow: stable, nightly, or preview
+#   S2CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: nightly, the only train the fork publishes)
-#   SHUV2CODE_VERSION           exact version to install (overrides SHUV2CODE_CHANNEL)
-#   SHUV2CODE_HOME              Server home directory (default: ~\.shuv2code-v2-<channel>,
-#                            or ~\.shuv2code-v2 for stable)
-#   SHUV2CODE_INSTALL_BIN_DIR   where shuv2code is linked (default: ~\.local\bin)
-#   SHUV2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
+#   S2CODE_VERSION           exact version to install (overrides S2CODE_CHANNEL)
+#   S2CODE_HOME              Server home directory (default: ~\.s2code-v2-<channel>,
+#                            or ~\.s2code-v2 for stable)
+#   S2CODE_INSTALL_BIN_DIR   where s2code is linked (default: ~\.local\bin)
+#   S2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
-# The archive is unpacked into $SHUV2CODE_HOME\runtime\versions\<version>, the
-# same layout `t3 service install` uses, so the service reuses this download.
+# The archive is unpacked into $S2CODE_HOME\runtime\versions\<version>, the
+# same layout `s2code service install` uses, so the service reuses this download.
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Environment lookups are case-insensitive on Windows. New nonblank names win.
+foreach ($key in @("HOME", "CHANNEL", "VERSION", "INSTALL_BIN_DIR", "RELEASE_BASE_URL", "IMPORT_UPSTREAM")) {
+  $canonical = [Environment]::GetEnvironmentVariable("S2CODE_$key")
+  if ([string]::IsNullOrWhiteSpace($canonical)) {
+    $canonical = [Environment]::GetEnvironmentVariable("SHUV2CODE_$key")
+  }
+  [Environment]::SetEnvironmentVariable("S2CODE_$key", $(if ($canonical) { $canonical.Trim() } else { $null }))
+}
+# Retain the current published repository until its external cutover is verified.
 $repo = "shuv1337/shuv2code"
-$baseUrl = if ($env:SHUV2CODE_RELEASE_BASE_URL) { $env:SHUV2CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
-$t3Home = if ($env:SHUV2CODE_HOME) { $env:SHUV2CODE_HOME } else { Join-Path $HOME ".shuv2code-v2" }
-$binDir = if ($env:SHUV2CODE_INSTALL_BIN_DIR) { $env:SHUV2CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
-if ($env:T3CODE_HOME -and -not $env:SHUV2CODE_HOME) {
-  [Console]::Error.WriteLine("shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home.")
+$baseUrl = if ($env:S2CODE_RELEASE_BASE_URL) { $env:S2CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
+$t3Home = if ($env:S2CODE_HOME) { $env:S2CODE_HOME } else { Join-Path $HOME ".s2code-v2" }
+$binDir = if ($env:S2CODE_INSTALL_BIN_DIR) { $env:S2CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
+if ($env:T3CODE_HOME -and -not $env:S2CODE_HOME) {
+  [Console]::Error.WriteLine("s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home.")
 }
 
 function Fail([string] $message) {
-  Write-Error "t3 install: $message"
+  Write-Error "s2code install: $message"
   exit 1
 }
 
@@ -45,7 +54,7 @@ function Move-RuntimeDirectory([string] $source, [string] $destination) {
   }
 }
 
-if ($env:SHUV2CODE_IMPORT_UPSTREAM) { Fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME." }
+if ($env:S2CODE_IMPORT_UPSTREAM) { Fail "Upstream import is not supported; choose a separate S2CODE_HOME." }
 function Assert-ProductPath([string] $directory) {
   $current = [IO.Path]::GetFullPath($directory)
   while ($current) {
@@ -143,7 +152,7 @@ if ($interactive) {
   [Console]::Error.WriteLine()
   for ($i = 0; $i -lt $mark.Length; $i++) {
     $row = $mark[$i].Replace('#', [char]0x2588).Replace('^', [char]0x2580).Replace('_', [char]0x2584)
-    $label = if ($i -eq 1) { "     ${bold}shuv2code$reset" } elseif ($i -eq 2) { "     ${muted}CLI installer$reset" } else { "" }
+    $label = if ($i -eq 1) { "     ${bold}s2code$reset" } elseif ($i -eq 2) { "     ${muted}CLI installer$reset" } else { "" }
     [Console]::Error.WriteLine("  $bold$row$reset$label")
   }
   [Console]::Error.WriteLine()
@@ -160,8 +169,8 @@ $arch = switch ($rawArch) {
   default { Fail "unsupported architecture $rawArch" }
 }
 
-$channel = if ($env:SHUV2CODE_CHANNEL) { $env:SHUV2CODE_CHANNEL } else { "nightly" }
-$version = $env:SHUV2CODE_VERSION
+$channel = if ($env:S2CODE_CHANNEL) { $env:S2CODE_CHANNEL } else { "nightly" }
+$version = $env:S2CODE_VERSION
 if (-not $version) {
   # Tags are v<semver>; the channel is the prerelease identifier, or none for
   # stable. Only tags of the requested train are considered, so a stable
@@ -170,48 +179,83 @@ if (-not $version) {
     "stable" { '^v\d+\.\d+\.\d+$' }
     "nightly" { '^v\d+\.\d+\.\d+-nightly\.\d+\.\d+$' }
     "preview" { '^v\d+\.\d+\.\d+-preview\.\d+\.\d+$' }
-    default { Fail "SHUV2CODE_CHANNEL must be stable, nightly, or preview" }
+    default { Fail "S2CODE_CHANNEL must be stable, nightly, or preview" }
   }
   $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=100" -Headers @{ "User-Agent" = "t3-install" }
   $tag = ($releases | Where-Object { -not $_.draft -and $_.tag_name -match $tagPattern } | Select-Object -First 1).tag_name
-  if (-not $tag) { Fail "could not find a $channel release; set SHUV2CODE_VERSION" }
+  if (-not $tag) { Fail "could not find a $channel release; set S2CODE_VERSION" }
   $version = $tag.Substring(1)
 }
 if ($version -match '-preview\.') {
-  Write-Warning "t3 $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set SHUV2CODE_CHANNEL=nightly (the default) for a supported build."
-  if ($channel -ne "preview" -and -not $env:SHUV2CODE_VERSION) {
+  Write-Warning "s2code $version is a preview build. Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, and are never offered as updates. Set S2CODE_CHANNEL=nightly (the default) for a supported build."
+  if ($channel -ne "preview" -and -not $env:S2CODE_VERSION) {
     Fail "refusing a preview build that was not explicitly requested"
   }
 }
 
-$stem = "shuv2code-$version-win32-$arch"
+$stem = "s2code-$version-win32-$arch"
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') { Fail "Invalid release version." }
 $archive = "$stem.zip"
+$previousStem = "shuv2code-$version-win32-$arch"
+$previousArchive = "$previousStem.zip"
 $legacyStem = "t3-$version-win32-$arch"
 $legacyArchive = "$legacyStem.zip"
-$commandName = if ($version -match '^[^-+]+-nightly\.') { "shuv2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "shuv2code-preview" } else { "shuv2code" }
-if (-not $env:SHUV2CODE_HOME) {
-  if ($version -match '^[^-+]+-nightly\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-nightly" }
-  elseif ($version -match '^[^-+]+-(preview|pr)\.') { $t3Home = Join-Path $HOME ".shuv2code-v2-preview" }
+$commandName = if ($version -match '^[^-+]+-nightly\.') { "s2code-nightly" } elseif ($version -match '^[^-+]+-(preview|pr)\.') { "s2code-preview" } else { "s2code" }
+if (-not $env:S2CODE_HOME) {
+  if ($version -match '^[^-+]+-nightly\.') { $t3Home = Join-Path $HOME ".s2code-v2-nightly" }
+  elseif ($version -match '^[^-+]+-(preview|pr)\.') { $t3Home = Join-Path $HOME ".s2code-v2-preview" }
+  $legacyHome = Join-Path $HOME (".shuv2code-v2" + $commandName.Substring("s2code".Length))
+  if ((Test-Path -LiteralPath $legacyHome) -and @(Get-ChildItem -LiteralPath $legacyHome -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0) {
+    if ((Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0) {
+      Fail "Both S2Code homes contain state. Choose S2CODE_HOME explicitly; they will not be merged."
+    }
+    $legacyMarker = Join-Path $legacyHome ".product-identity"
+    Assert-ProductPath $legacyMarker
+    if (-not (Test-Path -LiteralPath $legacyMarker -PathType Leaf)) { Fail "Cannot establish product ownership of the legacy home. Verify it offline and choose S2CODE_HOME explicitly." }
+    if ([IO.File]::ReadAllText($legacyMarker).Trim() -cnotin @("s2code", "shuv2code")) { Fail "Cannot establish product ownership of the legacy home. Verify it offline and choose S2CODE_HOME explicitly." }
+    $t3Home = $legacyHome
+  }
 }
 $t3Home = [IO.Path]::GetFullPath($t3Home)
 Assert-ProductPath $t3Home
-if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." }
+if ($t3Home -match '(^|[\\/])\.t3([\\/]|$)') { Fail "Refusing an upstream .t3 home; choose a separate S2CODE_HOME." }
 $defaultForkHome = [IO.Path]::GetFullPath((Join-Path $HOME ".shuv2code-v2"))
 $homeMarker = Join-Path $t3Home ".product-identity"
 Assert-ProductPath $homeMarker
 if (Test-Path -LiteralPath $homeMarker) {
   $homeProduct = [IO.File]::ReadAllText($homeMarker).Trim()
-  if (-not "shuv2code".StartsWith($homeProduct, [StringComparison]::Ordinal)) { Fail "Home belongs to another product." }
+  if (-not "s2code".StartsWith($homeProduct, [StringComparison]::Ordinal) -and -not "shuv2code".StartsWith($homeProduct, [StringComparison]::Ordinal)) { Fail "Home belongs to another product." }
 } else { $homeProduct = "" }
-if ($homeProduct -cne "shuv2code" -and (Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0 -and -not [string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) {
-  Fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+if ($homeProduct -cnotin @("s2code", "shuv2code") -and (Test-Path -LiteralPath $t3Home) -and @(Get-ChildItem -LiteralPath $t3Home -Force | Where-Object { $_.Name -ne '.product-identity' }).Count -gt 0 -and -not [string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) {
+  Fail "Cannot establish product ownership. Choose an empty S2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing s2code."
 }
 foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-Path $t3Home $child) }
+$binDir = [IO.Path]::GetFullPath($binDir)
+$legacyCommandName = "shuv2code" + $commandName.Substring("s2code".Length)
+$legacyCommand = Join-Path $binDir "$legacyCommandName.cmd"
+$canonicalForwarder = "@echo off`r`n`"$legacyCommand`" %*"
+$commandNames = @($commandName, $legacyCommandName)
+foreach ($name in $commandNames) {
+  $existingCommand = Join-Path $binDir "$name.cmd"
+  if (Test-Path -LiteralPath $existingCommand) {
+    Assert-ProductPath $existingCommand
+    $content = [IO.File]::ReadAllText($existingCommand)
+    if ($name -eq $commandName -and $content -eq $canonicalForwarder) {
+      Assert-ProductPath $legacyCommand
+      if (-not (Test-Path -LiteralPath $legacyCommand -PathType Leaf)) { Fail "Refusing a canonical command without an owned legacy launcher: $existingCommand" }
+      $content = [IO.File]::ReadAllText($legacyCommand)
+    }
+    $ownedPattern = '^@echo off\r?\n"' + [regex]::Escape((Join-Path $t3Home 'runtime/versions')) + '[\\/][^\\/\r\n]+[\\/]t3\.exe" %\*\s*$'
+    if ($content -notmatch $ownedPattern) { Fail "Refusing to replace a command owned by another installation: $existingCommand" }
+  }
+}
 New-Item -ItemType Directory -Force -Path $t3Home | Out-Null
 $homeMarkerTemp = Join-Path $t3Home (".product-identity." + [Guid]::NewGuid().ToString() + ".tmp")
 try {
-  Set-Content -LiteralPath $homeMarkerTemp -Value "shuv2code"
+  if ($homeProduct -cnotin @("shuv2code", "s2code")) {
+    $homeProduct = if ([string]::Equals($t3Home, $defaultForkHome, [StringComparison]::OrdinalIgnoreCase)) { "shuv2code" } else { "s2code" }
+  }
+  Set-Content -LiteralPath $homeMarkerTemp -Value $homeProduct
   if (Test-Path -LiteralPath $homeMarker) { [IO.File]::Replace($homeMarkerTemp, $homeMarker, "$homeMarkerTemp.previous") }
   else { [IO.File]::Move($homeMarkerTemp, $homeMarker) }
 } finally {
@@ -228,7 +272,7 @@ try {
   if ($releaseBody -is [byte[]]) { $releaseBody = [Text.Encoding]::UTF8.GetString($releaseBody) }
   $releaseMetadata = [string]$releaseBody | ConvertFrom-Json
   if ($releaseMetadata.signing.unsigned) {
-    Write-Warning "shuv2code $version is an UNSIGNED build. At least one platform was built without signing credentials, so its code signature and notarization are absent and your system may refuse to run it without an override."
+    Write-Warning "s2code $version is an UNSIGNED build. At least one platform was built without signing credentials, so its code signature and notarization are absent and your system may refuse to run it without an override."
   }
 } catch {}
 
@@ -241,11 +285,11 @@ Assert-ProductPath $marker
 $productMarker = Join-Path $targetDir ".install-product"
 Assert-ProductPath $productMarker
 $product = if (Test-Path -LiteralPath $productMarker) { [IO.File]::ReadAllText($productMarker).Trim() } else { "" }
-if (-not "shuv2code".StartsWith($product, [StringComparison]::Ordinal)) { Fail "Refusing to reuse or replace a foreign runtime cache." }
+if (-not "s2code".StartsWith($product, [StringComparison]::Ordinal) -and -not "shuv2code".StartsWith($product, [StringComparison]::Ordinal)) { Fail "Refusing to reuse or replace a foreign runtime cache." }
 $completion = $version
 $installedMarker = if (Test-Path -LiteralPath $marker) { [IO.File]::ReadAllText($marker).Trim().Replace("`r`n", "`n") } else { "" }
 
-if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -and $installedMarker -eq $completion) {
+if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -cin @("s2code", "shuv2code") -and $installedMarker -eq $completion) {
   Step "Version $version is already downloaded."
 } else {
   New-Item -ItemType Directory -Force -Path $versionsDir | Out-Null
@@ -255,18 +299,24 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
   $validated = $false
   try {
     if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
-    [Console]::Error.WriteLine("  ${muted}Installing$reset shuv2code $bold$version$reset`n")
+    [Console]::Error.WriteLine("  ${muted}Installing$reset s2code $bold$version$reset`n")
     Step "Downloading..."
     try {
       Fetch "$baseUrl/v$version/SHA256SUMS" (Join-Path $staging "SHA256SUMS")
     } catch {
       $status = $_.Exception.Response.StatusCode.value__
       if ($status -eq 404) {
-        Fail "shuv2code $version has no release archive for win32-$arch"
+        Fail "s2code $version has no release archive for win32-$arch"
       }
       throw
     }
     $expected = (Get-Content (Join-Path $staging "SHA256SUMS") | Where-Object { $_ -match "\s\*?$([regex]::Escape($archive))$" } | Select-Object -First 1)
+    if (-not $expected) {
+      if ($homeProduct -cne "shuv2code") { Fail "This release predates the S2Code transition. A fresh S2Code home requires the first bridge release; existing verified shuv2code homes can still install it." }
+      $stem = $previousStem
+      $archive = $previousArchive
+      $expected = (Get-Content (Join-Path $staging "SHA256SUMS") | Where-Object { $_ -match "\s\*?$([regex]::Escape($archive))$" } | Select-Object -First 1)
+    }
     if (-not $expected) {
       $stem = $legacyStem
       $archive = $legacyArchive
@@ -281,21 +331,24 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
     $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $staging $archive)).Hash.ToLowerInvariant()
     if ($actual -ne $expected) { Fail "checksum mismatch for $archive" }
 
-    Step "Extracting shuv2code..."
+    Step "Extracting s2code..."
     # The archive module reads the global preference, not the caller's local scope.
     $savedProgress = $global:ProgressPreference
     try {
       $global:ProgressPreference = "SilentlyContinue"
       Expand-Archive -Path (Join-Path $staging $archive) -DestinationPath $staging -Force
     } finally { $global:ProgressPreference = $savedProgress }
-    # The archive wraps everything in one directory named after its stem.
-    Get-ChildItem (Join-Path $staging $stem) | Move-Item -Destination $staging
-    Remove-Item (Join-Path $staging $stem), (Join-Path $staging $archive), (Join-Path $staging "SHA256SUMS") -Recurse -Force
+    # Byte-identical download aliases retain the older root for installed launchers.
+    $roots = @(@("s2code-$version-win32-$arch", $previousStem, $legacyStem) | Where-Object { Test-Path -LiteralPath (Join-Path $staging $_) -PathType Container })
+    if (@($roots).Count -ne 1) { Fail "The CLI archive must contain exactly one recognized runtime root." }
+    $runtimeRoot = Join-Path $staging $roots[0]
+    Get-ChildItem $runtimeRoot | Move-Item -Destination $staging
+    Remove-Item $runtimeRoot, (Join-Path $staging $archive), (Join-Path $staging "SHA256SUMS") -Recurse -Force
 
     & (Join-Path $staging "t3.exe") --version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "the downloaded executable does not run" }
     Set-Content -Path (Join-Path $staging ".install-complete") -Value "$completion`n" -NoNewline
-    Set-Content -Path (Join-Path $staging ".install-product") -Value "shuv2code`n" -NoNewline
+    Set-Content -Path (Join-Path $staging ".install-product") -Value "$homeProduct`n" -NoNewline
 
     $validated = $true
     if (Test-Path -LiteralPath $targetDir) {
@@ -334,14 +387,15 @@ if ((Test-Path (Join-Path $targetDir "t3.exe")) -and $product -eq "shuv2code" -a
   }
 }
 
-Step "Setting up the shuv2code command..."
+Step "Setting up the s2code command..."
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$shim = Join-Path $binDir "$commandName.cmd"
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
-[System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
+# Installed old updaters only repoint their legacy command.
+[System.IO.File]::WriteAllText($legacyCommand, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText((Join-Path $binDir "$commandName.cmd"), $canonicalForwarder, (New-Object System.Text.UTF8Encoding $false))
 if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
-[Console]::Error.WriteLine("  ${green}Installed shuv2code $version$reset`n")
+[Console]::Error.WriteLine("  ${green}Installed s2code $version$reset`n")
 if (($env:PATH -split ";") -notcontains $binDir) {
   Write-Host "  Add $binDir to your PATH, then run $bold$commandName$reset.`n"
 } else {

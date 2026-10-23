@@ -132,6 +132,7 @@ const backendChildEnvPatch = (): Record<string, string | undefined> =>
     DESKTOP_BACKEND_ENV_NAMES.flatMap((name) => [
       [name, undefined],
       [name.replace(/^T3CODE_/, "SHUV2CODE_"), undefined],
+      [name.replace(/^T3CODE_/, "S2CODE_"), undefined],
     ]),
   );
 
@@ -669,7 +670,9 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   const forwardedEnv: Record<string, string> = {};
   const forwardedEnvNames: string[] = [];
   for (const name of WSL_FORWARDED_ENV_NAMES.flatMap((name) =>
-    name.startsWith("T3CODE_") ? [name, name.replace(/^T3CODE_/, "SHUV2CODE_")] : [name],
+    name.startsWith("T3CODE_")
+      ? [name, name.replace(/^T3CODE_/, "SHUV2CODE_"), name.replace(/^T3CODE_/, "S2CODE_")]
+      : [name],
   )) {
     const value = process.env[name];
     if (value !== undefined && value.length > 0) {
@@ -680,7 +683,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
 
   const parentEnvWithoutT3Home: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key === "T3CODE_HOME" || key === "SHUV2CODE_HOME") continue;
+    if (["T3CODE_HOME", "SHUV2CODE_HOME", "S2CODE_HOME"].includes(key.toUpperCase())) continue;
     parentEnvWithoutT3Home[key] = value;
   }
   const wslEnv = mergeWslEnv(parentEnvWithoutT3Home.WSLENV, forwardedEnvNames);

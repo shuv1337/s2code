@@ -81,7 +81,7 @@ it("preserves the replaced extension as a recoverable backup", async () => {
   await installGnomeCaptureBundle({ bundle, dataHome });
   await NodeFSP.writeFile(NodePath.join(installedPath(), "custom.txt"), "local change");
   await installGnomeCaptureBundle({ bundle, dataHome });
-  const backups = NodePath.join(dataHome, "shuv2code/extension-backups");
+  const backups = NodePath.join(dataHome, "s2code/extension-backups");
   const [backup] = await NodeFSP.readdir(backups);
   expect(
     await NodeFSP.readFile(
@@ -116,7 +116,7 @@ it("coexists with the upstream UUID through setup, upgrade and disable", async (
   expect((await upgrade.setup.state()).status).toBe("update-required");
   await upgrade.setup.perform("install-extension");
   upgrade.setup.close();
-  const loaded = fixture({ state: 1, version: 2 });
+  const loaded = fixture({ state: 1, version: 3 });
   await loaded.setup.perform("disable-extension");
   expect((await loaded.setup.state()).message).toContain("does not revoke");
   for (const calls of [initial.call.mock.calls, upgrade.call.mock.calls, loaded.call.mock.calls]) {
@@ -156,7 +156,7 @@ it.each(["foreign", "missing", "linked"] as const)(
     const metadataPath = NodePath.join(installedPath(), "metadata.json");
     const foreign = JSON.stringify({
       uuid: "snap-shot@t3.codes",
-      version: 2,
+      version: 3,
       "shell-version": ["50"],
     });
     if (kind === "foreign") await NodeFSP.writeFile(metadataPath, foreign);
@@ -164,7 +164,7 @@ it.each(["foreign", "missing", "linked"] as const)(
       await NodeFSP.symlink(NodePath.join(bundle, "metadata.json"), metadataPath);
     await NodeFSP.writeFile(NodePath.join(installedPath(), "extension.js"), "do not replace");
     await expect(installGnomeCaptureBundle({ bundle, dataHome })).rejects.toThrow();
-    const { setup, call } = fixture({ state: 1, version: 2 });
+    const { setup, call } = fixture({ state: 1, version: 3 });
     expect((await setup.state()).status).toBe("error");
     await expect(setup.perform("disable-extension")).rejects.toThrow();
     expect(call.mock.calls.some(([message]) => message.member === "DisableExtension")).toBe(false);
@@ -174,7 +174,7 @@ it.each(["foreign", "missing", "linked"] as const)(
     );
     if (kind === "foreign") expect(await NodeFSP.readFile(metadataPath, "utf8")).toBe(foreign);
     await expect(
-      NodeFSP.stat(NodePath.join(dataHome, "shuv2code/extension-backups")),
+      NodeFSP.stat(NodePath.join(dataHome, "s2code/extension-backups")),
     ).rejects.toMatchObject({ code: "ENOENT" });
   },
 );
@@ -222,11 +222,11 @@ it("refuses to replace symlinks or downgrade a newer extension", async () => {
 
 it.each([
   [{}, "not-installed"],
-  [{ state: 2, version: 2 }, "disabled"],
-  [{ state: 1, version: 2 }, "enabled"],
+  [{ state: 2, version: 3 }, "disabled"],
+  [{ state: 1, version: 3 }, "enabled"],
   [{ state: 1, version: 1 }, "update-required"],
-  [{ state: 2, version: 2, enabled: false }, "extensions-disabled"],
-  [{ state: 3, version: 2, error: "Load failed" }, "error"],
+  [{ state: 2, version: 3, enabled: false }, "extensions-disabled"],
+  [{ state: 3, version: 3, error: "Load failed" }, "error"],
   [{ shell: "51.0" }, "unsupported"],
 ] as const)("reports GNOME setup state %j", async (options, status) => {
   const { setup, call } = fixture(options);
@@ -246,7 +246,7 @@ it("requires login for local installs and updates until the new version is loade
     expect((await setup.state()).status).toBe("restart-required");
     setup.close();
   }
-  const { setup } = fixture({ state: 2, version: 2 });
+  const { setup } = fixture({ state: 2, version: 3 });
   expect((await setup.state()).status).toBe("disabled");
   setup.close();
 });
@@ -262,7 +262,7 @@ it("installs only on explicit action without invoking remote installation", asyn
 });
 
 it("enables and disables only the capture UUID", async () => {
-  const { setup, call } = fixture({ state: 2, version: 2 });
+  const { setup, call } = fixture({ state: 2, version: 3 });
   await setup.perform("enable-extension");
   await setup.perform("disable-extension");
   for (const member of ["EnableExtension", "DisableExtension"]) {
@@ -277,7 +277,7 @@ it("enables and disables only the capture UUID", async () => {
 });
 
 it("never changes the global user-extensions preference", async () => {
-  const { setup, call } = fixture({ state: 2, version: 2, enabled: false });
+  const { setup, call } = fixture({ state: 2, version: 3, enabled: false });
   await expect(setup.perform("enable-extension")).rejects.toThrow("GNOME has disabled");
   expect(call.mock.calls.every(([message]) => message.member.startsWith("Get"))).toBe(true);
   setup.close();
@@ -285,7 +285,7 @@ it("never changes the global user-extensions preference", async () => {
 
 it("still disables a fork extension which failed to load", async () => {
   await installGnomeCaptureBundle({ bundle, dataHome });
-  const { setup, call } = fixture({ state: 3, version: 2, error: "Load failed" });
+  const { setup, call } = fixture({ state: 3, version: 3, error: "Load failed" });
   expect((await setup.state()).status).toBe("error");
   await setup.perform("disable-extension");
   expect(
@@ -295,7 +295,7 @@ it("still disables a fork extension which failed to load", async () => {
 });
 
 it("surfaces desktop rejection and disconnect as actionable failures", async () => {
-  const { setup, bus } = fixture({ state: 2, version: 2, accepted: false });
+  const { setup, bus } = fixture({ state: 2, version: 3, accepted: false });
   await expect(setup.perform("enable-extension")).rejects.toThrow("Sign out");
   bus.emit("error", new Error("Session bus disconnected"));
   expect(await setup.state()).toEqual({ status: "error", message: "Session bus disconnected" });

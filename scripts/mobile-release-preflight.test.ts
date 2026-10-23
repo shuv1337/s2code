@@ -218,13 +218,24 @@ describe("fork mobile release preflight", () => {
             MOBILE_AUTH_ENABLED: "0",
             MOBILE_PUSH_ENABLED: "0",
             MOBILE_UPDATES_ENABLED: "0",
-            SHUV2CODE_IOS_BUNDLE_IDENTIFIER: "",
-            SHUV2CODE_IOS_PERSONAL_TEAM: "0",
+            S2CODE_IOS_BUNDLE_IDENTIFIER: MOBILE_VARIANTS.production.iosBundleIdentifier,
+            SHUV2CODE_IOS_BUNDLE_IDENTIFIER: "dev.example.legacy",
+            T3CODE_IOS_BUNDLE_IDENTIFIER: "dev.example.internal",
+            S2CODE_IOS_PERSONAL_TEAM: "0",
+            SHUV2CODE_IOS_PERSONAL_TEAM: "1",
+            S2CODE_MOBILE_VERSION: "2.1.0",
+            SHUV2CODE_MOBILE_VERSION: "1.8.0",
+            T3CODE_MOBILE_VERSION: "0.9.0",
           },
         },
       );
       const app = JSON.parse(output);
       expect(app.name).toBe(MOBILE_VARIANTS[variant].appName);
+      expect(app.version).toBe("2.1.0");
+      expect(app.scheme).toEqual([
+        MOBILE_VARIANTS[variant].scheme,
+        MOBILE_VARIANTS[variant].legacyScheme,
+      ]);
       expect(app.extra.displayName).toBe(MOBILE_VARIANTS[variant].displayName);
       expect(app.ios.infoPlist.CFBundleDisplayName).toBe(MOBILE_VARIANTS[variant].displayName);
       expect(app.ios.bundleIdentifier).toBe(MOBILE_VARIANTS[variant].iosBundleIdentifier);

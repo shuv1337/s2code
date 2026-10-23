@@ -22,6 +22,8 @@ import { isHyprlandCaptureSession, type HyprlandCapturePaths } from "./HyprlandS
 import {
   GNOME_CAPTURE_DBUS_NAME,
   GNOME_CAPTURE_DBUS_PATH,
+  LEGACY_GNOME_CAPTURE_DBUS_NAME,
+  LEGACY_GNOME_CAPTURE_DBUS_PATH,
   gnomeCaptureClientName,
 } from "./gnomeCaptureBundle.ts";
 
@@ -108,6 +110,8 @@ export class LinuxCaptureConnection {
   private readonly disconnected: Promise<never>;
   private uniqueName = "";
   private extensionVersion = 0;
+  private extensionName = EXTENSION;
+  private extensionPath = EXTENSION_PATH;
   private closed = false;
   private feedbackTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -202,16 +206,23 @@ export class LinuxCaptureConnection {
       }
     }
     if (!isGnomeCaptureSession(process.env)) return "picker";
-    const extension = await this.properties(EXTENSION, EXTENSION_PATH, EXTENSION).catch(
-      (error: unknown) => {
+    for (const [name, path] of [
+      [EXTENSION, EXTENSION_PATH],
+      [LEGACY_GNOME_CAPTURE_DBUS_NAME, LEGACY_GNOME_CAPTURE_DBUS_PATH],
+    ] as const) {
+      const extension = await this.properties(name, path, name).catch((error: unknown) => {
         if (!unavailable(error)) throw error;
         return undefined;
-      },
-    );
-    if (extension !== undefined) {
-      const parsed = decodeExtension(extension);
-      this.extensionVersion = parsed.Version.value;
-      if (this.extensionVersion === 1 || this.extensionVersion === 2) return "gnome-extension";
+      });
+      if (extension !== undefined) {
+        const parsed = decodeExtension(extension);
+        this.extensionVersion = parsed.Version.value;
+        if (this.extensionVersion === 1 || this.extensionVersion === 2) {
+          this.extensionName = name;
+          this.extensionPath = path;
+          return "gnome-extension";
+        }
+      }
     }
     return "picker";
   }
@@ -306,16 +317,19 @@ export class LinuxCaptureConnection {
 
   async captureExtension(appId: string, options?: FeedbackOptions): Promise<LinuxWindowSnapshot> {
     const result = await this.wait(
-      this.bus.requestName(gnomeCaptureClientName(appId), NameFlag.DO_NOT_QUEUE),
+      this.bus.requestName(
+        gnomeCaptureClientName(appId, this.extensionName),
+        NameFlag.DO_NOT_QUEUE,
+      ),
     );
     if (result !== RequestNameReply.PRIMARY_OWNER) {
       throw new Error("Another T3 Code instance is capturing a window. Try again.");
     }
     const withFeedback = this.feedbackAvailable && options !== undefined;
     const reply = await this.call({
-      destination: EXTENSION,
-      path: EXTENSION_PATH,
-      interface: EXTENSION,
+      destination: this.extensionName,
+      path: this.extensionPath,
+      interface: this.extensionName,
       member: withFeedback ? "CaptureWithFeedback" : "Capture",
       ...(withFeedback ? { signature: "bb", body: [options.flash, options.animate] } : {}),
     });
@@ -357,9 +371,9 @@ export class LinuxCaptureConnection {
   private async feedbackCall(member: string, signature: string, body: unknown[]): Promise<void> {
     if (this.closed) return;
     await this.call({
-      destination: EXTENSION,
-      path: EXTENSION_PATH,
-      interface: EXTENSION,
+      destination: this.extensionName,
+      path: this.extensionPath,
+      interface: this.extensionName,
       member,
       signature,
       body,

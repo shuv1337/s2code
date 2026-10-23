@@ -1,10 +1,20 @@
 /** Fork-owned install identity; upstream protocol names intentionally stay stable. */
 // Never open the old fork's divergent V1 migration ledger by default.
-export const DEFAULT_HOME_DIRECTORY = ".shuv2code-v2";
-export const PRODUCT_ID = "shuv2code";
+export const DEFAULT_HOME_DIRECTORY = ".s2code-v2";
+export const LEGACY_HOME_DIRECTORY = ".shuv2code-v2";
+export const PRODUCT_ID = "s2code";
+export const LEGACY_PRODUCT_ID = "shuv2code";
 export const PRODUCT_HOME_MARKER = ".product-identity";
 export const PRODUCT_CLI_SHIM_MARKER = `Written by ${PRODUCT_ID}: runs the desktop app's bundled CLI.`;
-const PRODUCT_RELEASES_URL = "https://github.com/shuv1337/shuv2code/releases";
+export const LEGACY_PRODUCT_CLI_SHIM_MARKER = `Written by ${LEGACY_PRODUCT_ID}: runs the desktop app's bundled CLI.`;
+export const isOwnedCliShim = (content: string) =>
+  content.includes(PRODUCT_CLI_SHIM_MARKER) || content.includes(LEGACY_PRODUCT_CLI_SHIM_MARKER);
+// Keep installed updaters on the published repository until the external cutover.
+export const PRODUCT_RELEASE_REPOSITORY = "shuv1337/shuv2code";
+const PRODUCT_RELEASES_URL = `https://github.com/${PRODUCT_RELEASE_REPOSITORY}/releases`;
+
+export const isProductIdentity = (value: string) =>
+  value.trim() === PRODUCT_ID || value.trim() === LEGACY_PRODUCT_ID;
 
 /** No fork mobile distribution exists yet; never substitute an upstream store listing. */
 export const resolveProductDownload = (mobile: boolean) =>
@@ -67,30 +77,44 @@ const PUBLIC_CONFIG_KEYS = [
   "CLERK_PASSKEY_RP_DOMAINS",
   "DESKTOP_APP_USER_MODEL_ID",
   "DESKTOP_WSL_RUNTIME",
+  "IOS_BUNDLE_IDENTIFIER",
+  "IOS_TEAM_ID",
+  "IOS_PERSONAL_TEAM",
+  "IOS_PERSONAL_TEAM_BUNDLE_ID",
+  "MOBILE_VERSION",
+  "MOBILE_ENV_NAME",
 ] as const;
 
-const publicInternalNames = new Set(PUBLIC_CONFIG_KEYS.map((key) => `T3CODE_${key}`));
-const publicForkNames = new Set(PUBLIC_CONFIG_KEYS.map((key) => `SHUV2CODE_${key}`));
+const publicNames = new Set(
+  PUBLIC_CONFIG_KEYS.flatMap((key) => [`S2CODE_${key}`, `SHUV2CODE_${key}`, `T3CODE_${key}`]),
+);
 const readEnvironmentValue = (env: Readonly<Record<string, string | undefined>>, name: string) =>
   env[name] ?? Object.entries(env).find(([key]) => key.toUpperCase() === name)?.[1];
+const readProductValue = (env: Readonly<Record<string, string | undefined>>, key: string) =>
+  readEnvironmentValue(env, `S2CODE_${key}`)?.trim() ||
+  readEnvironmentValue(env, `SHUV2CODE_${key}`)?.trim();
 
 /** Resolve once at a process boundary, before any internal configuration is read. */
 export function resolveProductEnvironment(env: Readonly<Record<string, string | undefined>>) {
-  if (readEnvironmentValue(env, "SHUV2CODE_IMPORT_UPSTREAM")?.trim()) {
+  if (
+    readEnvironmentValue(env, "S2CODE_IMPORT_UPSTREAM")?.trim() ||
+    readEnvironmentValue(env, "SHUV2CODE_IMPORT_UPSTREAM")?.trim()
+  ) {
     throw new Error(
-      "Upstream import is not supported. Use a separate SHUV2CODE_HOME; never point shuv2code at a live upstream home.",
+      "Upstream import is not supported. Use a separate S2CODE_HOME; never point s2code at a live upstream home.",
     );
   }
   const resolved = { ...env };
   // Windows environment names are case-insensitive, even if a copied record is not.
   for (const name of Object.keys(resolved)) {
-    if (publicInternalNames.has(name.toUpperCase()) || publicForkNames.has(name.toUpperCase()))
-      delete resolved[name];
+    if (publicNames.has(name.toUpperCase())) delete resolved[name];
   }
   for (const key of PUBLIC_CONFIG_KEYS) {
     const internal = `T3CODE_${key}`;
-    const value = readEnvironmentValue(env, `SHUV2CODE_${key}`)?.trim();
+    const value = readProductValue(env, key);
     if (value) {
+      resolved[`S2CODE_${key}`] = value;
+      // Retained launchers and child runtimes must see the same selected setting.
       resolved[`SHUV2CODE_${key}`] = value;
       resolved[internal] = value;
     }
@@ -101,18 +125,14 @@ export function resolveProductEnvironment(env: Readonly<Record<string, string | 
 export function applyProductEnvironment(env: Record<string, string | undefined>) {
   if (
     readEnvironmentValue(env, "T3CODE_HOME")?.trim() &&
-    readEnvironmentValue(env, "T3CODE_HOME")?.trim() !==
-      readEnvironmentValue(env, "SHUV2CODE_HOME")?.trim()
+    readEnvironmentValue(env, "T3CODE_HOME")?.trim() !== readProductValue(env, "HOME")
   ) {
     // @effect-diagnostics-next-line globalConsole:off - Runs before the Effect/logger runtime is initialized.
-    console.error(
-      "shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home.",
-    );
+    console.error("s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home.");
   }
   const resolved = resolveProductEnvironment(env);
   for (const name of Object.keys(env)) {
-    if (publicInternalNames.has(name.toUpperCase()) || publicForkNames.has(name.toUpperCase()))
-      delete env[name];
+    if (publicNames.has(name.toUpperCase())) delete env[name];
   }
   Object.assign(env, resolved);
 }
@@ -121,11 +141,21 @@ export function applyProductEnvironment(env: Record<string, string | undefined>)
 export function applyDevelopmentProductOverrides(env: Record<string, string | undefined>) {
   const resolved = resolveProductEnvironment(env);
   for (const key of PUBLIC_CONFIG_KEYS) {
-    if (readEnvironmentValue(env, `SHUV2CODE_${key}`) === undefined) continue;
+    if (
+      readEnvironmentValue(env, `S2CODE_${key}`) === undefined &&
+      readEnvironmentValue(env, `SHUV2CODE_${key}`) === undefined
+    )
+      continue;
     const internal = `T3CODE_${key}`;
     const value = resolved[internal];
-    if (value === undefined) delete env[internal];
-    else env[internal] = value;
+    const selectedNames = new Set([`S2CODE_${key}`, `SHUV2CODE_${key}`, internal]);
+    for (const name of Object.keys(env)) {
+      if (selectedNames.has(name.toUpperCase())) delete env[name];
+    }
+    for (const name of [`S2CODE_${key}`, `SHUV2CODE_${key}`, internal]) {
+      if (value === undefined) delete env[name];
+      else env[name] = value;
+    }
   }
 }
 
@@ -136,7 +166,7 @@ export const isProductRuntimeVersion = (version: string) =>
 
 /** Keep completion compatible with retained launchers; ownership is independent. */
 export function isProductRuntimeComplete(marker: string, version: string, product: string) {
-  return product.trim() === PRODUCT_ID && marker.trim() === version;
+  return isProductIdentity(product) && marker.trim() === version;
 }
-export const PRODUCT_DBUS_PREFIX = "io.github.shuv1337.shuv2code";
+export const PRODUCT_DBUS_PREFIX = "io.github.shuv1337.s2code";
 export const KDE_CAPTURE_HELPER_EXECUTABLE = `${PRODUCT_ID}-kde-snap-shot`;

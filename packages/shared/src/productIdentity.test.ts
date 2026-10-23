@@ -6,6 +6,7 @@ import {
   applyDevelopmentProductOverrides,
   applyProductEnvironment,
   resolveProductDownload,
+  isProductIdentity,
 } from "./productIdentity.ts";
 
 it("routes desktop downloads only to the fork and makes mobile distribution explicitly unavailable", () => {
@@ -65,7 +66,7 @@ describe("fork public configuration", () => {
         T3Code_Port: "3773",
         shuv2code_home: "/fork",
       }),
-    ).toEqual({ SHUV2CODE_HOME: "/fork", T3CODE_HOME: "/fork" });
+    ).toEqual({ S2CODE_HOME: "/fork", SHUV2CODE_HOME: "/fork", T3CODE_HOME: "/fork" });
   });
   it.each(["arbitrary-context", "{}", '{"version":"1.2.3"}'])(
     "never adopts inherited upstream homes through launcher context %s",
@@ -82,7 +83,7 @@ describe("fork public configuration", () => {
         expect(env).not.toHaveProperty("SHUV2CODE_HOME");
         expect(env).not.toHaveProperty("T3CODE_PORT");
         expect(notice).toHaveBeenCalledExactlyOnceWith(
-          expect.stringContaining("ignoring T3CODE_HOME; use SHUV2CODE_HOME"),
+          expect.stringContaining("ignoring T3CODE_HOME; use S2CODE_HOME"),
         );
         expect(resolveProductEnvironment({ ...env, SHUV2CODE_HOME: "/explicit" }).T3CODE_HOME).toBe(
           "/explicit",
@@ -99,7 +100,7 @@ describe("fork public configuration", () => {
       applyProductEnvironment(env);
       expect(env).not.toHaveProperty("T3CODE_HOME");
       expect(notice).toHaveBeenCalledExactlyOnceWith(
-        expect.stringContaining("ignoring T3CODE_HOME; use SHUV2CODE_HOME"),
+        expect.stringContaining("ignoring T3CODE_HOME; use S2CODE_HOME"),
       );
     } finally {
       notice.mockRestore();
@@ -126,8 +127,88 @@ describe("fork public configuration", () => {
     const marker = runtimeCompletionMarker("1.2.3");
     expect(marker.trim() === "1.2.3").toBe(true); // Retained launcher's exact reader.
     expect(isProductRuntimeComplete(marker, "1.2.3", "shuv2code\n")).toBe(true);
+    expect(isProductRuntimeComplete(marker, "1.2.3", "s2code\n")).toBe(true);
+    expect(isProductRuntimeComplete(marker, "1.2.4", "s2code\n")).toBe(false);
     expect(isProductRuntimeComplete("1.2.3\r\n", "1.2.3", "shuv2code\r\n")).toBe(true);
     expect(isProductRuntimeComplete(marker, "1.2.3", "t3code")).toBe(false);
     expect(isProductRuntimeComplete(marker, "1.2.3", "")).toBe(false);
   });
+  it("prefers canonical settings over legacy aliases across all process boundaries", () => {
+    const resolved = resolveProductEnvironment({
+      S2CODE_HOME: " /new-home ",
+      SHUV2CODE_HOME: "/old-home",
+      T3CODE_HOME: "/upstream",
+      S2CODE_PORT: "5773",
+      SHUV2CODE_PORT: "4773",
+      s2code_otlp_headers: "canonical-observability",
+      shuv2code_otlp_headers: "legacy-observability",
+      SHUV2CODE_HOST: "127.0.0.1",
+    });
+    expect(resolved).toEqual({
+      S2CODE_HOME: "/new-home",
+      SHUV2CODE_HOME: "/new-home",
+      T3CODE_HOME: "/new-home",
+      S2CODE_PORT: "5773",
+      SHUV2CODE_PORT: "5773",
+      T3CODE_PORT: "5773",
+      S2CODE_HOST: "127.0.0.1",
+      SHUV2CODE_HOST: "127.0.0.1",
+      T3CODE_HOST: "127.0.0.1",
+      S2CODE_OTLP_HEADERS: "canonical-observability",
+      SHUV2CODE_OTLP_HEADERS: "canonical-observability",
+      T3CODE_OTLP_HEADERS: "canonical-observability",
+    });
+    expect(resolveProductEnvironment(resolved)).toEqual(resolved);
+  });
+  it("treats blank canonical inputs as unset while keeping nonblank legacy settings", () => {
+    expect(resolveProductEnvironment({ S2CODE_HOME: "  ", SHUV2CODE_HOME: "/old-home" })).toEqual({
+      S2CODE_HOME: "/old-home",
+      SHUV2CODE_HOME: "/old-home",
+      T3CODE_HOME: "/old-home",
+    });
+    expect(
+      resolveProductEnvironment({ S2CODE_HOME: "", SHUV2CODE_HOME: " ", T3CODE_HOME: "/upstream" }),
+    ).toEqual({});
+  });
+  it("normalizes managed development overrides without replacing the worktree home", () => {
+    const env: Record<string, string | undefined> = {
+      T3CODE_HOME: "/worktree/.t3",
+      S2CODE_PORT: "5773",
+      SHUV2CODE_PORT: "4773",
+    };
+    applyDevelopmentProductOverrides(env);
+    expect(env).toMatchObject({
+      T3CODE_HOME: "/worktree/.t3",
+      S2CODE_PORT: "5773",
+      SHUV2CODE_PORT: "5773",
+      T3CODE_PORT: "5773",
+    });
+    expect(env.S2CODE_HOME).toBeUndefined();
+  });
+  it("removes mixed-case development aliases before writing normalized values", () => {
+    const env: Record<string, string | undefined> = {
+      T3CODE_HOME: "/worktree/.t3",
+      s2code_port: "5773",
+      Shuv2Code_Port: "4773",
+      t3code_port: "3773",
+    };
+    applyDevelopmentProductOverrides(env);
+    expect(env).toEqual({
+      T3CODE_HOME: "/worktree/.t3",
+      S2CODE_PORT: "5773",
+      SHUV2CODE_PORT: "5773",
+      T3CODE_PORT: "5773",
+    });
+  });
+  it("refuses upstream import under either public name", () => {
+    expect(() => resolveProductEnvironment({ S2CODE_IMPORT_UPSTREAM: "1" })).toThrow(
+      "Upstream import is not supported",
+    );
+  });
+  it.each(["s2", "shuv", "shuv2code-v1", "t3", "t3code", "s2code-other"])(
+    "never accepts partial or foreign ownership %s",
+    (identity) => {
+      expect(isProductIdentity(identity)).toBe(false);
+    },
+  );
 });

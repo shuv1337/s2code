@@ -5,10 +5,10 @@
  * platform key, so a rename here is a release-breaking change.
  */
 
-const CLI_RELEASE_REPOSITORY = "shuv1337/shuv2code";
+import { PRODUCT_RELEASE_REPOSITORY } from "./productIdentity.ts";
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 /** Overrides the download origin for mirrors and air-gapped installs. */
-export const CLI_RELEASE_BASE_URL_ENV = "SHUV2CODE_RELEASE_BASE_URL";
+export const CLI_RELEASE_BASE_URL_ENV = "S2CODE_RELEASE_BASE_URL";
 
 /**
  * Kept in step with the build_linux_cli matrix, build_windows_arm64_cli, and
@@ -50,6 +50,10 @@ export function cliArchiveTarCommand(
 }
 
 export function cliArchiveFileName(version: string, platformKey: CliArchivePlatformKey): string {
+  return `s2code-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
+}
+
+export function cliArchivePreviousFileName(version: string, platformKey: CliArchivePlatformKey) {
   return `shuv2code-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
 }
 
@@ -60,15 +64,19 @@ export function cliArchiveLegacyFileName(
   return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
 }
 
-/** Preferred archive name followed by the pre-rename compatibility name. */
+/** Older installed launchers still request both previous archive names. */
 export function cliArchiveFileNames(
   version: string,
   platformKey: CliArchivePlatformKey,
-): readonly [string, string] {
-  return [cliArchiveFileName(version, platformKey), cliArchiveLegacyFileName(version, platformKey)];
+): readonly [string, string, string] {
+  return [
+    cliArchiveFileName(version, platformKey),
+    cliArchivePreviousFileName(version, platformKey),
+    cliArchiveLegacyFileName(version, platformKey),
+  ];
 }
 
-const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;
+const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${PRODUCT_RELEASE_REPOSITORY}/releases/download`;
 
 export function cliReleaseDownloadBaseUrl(
   version: string,
@@ -105,7 +113,7 @@ export function cliReleaseChannelOf(version: string): CliReleaseChannel {
  * preview or stable release past any single page.
  */
 export function cliReleaseIndexPageUrl(page: number): string {
-  return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
+  return `https://api.github.com/repos/${PRODUCT_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
 }
 
 /**

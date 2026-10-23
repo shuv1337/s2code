@@ -2,7 +2,7 @@ import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
-// shuv2code fork: fork-only migrations run on their own track; see ForkMigrations.ts.
+// s2code fork: fork-only migrations run on their own track; see ForkMigrations.ts.
 import { divergentForkMigrations, runForkMigrations } from "./ForkMigrations.ts";
 import { reconcileForkMigrationTrack } from "./reconcileForkMigrationTrack.ts";
 import { reconcileWatchPreviewMigration } from "./reconcileWatchPreviewMigration.ts";
@@ -201,7 +201,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
-  // shuv2code fork: reconcile fork-track history, then run fork migrations
+  // s2code fork: reconcile fork-track history, then run fork migrations
   // after upstream's. `toMigrationInclusive` names an upstream id, so a partial
   // run leaves the fork track alone. Only upstream's migrations are returned.
   // The reconciles run before the V2 check: until they move them, fork rows

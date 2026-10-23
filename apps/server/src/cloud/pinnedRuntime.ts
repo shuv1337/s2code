@@ -25,7 +25,10 @@ import {
   isProductRuntimeVersion,
   runtimeCompletionMarker,
   PRODUCT_RUNTIME_MARKER,
+  PRODUCT_HOME_MARKER,
   PRODUCT_ID,
+  LEGACY_PRODUCT_ID,
+  isProductIdentity,
 } from "@t3tools/shared/productIdentity";
 import { canonicalProductPath, ensureProductHome } from "@t3tools/shared/productHome";
 
@@ -290,6 +293,17 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     catch: (cause) =>
       new PinnedRuntimeInstallError({ step: "validating product ownership", cause }),
   });
+  const homeProduct = yield* fs
+    .readFileString(input.path.join(input.baseDir, PRODUCT_HOME_MARKER))
+    .pipe(
+      Effect.map((value) => value.trim()),
+      Effect.mapError(
+        (cause) => new PinnedRuntimeInstallError({ step: "reading home product metadata", cause }),
+      ),
+    );
+  if (!isProductIdentity(homeProduct)) {
+    return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign product home" });
+  }
   const [versionDirExists, entryExists, sentinel] = yield* Effect.all([
     fs.exists(paths.versionDir),
     fs.exists(paths.entryPath),
@@ -314,7 +328,12 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
       (cause) => new PinnedRuntimeInstallError({ step: "reading runtime product metadata", cause }),
     ),
   );
-  if ((yield* fs.exists(productPath)) && !PRODUCT_ID.startsWith(product.trim()))
+  if (
+    (yield* fs.exists(productPath)) &&
+    !isProductIdentity(product.trim()) &&
+    !PRODUCT_ID.startsWith(product.trim()) &&
+    !LEGACY_PRODUCT_ID.startsWith(product.trim())
+  )
     return yield* new PinnedRuntimeInstallError({ step: "refusing a foreign runtime cache" });
   const alreadyPinned =
     entryExists &&
@@ -370,7 +389,7 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     yield* input.validate(stagingPaths);
     yield* fs.writeFileString(
       input.path.join(stagingDir, PRODUCT_RUNTIME_MARKER),
-      `${PRODUCT_ID}\n`,
+      `${homeProduct}\n`,
     );
     yield* fs
       .writeFileString(stagingPaths.sentinelPath, runtimeCompletionMarker(input.version))
@@ -400,7 +419,11 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
                 }),
             ),
           );
-          if (!PRODUCT_ID.startsWith(currentProduct.trim()))
+          if (
+            !isProductIdentity(currentProduct.trim()) &&
+            !PRODUCT_ID.startsWith(currentProduct.trim()) &&
+            !LEGACY_PRODUCT_ID.startsWith(currentProduct.trim())
+          )
             return yield* new PinnedRuntimeInstallError({
               step: "refusing a foreign runtime cache",
             });

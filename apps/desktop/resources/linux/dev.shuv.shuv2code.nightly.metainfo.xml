@@ -9,9 +9,9 @@
   <description>
     <p>S2Code is an open-source desktop app for coding agents. This nightly installation is separate from stable and preview.</p>
   </description>
-  <launchable type="desktop-id">shuv2code-nightly.desktop</launchable>
-  <icon type="stock">shuv2code-nightly</icon>
-  <provides><binary>shuv2code-nightly</binary></provides>
+  <launchable type="desktop-id">s2code-nightly.desktop</launchable>
+  <icon type="stock">s2code-nightly</icon>
+  <provides><binary>s2code-nightly</binary></provides>
   <categories><category>Development</category></categories>
   <url type="homepage">https://github.com/shuv1337/shuv2code</url>
   <url type="bugtracker">https://github.com/shuv1337/shuv2code/issues</url>

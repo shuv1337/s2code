@@ -7,7 +7,10 @@ import {
   waitForHttpReady as waitForHttpReadyShared,
 } from "@t3tools/shared/httpReadiness";
 import { cliReleaseDownloadBaseUrl } from "@t3tools/shared/cliRelease";
-import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as NetService from "@t3tools/shared/Net";
 import { extractJsonObject, fromLenientJson } from "@t3tools/shared/schemaJson";
@@ -435,9 +438,28 @@ ensure_remote_node_path() {
 }
 `;
 
-// Claim a fresh channel home before cache, SSH bookkeeping or server state can populate it.
-// Only the stable default has legitimate installs from before ownership markers existed.
-const REMOTE_HOME_OWNERSHIP_SCRIPT = `T3_PRODUCT_HOME="$HOME/@@T3_HOME_DIRECTORY@@"
+// Select existing verified V2 state in place; a rename must not start an empty remote environment.
+const REMOTE_HOME_SELECTION_SCRIPT = `t3_owned_product() {
+  case "$1" in s2code|shuv2code) return 0 ;; *) return 1 ;; esac
+}
+T3_PRODUCT_HOME="$HOME/@@T3_HOME_DIRECTORY@@"
+T3_LEGACY_HOME="$HOME/@@T3_LEGACY_HOME_DIRECTORY@@"
+if [ -e "$T3_LEGACY_HOME" ] || [ -L "$T3_LEGACY_HOME" ]; then
+  [ ! -L "$T3_LEGACY_HOME" ] && [ ! -L "$T3_LEGACY_HOME/.product-identity" ] || { printf 'Refusing linked legacy product state.\\n' >&2; exit 1; }
+  if [ -n "$(ls -A "$T3_LEGACY_HOME" | grep -v '^\\.product-identity$')" ]; then
+    if [ "$T3_LEGACY_HOME" != "$HOME/.shuv2code-v2" ] || [ -e "$T3_LEGACY_HOME/.product-identity" ]; then
+      [ -f "$T3_LEGACY_HOME/.product-identity" ] && t3_owned_product "$(cat "$T3_LEGACY_HOME/.product-identity")" || { printf 'Cannot verify legacy V2 home ownership. Verify existing data offline.\\n' >&2; exit 1; }
+    fi
+    if [ -d "$T3_PRODUCT_HOME" ] && [ -n "$(ls -A "$T3_PRODUCT_HOME" | grep -v '^\\.product-identity$')" ]; then
+      printf 'Both s2code and shuv2code homes contain state. Select the intended home before connecting.\\n' >&2; exit 1
+    fi
+    T3_PRODUCT_HOME="$T3_LEGACY_HOME"
+  fi
+fi
+`;
+
+// Claim before cache, SSH bookkeeping or server state can populate a fresh home.
+const REMOTE_HOME_OWNERSHIP_SCRIPT = `${REMOTE_HOME_SELECTION_SCRIPT}
 for T3_PATH in "$T3_PRODUCT_HOME" "$T3_PRODUCT_HOME/.product-identity" "$T3_PRODUCT_HOME/userdata" "$T3_PRODUCT_HOME/runtime" "$T3_PRODUCT_HOME/runtime/versions" "$T3_PRODUCT_HOME/ssh-launch"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing linked product ownership metadata or state.\\n' >&2; exit 1; fi
 done
@@ -445,29 +467,26 @@ T3_HOME_PRODUCT=
 if [ -e "$T3_PRODUCT_HOME/.product-identity" ]; then
   [ -f "$T3_PRODUCT_HOME/.product-identity" ] || { printf 'Home belongs to another product.\\n' >&2; exit 1; }
   T3_HOME_PRODUCT="$(cat "$T3_PRODUCT_HOME/.product-identity")"
-  case shuv2code in "$T3_HOME_PRODUCT"*) ;; *) printf 'Home belongs to another product.\\n' >&2; exit 1 ;; esac
+  case s2code in "$T3_HOME_PRODUCT"*) ;; *) t3_owned_product "$T3_HOME_PRODUCT" || { printf 'Home belongs to another product.\\n' >&2; exit 1; } ;; esac
 fi
-if [ "$T3_HOME_PRODUCT" != shuv2code ]; then
-  if [ "@@T3_HOME_DIRECTORY@@" != .shuv2code-v2 ] && [ -d "$T3_PRODUCT_HOME" ] && [ -n "$(ls -A "$T3_PRODUCT_HOME" | grep -v '^\\.product-identity$')" ]; then
-    # Another initializer may have published ownership since the first check.
-    if [ -L "$T3_PRODUCT_HOME/.product-identity" ] || [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || [ "$(cat "$T3_PRODUCT_HOME/.product-identity")" != shuv2code ]; then
-      printf 'Cannot establish product ownership of an existing unmarked channel home. Choose an empty SHUV2CODE_HOME or verify ownership offline.\\n' >&2; exit 1
+if ! t3_owned_product "$T3_HOME_PRODUCT"; then
+  if [ "$T3_PRODUCT_HOME" != "$HOME/.shuv2code-v2" ] && [ -d "$T3_PRODUCT_HOME" ] && [ -n "$(ls -A "$T3_PRODUCT_HOME" | grep -v '^\\.product-identity$')" ]; then
+    if [ -L "$T3_PRODUCT_HOME/.product-identity" ] || [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || ! t3_owned_product "$(cat "$T3_PRODUCT_HOME/.product-identity")"; then
+      printf 'Cannot establish product ownership of an existing unmarked home. Choose an empty S2CODE_HOME or verify ownership offline.\\n' >&2; exit 1
     fi
   fi
   mkdir -p "$T3_PRODUCT_HOME"
-  # Publish complete contents atomically, without replacing another owner's marker.
-  # Stage outside the home so concurrent initializers never see unmarked partial state.
   (
-    T3_OWNERSHIP_TEMP="$(mktemp "$HOME/.shuv2code-home-owner.XXXXXX")"
+    T3_OWNERSHIP_TEMP="$(mktemp "$HOME/.s2code-home-owner.XXXXXX")"
     trap 'rm -f "$T3_OWNERSHIP_TEMP"' EXIT
-    printf 'shuv2code\\n' > "$T3_OWNERSHIP_TEMP"
-    if [ -f "$T3_PRODUCT_HOME/.product-identity" ] && [ "$(cat "$T3_PRODUCT_HOME/.product-identity")" != shuv2code ]; then
-      # Recover an incomplete marker only after the independent home check above.
+    if [ "$T3_PRODUCT_HOME" = "$HOME/.shuv2code-v2" ]; then T3_HOME_PRODUCT=shuv2code; else T3_HOME_PRODUCT=s2code; fi
+    printf '%s\\n' "$T3_HOME_PRODUCT" > "$T3_OWNERSHIP_TEMP"
+    if [ -f "$T3_PRODUCT_HOME/.product-identity" ] && ! t3_owned_product "$(cat "$T3_PRODUCT_HOME/.product-identity")"; then
       mv "$T3_OWNERSHIP_TEMP" "$T3_PRODUCT_HOME/.product-identity"
     else
       ln "$T3_OWNERSHIP_TEMP" "$T3_PRODUCT_HOME/.product-identity" 2>/dev/null || true
     fi
-    if [ -L "$T3_PRODUCT_HOME/.product-identity" ] || [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || [ "$(cat "$T3_PRODUCT_HOME/.product-identity")" != shuv2code ]; then
+    if [ -L "$T3_PRODUCT_HOME/.product-identity" ] || [ ! -f "$T3_PRODUCT_HOME/.product-identity" ] || ! t3_owned_product "$(cat "$T3_PRODUCT_HOME/.product-identity")"; then
       printf 'Cannot establish product ownership.\\n' >&2; exit 1
     fi
   )
@@ -497,25 +516,25 @@ printf '%s\\n' "$T3_ARCHIVE_VERSION" | grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9
 # Self-contained release archive: no Node, npm, or compiler on the remote.
 # Unpacked into the pinned-runtime layout so \`t3 service install\` reuses it.
 T3_RELEASE_BASE_URL=@@T3_RELEASE_BASE_URL@@
-T3_RUNTIME_DIR="$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions/$T3_ARCHIVE_VERSION"
-for T3_PATH in "$HOME/@@T3_HOME_DIRECTORY@@" "$HOME/@@T3_HOME_DIRECTORY@@/.product-identity" "$HOME/@@T3_HOME_DIRECTORY@@/runtime" "$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions" "$T3_RUNTIME_DIR" "$T3_RUNTIME_DIR/t3" "$T3_RUNTIME_DIR/.install-complete" "$T3_RUNTIME_DIR/.install-product"; do
+${REMOTE_HOME_OWNERSHIP_SCRIPT}
+T3_RUNTIME_DIR="$T3_PRODUCT_HOME/runtime/versions/$T3_ARCHIVE_VERSION"
+for T3_PATH in "$T3_PRODUCT_HOME" "$T3_PRODUCT_HOME/.product-identity" "$T3_PRODUCT_HOME/runtime" "$T3_PRODUCT_HOME/runtime/versions" "$T3_RUNTIME_DIR" "$T3_RUNTIME_DIR/t3" "$T3_RUNTIME_DIR/.install-complete" "$T3_RUNTIME_DIR/.install-product"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing a linked runtime cache.\\n' >&2; exit 1; fi
 done
-${REMOTE_HOME_OWNERSHIP_SCRIPT}
 t3_runtime_ready() {
   T3_MARKER="$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null || true)"
-  [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$T3_MARKER" = "$T3_ARCHIVE_VERSION" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-product" 2>/dev/null || true)" = shuv2code ]
+  [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$T3_MARKER" = "$T3_ARCHIVE_VERSION" ] && t3_owned_product "$(cat "$T3_RUNTIME_DIR/.install-product" 2>/dev/null || true)"
 }
 if [ -e "$T3_RUNTIME_DIR/.install-product" ]; then
   T3_PRODUCT="$(cat "$T3_RUNTIME_DIR/.install-product")"
-  case shuv2code in "$T3_PRODUCT"*) ;; *) printf 'Refusing to reuse or replace a foreign runtime cache.\\n' >&2; exit 1 ;; esac
+  case s2code in "$T3_PRODUCT"*) ;; *) t3_owned_product "$T3_PRODUCT" || { printf 'Refusing to reuse or replace a foreign runtime cache.\\n' >&2; exit 1; } ;; esac
 fi
 if ! t3_runtime_ready; then
-  mkdir -p "$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions"
+  mkdir -p "$T3_PRODUCT_HOME/runtime/versions"
   # Concurrent launches (two clients, a retry racing a slow first run) must
   # not both install: mkdir is the atomic lock and the ready check repeats
   # under it.
-  T3_LOCK="$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"
+  T3_LOCK="$T3_PRODUCT_HOME/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"
   # mkdir is the only portable atomic exclusive create (mv would silently
   # nest a candidate inside an existing lock). The owner publishes its pid
   # right after, so a lock with a live owner is never reclaimed however
@@ -561,9 +580,10 @@ if ! t3_runtime_ready; then
     x86_64 | amd64) T3_ARCH="x64" ;;
     *) printf 'Remote host %s has no t3 release archive.\\n' "$(uname -m)" >&2; exit 1 ;;
   esac
-  T3_ARCHIVE="shuv2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
+  T3_ARCHIVE="s2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
+  T3_PREVIOUS_ARCHIVE="shuv2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
   T3_LEGACY_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
-  T3_STAGING="$(mktemp -d "$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions/.staging-XXXXXX")"
+  T3_STAGING="$(mktemp -d "$T3_PRODUCT_HOME/runtime/versions/.staging-XXXXXX")"
   T3_PREVIOUS_PARENT= T3_PREVIOUS= T3_VALIDATED=false T3_PUBLISHED=false
   t3_runtime_cleanup() {
     if [ "$T3_PUBLISHED" != true ] && [ -n "$T3_PREVIOUS" ] && [ -d "$T3_PREVIOUS" ]; then
@@ -591,7 +611,10 @@ if ! t3_runtime_ready; then
     fi
   }
   t3_fetch "$T3_RELEASE_BASE_URL/v$T3_ARCHIVE_VERSION/SHA256SUMS" "$T3_STAGING/SHA256SUMS" @@T3_ARCHIVE_CHECKSUMS_SECONDS@@
-  if ! grep -q " \\*\\{0,1\\}$T3_ARCHIVE$" "$T3_STAGING/SHA256SUMS"; then T3_ARCHIVE="$T3_LEGACY_ARCHIVE"; fi
+  if ! grep -q " \\*\\{0,1\\}$T3_ARCHIVE$" "$T3_STAGING/SHA256SUMS"; then
+    T3_ARCHIVE="$T3_PREVIOUS_ARCHIVE"
+    if ! grep -q " \\*\\{0,1\\}$T3_ARCHIVE$" "$T3_STAGING/SHA256SUMS"; then T3_ARCHIVE="$T3_LEGACY_ARCHIVE"; fi
+  fi
   T3_EXPECTED="$(grep " \\*\\{0,1\\}$T3_ARCHIVE$" "$T3_STAGING/SHA256SUMS" | cut -d' ' -f1)"
   if [ -z "$T3_EXPECTED" ]; then printf 'No release archive for %s-%s is listed in SHA256SUMS.\\n' "$T3_PLATFORM" "$T3_ARCH" >&2; exit 1; fi
   t3_fetch "$T3_RELEASE_BASE_URL/v$T3_ARCHIVE_VERSION/$T3_ARCHIVE" "$T3_STAGING/$T3_ARCHIVE" @@T3_ARCHIVE_DOWNLOAD_SECONDS@@
@@ -611,10 +634,10 @@ if ! t3_runtime_ready; then
     printf 'The t3 %s executable does not run on this host.\\n' "$T3_ARCHIVE_VERSION" >&2; exit 1
   fi
   printf '%s\\n' "$T3_ARCHIVE_VERSION" > "$T3_STAGING/.install-complete"
-  printf 'shuv2code\\n' > "$T3_STAGING/.install-product"
+  cat "$T3_PRODUCT_HOME/.product-identity" > "$T3_STAGING/.install-product"
   T3_VALIDATED=true
   if [ -e "$T3_RUNTIME_DIR" ]; then
-    T3_PREVIOUS_PARENT="$(mktemp -d "$HOME/@@T3_HOME_DIRECTORY@@/runtime/versions/.previous-XXXXXX")"
+    T3_PREVIOUS_PARENT="$(mktemp -d "$T3_PRODUCT_HOME/runtime/versions/.previous-XXXXXX")"
     T3_PREVIOUS="$T3_PREVIOUS_PARENT/runtime"
     mv "$T3_RUNTIME_DIR" "$T3_PREVIOUS"
   fi
@@ -626,19 +649,21 @@ if [ -n "\${T3_LOCK:-}" ]; then
   rm -rf "$T3_LOCK"
   trap - EXIT
 fi
+export S2CODE_HOME="$T3_PRODUCT_HOME"
+export SHUV2CODE_HOME="$T3_PRODUCT_HOME"
 exec "$T3_RUNTIME_DIR/t3" "$@"
 `;
 
 const REMOTE_LAUNCH_SCRIPT = `set -eu
 @@T3_NODE_ENV_SCRIPT@@
+${REMOTE_HOME_OWNERSHIP_SCRIPT}
 STATE_KEY="$1"
-STATE_DIR="$HOME/@@T3_HOME_DIRECTORY@@/ssh-launch/$STATE_KEY"
-DEFAULT_SERVER_HOME="$HOME/@@T3_HOME_DIRECTORY@@"
+STATE_DIR="$T3_PRODUCT_HOME/ssh-launch/$STATE_KEY"
+DEFAULT_SERVER_HOME="$T3_PRODUCT_HOME"
 DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
 for T3_PATH in "$DEFAULT_SERVER_HOME" "$DEFAULT_SERVER_HOME/.product-identity" "$DEFAULT_SERVER_HOME/userdata" "$DEFAULT_RUNTIME_FILE"; do
   if [ -L "$T3_PATH" ]; then printf 'Refusing linked server state.\\n' >&2; exit 1; fi
 done
-${REMOTE_HOME_OWNERSHIP_SCRIPT}
 PORT_FILE="$STATE_DIR/port"
 PID_FILE="$STATE_DIR/pid"
 MANAGED_FILE="$STATE_DIR/managed"
@@ -834,8 +859,8 @@ printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGE
 
 const REMOTE_PAIRING_SCRIPT = `set -eu
 ${REMOTE_HOME_OWNERSHIP_SCRIPT}
-STATE_DIR="$HOME/@@T3_HOME_DIRECTORY@@/ssh-launch/@@T3_STATE_KEY@@"
-DEFAULT_SERVER_HOME="$HOME/@@T3_HOME_DIRECTORY@@"
+STATE_DIR="$T3_PRODUCT_HOME/ssh-launch/@@T3_STATE_KEY@@"
+DEFAULT_SERVER_HOME="$T3_PRODUCT_HOME"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
 mkdir -p "$STATE_DIR"
 cat >"$RUNNER_FILE" <<'SH'
@@ -847,7 +872,8 @@ PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
 `;
 
 const REMOTE_STOP_SCRIPT = `set -eu
-STATE_DIR="$HOME/@@T3_HOME_DIRECTORY@@/ssh-launch/@@T3_STATE_KEY@@"
+${REMOTE_HOME_SELECTION_SCRIPT}
+STATE_DIR="$T3_PRODUCT_HOME/ssh-launch/@@T3_STATE_KEY@@"
 PID_FILE="$STATE_DIR/pid"
 PORT_FILE="$STATE_DIR/port"
 MANAGED_FILE="$STATE_DIR/managed"
@@ -870,7 +896,8 @@ printf '{"stopped":true}\\n'
 `;
 
 const REMOTE_LOG_TAIL_SCRIPT = `set -eu
-STATE_DIR="$HOME/@@T3_HOME_DIRECTORY@@/ssh-launch/@@T3_STATE_KEY@@"
+${REMOTE_HOME_SELECTION_SCRIPT}
+STATE_DIR="$T3_PRODUCT_HOME/ssh-launch/@@T3_STATE_KEY@@"
 LOG_FILE="$STATE_DIR/server.log"
 if [ -f "$LOG_FILE" ]; then
   tail -n 80 "$LOG_FILE" 2>/dev/null || true
@@ -921,6 +948,9 @@ export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string
   return stripTrailingNewlines(
     applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
       T3_HOME_DIRECTORY: remoteHomeDirectory(input),
+      T3_LEGACY_HOME_DIRECTORY: resolveLegacyChannelIdentity(
+        input?.archiveVersion?.trim() || input?.version?.trim() || "",
+      ).homeDirectory,
       T3_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),
       T3_ARCHIVE_VERSION: shellSingleQuote(archiveVersion),
       T3_RELEASE_BASE_URL: shellSingleQuote(releaseBaseUrl),
@@ -944,6 +974,9 @@ export function buildRemoteNodeEnvScript(input?: RemoteT3RunnerOptions): string 
 export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
     T3_HOME_DIRECTORY: remoteHomeDirectory(input),
+    T3_LEGACY_HOME_DIRECTORY: resolveLegacyChannelIdentity(
+      input?.archiveVersion?.trim() || input?.version?.trim() || "",
+    ).homeDirectory,
     T3_ARCHIVE_MODE: isNodeScriptRunner(input) ? "0" : "1",
     T3_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
@@ -960,6 +993,9 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
 export function buildRemotePairingScript(stateKey: string, input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_HOME_DIRECTORY: remoteHomeDirectory(input),
+    T3_LEGACY_HOME_DIRECTORY: resolveLegacyChannelIdentity(
+      input?.archiveVersion?.trim() || input?.version?.trim() || "",
+    ).homeDirectory,
     T3_STATE_KEY: stateKey,
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
   });
@@ -968,6 +1004,9 @@ export function buildRemotePairingScript(stateKey: string, input?: RemoteT3Runne
 export function buildRemoteStopScript(stateKey: string, input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_STOP_SCRIPT, {
     T3_HOME_DIRECTORY: remoteHomeDirectory(input),
+    T3_LEGACY_HOME_DIRECTORY: resolveLegacyChannelIdentity(
+      input?.archiveVersion?.trim() || input?.version?.trim() || "",
+    ).homeDirectory,
     T3_STATE_KEY: stateKey,
   });
 }
@@ -975,6 +1014,9 @@ export function buildRemoteStopScript(stateKey: string, input?: RemoteT3RunnerOp
 function buildRemoteLogTailScript(stateKey: string, input?: RemoteT3RunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LOG_TAIL_SCRIPT, {
     T3_HOME_DIRECTORY: remoteHomeDirectory(input),
+    T3_LEGACY_HOME_DIRECTORY: resolveLegacyChannelIdentity(
+      input?.archiveVersion?.trim() || input?.version?.trim() || "",
+    ).homeDirectory,
     T3_STATE_KEY: stateKey,
   });
 }

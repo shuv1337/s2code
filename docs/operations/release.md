@@ -4,26 +4,40 @@ The canonical pipeline is `.github/workflows/release.yml`, restricted to
 `shuv1337/shuv2code`. It replaces the artifact-only `fork-desktop.yml` workflow.
 Do not use an upstream release, npm scope, signing identity or deployment as a substitute.
 
+Repository and installer URLs remain `shuv1337/shuv2code` until the repository is
+renamed together with workflow guards, npm trusted publisher bindings and updater
+feeds. A missing `shuv1337/s2code` repository or available npm name does not prove
+ownership. Provision and verify `s2code` and `@s2code` before enabling publication;
+keep the existing package's trusted publisher configured for the bridge. Do not
+move the maintainer checkout while project paths and attached worktrees use it.
+Signed desktop app IDs, Electron renderer origins and profile directories retain
+their installed identities so the rename does not create another app or strand
+credentials. Public app names and URL schemes use S2Code and `s2code`.
+
 ## Matrix and source
 
 One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives, package manifests and release receipts. Desktop builds cover
 macOS ARM64/x64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
 ARM64/x64 (NSIS). Each Windows desktop embeds the matching same-version Linux
-`shuv2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
+`s2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
 compares its digest before publication.
 
 CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-arm64`, `win32-x64`. **Intel macOS CLI/SEA is unsupported**; use the Intel
-desktop app. CLI release archives are named `shuv2code-<version>-<platform>-<arch>` and
-temporarily include byte-identical `t3-<version>-<platform>-<arch>` aliases for installs
-from before the rename; both names have checksum entries. The internal executable remains
-`t3`. That does not authorize
+desktop app. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
+include byte-identical `shuv2code-<version>-<platform>-<arch>` and
+`t3-<version>-<platform>-<arch>` aliases for installed clients; all three names have
+checksum entries. The archive's internal root directory retains
+`shuv2code-<version>-<platform>-<arch>` because existing PowerShell installers
+look for that exact directory. The internal executable remains `t3`. That does not authorize
 publishing the workspace package named `t3`, which is private.
 
-When npm is enabled, the public npm endpoints are `shuv2code` and
-`@shuv2code/t3-<platform>` for those five CLI targets. Platform packages publish and verify first; the launcher follows only
+When npm is enabled, the public npm endpoints are `s2code` and
+`@s2code/t3-<platform>` for those five CLI targets. Platform packages publish and verify first; the launcher follows only
 when all five are verifiable, with exact matching optional dependency versions.
+The `shuv2code` bridge launcher publishes the same version and depends on those
+canonical platform packages, preserving upgrades for existing npm installs.
 
 ## Nightly only
 
@@ -58,9 +72,10 @@ Artifacts are first uploaded to a **draft** release and checked against their
 GitHub SHA-256 digests. Updater manifests are uploaded last, and the complete
 draft is verified before publication.
 
-npm publication is optional. When `FORK_NPM_TRUSTED_PUBLISHING_READY` is not
-`true`, the GitHub release still publishes and `release.json` lists no npm
-packages. When it is `true`, all six packages publish under a temporary
+npm publication is optional. It requires both `S2CODE_NPM_TRUSTED_PUBLISHING_READY`
+for the six canonical names and `FORK_NPM_TRUSTED_PUBLISHING_READY` for the legacy
+bridge to be `true`. Otherwise the GitHub release still publishes and `release.json`
+lists no npm packages. When both are ready, all seven packages publish under a temporary
 non-default dist-tag with `npm publish --provenance`, and their names, versions,
 repository and tarball integrity are verified before the release is exposed.
 npm reviews each new version before it can be installed, which took up to about
@@ -69,7 +84,7 @@ Answers the registry could not give (429, 5xx, timeouts) are retried within that
 budget; a mismatched tarball or a package outside the allowlist fails at once.
 After the release publishes, the `nightly` dist-tag is promoted, platform
 packages first and the launcher last. A nightly moves `latest` as well, so
-`npx shuv2code` installs the newest nightly instead of the placeholder version
+`npx s2code` installs the newest nightly instead of the placeholder version
 that trusted publishing required; `nightly` refuses to move backwards, while
 `latest` is left alone with a log line when a newer version already holds it.
 
@@ -98,7 +113,8 @@ one published endpoint as delivery evidence.
 
 Use the protected GitHub environment `fork-release`, with appropriate default
 branch protections and approvals. Repository variables:
-`FORK_NPM_TRUSTED_PUBLISHING_READY`, `APPLE_TEAM_ID`.
+`S2CODE_NPM_TRUSTED_PUBLISHING_READY`, `FORK_NPM_TRUSTED_PUBLISHING_READY`,
+`APPLE_TEAM_ID`.
 
 Signing secrets must be **repository or organization secrets**. The reusable
 desktop build does not select `fork-release` and cannot see secrets attached only
@@ -124,7 +140,8 @@ Hosted/relay, marketing and AUR deployment are intentionally separate and are no
 invoked by this pipeline; configure their fork identities in their owning work.
 
 npm is optional (see [Nightly only](#nightly-only)). To enable it, human npm setup
-must establish ownership/bootstrap of all six package names and trusted publishers
+must establish ownership/bootstrap of the six canonical package names, retain the
+legacy bridge package, and configure trusted publishers
 for **calling workflow filename `release.yml`**, repository `shuv1337/shuv2code`, environment `fork-release`. Enable both direct `npm publish`
 and `npm dist-tag` allowed actions for each package. The readiness variable is an
 explicit human attestation, not an authentication test. `npm whoami`, token names,
@@ -141,7 +158,7 @@ Already uploaded assets and npm versions are reused only when their digests matc
 Do not rebuild different signed bytes under an immutable version, overwrite public
 release assets or move a dist-tag backwards. If the original prepared bytes are
 lost, use a new version. Rolling index/tag repair may be retried after a fully
-verified release; inspect all six endpoints and the release before doing so.
+verified release; inspect all seven endpoints and the release before doing so.
 
 Before claiming delivery, a human must run the protected workflow with real fork
 accounts and capture: signature/team/publisher and notarization evidence for

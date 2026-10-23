@@ -131,6 +131,7 @@ function publishFixture(
     for (const manifest of [
       ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => npmPlatformPackageManifest(key, plan.version, {})),
       npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS),
+      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS, "shuv2code"),
     ]) {
       const file = NodePath.join(prepared, "npm-packages", manifest.name + ".tgz");
       NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
@@ -196,7 +197,12 @@ function publishFixture(
           RUNNER_ENVIRONMENT: "github-hosted",
           ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
-          ...(npm ? { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" } : {}),
+          ...(npm
+            ? {
+                S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true",
+                FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
+              }
+            : {}),
           // Same number of polls as CI, without the fifteen-second waits.
           FORK_RELEASE_NPM_POLL_MS: "1",
           FIXTURE_FLAKY_TAGS: String(flaky.tags ?? 0),
@@ -327,12 +333,12 @@ describe("fork publication fixtures", () => {
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "promotes nightly and latest, platform packages before the launcher",
     () => {
-      const held = "@shuv2code/t3-linux-x64";
+      const held = "@s2code/t3-linux-x64";
       const { result, state, plan } = publishFixture("resume", "refs/heads/main", true, "nightly", {
         ...Object.fromEntries(
-          CLI_ARCHIVE_PLATFORM_KEYS.map((key) => [`@shuv2code/t3-${key}`, { latest: "0.0.0" }]),
+          CLI_ARCHIVE_PLATFORM_KEYS.map((key) => [`@s2code/t3-${key}`, { latest: "0.0.0" }]),
         ),
-        shuv2code: { latest: "0.0.0" },
+        s2code: { latest: "0.0.0" },
         // A newer published version must keep `latest`, without failing the run.
         [held]: { latest: "9.9.9" },
       });
@@ -340,15 +346,17 @@ describe("fork publication fixtures", () => {
       const promotions = state.commands
         .filter(([command, subcommand]) => command === "npm" && subcommand === "dist-tag")
         .map((args) => [args[3]!.slice(0, args[3]!.lastIndexOf("@")), args[4]!] as const);
-      for (const name of [...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@shuv2code/t3-${key}`)])
+      for (const name of CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`))
         expect(promotions.filter(([pkg]) => pkg === name).map(([, tag]) => tag)).toEqual(
           name === held ? ["nightly"] : ["nightly", "latest"],
         );
-      expect(promotions.filter(([pkg]) => pkg === "shuv2code").map(([, tag]) => tag)).toEqual([
+      expect(promotions.filter(([pkg]) => pkg === "s2code").map(([, tag]) => tag)).toEqual([
         "nightly",
         "latest",
       ]);
-      expect(promotions.findIndex(([pkg]) => pkg === "shuv2code")).toBe(promotions.length - 2);
+      expect(promotions.findIndex(([pkg]) => pkg === "s2code")).toBe(promotions.length - 4);
+      expect(promotions.slice(-2).map(([pkg]) => pkg)).toEqual(["shuv2code", "shuv2code"]);
+      expect(state.tags["s2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });
     },
@@ -365,7 +373,7 @@ describe("fork publication fixtures", () => {
         "refs/heads/main",
         true,
         "nightly",
-        { shuv2code: { latest: "0.0.0" } },
+        { s2code: { latest: "0.0.0" } },
         { versions: 2, tags: 2 },
       );
       expect(result.status, result.stderr).toBe(0);
@@ -375,7 +383,7 @@ describe("fork publication fixtures", () => {
           ([command, subcommand]) => command === "npm" && subcommand === "publish",
         ),
       ).toBe(false);
-      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(state.tags["s2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
     },
   );

@@ -6,7 +6,7 @@ The Android app receives Firebase Cloud Messaging (FCM) data messages. The relay
 
 The app's minimum is Android 7.0 (API 24), declared in `app.config.ts` and enforced by the relay's device-registration schema. Compile/target SDK versions follow the locked Expo/React Native toolchain (currently API 36). Notification channels begin at API 26; the notification permission prompt begins at API 33. Live Update promotion requires API 36 and remains subject to system settings and device support. Alerts and ordinary activity cards work below API 36.
 
-On Android 16+, open T3 Code Settings → Live Update Settings to allow status bar chips. Android controls this separately from notification permission. The chip reads `Working` during work, `Approve` for approvals, and `Answer` for input requests; completed work returns to a normal notification. Use an Android 16 QPR2 or newer emulator image to verify the shipped promotion behavior.
+On Android 16+, open S2Code Settings → Live Update Settings to allow status bar chips. Android controls this separately from notification permission. The chip reads `Working` during work, `Approve` for approvals, and `Answer` for input requests; completed work returns to a normal notification. Use an Android 16 QPR2 or newer emulator image to verify the shipped promotion behavior.
 
 API 24–25 use a single inexact system alarm to expire cards after process exit, with no exact-alarm permission. Android can delay that alarm in power-saving modes. API 26+ use notification timeouts. Disabling activity, dismissal, account changes and sign-out cancel the legacy alarm. A stale expiry broadcast cannot remove a newer run's card.
 
@@ -22,7 +22,11 @@ The lint command uses the K1 frontend because AGP's K2 frontend crashes while an
 
 ## Firebase and app build
 
-1. Create a fork-owned Firebase project and register each Android application identifier you intend to build: `dev.shuv.shuv2code.dev`, `dev.shuv.shuv2code.preview`, or `dev.shuv.shuv2code`.
+The product rename retains the registered `dev.shuv.shuv2code*` packages and
+their signing certificates. Renaming these IDs would create separate installations
+and invalidate existing Firebase, Play and OAuth registrations.
+
+1. Create a fork-owned Firebase project and register each Android application identifier you intend to build: `dev.shuv.shuv2code.dev`, `dev.shuv.shuv2code.nightly`, or `dev.shuv.shuv2code`.
 2. Download `google-services.json`. Set `ANDROID_GOOGLE_SERVICES_FILE` to its path and `FIREBASE_PROJECT_ID` to the fork project when running Expo prebuild and building the app. The JSON must contain the selected variant's package identifier. Enable Android push explicitly with `MOBILE_PUSH_ENABLED=1`.
 3. Create a service-account key with permission to send FCM messages for that Firebase project. Keep this private JSON outside the repository and the app bundle.
 4. Enable the Firebase Cloud Messaging API in the Google project if it is not already enabled. For hosted delivery, set the relay's `FCM_SERVICE_ACCOUNT` secret to the service-account JSON.

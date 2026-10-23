@@ -11,13 +11,24 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
-import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
 
 export const DESKTOP_HOST = "app";
 const DESKTOP_DEVELOPMENT_SCHEME = "shuv2code-dev";
 
 export function getDesktopScheme(isDevelopment: boolean, version = ""): string {
-  return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : resolveChannelIdentity(version).scheme;
+  // The renderer origin owns saved browser credentials and must survive the rename.
+  return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : resolveLegacyChannelIdentity(version).scheme;
+}
+
+export function getPublicDesktopSchemes(isDevelopment: boolean, version = ""): readonly string[] {
+  return [
+    isDevelopment ? "s2code-dev" : resolveChannelIdentity(version).scheme,
+    getDesktopScheme(isDevelopment, version),
+  ];
 }
 
 function getDesktopOrigin(isDevelopment: boolean, version: string): string {

@@ -1,10 +1,15 @@
-export const DBUS_NAME = "io.github.shuv1337.shuv2code.SnapShot";
-export const DBUS_PATH = "/io/github/shuv1337/shuv2code/SnapShot";
+export const DBUS_NAME = "io.github.shuv1337.s2code.SnapShot";
+export const DBUS_PATH = "/io/github/shuv1337/s2code/SnapShot";
+export const LEGACY_DBUS_NAME = "io.github.shuv1337.shuv2code.SnapShot";
+export const LEGACY_DBUS_PATH = "/io/github/shuv1337/shuv2code/SnapShot";
 export const CLIENT_NAMES = [
   `${DBUS_NAME}.Client`,
   `${DBUS_NAME}.Client.Development`,
   `${DBUS_NAME}.Client.Nightly`,
   `${DBUS_NAME}.Client.Preview`,
+  ...["", ".Development", ".Nightly", ".Preview"].map(
+    (channel) => `${LEGACY_DBUS_NAME}.Client${channel}`,
+  ),
 ];
 
 export function isWaylandSession(meta) {
@@ -46,7 +51,7 @@ export class CaptureService {
           break;
         }
       }
-      if (!allowed) throw new Error("Only shuv2code may request a snapshot.");
+      if (!allowed) throw new Error("Only S2Code may request a snapshot.");
       const pid = options ? await this._getProcessId(sender) : undefined;
       this._checkSession();
       const snapshot = await this._takeSnapshot(options?.animate ?? false);

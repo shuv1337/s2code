@@ -47,11 +47,11 @@ describe("DesktopEnvironment", () => {
           appVersion: `1.2.3-${channel}.20261014.1`,
           isPackaged: true,
         });
-        assert.equal(environment.baseDir, `/Users/alice/.shuv2code-v2-${channel}`);
-        assert.equal(environment.stateDir, `/Users/alice/.shuv2code-v2-${channel}/userdata`);
+        assert.equal(environment.baseDir, `/Users/alice/.s2code-v2-${channel}`);
+        assert.equal(environment.stateDir, `/Users/alice/.s2code-v2-${channel}/userdata`);
         assert.equal(environment.appUserModelId, `dev.shuv.shuv2code.${channel}`);
         assert.equal(environment.linuxDesktopEntryName, `dev.shuv.shuv2code.${channel}.desktop`);
-        assert.equal(environment.linuxWmClass, `shuv2code-${channel}`);
+        assert.equal(environment.linuxWmClass, `s2code-${channel}`);
         assert.equal(
           environment.branding.stageLabel,
           channel === "nightly" ? "Nightly" : "Preview",
@@ -96,7 +96,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
       assert.equal(environment.appUserModelId, "dev.shuv.shuv2code.dev");
-      assert.equal(environment.linuxWmClass, "shuv2code-dev");
+      assert.equal(environment.linuxWmClass, "s2code-dev");
       assert.equal(environment.linuxDesktopEntryName, "dev.shuv.shuv2code.dev.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
@@ -181,8 +181,8 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.shuv2code-v2/dev");
-      assert.equal(production.stateDir, "/Users/alice/.shuv2code-v2/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.s2code-v2/dev");
+      assert.equal(production.stateDir, "/Users/alice/.s2code-v2/userdata");
     }),
   );
 

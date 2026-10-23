@@ -18,6 +18,7 @@ import {
   classifyScope,
   make,
   ownedAgentSlice,
+  leftoverAgentSlices,
   type ScopeState,
 } from "./agentScope.ts";
 
@@ -69,6 +70,7 @@ const withFakeSystemd = <A, E>(
     readonly calls: Array<{ command: string; args: ReadonlyArray<string> }>;
     readonly awaitReset: (unit: string) => Effect.Effect<void>;
     readonly stateDir: string;
+    readonly cleanupSlices: ReadonlyArray<string>;
   }) => Effect.Effect<A, E>,
 ) =>
   Effect.gen(function* () {
@@ -118,12 +120,14 @@ const withFakeSystemd = <A, E>(
       Effect.provideService(HostProcess.Environment, { PATH: bin, XDG_RUNTIME_DIR: "/run/user/1" }),
     );
     const { stateDir } = yield* ServerConfig.ServerConfig;
+    const cleanupSlices = leftoverAgentSlices(stateDir);
     return yield* body({
       scope,
       units,
       calls,
       awaitReset: (unit) => Deferred.await(resetSignal(unit)),
       stateDir,
+      cleanupSlices,
     }).pipe(
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(bin, { recursive: true, force: true }))),
     );
@@ -153,20 +157,20 @@ describe("AgentScope service", () => {
           threadId: "thread",
         });
         const terminal = yield* scope.wrap({ command: "agent", args: [], name: "terminal" });
-        expect(ownedAgentSlice(stateDir)).toMatch(/^app-shuv2code-agents-[0-9a-f]{12}\.slice$/);
+        expect(ownedAgentSlice(stateDir)).toMatch(/^app-s2code-agents-[0-9a-f]{12}\.slice$/);
         for (const launch of [agent, terminal]) {
           expect(launch.args).toContain(`--slice=${ownedAgentSlice(stateDir)}`);
-          expect(unitOf(launch)).toMatch(/^shuv2code-(claude|terminal)-[0-9a-f]{8}\.scope$/);
+          expect(unitOf(launch)).toMatch(/^s2code-(claude|terminal)-[0-9a-f]{8}\.scope$/);
         }
         const probe = calls.find(({ args }) => args.includes("--scope"));
-        expect(probe?.args).toContain("--slice=app-shuv2code-agents.slice");
+        expect(probe?.args).toContain("--slice=app-s2code-agents.slice");
         const limits = calls.filter(({ args }) => args.includes("set-property"));
         expect(limits).toHaveLength(1);
         expect(limits[0]?.args).toEqual([
           "--user",
           "set-property",
           "--runtime",
-          "app-shuv2code-agents.slice",
+          "app-s2code-agents.slice",
           expect.stringMatching(/^MemoryHigh=\d+$/),
           expect.stringMatching(/^MemoryMax=\d+$/),
         ]);
@@ -178,13 +182,13 @@ describe("AgentScope service", () => {
   it.effect(
     "inspects and cleans only its exact tracked scopes, never upstream or other fork scopes",
     () =>
-      withFakeSystemd(({ scope, units, calls, awaitReset, stateDir }) =>
+      withFakeSystemd(({ scope, units, calls, awaitReset, cleanupSlices }) =>
         Effect.gen(function* () {
           const foreign = new Map([
             ["app-t3code-agents.slice", { activeState: "failed", result: "oom-kill" }],
             ["t3code-claude-deadbeef.scope", { activeState: "failed", result: "oom-kill" }],
             ["t3code-terminal-deadbeef.scope", { activeState: "failed", result: "exit-code" }],
-            ["shuv2code-terminal-deadbeef.scope", { activeState: "failed", result: "oom-kill" }],
+            ["s2code-terminal-deadbeef.scope", { activeState: "failed", result: "oom-kill" }],
           ]);
           for (const [unit, state] of foreign) units.set(unit, state);
           const own: string[] = [];
@@ -219,8 +223,8 @@ describe("AgentScope service", () => {
           const inspection = calls.filter(({ args }) => args[1] === "show");
           expect(inspection.length).toBeGreaterThan(0);
           // Besides its scopes, it inspects only this server's own slice at startup.
-          const inspectable = [...own, ownedAgentSlice(stateDir)];
-          expect(inspection.every(({ args }) => inspectable.includes(args[2] ?? ""))).toBe(true);
+          const inspectable = new Set([...own, ...cleanupSlices]);
+          expect(inspection.every(({ args }) => inspectable.has(args[2] ?? ""))).toBe(true);
           expect(
             calls.some(
               ({ args }) =>
@@ -281,7 +285,7 @@ describe("AgentScope service", () => {
           name: "terminal",
           survivesRestart: true,
         });
-        expect(sliceOf(terminal)).toBe("app-shuv2code-agents.slice");
+        expect(sliceOf(terminal)).toBe("app-s2code-agents.slice");
         expect(calls.filter(({ args: [, verb] }) => verb === "stop")).toHaveLength(1);
       }),
     ),
@@ -294,5 +298,29 @@ describe("AgentScope service", () => {
         expect(calls.filter(({ args: [, verb] }) => verb === "stop")).toEqual([]);
       }),
     ),
+  );
+
+  it.effect(
+    "cleans this home's legacy slice while leaving other homes and global slices alone",
+    () =>
+      withFakeSystemd(({ scope, units, calls, stateDir }) =>
+        Effect.gen(function* () {
+          const legacySlice = ownedAgentSlice(stateDir, "shuv2code");
+          const foreignSlices = [
+            ownedAgentSlice(`${stateDir}-other`, "shuv2code"),
+            "app-shuv2code-agents.slice",
+            "app-t3code-agents.slice",
+          ];
+          for (const unit of [legacySlice, ...foreignSlices]) {
+            units.set(unit, { activeState: "active", result: "success" });
+          }
+          yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
+          const stops = calls
+            .filter(({ args: [, verb] }) => verb === "stop")
+            .map(({ args }) => args);
+          expect(stops).toEqual([["--user", "stop", legacySlice]]);
+          expect(calls.every(({ args }) => !foreignSlices.includes(args[2] ?? ""))).toBe(true);
+        }),
+      ),
   );
 });

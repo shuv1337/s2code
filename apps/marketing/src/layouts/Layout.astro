@@ -1,7 +1,7 @@
 ---
 import { getImage, Image } from "astro:assets";
 import appIcon from "../../../../assets/prod/black-universal-1024.png";
-import brandMark from "../../../../assets/brand/shuv2code-devil-terminal.svg";
+import brandMark from "../../../../assets/brand/s2code-devil-terminal.svg";
 import dmSansLatinUrl from "../assets/fonts/dm-sans-latin.woff2?url";
 import "../styles/fonts.css";
 import {
@@ -17,8 +17,8 @@ interface Props {
 }
 
 const {
-  title = "shuv2code",
-  description = "shuv2code: a branded fork of T3 Code for coding agents.",
+  title = "S2Code",
+  description = "S2Code: a branded fork of T3 Code for coding agents.",
   pageClass,
 } = Astro.props;
 
@@ -34,7 +34,7 @@ const socialImage = await getImage({
 });
 const socialImageUrl = Astro.site ? new URL(socialImage.src, Astro.site) : socialImage.src;
 const socialImageAlt =
-  "shuv2code devil-terminal mark";
+  "S2Code devil-terminal mark";
 const canonicalUrl = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefined;
 ---
 
@@ -45,7 +45,7 @@ const canonicalUrl = Astro.site ? new URL(Astro.url.pathname, Astro.site) : unde
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalUrl} />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="shuv2code" />
+    <meta property="og:site_name" content="S2Code" />
     <meta property="og:url" content={canonicalUrl} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -75,9 +75,9 @@ const canonicalUrl = Astro.site ? new URL(Astro.url.pathname, Astro.site) : unde
     <div class:list={["page", pageClass]}>
       <nav class="nav">
         <div class="nav-inner">
-          <a href="/" class="nav-brand" aria-label="shuv2code home">
+          <a href="/" class="nav-brand" aria-label="S2Code home">
             <img src={brandMark.src} class="nav-brand-mark" width="28" height="28" alt="" />
-            <span class="nav-brand-name">shuv2code</span>
+            <span class="nav-brand-name">S2Code</span>
           </a>
           <div class="nav-right">
             <a class="nav-link" href="/download">Download</a>
@@ -86,7 +86,7 @@ const canonicalUrl = Astro.site ? new URL(Astro.url.pathname, Astro.site) : unde
               href={GITHUB_REPOSITORY_URL}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="shuv2code on GitHub"
+              aria-label="S2Code on GitHub"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M12 2.3l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.12l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.3z"/>
@@ -123,9 +123,9 @@ const canonicalUrl = Astro.site ? new URL(Astro.url.pathname, Astro.site) : unde
             <a href="/download">Download</a>
             <a href={IOS_APP_STORE_URL} target="_blank" rel="noopener noreferrer">Upstream iOS</a>
             <a href={ANDROID_PLAY_STORE_URL} target="_blank" rel="noopener noreferrer">Upstream Android</a>
-            <a href="/terms-of-service">Terms</a>
-            <a href="/privacy-policy">Privacy</a>
-            <a href="/security-policy">Security</a>
+            <a href="/terms-of-service">Upstream terms</a>
+            <a href="/privacy-policy">Upstream privacy</a>
+            <a href="/security-policy">Upstream security</a>
           </div>
         </div>
       </footer>

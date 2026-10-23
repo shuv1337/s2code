@@ -21,7 +21,7 @@ it.skipIf(hostPlatform === "win32")(
     const entry = NodePath.join(root, "node_modules/shuv2code/dist/bin.mjs");
     const executable = NodePath.join(
       root,
-      `node_modules/@shuv2code/t3-${hostPlatform}-${hostArch}/t3`,
+      `node_modules/@s2code/t3-${hostPlatform}-${hostArch}/t3`,
     );
     await NodeFSP.mkdir(NodePath.dirname(entry), { recursive: true });
     await NodeFSP.mkdir(NodePath.dirname(executable), { recursive: true });

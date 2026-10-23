@@ -1,5 +1,7 @@
 import type { DesktopCliCommandState } from "@t3tools/contracts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import { useEffect, useState } from "react";
+import { APP_VERSION } from "~/branding";
 
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -7,6 +9,7 @@ import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 export function CliCommandSettingsRow() {
+  const commandName = resolveChannelIdentity(APP_VERSION).executableName;
   const bridge = typeof window === "undefined" ? undefined : window.desktopBridge?.cliCommand;
   const [state, setState] = useState<DesktopCliCommandState | null>(null);
   const [pending, setPending] = useState(false);
@@ -35,7 +38,9 @@ export function CliCommandSettingsRow() {
           stackedThreadToast({
             type: "error",
             title:
-              action === "install" ? "Could not install shuv2code" : "Could not remove shuv2code",
+              action === "install"
+                ? `Could not install ${commandName}`
+                : `Could not remove ${commandName}`,
             description: error instanceof Error ? error.message : "Something went wrong.",
           }),
         );
@@ -46,16 +51,17 @@ export function CliCommandSettingsRow() {
   if (!bridge || !state?.supported) return null;
   const installed = state.installedPath !== null;
   const description = state.shadowedBy
-    ? `Another shuv2code at ${state.shadowedBy} runs first in a new terminal. Remove it to use this app's.`
+    ? `Another ${commandName} at ${state.shadowedBy} runs first in a new terminal. Remove it to use this app's.`
     : !installed
-      ? "Run shuv2code's CLI as `shuv2code` from any terminal."
+      ? `Run S2Code's CLI as \`${commandName}\` from any terminal.`
       : state.onPath
         ? `Installed at ${state.installedPath}. Open a new terminal to use it.`
-        : `Installed at ${state.installedPath}, which is not on your PATH yet. Add its folder to your PATH to run \`shuv2code\`.`;
+        : `Installed at ${state.installedPath}, which is not on your PATH yet. Add its folder to your PATH to run \`${commandName}\`.`;
 
   return (
     <SettingsRow
       {...searchableSetting("cli-command")}
+      title={`${commandName} command`}
       description={description}
       control={
         <Button

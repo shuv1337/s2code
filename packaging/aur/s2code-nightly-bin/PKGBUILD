@@ -1,12 +1,15 @@
 # Maintained in https://github.com/shuv1337/shuv2code/tree/main/packaging/aur
 
-pkgname=shuv2code-nightly-bin
+pkgname=s2code-nightly-bin
 pkgver=0.0.0_nightly.19700101.0
 pkgrel=1
 pkgdesc='Nightly desktop control surface for local coding agents'
 arch=('x86_64')
 url='https://github.com/shuv1337/shuv2code'
 license=('MIT')
+provides=('shuv2code-nightly-bin')
+conflicts=('shuv2code-nightly-bin')
+replaces=('shuv2code-nightly-bin')
 depends=(
   'alsa-lib'
   'at-spi2-core'
@@ -71,31 +74,32 @@ package() {
   chmod -R u=rwX,go=rX "$pkgdir/opt/$pkgname"
   chmod 4755 "$pkgdir/opt/$pkgname/chrome-sandbox"
 
-  install -Dm755 /dev/stdin "$pkgdir/usr/bin/shuv2code-nightly" <<'EOF'
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/s2code-nightly" <<'EOF'
 #!/bin/sh
-exec /opt/shuv2code-nightly-bin/AppRun "$@"
+exec /opt/s2code-nightly-bin/AppRun "$@"
 EOF
+  ln -s s2code-nightly "$pkgdir/usr/bin/shuv2code-nightly"
 
   # Icon lookup only sees sizes registered in hicolor's index.theme (max 512x512).
   local icon size_dir
-  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/shuv2code-nightly.png; do
-    size_dir="${icon%/apps/shuv2code-nightly.png}"
+  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/s2code-nightly.png; do
+    size_dir="${icon%/apps/s2code-nightly.png}"
     install -Dm644 "$icon" \
-      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/shuv2code-nightly.png"
+      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/s2code-nightly.png"
   done
 
-  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/shuv2code-nightly.desktop" <<'EOF'
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/s2code-nightly.desktop" <<'EOF'
 [Desktop Entry]
 Name=S2Code (Nightly)
 Comment=Nightly desktop control surface for local coding agents
-Exec=shuv2code-nightly %U
-TryExec=shuv2code-nightly
+Exec=s2code-nightly %U
+TryExec=s2code-nightly
 Terminal=false
 Type=Application
-Icon=shuv2code-nightly
-StartupWMClass=shuv2code-nightly
+Icon=s2code-nightly
+StartupWMClass=s2code-nightly
 Categories=Development;
-MimeType=x-scheme-handler/shuv2code-nightly;
+MimeType=x-scheme-handler/s2code-nightly;x-scheme-handler/shuv2code-nightly;
 EOF
 
   install -Dm644 "$srcdir/${pkgname}-${pkgver}-LICENSE" \

@@ -81,10 +81,10 @@ If no credentials are saved, S2Code falls back to these variables in the server'
 Restart the server after changing them:
 
 ```bash
-export SHUV2CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
+export S2CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
 # or
-export SHUV2CODE_BITBUCKET_EMAIL="you@example.com"
-export SHUV2CODE_BITBUCKET_API_TOKEN="your-token"
+export S2CODE_BITBUCKET_EMAIL="you@example.com"
+export S2CODE_BITBUCKET_API_TOKEN="your-token"
 ```
 
 ### Azure DevOps

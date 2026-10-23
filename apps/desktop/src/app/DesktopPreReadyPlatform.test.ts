@@ -63,6 +63,7 @@ vi.mock("node:child_process", () => ({
 // Home ownership has its own filesystem tests; this suite isolates Electron setup.
 vi.mock("@t3tools/shared/productHome", () => ({
   ensureProductHome: vi.fn(),
+  resolveDefaultProductHome: (home: string, directory: string) => `${home}/${directory}`,
 }));
 
 import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
@@ -186,7 +187,10 @@ describe("DesktopPreReadyPlatform", () => {
         assert.equal(identity.desktopName, "dev.shuv.shuv2code.desktop");
         assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
         assert.include(identity.desktopEntry ?? "", "Name=S2Code (Alpha)");
-        assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/shuv2code;");
+        assert.include(
+          identity.desktopEntry ?? "",
+          "MimeType=x-scheme-handler/s2code;x-scheme-handler/shuv2code;",
+        );
         assert.include(
           identity.desktopEntry ?? "",
           "Icon=/xdg/icons/dev.shuv.shuv2code.desktop.png",
@@ -216,7 +220,7 @@ describe("DesktopPreReadyPlatform", () => {
     return Effect.gen(function* () {
       yield* DesktopPreReadyPlatform.make;
       const contents = writeFileSyncMock.mock.calls[0]?.[1];
-      assert.include(contents, "MimeType=x-scheme-handler/shuv2code;");
+      assert.include(contents, "MimeType=x-scheme-handler/s2code;x-scheme-handler/shuv2code;");
       assert.include(contents, "Icon=");
       assert.equal(setDesktopNameMock.mock.calls.length, 1);
     }).pipe(Effect.provideService(HostProcess.Platform, "linux"));

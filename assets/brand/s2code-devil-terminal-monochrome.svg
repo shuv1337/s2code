@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">shuv2code monochrome devil terminal mark</title>
+  <title id="title">S2Code monochrome devil terminal mark</title>
   <desc id="desc">A one-color horned terminal with a command prompt knocked out of the screen.</desc>
   <!-- Icon master: the horned body is centred at (256,256), and the tail extends to the right. -->
   <mask id="screen" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
