@@ -6,6 +6,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeModule from "node:module";
 // plist is CommonJS; Node cannot load its named exports from an ES module.
 import Plist from "plist";
+import semver from "semver";
 
 import {
   createPackageWithOptions,
@@ -1643,15 +1644,81 @@ export function createStageWorkspaceConfig(input: {
   };
 }
 
+const StagePatchMismatch = Schema.Struct({
+  packageName: Schema.String,
+  spec: Schema.String,
+  patchVersions: Schema.Array(Schema.String),
+});
+
+export class StagePatchedDependencyMismatchError extends Schema.TaggedError<StagePatchedDependencyMismatchError>()(
+  "StagePatchedDependencyMismatchError",
+  {
+    mismatches: Schema.Array(StagePatchMismatch),
+  },
+) {
+  override get message(): string {
+    return this.mismatches
+      .map(
+        (mismatch) =>
+          `${mismatch.packageName} spec ${mismatch.spec} does not match patched versions ${mismatch.patchVersions.join(", ")}`,
+      )
+      .join("; ");
+  }
+}
+
 export function createStagePatchedDependencies(
-  patchedDependencies: Record<string, string>,
-  dependencies: Record<string, unknown>,
+  patchedDependencies: Readonly<Record<string, string>>,
+  dependencies: Readonly<Record<string, unknown>>,
 ): Record<string, string> {
+  const versionsByPackage = patchVersionsByPackage(patchedDependencies);
+  const mismatches: Array<typeof StagePatchMismatch.Type> = [];
+  for (const [packageName, patchVersions] of versionsByPackage) {
+    if (!Object.hasOwn(dependencies, packageName)) continue;
+    const spec = dependencies[packageName];
+    const specText = typeof spec === "string" ? spec : String(spec);
+    if (typeof spec === "string" && patchVersions.some((version) => versionsEqual(spec, version))) {
+      continue;
+    }
+    // A range we refuse to pin can still resolve a newer release. Keeping the
+    // patch then fails the install with ERR_PNPM_UNUSED_PATCH, so fail here
+    // with the package, the spec, and the patch versions.
+    mismatches.push({ packageName, spec: specText, patchVersions: [...patchVersions] });
+  }
+  if (mismatches.length > 0) {
+    throw new StagePatchedDependencyMismatchError({ mismatches });
+  }
+
   return Object.fromEntries(
-    Object.entries(patchedDependencies).filter(([patchKey]) =>
-      Object.hasOwn(dependencies, getPatchedDependencyPackageName(patchKey)),
-    ),
+    Object.entries(patchedDependencies).filter(([patchKey]) => {
+      const { name, version } = splitPatchedDependencyKey(patchKey);
+      if (version === undefined || !Object.hasOwn(dependencies, name)) return false;
+      const spec = dependencies[name];
+      return typeof spec === "string" && versionsEqual(spec, version);
+    }),
   );
+}
+
+export function stagePatchedDependenciesFrom(
+  patchedDependencies: Readonly<Record<string, string>>,
+  dependencies: Readonly<Record<string, unknown>>,
+) {
+  return Effect.try({
+    try: () => createStagePatchedDependencies(patchedDependencies, dependencies),
+    catch: stagePatchMismatchFromCause,
+  });
+}
+
+function stagePatchMismatchFromCause(cause: unknown): StagePatchedDependencyMismatchError {
+  if (Schema.is(StagePatchedDependencyMismatchError)(cause)) return cause;
+  return new StagePatchedDependencyMismatchError({
+    mismatches: [
+      {
+        packageName: "stage",
+        spec: cause instanceof Error ? cause.message : String(cause),
+        patchVersions: [],
+      },
+    ],
+  });
 }
 
 /**
@@ -1665,16 +1732,7 @@ export function pinPatchedStageDependencies(
   dependencies: Readonly<Record<string, string>>,
   patchedDependencies: Readonly<Record<string, string>>,
 ): Record<string, string> {
-  const versionsByPackage = new Map<string, Array<string>>();
-  for (const patchKey of Object.keys(patchedDependencies)) {
-    const version = getPatchedDependencyVersion(patchKey);
-    if (version === undefined) continue;
-    const packageName = getPatchedDependencyPackageName(patchKey);
-    const versions = versionsByPackage.get(packageName);
-    if (versions === undefined) versionsByPackage.set(packageName, [version]);
-    else versions.push(version);
-  }
-
+  const versionsByPackage = patchVersionsByPackage(patchedDependencies);
   return Object.fromEntries(
     Object.entries(dependencies).map(([name, spec]) => {
       const pinned = versionsByPackage
@@ -1685,22 +1743,173 @@ export function pinPatchedStageDependencies(
   );
 }
 
-function getPatchedDependencyPackageName(patchKey: string): string {
-  const versionSeparator = patchKey.lastIndexOf("@");
-  return versionSeparator > 0 ? patchKey.slice(0, versionSeparator) : patchKey;
+/**
+ * Platform binaries are chosen from `@ff-labs/fff-node`'s spec. Pin that spec
+ * first so a floating range cannot install bins from a different release than
+ * the patched package.
+ */
+export function withPinnedFffNativeDependencies(
+  dependencies: Readonly<Record<string, string>>,
+  patchedDependencies: Readonly<Record<string, string>>,
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+  fffNodeVersion?: string,
+): Record<string, string> {
+  const pinned = pinPatchedStageDependencies(dependencies, patchedDependencies);
+  const declared = pinned["@ff-labs/fff-node"] ?? fffNodeVersion;
+  if (declared === undefined) return pinned;
+  const version =
+    pinned["@ff-labs/fff-node"] ??
+    pinPatchedStageDependencies({ "@ff-labs/fff-node": declared }, patchedDependencies)[
+      "@ff-labs/fff-node"
+    ] ??
+    declared;
+  return {
+    ...pinned,
+    ...resolveFffNativeDependencies(platform, arch, version),
+  };
 }
 
-function getPatchedDependencyVersion(patchKey: string): string | undefined {
-  const versionSeparator = patchKey.lastIndexOf("@");
-  if (versionSeparator <= 0) return undefined;
-  const version = patchKey.slice(versionSeparator + 1);
-  return version.length > 0 ? version : undefined;
+export function pinPatchedOverrideSpecs(
+  overrides: Readonly<Record<string, string>>,
+  patchedDependencies: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const pinned = Object.fromEntries(
+    Object.entries(overrides).map(([selector, spec]) => {
+      const packageName = overrideTargetPackageName(selector);
+      if (packageName === undefined) return [selector, spec];
+      const pinnedSpec = pinPatchedStageDependencies({ [packageName]: spec }, patchedDependencies)[
+        packageName
+      ];
+      return [selector, pinnedSpec ?? spec];
+    }),
+  );
+  const versionsByPackage = patchVersionsByPackage(patchedDependencies);
+  const mismatches: Array<typeof StagePatchMismatch.Type> = [];
+  for (const [selector, spec] of Object.entries(pinned)) {
+    const packageName = overrideTargetPackageName(selector);
+    if (packageName === undefined) continue;
+    const patchVersions = versionsByPackage.get(packageName);
+    // `"-"` drops the edge, and protocol specs are resolved before this runs.
+    // A remaining registry range that is not the patched version would replace
+    // the pinned dependency and leave that patch unused.
+    if (patchVersions === undefined || overrideSpecSkipsPatchCheck(spec)) continue;
+    if (patchVersions.some((version) => versionsEqual(spec, version))) continue;
+    mismatches.push({ packageName, spec, patchVersions: [...patchVersions] });
+  }
+  if (mismatches.length > 0) {
+    throw new StagePatchedDependencyMismatchError({ mismatches });
+  }
+  return pinned;
 }
 
+export function stageOverrideSpecsFrom(
+  overrides: Readonly<Record<string, string>>,
+  patchedDependencies: Readonly<Record<string, string>>,
+) {
+  return Effect.try({
+    try: () => pinPatchedOverrideSpecs(overrides, patchedDependencies),
+    catch: stagePatchMismatchFromCause,
+  });
+}
+
+function patchVersionsByPackage(
+  patchedDependencies: Readonly<Record<string, string>>,
+): Map<string, Array<string>> {
+  const versionsByPackage = new Map<string, Array<string>>();
+  for (const patchKey of Object.keys(patchedDependencies)) {
+    const { name, version } = splitPatchedDependencyKey(patchKey);
+    if (version === undefined) continue;
+    const versions = versionsByPackage.get(name);
+    if (versions === undefined) versionsByPackage.set(name, [version]);
+    else versions.push(version);
+  }
+  return versionsByPackage;
+}
+
+// Peer suffixes (`name@version(@types/node@1.0.0)`) contain their own `@`.
+// The version separator is the `@` before the version, on the bare key.
+function splitPatchedDependencyKey(patchKey: string): {
+  readonly name: string;
+  readonly version: string | undefined;
+} {
+  const peerStart = patchKey.indexOf("(");
+  const bare = peerStart === -1 ? patchKey : patchKey.slice(0, peerStart);
+  const versionAt = bare.startsWith("@") ? bare.indexOf("@", 1) : bare.indexOf("@");
+  if (versionAt <= 0) return { name: bare, version: undefined };
+  const version = bare.slice(versionAt + 1);
+  return { name: bare.slice(0, versionAt), version: version.length > 0 ? version : undefined };
+}
+
+function overrideTargetPackageName(selector: string): string | undefined {
+  const target = selector.slice(selector.lastIndexOf(">") + 1).trim();
+  if (target.length === 0) return undefined;
+  const name = splitPatchedDependencyKey(target).name;
+  return name.length > 0 ? name : undefined;
+}
+
+function overrideSpecSkipsPatchCheck(spec: string): boolean {
+  const trimmed = spec.trim();
+  return trimmed === "-" || trimmed.startsWith("$") || NON_REGISTRY_SPEC.test(trimmed);
+}
+
+// Alias and protocol specs are not registry ranges. Pinning them would drop
+// the protocol and install the bare version.
+const NON_REGISTRY_SPEC = /^(?:workspace:|npm:|file:|link:|portal:|catalog:|git\+|github:|https?:)/;
+
+function rawAnchorOperator(spec: string): "^" | "~" | ">=" | undefined {
+  if (spec.startsWith(">=")) return ">=";
+  if (spec.startsWith("^")) return "^";
+  if (spec.startsWith("~")) return "~";
+  return undefined;
+}
+
+// `semver.Range` expands `^` and `~` into two comparators (`>=` and `<`).
+// A compound range is also two comparators, and `>=1.2.0<2` does not parse.
+// Only a raw `^`/`~` with that exact pair, or a lone `>=`, is an anchor.
 // `>` is excluded: that range does not include the patched version itself.
 function specAnchoredOnPatchedVersion(spec: string, version: string): boolean {
-  const match = /^(?:\^|~|>=)v?(\S+)/.exec(spec.trim());
-  return match?.[1] === version;
+  const trimmed = spec.trim();
+  if (NON_REGISTRY_SPEC.test(trimmed)) return false;
+  const operator = rawAnchorOperator(trimmed);
+  if (operator === undefined) return false;
+  try {
+    const range = new semver.Range(trimmed, { includePrerelease: true });
+    const comparators = range.set.length === 1 ? range.set[0] : undefined;
+    if (comparators === undefined) return false;
+    if (operator === ">=") {
+      const only = comparators[0];
+      return (
+        comparators.length === 1 &&
+        only !== undefined &&
+        only.operator === ">=" &&
+        versionsEqual(only.semver.version, version)
+      );
+    }
+    const lower = comparators[0];
+    const upper = comparators[1];
+    return (
+      comparators.length === 2 &&
+      lower !== undefined &&
+      upper !== undefined &&
+      lower.operator === ">=" &&
+      upper.operator === "<" &&
+      versionsEqual(lower.semver.version, version)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function versionsEqual(left: string, right: string): boolean {
+  const normalizedLeft = left.trim();
+  const normalizedRight = right.trim();
+  if (normalizedLeft === normalizedRight) return true;
+  try {
+    return semver.eq(normalizedLeft, normalizedRight);
+  } catch {
+    return false;
+  }
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -3127,14 +3336,14 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   yield* fs.makeDirectory(path.join(serverStageDir, "apps/server"), { recursive: true });
   yield* fs.copy(input.serverDistDir, path.join(serverStageDir, "apps/server/dist"));
 
-  const sidecarDependencies = pinPatchedStageDependencies(
-    {
-      ...input.runtimeExternalDependencies,
-      ...resolveFffNativeDependencies("win", input.arch, input.fffNodeVersion),
-    },
+  const sidecarDependencies = withPinnedFffNativeDependencies(
+    input.runtimeExternalDependencies,
     input.patchedDependencies,
+    "win",
+    input.arch,
+    input.fffNodeVersion,
   );
-  const sidecarPatchedDependencies = createStagePatchedDependencies(
+  const sidecarPatchedDependencies = yield* stagePatchedDependenciesFrom(
     input.patchedDependencies,
     sidecarDependencies,
   );
@@ -3156,7 +3365,7 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
       arch: input.arch,
       allowBuilds: input.allowBuilds,
       patchedDependencies: sidecarPatchedDependencies,
-      overrides: input.overrides,
+      overrides: yield* stageOverrideSpecsFrom(input.overrides, input.patchedDependencies),
     }),
     // The tree gets packed into server.asar, which cannot carry pnpm's
     // symlink/junction layout, so install a physical, hoisted node_modules.
@@ -3894,19 +4103,22 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
-  const stageDependencies = pinPatchedStageDependencies(
+  const stageDependencies =
     options.platform === "win"
-      ? { ...resolvedDesktopRuntimeDependencies }
-      : resolveMergedStageDependencies({
-          platform: options.platform,
-          serverDependencies: resolvedServerDependencies,
-          desktopDependencies: resolvedDesktopRuntimeDependencies,
-          arch: options.arch,
-          fffNodeVersion: serverPackageJson.dependencies["@ff-labs/fff-node"],
-        }),
-    workspacePatchedDependencies,
-  );
-  const stagePatchedDependencies = createStagePatchedDependencies(
+      ? pinPatchedStageDependencies(
+          resolvedDesktopRuntimeDependencies,
+          workspacePatchedDependencies,
+        )
+      : withPinnedFffNativeDependencies(
+          {
+            ...selectCliRuntimeExternalDependencies(resolvedServerDependencies),
+            ...resolvedDesktopRuntimeDependencies,
+          },
+          workspacePatchedDependencies,
+          options.platform,
+          options.arch,
+        );
+  const stagePatchedDependencies = yield* stagePatchedDependenciesFrom(
     workspacePatchedDependencies,
     stageDependencies,
   );
@@ -3959,7 +4171,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     arch: options.arch,
     allowBuilds: workspaceAllowBuilds,
     patchedDependencies: stagePatchedDependencies,
-    overrides: resolvedOverrides,
+    overrides: yield* stageOverrideSpecsFrom(resolvedOverrides, workspacePatchedDependencies),
   });
   const stageWorkspaceConfigString = yield* encodeStageWorkspaceConfig(stageWorkspaceConfig);
   yield* fs.writeFileString(

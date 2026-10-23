@@ -25,11 +25,11 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import {
   assertStagedFfmpeg,
-  createStagePatchedDependencies,
   createStageWorkspaceConfig,
-  pinPatchedStageDependencies,
-  resolveFffNativeDependencies,
+  stageOverrideSpecsFrom,
+  stagePatchedDependenciesFrom,
   STAGE_INSTALL_ARGS,
+  withPinnedFffNativeDependencies,
 } from "./build-desktop-artifact.ts";
 import {
   partitionStageDependencies,
@@ -165,14 +165,14 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
       hint: "The archive stages fff's platform binary from this version.",
     });
   }
-  const dependencies = pinPatchedStageDependencies(
-    {
-      ...selectCliRuntimeExternalDependencies(serverDependencies),
-      ...resolveFffNativeDependencies(input.platform, input.arch, fffNodeVersion),
-    },
+  const dependencies = withPinnedFffNativeDependencies(
+    selectCliRuntimeExternalDependencies(serverDependencies),
     workspace.patchedDependencies ?? {},
+    input.platform,
+    input.arch,
+    fffNodeVersion,
   );
-  const patchedDependencies = createStagePatchedDependencies(
+  const patchedDependencies = yield* stagePatchedDependenciesFrom(
     workspace.patchedDependencies ?? {},
     dependencies,
   );
@@ -195,7 +195,10 @@ const stageRuntimeExternals = Effect.fn("stageRuntimeExternals")(function* (inpu
         arch: input.arch,
         ...(workspace.allowBuilds ? { allowBuilds: workspace.allowBuilds } : {}),
         patchedDependencies,
-        overrides: resolveCatalogDependencies(workspace.overrides ?? {}, catalog, "apps/server"),
+        overrides: yield* stageOverrideSpecsFrom(
+          resolveCatalogDependencies(workspace.overrides ?? {}, catalog, "apps/server"),
+          workspace.patchedDependencies ?? {},
+        ),
       }),
       nodeLinker: "hoisted",
     }),
