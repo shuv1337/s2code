@@ -49,8 +49,13 @@ function ConvertTo-ResultText($Result) {
 
 function Get-SmokeEnvironment([string] $StubLog) {
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } else { "AMD64" }
+  # Windows PowerShell 5.1 looks up cmd.exe on PATH to run a .cmd file.
+  # With PATH empty it exits 0 and writes nothing, which is the blank
+  # `running s2code-nightly.cmd:` failure from release run 54. System32
+  # is enough to find cmd.exe and does not contain node.
   return @{
-    PATH                     = ""
+    PATH                     = (Join-Path $script:SystemRoot "System32")
+    PATHEXT                  = ".COM;.EXE;.BAT;.CMD"
     HOME                     = $script:Root
     USERPROFILE              = $script:Root
     TMPDIR                   = $script:Root

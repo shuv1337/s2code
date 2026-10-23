@@ -190,6 +190,13 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
         ].join("\n"),
       });
     const command = resolveChannelIdentity(input.expectVersion).executableName;
+    // PowerShell 5.1 runs a .cmd by finding cmd.exe on PATH. The cleared
+    // smoke PATH makes that launch exit 0 with empty stdout and stderr.
+    const shimEnv = {
+      ...env,
+      PATH: path.join(systemRoot, "System32"),
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+    };
     for (const name of [command, command.replace("s2code", "shuv2code")]) {
       const aliasArgs = [
         "-NoProfile",
@@ -197,7 +204,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
         "-Command",
         `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${name}.cmd') --version; exit $LASTEXITCODE`,
       ];
-      const alias = yield* runExecutable(powershell, aliasArgs, scratch, env);
+      const alias = yield* runExecutable(powershell, aliasArgs, scratch, shimEnv);
       if (alias.exitCode !== 0 || alias.stdout.trim() !== version.stdout.trim())
         return yield* new CliArchiveSmokeError({
           step: `running ${name}.cmd`,
