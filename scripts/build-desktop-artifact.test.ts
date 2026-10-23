@@ -15,6 +15,8 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
+import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+
 import {
   BundleNotSelfContainedError,
   BuildCommandFailedError,
@@ -22,6 +24,7 @@ import {
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
+  pinPatchedStageDependencies,
   readWorkspaceConfig,
   createBuildConfig,
   DESKTOP_ELECTRON_LANGUAGES,
@@ -477,6 +480,67 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       },
     );
   });
+
+  it("pins floating patched dependencies to the version the patch names", () => {
+    const patches = {
+      "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+      "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+      "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    };
+    assert.deepStrictEqual(
+      pinPatchedStageDependencies(
+        {
+          "@ff-labs/fff-node": "0.11.0",
+          effect: "^4.0.5",
+          "left-alone": "^1.0.0",
+          "node-pty": "^1.2.0-beta.15",
+        },
+        patches,
+      ),
+      {
+        "@ff-labs/fff-node": "0.11.0",
+        effect: "^4.0.5",
+        "left-alone": "^1.0.0",
+        "node-pty": "1.2.0-beta.15",
+      },
+    );
+    for (const spec of ["^1.2.0-beta.15", "~1.2.0-beta.15", ">=1.2.0-beta.15"]) {
+      assert.strictEqual(
+        pinPatchedStageDependencies({ "node-pty": spec }, patches)["node-pty"],
+        "1.2.0-beta.15",
+      );
+    }
+    // A `>` range does not include the patched version, so it must stay put.
+    assert.strictEqual(
+      pinPatchedStageDependencies({ "node-pty": ">1.2.0-beta.15" }, patches)["node-pty"],
+      ">1.2.0-beta.15",
+    );
+    assert.deepStrictEqual(
+      createStagePatchedDependencies(patches, {
+        "node-pty": "1.2.0-beta.15",
+        "@ff-labs/fff-node": "0.11.0",
+      }),
+      {
+        "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+        "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+      },
+    );
+  });
+
+  it.effect("pins the server node-pty range to the patched version", () =>
+    Effect.gen(function* () {
+      const { patchedDependencies = {} } = yield* readWorkspaceConfig();
+      const pinned = pinPatchedStageDependencies(
+        { "node-pty": serverPackageJson.dependencies["node-pty"] },
+        patchedDependencies,
+      );
+      assert.strictEqual(pinned["node-pty"], "1.2.0-beta.15");
+      assert.strictEqual(
+        createStagePatchedDependencies(patchedDependencies, pinned)["node-pty@1.2.0-beta.15"],
+        "patches/node-pty@1.2.0-beta.15.patch",
+      );
+    }),
+  );
 
   it("carries only staged dependency patch metadata into staged desktop installs", () => {
     assert.deepStrictEqual(

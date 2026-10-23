@@ -1654,9 +1654,53 @@ export function createStagePatchedDependencies(
   );
 }
 
+/**
+ * A staged install has no lockfile, so pnpm resolves ranges again. Its default
+ * minimumReleaseAge is 24 hours: a newer prerelease that still satisfies
+ * `^1.2.0-beta.15` becomes eligible a day after publish, and pnpm then rejects
+ * the install because `patchedDependencies` names the older exact version.
+ * Pin a range that is anchored on the patched version so that patch still applies.
+ */
+export function pinPatchedStageDependencies(
+  dependencies: Readonly<Record<string, string>>,
+  patchedDependencies: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const versionsByPackage = new Map<string, Array<string>>();
+  for (const patchKey of Object.keys(patchedDependencies)) {
+    const version = getPatchedDependencyVersion(patchKey);
+    if (version === undefined) continue;
+    const packageName = getPatchedDependencyPackageName(patchKey);
+    const versions = versionsByPackage.get(packageName);
+    if (versions === undefined) versionsByPackage.set(packageName, [version]);
+    else versions.push(version);
+  }
+
+  return Object.fromEntries(
+    Object.entries(dependencies).map(([name, spec]) => {
+      const pinned = versionsByPackage
+        .get(name)
+        ?.find((version) => specAnchoredOnPatchedVersion(spec, version));
+      return [name, pinned ?? spec];
+    }),
+  );
+}
+
 function getPatchedDependencyPackageName(patchKey: string): string {
   const versionSeparator = patchKey.lastIndexOf("@");
   return versionSeparator > 0 ? patchKey.slice(0, versionSeparator) : patchKey;
+}
+
+function getPatchedDependencyVersion(patchKey: string): string | undefined {
+  const versionSeparator = patchKey.lastIndexOf("@");
+  if (versionSeparator <= 0) return undefined;
+  const version = patchKey.slice(versionSeparator + 1);
+  return version.length > 0 ? version : undefined;
+}
+
+// `>` is excluded: that range does not include the patched version itself.
+function specAnchoredOnPatchedVersion(spec: string, version: string): boolean {
+  const match = /^(?:\^|~|>=)v?(\S+)/.exec(spec.trim());
+  return match?.[1] === version;
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -3083,10 +3127,13 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
   yield* fs.makeDirectory(path.join(serverStageDir, "apps/server"), { recursive: true });
   yield* fs.copy(input.serverDistDir, path.join(serverStageDir, "apps/server/dist"));
 
-  const sidecarDependencies = {
-    ...input.runtimeExternalDependencies,
-    ...resolveFffNativeDependencies("win", input.arch, input.fffNodeVersion),
-  };
+  const sidecarDependencies = pinPatchedStageDependencies(
+    {
+      ...input.runtimeExternalDependencies,
+      ...resolveFffNativeDependencies("win", input.arch, input.fffNodeVersion),
+    },
+    input.patchedDependencies,
+  );
   const sidecarPatchedDependencies = createStagePatchedDependencies(
     input.patchedDependencies,
     sidecarDependencies,
@@ -3847,7 +3894,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
-  const stageDependencies =
+  const stageDependencies = pinPatchedStageDependencies(
     options.platform === "win"
       ? { ...resolvedDesktopRuntimeDependencies }
       : resolveMergedStageDependencies({
@@ -3856,7 +3903,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
           desktopDependencies: resolvedDesktopRuntimeDependencies,
           arch: options.arch,
           fffNodeVersion: serverPackageJson.dependencies["@ff-labs/fff-node"],
-        });
+        }),
+    workspacePatchedDependencies,
+  );
   const stagePatchedDependencies = createStagePatchedDependencies(
     workspacePatchedDependencies,
     stageDependencies,
