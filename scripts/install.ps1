@@ -233,19 +233,47 @@ foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-P
 $binDir = [IO.Path]::GetFullPath($binDir)
 $legacyCommandName = "shuv2code" + $commandName.Substring("s2code".Length)
 $legacyCommand = Join-Path $binDir "$legacyCommandName.cmd"
-# cmd.exe does not chain to a quoted .cmd. Without call, a bin path that
-# contains a space never starts the legacy launcher, and s2code exits with no output.
-$canonicalForwarder = "@echo off`r`ncall `"$legacyCommand`" %*"
+# Run the legacy shim's `"<t3.exe>" %*` line in this process. `call` parses
+# `%` and `^` a second time, and a quoted `.cmd` without `call` never starts
+# when the bin path contains a space. The legacy path stays in this file
+# because installed updaters only rewrite the legacy command. Keep this body
+# in lockstep with windowsForwarderShim.
+$canonicalForwarder = @(
+  '@echo off',
+  'setlocal DisableDelayedExpansion',
+  'set "s2_line="',
+  "for /f `"usebackq skip=1 delims=`" %%L in (`"$legacyCommand`") do set `"s2_line=%%L`"",
+  'if not defined s2_line exit /b 1',
+  'set "s2_exe=%s2_line:~1,-4%"',
+  'if not defined s2_exe exit /b 1',
+  'endlocal & "%s2_exe%" %*',
+  'exit /b %ERRORLEVEL%'
+) -join "`r`n"
+# Bodies written before the repair. The legacy file still has to be an owned
+# launcher. `-eq` is case-insensitive so a later GetFullPath casing still matches.
+$previousForwarders = @(
+  "@echo off`r`n`"$legacyCommand`" %*",
+  "@echo off`r`ncall `"$legacyCommand`" %*"
+)
 $commandNames = @($commandName, $legacyCommandName)
 foreach ($name in $commandNames) {
   $existingCommand = Join-Path $binDir "$name.cmd"
   if (Test-Path -LiteralPath $existingCommand) {
     Assert-ProductPath $existingCommand
     $content = [IO.File]::ReadAllText($existingCommand)
-    if ($name -eq $commandName -and $content -eq $canonicalForwarder) {
-      Assert-ProductPath $legacyCommand
-      if (-not (Test-Path -LiteralPath $legacyCommand -PathType Leaf)) { Fail "Refusing a canonical command without an owned legacy launcher: $existingCommand" }
-      $content = [IO.File]::ReadAllText($legacyCommand)
+    if ($name -eq $commandName) {
+      $trimmed = $content.TrimEnd("`r`n")
+      $ownedForwarder = $trimmed -eq $canonicalForwarder
+      if (-not $ownedForwarder) {
+        foreach ($previous in $previousForwarders) {
+          if ($trimmed -eq $previous) { $ownedForwarder = $true; break }
+        }
+      }
+      if ($ownedForwarder) {
+        Assert-ProductPath $legacyCommand
+        if (-not (Test-Path -LiteralPath $legacyCommand -PathType Leaf)) { Fail "Refusing a canonical command without an owned legacy launcher: $existingCommand" }
+        $content = [IO.File]::ReadAllText($legacyCommand)
+      }
     }
     $ownedPattern = '^@echo off\r?\n"' + [regex]::Escape((Join-Path $t3Home 'runtime/versions')) + '[\\/][^\\/\r\n]+[\\/]t3\.exe" %\*\s*$'
     if ($content -notmatch $ownedPattern) { Fail "Refusing to replace a command owned by another installation: $existingCommand" }
