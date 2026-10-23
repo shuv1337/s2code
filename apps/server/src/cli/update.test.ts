@@ -55,7 +55,11 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
             ? fs.writeFileString(file, `@echo off\r\n"${target}" %*`)
             : fs.symlink(target, file);
         yield* write(legacy, oldExe);
-        yield* write(canonical, legacy);
+        if (platform === "win32") {
+          yield* fs.writeFileString(canonical, `@echo off\r\ncall "${legacy}" %*`);
+        } else {
+          yield* write(canonical, legacy);
+        }
         yield* write(foreignAlias, foreignExe);
         yield* write(stable, oldExe);
         const update = repointLauncher({
@@ -72,6 +76,9 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
         assert.equal((yield* readLauncherTarget(legacy, "1.0.0-nightly.1"))?.target, newExe);
         assert.equal((yield* readLauncherTarget(foreignAlias))?.target, foreignExe);
         assert.equal((yield* readLauncherTarget(stable))?.target, oldExe);
+        if (platform === "win32") {
+          assert.equal(yield* fs.readFileString(canonical), `@echo off\r\ncall "${legacy}" %*`);
+        }
         yield* fs.remove(canonical);
         yield* fs.remove(legacy);
         yield* write(canonical, oldExe);
@@ -80,6 +87,35 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
         assert.equal((yield* readLauncherTarget(canonical, "1.0.0-nightly.1"))?.target, newExe);
         assert.equal((yield* readLauncherTarget(legacy, "1.0.0-nightly.1"))?.target, newExe);
       }).pipe(Effect.provideService(HostProcess.Platform, platform), Effect.scoped),
+  );
+
+  it.effect("follows a Windows call forwarder whose bin path contains a space", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-shim-parse-" });
+      const bin = path.join(root, "installer bin");
+      const version = "1.0.0-nightly.1";
+      const executable = path.join(root, "runtime", "versions", version, "t3.exe");
+      yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+      yield* fs.writeFileString(executable, "");
+      const legacy = path.join(bin, "shuv2code-nightly.cmd");
+      const canonical = path.join(bin, "s2code-nightly.cmd");
+      yield* fs.makeDirectory(bin);
+      yield* fs.writeFileString(legacy, `@echo off\r\n"${executable}" %*`);
+      yield* fs.writeFileString(canonical, `@echo off\r\ncall "${legacy}" %*`);
+      assert.deepEqual(yield* readLauncherTarget(canonical, version), {
+        target: executable,
+        forwarder: true,
+      });
+      // A quoted legacy path with no call is still a forwarder. An update must not
+      // treat that canonical command as a direct launcher and overwrite the bridge.
+      yield* fs.writeFileString(canonical, `@echo off\r\n"${legacy}" %*`);
+      assert.deepEqual(yield* readLauncherTarget(canonical, version), {
+        target: executable,
+        forwarder: true,
+      });
+    }).pipe(Effect.provideService(HostProcess.Platform, "win32"), Effect.scoped),
   );
   it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"])(
     "rejects cross-channel flags and exact versions from %s without side effects",

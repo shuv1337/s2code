@@ -113,7 +113,13 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
   const windows = (yield* HostProcess.Platform) === "win32";
   const readTarget = (file: string) =>
     (windows
-      ? fs.readFileString(file).pipe(Effect.map((content) => /^"([^"]+)"/m.exec(content)?.[1]))
+      ? fs.readFileString(file).pipe(
+          Effect.map(
+            // Canonical shims are `call "<legacy>.cmd"`. Direct shims still
+            // start with the quoted executable. Both point at a real path.
+            (content) => /^(?:call )?"([^"]+)"/m.exec(content)?.[1],
+          ),
+        )
       : fs.readLink(file)
     ).pipe(
       Effect.map((target) =>

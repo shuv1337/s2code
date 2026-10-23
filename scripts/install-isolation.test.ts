@@ -233,7 +233,7 @@ describe
         }
       } else {
         NodeFS.writeFileSync(legacy, `@echo off\r\n"${updatedRuntime}" %*`);
-        expect(NodeFS.readFileSync(canonical, "utf8")).toBe(`@echo off\r\n"${legacy}" %*`);
+        expect(NodeFS.readFileSync(canonical, "utf8")).toBe(`@echo off\r\ncall "${legacy}" %*`);
       }
       const reinstalled = runInstaller(kind);
       expect(reinstalled.status, reinstalled.stderr).toBe(0);
@@ -306,7 +306,7 @@ describe
         NodeFS.symlinkSync(legacy, canonical);
       } else {
         NodeFS.writeFileSync(legacy, `@echo off\r\n"${runtime}" %*`);
-        NodeFS.writeFileSync(canonical, `@echo off\r\n"${legacy}" %*`);
+        NodeFS.writeFileSync(canonical, `@echo off\r\ncall "${legacy}" %*`);
       }
       const result = runInstaller(kind);
       expect(result.status).not.toBe(0);

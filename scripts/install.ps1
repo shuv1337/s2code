@@ -233,7 +233,9 @@ foreach ($child in @("userdata", "dev", "runtime")) { Assert-ProductPath (Join-P
 $binDir = [IO.Path]::GetFullPath($binDir)
 $legacyCommandName = "shuv2code" + $commandName.Substring("s2code".Length)
 $legacyCommand = Join-Path $binDir "$legacyCommandName.cmd"
-$canonicalForwarder = "@echo off`r`n`"$legacyCommand`" %*"
+# cmd.exe does not chain to a quoted .cmd. Without call, a bin path that
+# contains a space never starts the legacy launcher, and s2code exits with no output.
+$canonicalForwarder = "@echo off`r`ncall `"$legacyCommand`" %*"
 $commandNames = @($commandName, $legacyCommandName)
 foreach ($name in $commandNames) {
   $existingCommand = Join-Path $binDir "$name.cmd"
