@@ -1892,6 +1892,9 @@ importers:
       pngjs:
         specifier: 7.0.0
         version: 7.0.0
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       sharp:
         specifier: 0.35.4
         version: 0.35.4(@types/node@24.12.4)
@@ -1905,6 +1908,9 @@ importers:
       '@types/pngjs':
         specifier: 6.0.5
         version: 6.0.5
+      '@types/semver':
+        specifier: 7.8.0
+        version: 7.8.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -6726,6 +6732,9 @@ packages:
 
   '@types/retry@0.12.5':
     resolution: {integrity: sha512-3xSjTp3v03X/lSQLkczaN9UIEwJMoMCA1+Nb5HfbJEQWogdeQIyVtTvxPXDQjZ5zws8rFQfVfRdz03ARihPJgw==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/send@1.2.1':
     resolution: {integrity: sha512-arsCikDvlU99zl1g69TcAB3mzZPpxgw0UQnaHeC1Nwb015xp8bknZv5rIfri9xTOcMuaVgvabfIRA7PSZVuZIQ==}
@@ -17566,6 +17575,8 @@ snapshots:
       '@types/node': 24.12.4
 
   '@types/retry@0.12.5': {}
+
+  '@types/semver@7.8.0': {}
 
   '@types/send@1.2.1':
     dependencies:

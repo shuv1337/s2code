@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - Tests use Node's glob matcher to verify electron-builder exclusions.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -15,6 +16,8 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
+import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+
 import {
   BundleNotSelfContainedError,
   BuildCommandFailedError,
@@ -22,6 +25,10 @@ import {
   DesktopDmgBackgroundSourceMissingError,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
+  pinPatchedOverrideSpecs,
+  pinPatchedStageDependencies,
+  StagePatchedDependencyMismatchError,
+  withPinnedFffNativeDependencies,
   readWorkspaceConfig,
   createBuildConfig,
   DESKTOP_ELECTRON_LANGUAGES,
@@ -476,6 +483,266 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "playwright-core": "1.60.0",
       },
     );
+  });
+
+  it("pins floating patched dependencies to the version the patch names", () => {
+    const patches = {
+      "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+      "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+      "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    };
+    assert.deepStrictEqual(
+      pinPatchedStageDependencies(
+        {
+          "@ff-labs/fff-node": "0.11.0",
+          effect: "^4.0.5",
+          "left-alone": "^1.0.0",
+          "node-pty": "^1.2.0-beta.15",
+        },
+        patches,
+      ),
+      {
+        "@ff-labs/fff-node": "0.11.0",
+        effect: "^4.0.5",
+        "left-alone": "^1.0.0",
+        "node-pty": "1.2.0-beta.15",
+      },
+    );
+    for (const spec of ["^1.2.0-beta.15", "~1.2.0-beta.15", ">=1.2.0-beta.15"]) {
+      assert.strictEqual(
+        pinPatchedStageDependencies({ "node-pty": spec }, patches)["node-pty"],
+        "1.2.0-beta.15",
+      );
+    }
+    // A `>` range does not include the patched version, so it must stay put.
+    assert.strictEqual(
+      pinPatchedStageDependencies({ "node-pty": ">1.2.0-beta.15" }, patches)["node-pty"],
+      ">1.2.0-beta.15",
+    );
+    assert.deepStrictEqual(
+      createStagePatchedDependencies(patches, {
+        "node-pty": "1.2.0-beta.15",
+        "@ff-labs/fff-node": "0.11.0",
+      }),
+      {
+        "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+        "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+      },
+    );
+  });
+
+  it.effect("pins the server node-pty range to the patched version", () =>
+    Effect.gen(function* () {
+      const { patchedDependencies = {}, overrides = {} } = yield* readWorkspaceConfig();
+      const pinned = pinPatchedStageDependencies(
+        { "node-pty": serverPackageJson.dependencies["node-pty"] },
+        patchedDependencies,
+      );
+      assert.strictEqual(pinned["node-pty"], "1.2.0-beta.15");
+      assert.strictEqual(
+        createStagePatchedDependencies(patchedDependencies, pinned)["node-pty@1.2.0-beta.15"],
+        "patches/node-pty@1.2.0-beta.15.patch",
+      );
+      const lockfile = NodeFS.readFileSync(
+        NodePath.join(import.meta.dirname, "../pnpm-lock.yaml"),
+        "utf8",
+      );
+      const locked =
+        /\n {2}apps\/server:\n[\s\S]*?\n {6}node-pty:\n {8}specifier:.*\n {8}version: ([^\s(]+)/.exec(
+          lockfile,
+        );
+      assert.strictEqual(pinned["node-pty"], locked?.[1]);
+      assert.deepStrictEqual(pinPatchedOverrideSpecs(overrides, patchedDependencies), overrides);
+    }),
+  );
+
+  it("pins only a single caret, tilde, or >= anchor", () => {
+    const patches = {
+      "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+      "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    };
+    for (const spec of [">= 1.2.0-beta.15", "^ 1.2.0-beta.15", "~ 1.2.0-beta.15"]) {
+      assert.strictEqual(
+        pinPatchedStageDependencies({ "node-pty": spec }, patches)["node-pty"],
+        "1.2.0-beta.15",
+      );
+    }
+    assert.strictEqual(
+      pinPatchedStageDependencies({ "@ff-labs/fff-node": "^0.11.0" }, patches)["@ff-labs/fff-node"],
+      "0.11.0",
+    );
+
+    const unchanged = [
+      ">=1.2.0-beta.15 <2",
+      ">=1.2.0-beta.15<2",
+      ">=1.2.0-beta.15 <1.2.0-beta.15",
+      "^1.2.0-beta.15 || ^2.0.0",
+      "^1.2.0-beta.15||^2.0.0",
+      "^1.2.0-beta.15 <1.5.0",
+      ">=1.2.0-beta.14",
+      "workspace:^1.2.0-beta.15",
+      "npm:node-pty@^1.2.0-beta.15",
+    ];
+    for (const spec of unchanged) {
+      assert.strictEqual(
+        pinPatchedStageDependencies({ "node-pty": spec }, patches)["node-pty"],
+        spec,
+      );
+    }
+  });
+
+  it("keeps the patch whose version equals the staged spec", () => {
+    const patches = {
+      "node-pty@1.0.0": "patches/node-pty@1.0.0.patch",
+      "node-pty@1.2.0-beta.15(@types/node@24.0.0)": "patches/node-pty@1.2.0-beta.15.patch",
+      "@ff-labs/fff-node@0.11.0(@types/node@24.0.0)": "patches/@ff-labs__fff-node@0.11.0.patch",
+    };
+    const pinned = pinPatchedStageDependencies(
+      {
+        "node-pty": "^1.2.0-beta.15",
+        "@ff-labs/fff-node": "^0.11.0",
+      },
+      patches,
+    );
+    assert.deepStrictEqual(pinned, {
+      "node-pty": "1.2.0-beta.15",
+      "@ff-labs/fff-node": "0.11.0",
+    });
+    assert.deepStrictEqual(createStagePatchedDependencies(patches, pinned), {
+      "node-pty@1.2.0-beta.15(@types/node@24.0.0)": "patches/node-pty@1.2.0-beta.15.patch",
+      "@ff-labs/fff-node@0.11.0(@types/node@24.0.0)": "patches/@ff-labs__fff-node@0.11.0.patch",
+    });
+    assert.deepStrictEqual(createStagePatchedDependencies(patches, { "node-pty": "1.0.0" }), {
+      "node-pty@1.0.0": "patches/node-pty@1.0.0.patch",
+    });
+  });
+
+  it("fails the stage when no patch version equals the spec", () => {
+    const patches = {
+      "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+      "node-pty@1.0.0": "patches/node-pty@1.0.0.patch",
+      "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+    };
+    const specs = [
+      ">=1.2.0-beta.15 <2",
+      ">=1.2.0-beta.15<2",
+      "^1.2.0-beta.15 || ^2.0.0",
+      "^1.2.0-beta.15||^2.0.0",
+      ">=1.2.0-beta.14",
+    ];
+    for (const spec of specs) {
+      let caught: unknown;
+      try {
+        createStagePatchedDependencies(patches, { "node-pty": spec });
+      } catch (error) {
+        caught = error;
+      }
+      assert.instanceOf(caught, StagePatchedDependencyMismatchError);
+      assert.include(caught.message, "node-pty");
+      assert.include(caught.message, spec);
+      assert.include(caught.message, "1.2.0-beta.15");
+      assert.include(caught.message, "1.0.0");
+    }
+
+    let caught: unknown;
+    try {
+      createStagePatchedDependencies(patches, {
+        "node-pty": ">=1.2.0-beta.15 <2",
+        "@ff-labs/fff-node": "^0.11.0",
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assert.instanceOf(caught, StagePatchedDependencyMismatchError);
+    assert.include(caught.message, "node-pty");
+    assert.include(caught.message, "@ff-labs/fff-node");
+    assert.include(caught.message, "^0.11.0");
+  });
+
+  it("stages fff bins at the pinned fff-node version", () => {
+    const patches = {
+      "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
+      "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    };
+    assert.deepStrictEqual(
+      withPinnedFffNativeDependencies(
+        {
+          "@ff-labs/fff-node": "^0.11.0",
+          "node-pty": "^1.2.0-beta.15",
+        },
+        patches,
+        "linux",
+        "x64",
+      ),
+      {
+        "@ff-labs/fff-node": "0.11.0",
+        "node-pty": "1.2.0-beta.15",
+        "@ff-labs/fff-bin-linux-x64-gnu": "0.11.0",
+        "@ff-labs/fff-bin-linux-x64-musl": "0.11.0",
+      },
+    );
+    assert.deepStrictEqual(
+      withPinnedFffNativeDependencies(
+        { "node-pty": "1.2.0-beta.15" },
+        patches,
+        "win",
+        "x64",
+        "^0.11.0",
+      ),
+      {
+        "node-pty": "1.2.0-beta.15",
+        "@ff-labs/fff-bin-win32-x64": "0.11.0",
+      },
+    );
+  });
+
+  it("pins override specs that are simple anchors on a patched version", () => {
+    const patches = {
+      "node-pty@1.2.0-beta.15": "patches/node-pty@1.2.0-beta.15.patch",
+    };
+    assert.deepStrictEqual(
+      pinPatchedOverrideSpecs(
+        {
+          "node-pty": "^1.2.0-beta.15",
+          "app>node-pty": ">= 1.2.0-beta.15",
+          "pkg>node-pty": "npm:node-pty@^1.2.0-beta.15",
+          "alias>node-pty": "workspace:^1.2.0-beta.15",
+          "catalog>node-pty": "catalog:",
+          "omit>node-pty": "-",
+          "dbus-next>usocket": "-",
+          "@react-navigation/core": "7.24.0",
+        },
+        patches,
+      ),
+      {
+        "node-pty": "1.2.0-beta.15",
+        "app>node-pty": "1.2.0-beta.15",
+        "pkg>node-pty": "npm:node-pty@^1.2.0-beta.15",
+        "alias>node-pty": "workspace:^1.2.0-beta.15",
+        "catalog>node-pty": "catalog:",
+        "omit>node-pty": "-",
+        "dbus-next>usocket": "-",
+        "@react-navigation/core": "7.24.0",
+      },
+    );
+
+    for (const spec of [
+      ">=1.2.0-beta.15 <2",
+      ">=1.2.0-beta.15<2",
+      "^1.2.0-beta.15 || ^2.0.0",
+      "^1.2.0-beta.15||^2.0.0",
+    ]) {
+      let caught: unknown;
+      try {
+        pinPatchedOverrideSpecs({ "foo>node-pty": spec }, patches);
+      } catch (error) {
+        caught = error;
+      }
+      assert.instanceOf(caught, StagePatchedDependencyMismatchError);
+      assert.include(caught.message, "node-pty");
+      assert.include(caught.message, spec);
+      assert.include(caught.message, "1.2.0-beta.15");
+    }
   });
 
   it("carries only staged dependency patch metadata into staged desktop installs", () => {
