@@ -38,6 +38,21 @@ const collect = <E>(stream: Stream.Stream<Uint8Array, E>) =>
     ),
   );
 
+// A shim that exits before printing still has to say how it was started.
+// Release logs were `running s2code-nightly.cmd:` with nothing after the colon.
+const formatCommandFailure = (
+  executable: string,
+  args: ReadonlyArray<string>,
+  result: { readonly stdout: string; readonly stderr: string; readonly exitCode: number },
+) =>
+  [
+    `exit ${String(result.exitCode)}`,
+    `command: ${JSON.stringify(executable)}`,
+    `args: ${JSON.stringify(args)}`,
+    `stdout: ${JSON.stringify(result.stdout)}`,
+    `stderr: ${JSON.stringify(result.stderr)}`,
+  ].join("\n");
+
 const runExecutable = Effect.fn("runExecutable")(function* (
   executable: string,
   args: ReadonlyArray<string>,
@@ -112,11 +127,12 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     }
   }
 
-  const version = yield* runExecutable(executable, ["--version"], contentDir);
+  const versionArgs = ["--version"] as const;
+  const version = yield* runExecutable(executable, versionArgs, contentDir);
   if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
     return yield* new CliArchiveSmokeError({
       step: "running --version",
-      detail: `exit ${String(version.exitCode)}\n${version.stdout}${version.stderr}`,
+      detail: formatCommandFailure(executable, versionArgs, version),
     });
   }
 
@@ -149,58 +165,52 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       // The cache is complete; any unexpected download must fail locally.
       S2CODE_RELEASE_BASE_URL: "http://127.0.0.1:1",
     };
-    const installed = yield* runExecutable(
-      powershell,
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        path.join(import.meta.dirname, "install.ps1"),
-      ],
-      scratch,
-      env,
-    );
+    const installArgs = [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      path.join(import.meta.dirname, "install.ps1"),
+    ];
+    const installed = yield* runExecutable(powershell, installArgs, scratch, env);
     if (installed.exitCode !== 0)
       return yield* new CliArchiveSmokeError({
         step: "installing Windows command aliases",
-        detail: installed.stderr,
+        detail: formatCommandFailure(powershell, installArgs, installed),
       });
     const command = resolveChannelIdentity(input.expectVersion).executableName;
     for (const name of [command, command.replace("s2code", "shuv2code")]) {
-      const alias = yield* runExecutable(
-        powershell,
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${name}.cmd') --version; exit $LASTEXITCODE`,
-        ],
-        scratch,
-        env,
-      );
-      if (alias.exitCode !== 0 || alias.stdout.trim() !== version.stdout.trim())
-        return yield* new CliArchiveSmokeError({
-          step: `running ${name}.cmd`,
-          detail: `${alias.stdout}${alias.stderr}`,
-        });
-    }
-    const invalid = yield* runExecutable(
-      powershell,
-      [
+      const aliasArgs = [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${command}.cmd') --not-a-real-option; exit $LASTEXITCODE`,
-      ],
-      scratch,
-      env,
-    );
+        `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${name}.cmd') --version; exit $LASTEXITCODE`,
+      ];
+      const alias = yield* runExecutable(powershell, aliasArgs, scratch, env);
+      if (alias.exitCode !== 0 || alias.stdout.trim() !== version.stdout.trim())
+        return yield* new CliArchiveSmokeError({
+          step: `running ${name}.cmd`,
+          detail: [
+            formatCommandFailure(powershell, aliasArgs, alias),
+            `expected stdout: ${JSON.stringify(version.stdout)}`,
+          ].join("\n"),
+        });
+    }
+    const invalidArgs = [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${command}.cmd') --not-a-real-option; exit $LASTEXITCODE`,
+    ];
+    const invalid = yield* runExecutable(powershell, invalidArgs, scratch, env);
     if (invalid.exitCode === 0)
       return yield* new CliArchiveSmokeError({
         step: "forwarding Windows command failures",
-        detail: "invalid option exited successfully",
+        detail: [
+          "invalid option exited successfully",
+          formatCommandFailure(powershell, invalidArgs, invalid),
+        ].join("\n"),
       });
   }
 

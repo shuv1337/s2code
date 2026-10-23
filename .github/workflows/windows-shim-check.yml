@@ -1,0 +1,59 @@
+# Real cmd.exe check for the Windows s2code command shims.
+# The archive smoke test's PowerShell host on a Linux runner does not parse
+# these .cmd bodies. Do not replace this job with the full Fork release workflow.
+name: Windows shim check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/install.ps1
+      - scripts/install-isolation.test.ts
+      - scripts/smoke-cli-archive.ts
+      - scripts/windows-shim-runner-check.ps1
+      - apps/server/src/cli/windowsForwarderShim.ts
+      - apps/server/src/cli/update.ts
+      - apps/server/src/cli/update.test.ts
+      - .github/workflows/windows-shim-check.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-shim-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shim:
+    name: Shim (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, windows-11-arm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.13.1"
+
+      - name: Check shims on cmd.exe
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/windows-shim-runner-check.ps1
+
+      - name: Upload shim check log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-shim-check-${{ matrix.runner }}
+          path: shim-check.log
+          if-no-files-found: warn
