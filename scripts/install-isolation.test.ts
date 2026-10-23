@@ -272,6 +272,43 @@ describe
       }
     },
   );
+  it.skipIf(kind !== "pwsh" || !hasPwsh)(
+    "reinstalls a launcher whose runtime path uses backslashes",
+    () => {
+      const installed = runInstaller(kind);
+      expect(installed.status, installed.stderr).toBe(0);
+      const canonical = NodePath.join(env.S2CODE_INSTALL_BIN_DIR!, "s2code.cmd");
+      const legacy = NodePath.join(env.S2CODE_INSTALL_BIN_DIR!, "shuv2code.cmd");
+      const quoted = NodeFS.readFileSync(legacy, "utf8").match(/"([^"]+)"/);
+      expect(quoted?.[1]).toBeTruthy();
+      const exe = quoted?.[1] ?? "";
+      const marker = "/runtime/versions/";
+      const slash = exe.lastIndexOf(marker);
+      expect(slash).toBeGreaterThan(0);
+      const windowsExe = `${exe.slice(0, slash)}\\runtime\\versions\\${version}\\t3.exe`;
+      const windowsLegacy = `@echo off\r\n"${windowsExe}" %*`;
+      NodeFS.writeFileSync(legacy, windowsLegacy);
+      NodeFS.writeFileSync(canonical, windowsLegacy);
+      const direct = runInstaller(kind);
+      expect(direct.status, direct.stderr).toBe(0);
+      expect(direct.stderr).toContain("already downloaded");
+      expect(direct.stderr).not.toContain("Refusing to replace");
+      expect(NodeFS.readFileSync(canonical, "utf8")).toBe(windowsForwarderShim(legacy));
+      NodeFS.writeFileSync(legacy, windowsLegacy);
+      NodeFS.writeFileSync(canonical, `@echo off\r\n"${legacy}" %*`);
+      const forwarded = runInstaller(kind);
+      expect(forwarded.status, forwarded.stderr).toBe(0);
+      expect(forwarded.stderr).not.toContain("Refusing to replace");
+      expect(NodeFS.readFileSync(canonical, "utf8")).toBe(windowsForwarderShim(legacy));
+      const foreignExe = `${NodePath.join(root, "another-home")}\\runtime\\versions\\${version}\\t3.exe`;
+      const foreignBody = `@echo off\r\n"${foreignExe}" %*`;
+      NodeFS.writeFileSync(canonical, foreignBody);
+      const foreign = runInstaller(kind);
+      expect(foreign.status).not.toBe(0);
+      expect(foreign.stderr).toContain("Refusing to replace");
+      expect(NodeFS.readFileSync(canonical, "utf8")).toBe(foreignBody);
+    },
+  );
   it.skipIf(kind === "pwsh" && !hasPwsh)(
     "prefers canonical configuration while retaining legacy input support",
     () => {

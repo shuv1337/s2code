@@ -275,7 +275,10 @@ foreach ($name in $commandNames) {
         $content = [IO.File]::ReadAllText($legacyCommand)
       }
     }
-    $ownedPattern = '^@echo off\r?\n"' + [regex]::Escape((Join-Path $t3Home 'runtime/versions')) + '[\\/][^\\/\r\n]+[\\/]t3\.exe" %\*\s*$'
+    # Join-Path $t3Home 'runtime/versions' keeps the slash on PowerShell 5.1
+    # (`...\runtime/versions`). The shim quotes Join-Path $t3Home "runtime\versions"
+    # (`...\runtime\versions\...`). Either separator has to count as this install.
+    $ownedPattern = '^@echo off\r?\n"' + [regex]::Escape($t3Home) + '[\\/]runtime[\\/]versions[\\/][^\\/\r\n]+[\\/]t3\.exe" %\*\s*$'
     if ($content -notmatch $ownedPattern) { Fail "Refusing to replace a command owned by another installation: $existingCommand" }
   }
 }
