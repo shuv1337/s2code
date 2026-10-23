@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { windowsForwarderShim } from "../apps/server/src/cli/windowsForwarderShim.ts";
 
 const hasPwsh =
   NodeChildProcess.spawnSync(
@@ -233,7 +234,7 @@ describe
         }
       } else {
         NodeFS.writeFileSync(legacy, `@echo off\r\n"${updatedRuntime}" %*`);
-        expect(NodeFS.readFileSync(canonical, "utf8")).toBe(`@echo off\r\n"${legacy}" %*`);
+        expect(NodeFS.readFileSync(canonical, "utf8")).toBe(windowsForwarderShim(legacy));
       }
       const reinstalled = runInstaller(kind);
       expect(reinstalled.status, reinstalled.stderr).toBe(0);
@@ -242,6 +243,32 @@ describe
         expect(
           NodeChildProcess.execFileSync(canonical, ["--version"], { encoding: "utf8" }).trim(),
         ).toBe("fork-runtime");
+      }
+    },
+  );
+  it.skipIf(kind !== "pwsh" || !hasPwsh)(
+    "upgrades a canonical command that still has an older forwarder body",
+    () => {
+      const installed = runInstaller(kind);
+      expect(installed.status, installed.stderr).toBe(0);
+      const canonical = NodePath.join(env.S2CODE_INSTALL_BIN_DIR!, "s2code.cmd");
+      const legacy = NodePath.join(env.S2CODE_INSTALL_BIN_DIR!, "shuv2code.cmd");
+      const legacyBody = NodeFS.readFileSync(legacy, "utf8");
+      const repaired = windowsForwarderShim(legacy);
+      expect(legacyBody).toMatch(/[/\\]t3\.exe" %\*$/);
+      expect(NodeFS.readFileSync(canonical, "utf8")).toBe(repaired);
+      for (const previous of [
+        `@echo off\r\n"${legacy}" %*`,
+        `@echo off\r\n"${legacy}" %*\r\n`,
+        `@echo off\r\n"${legacy}" %*`.toUpperCase(),
+        `@echo off\r\ncall "${legacy}" %*`,
+      ]) {
+        NodeFS.writeFileSync(canonical, previous);
+        const again = runInstaller(kind);
+        expect(again.status, again.stderr).toBe(0);
+        expect(again.stderr).toContain("already downloaded");
+        expect(NodeFS.readFileSync(canonical, "utf8")).toBe(repaired);
+        expect(NodeFS.readFileSync(legacy, "utf8")).toBe(legacyBody);
       }
     },
   );
@@ -306,14 +333,25 @@ describe
         NodeFS.symlinkSync(legacy, canonical);
       } else {
         NodeFS.writeFileSync(legacy, `@echo off\r\n"${runtime}" %*`);
-        NodeFS.writeFileSync(canonical, `@echo off\r\n"${legacy}" %*`);
       }
-      const result = runInstaller(kind);
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("Refusing to replace a command owned");
-      expect(NodeFS.readFileSync(runtime, "utf8")).toBe("upstream-sentinel");
-      expect(NodeFS.existsSync(NodePath.join(home, ".s2code-v2"))).toBe(false);
-      expect(NodeFS.existsSync(env.FIXTURE_REQUESTS!)).toBe(false);
+      const bodies =
+        kind === "sh"
+          ? [null]
+          : [
+              `@echo off\r\n"${legacy}" %*`,
+              `@echo off\r\ncall "${legacy}" %*`,
+              windowsForwarderShim(legacy),
+            ];
+      for (const body of bodies) {
+        if (body !== null) NodeFS.writeFileSync(canonical, body);
+        const result = runInstaller(kind);
+        expect(result.status, result.stderr).not.toBe(0);
+        expect(result.stderr).toContain("Refusing to replace a command owned");
+        expect(NodeFS.readFileSync(runtime, "utf8")).toBe("upstream-sentinel");
+        expect(NodeFS.existsSync(NodePath.join(home, ".s2code-v2"))).toBe(false);
+        expect(NodeFS.existsSync(env.FIXTURE_REQUESTS!)).toBe(false);
+        if (body !== null) expect(NodeFS.readFileSync(canonical, "utf8")).toBe(body);
+      }
     },
   );
   it.skipIf(kind === "pwsh" && !hasPwsh).each(["nightly", "preview"])(

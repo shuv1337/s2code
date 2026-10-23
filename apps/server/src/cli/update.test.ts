@@ -17,6 +17,7 @@ import {
   formatUpdatedLauncherCommand,
   readLauncherTarget,
 } from "./update.ts";
+import { windowsForwarderShim } from "./windowsForwarderShim.ts";
 
 it("recognizes only exact fork boot service cgroup components", () => {
   for (const unit of ["s2code-v2", "s2code-v2-nightly", "s2code-v2-preview"]) {
@@ -55,7 +56,11 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
             ? fs.writeFileString(file, `@echo off\r\n"${target}" %*`)
             : fs.symlink(target, file);
         yield* write(legacy, oldExe);
-        yield* write(canonical, legacy);
+        if (platform === "win32") {
+          yield* fs.writeFileString(canonical, `@echo off\r\n"${legacy}" %*`);
+        } else {
+          yield* write(canonical, legacy);
+        }
         yield* write(foreignAlias, foreignExe);
         yield* write(stable, oldExe);
         const update = repointLauncher({
@@ -72,6 +77,9 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
         assert.equal((yield* readLauncherTarget(legacy, "1.0.0-nightly.1"))?.target, newExe);
         assert.equal((yield* readLauncherTarget(foreignAlias))?.target, foreignExe);
         assert.equal((yield* readLauncherTarget(stable))?.target, oldExe);
+        if (platform === "win32") {
+          assert.equal(yield* fs.readFileString(canonical), windowsForwarderShim(legacy));
+        }
         yield* fs.remove(canonical);
         yield* fs.remove(legacy);
         yield* write(canonical, oldExe);
@@ -79,7 +87,64 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
         yield* update;
         assert.equal((yield* readLauncherTarget(canonical, "1.0.0-nightly.1"))?.target, newExe);
         assert.equal((yield* readLauncherTarget(legacy, "1.0.0-nightly.1"))?.target, newExe);
+        if (platform === "win32") {
+          assert.equal(yield* fs.readFileString(canonical), `@echo off\r\n"${newExe}" %*`);
+          assert.equal(yield* fs.readFileString(legacy), `@echo off\r\n"${newExe}" %*`);
+        }
       }).pipe(Effect.provideService(HostProcess.Platform, platform), Effect.scoped),
+  );
+
+  it.effect("upgrades a Windows forwarder whose bin path contains a space", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-shim-parse-" });
+      const bin = path.join(root, "Program Files (x86)", "installer bin");
+      const version = "1.0.0-nightly.1";
+      const versionsDir = path.join(root, "runtime", "versions");
+      const oldExe = path.join(versionsDir, version, "t3.exe");
+      const newExe = path.join(versionsDir, "1.0.0-nightly.2", "t3.exe");
+      for (const executable of [oldExe, newExe]) {
+        yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+        yield* fs.writeFileString(executable, "");
+      }
+      const legacy = path.join(bin, "shuv2code-nightly.cmd");
+      const canonical = path.join(bin, "s2code-nightly.cmd");
+      yield* fs.makeDirectory(bin, { recursive: true });
+      const repaired = windowsForwarderShim(legacy);
+      assert.isFalse(repaired.includes("call "));
+      assert.isFalse(repaired.endsWith("\n"));
+      const repoint = (launchedAs: string) =>
+        repointLauncher({
+          launchedAs,
+          currentVersion: version,
+          versionsDir,
+          targetEntryPath: newExe,
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            PATH: bin,
+            T3CODE_INSTALL_BIN_DIR: bin,
+          }),
+        );
+      for (const previous of [`@echo off\r\n"${legacy}" %*`, `@echo off\r\ncall "${legacy}" %*`]) {
+        yield* fs.writeFileString(legacy, `@echo off\r\n"${oldExe}" %*`);
+        yield* fs.writeFileString(canonical, previous);
+        assert.deepEqual(yield* readLauncherTarget(canonical, version), {
+          target: oldExe,
+          forwarder: true,
+        });
+        assert.equal(Option.getOrUndefined(yield* repoint(oldExe)), canonical);
+        assert.equal(yield* fs.readFileString(canonical), repaired);
+        assert.equal(yield* fs.readFileString(legacy), `@echo off\r\n"${newExe}" %*`);
+        assert.deepEqual(yield* readLauncherTarget(canonical, version), {
+          target: newExe,
+          forwarder: true,
+        });
+        assert.equal(Option.getOrUndefined(yield* repoint(newExe)), canonical);
+        assert.equal(yield* fs.readFileString(canonical), repaired);
+        assert.equal(yield* fs.readFileString(legacy), `@echo off\r\n"${newExe}" %*`);
+      }
+    }).pipe(Effect.provideService(HostProcess.Platform, "win32"), Effect.scoped),
   );
   it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"])(
     "rejects cross-channel flags and exact versions from %s without side effects",

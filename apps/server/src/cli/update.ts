@@ -38,6 +38,7 @@ import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { createUpdateProgress } from "./updateProgress.ts";
 import * as CliService from "./service.ts";
 import { formatCliHomeFlag, resolveCliCommand } from "./invocation.ts";
+import { windowsForwarderShim } from "./windowsForwarderShim.ts";
 
 /** Use the launcher just repointed, not this process's old versioned executable. */
 export const formatUpdatedLauncherCommand = (launcher: string, baseDir: string) =>
@@ -113,7 +114,18 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
   const windows = (yield* HostProcess.Platform) === "win32";
   const readTarget = (file: string) =>
     (windows
-      ? fs.readFileString(file).pipe(Effect.map((content) => /^"([^"]+)"/m.exec(content)?.[1]))
+      ? fs.readFileString(file).pipe(
+          Effect.map((content) =>
+            // Direct shims quote the executable. Forwarders quote the legacy
+            // `.cmd`, including the repaired body whose `for /f` line is not
+            // `call "..."`. Skip option quotes such as "usebackq skip=1 delims=".
+            [...content.matchAll(/"([^"]*)"/g)]
+              .map((match) => match[1])
+              .find(
+                (value) => value !== undefined && (value.includes("\\") || value.includes("/")),
+              ),
+          ),
+        )
       : fs.readLink(file)
     ).pipe(
       Effect.map((target) =>
@@ -174,7 +186,29 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   ]);
   for (const alias of aliases) {
     const existing = yield* readLauncherTarget(alias, version);
-    if (existing === undefined || !ownsTarget(existing.target) || existing.forwarder) continue;
+    if (existing === undefined || !ownsTarget(existing.target)) continue;
+    if (existing.forwarder) {
+      // Unix keeps the symlink. Windows rewrites the bytes in place so a shim
+      // from before the repair still points at the legacy command, not the exe.
+      if (platform !== "win32") continue;
+      const legacyShim = path.join(
+        path.dirname(alias),
+        `${resolveLegacyChannelIdentity(version).executableName}.cmd`,
+      );
+      const repaired = windowsForwarderShim(legacyShim);
+      if ((yield* fs.readFileString(alias).pipe(Effect.orElseSucceed(() => ""))) === repaired) {
+        continue;
+      }
+      yield* fs
+        .writeFileString(alias, repaired)
+        .pipe(
+          Effect.mapError(
+            () =>
+              new CliUpdateError({ reason: `Could not update the s2code launcher at ${alias}.` }),
+          ),
+        );
+      continue;
+    }
     const replacement =
       platform === "win32"
         ? fs.writeFileString(alias, `@echo off\r\n"${input.targetEntryPath}" %*`)
