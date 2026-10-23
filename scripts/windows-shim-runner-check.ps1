@@ -153,22 +153,6 @@ function Invoke-Install([string] $Label) {
   return $true
 }
 
-function Get-HistoricalForFShim([string] $LegacyCommand) {
-  # The body shipped by #324. Upgrades still have to recognize it.
-  $lines = @(
-    '@echo off',
-    'setlocal DisableDelayedExpansion',
-    'set "s2_line="',
-    "for /f `"usebackq skip=1 delims=`" %%L in (`"$LegacyCommand`") do set `"s2_line=%%L`"",
-    'if not defined s2_line exit /b 1',
-    'set "s2_exe=%s2_line:~1,-4%"',
-    'if not defined s2_exe exit /b 1',
-    'endlocal & "%s2_exe%" %*',
-    'exit /b %ERRORLEVEL%'
-  )
-  return ($lines -join "`r`n")
-}
-
 function Write-NodeForwarder([string] $LegacyCommand, [string] $Output) {
   $runner = Join-Path $PSScriptRoot "_print-windows-forwarder.ts"
   [IO.File]::WriteAllText($runner, @'
@@ -217,36 +201,76 @@ function Assert-ForwarderMatchesNode([string] $Label) {
   Show-TextFile $expected
 }
 
-function Invoke-Behavior([string] $Label, [string] $Executable) {
-  $contexts = @(
-    @{ Name = "smoke-env"; Smoke = $true },
-    @{ Name = "user-env"; Smoke = $false }
-  )
+function Get-DecodedStubArgs([string] $Stdout) {
+  $decoded = @()
+  foreach ($line in ($Stdout -split "\r?\n")) {
+    if ($line -match '^arg\d+=(.+)$') {
+      $decoded += [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Matches[1].Trim()))
+    }
+  }
+  return $decoded
+}
+
+function Assert-DecodedArgs([string] $Label, [string] $Stdout, [string[]] $Expected) {
+  $decoded = @(Get-DecodedStubArgs $Stdout)
+  $same = $decoded.Count -eq $Expected.Count
+  if ($same) {
+    for ($i = 0; $i -lt $decoded.Count; $i++) {
+      if ($decoded[$i] -ne $Expected[$i]) { $same = $false; break }
+    }
+  }
+  if ($same) {
+    Write-Log "PASS $Label argv=$($Expected.Count)"
+    return
+  }
+  $script:Failures++
+  Write-Log "FAIL $Label argv"
+  Write-Log ("decoded: " + (($decoded | ForEach-Object { ConvertTo-Json $_ -Compress }) -join ", "))
+  Write-Log ("expected: " + (($Expected | ForEach-Object { ConvertTo-Json $_ -Compress }) -join ", "))
+}
+
+function Invoke-Behavior([string] $Label, [string] $Executable, [switch] $SmokeOnly) {
+  $contexts = @(@{ Name = "smoke-env"; Smoke = $true })
+  if (-not $SmokeOnly) { $contexts += @{ Name = "user-env"; Smoke = $false } }
+  # The exe must see pre^post. The driver is parsed once (^^^^ -> ^^) and the
+  # shim's `"exe" %*` line is parsed once (^^ -> ^). `call` parses again and
+  # leaves prepost. Quoted a^b never shows that second parse.
+  $specialArgs = @("--probe", "%OS%", "a^b", "pre^post")
   foreach ($context in $contexts) {
     $smoke = [bool] $context.Smoke
     $prefix = "$Label $($context.Name)"
     foreach ($pair in @(
-        @{ Name = "version"; Args = "--version"; Special = $false },
-        @{ Name = "bad-option"; Args = "--not-a-real-option"; Special = $false },
-        @{ Name = "percent-caret"; Args = $null; Special = $true }
+        @{ Name = "version"; Args = @("--version") },
+        @{ Name = "bad-option"; Args = @("--not-a-real-option") },
+        @{ Name = "percent-caret"; Args = $specialArgs }
       )) {
-      $directArgs = if ($pair.Special) { @("%OS%", "a^b") } else { @([string] $pair.Args) }
-      if ($smoke) {
-        $direct = Invoke-Captured -File $Executable -Arguments $directArgs -SmokeEnvironment -Note "direct $($pair.Name)"
-      } else {
-        $direct = Invoke-Captured -File $Executable -Arguments $directArgs -Note "direct $($pair.Name)"
+      $oracleArgs = @($pair.Args)
+      $oracleParams = @{
+        File      = $Executable
+        Arguments = $oracleArgs
+        Note      = "ArgumentList $($pair.Name)"
       }
-      if ($pair.Name -eq "bad-option" -and $direct.ExitCode -eq 0) {
+      if ($smoke) { $oracleParams.SmokeEnvironment = $true }
+      $oracle = Invoke-Captured @oracleParams
+      Assert-DecodedArgs "$prefix oracle $($pair.Name)" $oracle.Stdout $oracleArgs
+      if ($pair.Name -eq "bad-option" -and ($oracle.ExitCode -eq 0 -or $oracle.Stderr -notmatch "unknown option")) {
         $script:Failures++
-        Write-Log "FAIL $prefix direct bad-option exited 0"
-        Write-Log (ConvertTo-ResultText $direct)
+        Write-Log "FAIL $prefix oracle bad-option exit=$($oracle.ExitCode)"
+        Write-Log (ConvertTo-ResultText $oracle)
       }
 
-      $psArgText = if ($pair.Special) { "--probe '%OS%' 'a^b'" } else { [string] $pair.Args }
-      $quotedExe = "'" + $Executable.Replace("'", "''") + "'"
-      $directCommand = "& $quotedExe $psArgText; exit `$LASTEXITCODE"
+      # PowerShell 5.1 hands a .cmd file to cmd and expands %VAR% and ^ before
+      # the shim runs. Run 40021108242: both shims received Windows_NT and ab,
+      # while ArgumentList kept %OS% and a^b. Compare the two shims to each
+      # other here. The cmd.exe driver below is the one-parse proof.
+      $psArgText = if ($pair.Name -eq "percent-caret") {
+        "--probe '%OS%' 'a^b' 'pre^post'"
+      } else {
+        [string] $oracleArgs[0]
+      }
       $shimCommand = "& (Join-Path `$env:S2CODE_INSTALL_BIN_DIR '$($script:CanonicalName)') $psArgText; exit `$LASTEXITCODE"
       $legacyCommandText = "& (Join-Path `$env:S2CODE_INSTALL_BIN_DIR '$($script:LegacyName)') $psArgText; exit `$LASTEXITCODE"
+      $powershellRuns = @{}
       foreach ($shellCase in @(
           @{ Name = "canonical"; Command = $shimCommand },
           @{ Name = "legacy"; Command = $legacyCommandText }
@@ -258,28 +282,53 @@ function Invoke-Behavior([string] $Label, [string] $Executable) {
         }
         if ($smoke) { $params.SmokeEnvironment = $true }
         $actual = Invoke-Captured @params
-        $expectedParams = @{
-          File      = $script:PowerShell51
-          Arguments = @("-NoProfile", "-NonInteractive", "-Command", $directCommand)
-          Note      = "powershell direct $directCommand"
+        $powershellRuns[$shellCase.Name] = $actual
+        if ($pair.Name -eq "version") {
+          Assert-SameResult "$prefix powershell $($shellCase.Name) version" $actual $oracle
+        } elseif ($pair.Name -eq "bad-option") {
+          Assert-DecodedArgs "$prefix powershell $($shellCase.Name) bad-option" $actual.Stdout $oracleArgs
+          if ($actual.Stderr -notmatch "unknown option") {
+            $script:Failures++
+            Write-Log "FAIL $prefix powershell $($shellCase.Name) bad-option stderr"
+            Write-Log (ConvertTo-ResultText $actual)
+          } elseif ($smoke) {
+            # Cleared-env PowerShell reports 0 for the shim and for a direct exe.
+            Write-Log "PASS $prefix powershell $($shellCase.Name) bad-option forwarded exit=$($actual.ExitCode)"
+          } elseif ($actual.ExitCode -ne $oracle.ExitCode) {
+            $script:Failures++
+            Write-Log "FAIL $prefix powershell $($shellCase.Name) bad-option exit=$($actual.ExitCode) expected=$($oracle.ExitCode)"
+            Write-Log (ConvertTo-ResultText $actual)
+          } else {
+            Write-Log "PASS $prefix powershell $($shellCase.Name) bad-option exit=$($actual.ExitCode)"
+          }
         }
-        if ($smoke) { $expectedParams.SmokeEnvironment = $true }
-        $expected = Invoke-Captured @expectedParams
-        Assert-SameResult "$prefix powershell $($shellCase.Name) $($pair.Name)" $actual $expected
-        if ($pair.Name -eq "bad-option" -and $actual.ExitCode -eq 0) {
+      }
+      if ($pair.Name -eq "percent-caret") {
+        $canonicalArgs = @(Get-DecodedStubArgs $powershellRuns["canonical"].Stdout)
+        $legacyArgs = @(Get-DecodedStubArgs $powershellRuns["legacy"].Stdout)
+        $same = $canonicalArgs.Count -eq $legacyArgs.Count -and $canonicalArgs.Count -eq $oracleArgs.Count
+        if ($same) {
+          for ($i = 0; $i -lt $canonicalArgs.Count; $i++) {
+            if ($canonicalArgs[$i] -ne $legacyArgs[$i]) { $same = $false; break }
+          }
+        }
+        $probe = $canonicalArgs.Count -gt 0 -and $canonicalArgs[0] -eq "--probe"
+        if ($same -and $probe) {
+          Write-Log "PASS $prefix powershell percent-caret canonical matches legacy"
+          Write-Log ("powershell argv: " + (($canonicalArgs | ForEach-Object { ConvertTo-Json $_ -Compress }) -join ", "))
+        } else {
           $script:Failures++
-          Write-Log "FAIL $prefix powershell $($shellCase.Name) bad-option exited 0"
+          Write-Log "FAIL $prefix powershell percent-caret canonical and legacy diverged"
+          Write-Log ("canonical: " + (($canonicalArgs | ForEach-Object { ConvertTo-Json $_ -Compress }) -join ", "))
+          Write-Log ("legacy: " + (($legacyArgs | ForEach-Object { ConvertTo-Json $_ -Compress }) -join ", "))
         }
       }
 
       $driverDir = Join-Path $script:Root "drivers"
       New-Item -ItemType Directory -Force -Path $driverDir | Out-Null
-      # One cmd parse turns %%OS%% into a literal %OS%. A second parse would expand it.
-      $driverArg = if ($pair.Special) { '--probe "%%OS%%" "a^b"' } else { [string] $pair.Args }
-      $directDriver = Join-Path $driverDir "direct-$($context.Name)-$($pair.Name).cmd"
+      $driverArg = if ($pair.Name -eq "percent-caret") { '--probe "%%OS%%" "a^b" pre^^^^post' } else { [string] $oracleArgs[0] }
       $canonicalDriver = Join-Path $driverDir "canonical-$($context.Name)-$($pair.Name).cmd"
       $legacyDriver = Join-Path $driverDir "legacy-$($context.Name)-$($pair.Name).cmd"
-      Write-CmdDriver $directDriver "`"$Executable`" $driverArg"
       Write-CmdDriver $canonicalDriver "`"$($script:CanonicalCommand)`" $driverArg"
       Write-CmdDriver $legacyDriver "`"$($script:LegacyCommand)`" $driverArg"
       foreach ($shellCase in @(
@@ -293,18 +342,8 @@ function Invoke-Behavior([string] $Label, [string] $Executable) {
         }
         if ($smoke) { $params.SmokeEnvironment = $true }
         $actual = Invoke-Captured @params
-        $expectedParams = @{
-          File      = $script:Cmd
-          Arguments = @("/d", "/c", $directDriver)
-          Note      = "cmd direct driver $([IO.File]::ReadAllText($directDriver))"
-        }
-        if ($smoke) { $expectedParams.SmokeEnvironment = $true }
-        $expected = Invoke-Captured @expectedParams
-        Assert-SameResult "$prefix cmd $($shellCase.Name) $($pair.Name)" $actual $expected
-        if ($pair.Name -eq "bad-option" -and $actual.ExitCode -eq 0) {
-          $script:Failures++
-          Write-Log "FAIL $prefix cmd $($shellCase.Name) bad-option exited 0"
-        }
+        Assert-SameResult "$prefix cmd $($shellCase.Name) $($pair.Name)" $actual $oracle
+        Assert-DecodedArgs "$prefix cmd $($shellCase.Name) $($pair.Name)" $actual.Stdout $oracleArgs
       }
     }
   }
@@ -330,6 +369,12 @@ function Invoke-EchoTrace {
   Write-Log "ECHO TRACE stderr:"
   Write-Log $result.Stderr
   Show-TextFile $trace
+  if ($result.ExitCode -ne 0 -or $result.Stdout -notmatch 'TRACE s2_exe=\[[^\]]+t3\.exe\]' -or $result.Stdout -notmatch 'TRACE s2_line=\[[^\]]+\]') {
+    $script:Failures++
+    Write-Log "FAIL echo trace did not show the legacy line and t3.exe"
+    return
+  }
+  Write-Log "PASS echo trace showed the legacy line and t3.exe"
 }
 
 $rootName = "s2shim-" + [guid]::NewGuid().ToString("n")
@@ -423,30 +468,42 @@ Copy-Item -LiteralPath $script:Exe -Destination $script:UpdatedExe -Force
 [IO.File]::WriteAllText($script:LegacyCommand, "@echo off`r`n`"$($script:UpdatedExe)`" %*", $script:Utf8)
 Write-Log "FOLLOW old updater repointed legacy only"
 Show-TextFile $script:LegacyCommand
-Invoke-Behavior "follow-old-updater" $script:UpdatedExe
+Invoke-Behavior "follow-old-updater" $script:UpdatedExe -SmokeOnly
 
+$freshForwarder = [IO.File]::ReadAllText($script:CanonicalCommand).TrimEnd("`r", "`n")
+# quote-legacy and call-legacy are the bodies install.ps1 still has to claim.
+# The for /f text is the current forwarder, checked by the byte compare above,
+# so planting it again would not be an upgrade.
 $upgradeBodies = @(
   @{ Name = "quote-legacy"; Body = "@echo off`r`n`"$($script:LegacyCommand)`" %*" },
   @{ Name = "call-legacy"; Body = "@echo off`r`ncall `"$($script:LegacyCommand)`" %*" },
-  @{ Name = "for-f-handoff"; Body = (Get-HistoricalForFShim $script:LegacyCommand) },
   @{ Name = "direct-canonical"; Body = "@echo off`r`n`"$($script:Exe)`" %*" }
 )
 foreach ($upgrade in $upgradeBodies) {
   Write-Log "UPGRADE from $($upgrade.Name)"
+  $planted = ([string] $upgrade.Body).TrimEnd("`r", "`n")
+  if ($planted -eq $freshForwarder) {
+    $script:Failures++
+    Write-Log "FAIL upgrade-$($upgrade.Name) planted body is not distinct from the current forwarder"
+  }
   [IO.File]::WriteAllText($script:CanonicalCommand, [string] $upgrade.Body, $script:Utf8)
   [IO.File]::WriteAllText($script:LegacyCommand, "@echo off`r`n`"$($script:Exe)`" %*", $script:Utf8)
-  if (-not (Invoke-Install "upgrade-$($upgrade.Name)")) { continue }
-  Assert-ForwarderMatchesNode "upgrade-$($upgrade.Name)"
-  $legacyText = [IO.File]::ReadAllText($script:LegacyCommand)
-  $expectedLegacy = "@echo off`r`n`"$($script:Exe)`" %*"
-  if ($legacyText -ne $expectedLegacy) {
-    $script:Failures++
-    Write-Log "FAIL upgrade-$($upgrade.Name) legacy shim was rewritten unexpectedly"
-    Show-TextFile $script:LegacyCommand
+  $upgraded = Invoke-Install "upgrade-$($upgrade.Name)"
+  if ($upgraded) {
+    Assert-ForwarderMatchesNode "upgrade-$($upgrade.Name)"
+    $legacyText = [IO.File]::ReadAllText($script:LegacyCommand)
+    $expectedLegacy = "@echo off`r`n`"$($script:Exe)`" %*"
+    if ($legacyText -ne $expectedLegacy) {
+      $script:Failures++
+      Write-Log "FAIL upgrade-$($upgrade.Name) legacy shim was rewritten unexpectedly"
+      Show-TextFile $script:LegacyCommand
+    } else {
+      Write-Log "PASS upgrade-$($upgrade.Name) legacy shim stayed a direct exe launcher"
+    }
   } else {
-    Write-Log "PASS upgrade-$($upgrade.Name) legacy shim stayed a direct exe launcher"
+    Write-Log "reinstall failed; running the shim left on disk"
   }
-  Invoke-Behavior "upgrade-$($upgrade.Name)" $script:Exe
+  Invoke-Behavior "upgrade-$($upgrade.Name)" $script:Exe -SmokeOnly
 }
 
 if ($script:Failures -gt 0) {

@@ -1,6 +1,7 @@
 # Real cmd.exe check for the Windows s2code command shims.
-# The archive smoke test's PowerShell host on a Linux runner does not parse
-# these .cmd bodies. Do not replace this job with the full Fork release workflow.
+# Fork release run 54 ran the CLI archive smoke test on windows-2025 and
+# windows-11-arm, under Windows PowerShell 5.1. Linux pwsh does not parse
+# these .cmd bodies. Do not start the Fork release workflow to debug them.
 name: Windows shim check
 
 on:
@@ -18,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: windows-shim-check-${{ github.ref }}
@@ -31,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-latest, windows-11-arm]
+        runner: [windows-2025, windows-11-arm]
     steps:
       - name: Checkout
         uses: actions/checkout@v6

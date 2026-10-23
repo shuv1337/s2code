@@ -179,6 +179,16 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
         step: "installing Windows command aliases",
         detail: formatCommandFailure(powershell, installArgs, installed),
       });
+    const invalidProbe = ["--not-a-real-option"] as const;
+    const invalidDirect = yield* runExecutable(executable, invalidProbe, contentDir);
+    if (invalidDirect.exitCode === 0)
+      return yield* new CliArchiveSmokeError({
+        step: "forwarding Windows command failures",
+        detail: [
+          "the executable accepted --not-a-real-option",
+          formatCommandFailure(executable, invalidProbe, invalidDirect),
+        ].join("\n"),
+      });
     const command = resolveChannelIdentity(input.expectVersion).executableName;
     for (const name of [command, command.replace("s2code", "shuv2code")]) {
       const aliasArgs = [
@@ -197,19 +207,22 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
           ].join("\n"),
         });
     }
-    const invalidArgs = [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${command}.cmd') --not-a-real-option; exit $LASTEXITCODE`,
-    ];
-    const invalid = yield* runExecutable(powershell, invalidArgs, scratch, env);
-    if (invalid.exitCode === 0)
+    // `exit $LASTEXITCODE` from Windows PowerShell 5.1 is 0 in this cleared
+    // environment, including a direct run of the exe. cmd.exe returns the
+    // executable's status, so failure forwarding is checked there.
+    const cmd = path.join(systemRoot, "System32", "cmd.exe");
+    const driver = path.join(scratch, "smoke-invalid.cmd");
+    const aliasPath = path.join(bin, `${command}.cmd`);
+    yield* fs.writeFileString(driver, `@echo off\r\n"${aliasPath}" --not-a-real-option\r\n`);
+    const invalidArgs = ["/d", "/c", driver] as const;
+    const invalid = yield* runExecutable(cmd, invalidArgs, scratch, env);
+    if (invalid.exitCode !== invalidDirect.exitCode || invalid.stderr !== invalidDirect.stderr)
       return yield* new CliArchiveSmokeError({
         step: "forwarding Windows command failures",
         detail: [
-          "invalid option exited successfully",
-          formatCommandFailure(powershell, invalidArgs, invalid),
+          formatCommandFailure(cmd, invalidArgs, invalid),
+          `expected exit ${String(invalidDirect.exitCode)}`,
+          `expected stderr: ${JSON.stringify(invalidDirect.stderr)}`,
         ].join("\n"),
       });
   }
