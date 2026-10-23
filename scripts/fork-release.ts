@@ -15,6 +15,7 @@ import {
   publishAtomicReleaseIndex,
   FORK_DESKTOP_MATRIX,
   FORK_NPM_PACKAGES,
+  forkNpmPublishingReady,
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
   RELEASE_CREDENTIAL_VARIABLES,
@@ -119,9 +120,9 @@ function assertPublishContext(npm: boolean) {
     !process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
   )
     throw new Error("GitHub-hosted OIDC with id-token: write is required.");
-  if (process.env.FORK_NPM_TRUSTED_PUBLISHING_READY !== "true")
+  if (!forkNpmPublishingReady(process.env))
     throw new Error(
-      "FORK_NPM_TRUSTED_PUBLISHING_READY must attest human setup of all six trusted publishers for release.yml, including publish and dist-tag permissions. This flag is not an authentication test.",
+      "S2CODE_NPM_TRUSTED_PUBLISHING_READY must attest the six new publishers and FORK_NPM_TRUSTED_PUBLISHING_READY the shuv2code bridge, including publish and dist-tag permissions for release.yml. These flags are not authentication tests.",
     );
   if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN)
     throw new Error("Use OIDC, not inherited npm publish tokens.");
@@ -133,11 +134,13 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   for (const name of plan.cliAssets)
     if (!names.includes(name)) throw new Error(`Missing required CLI archive: ${name}`);
   // Keep aliases for installs from before the archive rename; remove after that transition ends.
-  for (let index = 0; index < plan.cliAssets.length; index++)
-    FS.copyFileSync(
-      Path.join(directory, plan.cliAssets[index]!),
-      Path.join(directory, plan.cliLegacyAssets[index]!),
-    );
+  for (let index = 0; index < plan.cliAssets.length; index++) {
+    for (const aliases of [plan.cliPreviousAssets, plan.cliLegacyAssets])
+      FS.copyFileSync(
+        Path.join(directory, plan.cliAssets[index]!),
+        Path.join(directory, aliases[index]!),
+      );
+  }
   for (const target of FORK_DESKTOP_MATRIX) {
     const receipt = JSON.parse(
       FS.readFileSync(Path.join(directory, `build-${target.platform}-${target.arch}.json`), "utf8"),
@@ -247,6 +250,7 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
     ...desktops,
     ...plan.cliAssets,
     ...plan.cliLegacyAssets,
+    ...plan.cliPreviousAssets,
     ...FS.readdirSync(directory).filter((name) => name.endsWith(".blockmap")),
   ];
   FS.writeFileSync(
@@ -338,7 +342,8 @@ export function assertPackagedWslRuntime(payloadDir: string, expected: string) {
 
 export function inspectForkNpmPackages(directory: string, version: string) {
   const tarballs = [
-    ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@shuv2code", `t3-${key}.tgz`)),
+    ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@s2code", `t3-${key}.tgz`)),
+    Path.join(directory, "s2code.tgz"),
     Path.join(directory, "shuv2code.tgz"),
   ];
   const manifests = tarballs.map(
@@ -588,7 +593,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (!plan.npm) return;
     for (const pkg of packages)
       if (!(await publishedVersion(pkg)).published)
-        throw new Error("All six exact npm versions must exist before release exposure.");
+        throw new Error("All seven exact npm versions must exist before release exposure.");
   };
   const publishPackage = async (pkg: (typeof packages)[number]) => {
     // A transient answer must never read as "absent" here: publishing over an
@@ -661,13 +666,14 @@ async function publishPrepared(plan: ForkReleasePlan) {
     publishNpm: async () => {
       if (!plan.npm) return;
       const results = await Promise.allSettled(
-        packages.filter((pkg) => pkg.manifest.name !== "shuv2code").map(publishPackage),
+        packages.filter((pkg) => pkg.manifest.name.startsWith("@s2code/")).map(publishPackage),
       );
       const failures = results.filter((result) => result.status === "rejected");
       if (failures.length)
         throw new Error(
           `A fork platform package failed publication/verification; launcher publication was skipped. ${failures.map((result) => (result.reason instanceof Error ? result.reason.message : "Unknown publication failure.")).join(" ")}`,
         );
+      await publishPackage(packages.find((pkg) => pkg.manifest.name === "s2code")!);
       await publishPackage(packages.find((pkg) => pkg.manifest.name === "shuv2code")!);
     },
     verifyNpm,
@@ -821,10 +827,10 @@ async function main() {
       process.env.ALLOW_UNSIGNED === "true",
       process.env,
     );
-    const npm = process.env.FORK_NPM_TRUSTED_PUBLISHING_READY === "true";
+    const npm = forkNpmPublishingReady(process.env);
     if (!npm)
       console.log(
-        "npm publication skipped: FORK_NPM_TRUSTED_PUBLISHING_READY is not true. Only the GitHub release will publish.",
+        "npm publication skipped: both S2CODE_NPM_TRUSTED_PUBLISHING_READY and the legacy bridge readiness are required. Only the GitHub release will publish.",
       );
     const sha = run("git", ["rev-parse", "HEAD"]);
     const base = (

@@ -17,25 +17,25 @@ const documents = [
   {
     number: "03",
     title: "Security Policy",
-    description: "Our security practices, responsible disclosure process, and shared responsibilities.",
+    description: "T3 Tools' security practices, responsible disclosure process, and shared responsibilities.",
     href: "/security-policy",
   },
 ] as const;
 ---
 
 <Layout
-  title="Legal — T3 Code"
-  description="Privacy, terms, and security documents for T3 Code."
+  title="Upstream legal references — S2Code"
+  description="Inherited privacy, terms, and security documents for T3 Code."
   pageClass="legal-document-page"
 >
   <div class="legal-index">
     <header class="legal-index-hero">
-      <p class="eyebrow">T3 Tools, Inc. / Legal</p>
-      <h1>Legal</h1>
-      <p>Policies and terms for T3 Code, collected in one place.</p>
+      <p class="eyebrow">T3 Tools, Inc. / Upstream documents</p>
+      <h1>Upstream legal references</h1>
+      <p>These inherited documents describe T3 Tools and T3 Code. They are retained as upstream references, not S2Code policies.</p>
     </header>
 
-    <nav class="document-list" aria-label="Legal documents">
+    <nav class="document-list" aria-label="Upstream legal documents">
       {documents.map((document) => (
         <a href={document.href} class="document-card">
           <span class="document-number">{document.number}</span>

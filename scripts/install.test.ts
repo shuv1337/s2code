@@ -13,8 +13,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
     "preserves download and install behavior (HTTP failure: %s)",
     async (fail) => {
       const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-progress-"));
+      const fixtureEnv = {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: root,
+        USERPROFILE: root,
+      };
       const version = "1.2.3";
-      const stem = `shuv2code-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+      const stem = `s2code-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
       const archiveName = `${stem}.tar.gz`;
       let resumeDownload: (() => void) | undefined;
       let sawPartialProgress = false;
@@ -27,13 +32,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
         NodePath.join(root, stem, "payload"),
         NodeCrypto.randomBytes(64 * 1024),
       );
-      NodeChildProcess.execFileSync("tar", [
-        "-czf",
-        NodePath.join(root, archiveName),
-        "-C",
-        root,
-        stem,
-      ]);
+      NodeChildProcess.execFileSync(
+        "tar",
+        ["-czf", NodePath.join(root, archiveName), "-C", root, stem],
+        { env: fixtureEnv },
+      );
       const archive = await NodeFSP.readFile(NodePath.join(root, archiveName));
       const checksum = NodeCrypto.createHash("sha256").update(archive).digest("hex");
       const server = NodeHttp.createServer((request, response) => {
@@ -56,13 +59,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
       );
       const child = NodeChildProcess.spawn("script", ["-qec", `sh '${installer}'`, "/dev/null"], {
         env: {
-          ...process.env,
+          ...fixtureEnv,
           TERM: "xterm",
           NO_COLOR: "1",
-          SHUV2CODE_VERSION: version,
-          SHUV2CODE_HOME: NodePath.join(root, "home"),
-          SHUV2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-          SHUV2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+          S2CODE_VERSION: version,
+          S2CODE_HOME: NodePath.join(root, "home"),
+          S2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+          S2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -85,23 +88,24 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
           expect(code).not.toBe(0);
           expect(output).toContain("500");
           expect(output).not.toContain("100%");
-          expect(output).not.toContain("Installed shuv2code");
+          expect(output).not.toContain("Installed s2code");
           expect(await NodeFSP.readdir(versions)).toEqual([]);
         } else {
           expect(code).toBe(0);
           expect(sawPartialProgress).toBe(true);
           expect(output).toContain("100%");
           expect(output).toContain("0.1 / 0.1 MB");
-          expect(output).toContain("Installed shuv2code 1.2.3");
+          expect(output).toContain("Installed s2code 1.2.3");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
           ).toBe("1.2.3\n");
           expect(
             await NodeFSP.readFile(NodePath.join(versions, version, ".install-product"), "utf8"),
-          ).toBe("shuv2code\n");
+          ).toBe("s2code\n");
           expect(
-            NodeChildProcess.execFileSync(NodePath.join(root, "bin/shuv2code"), ["--version"], {
+            NodeChildProcess.execFileSync(NodePath.join(root, "bin/s2code"), ["--version"], {
               encoding: "utf8",
+              env: fixtureEnv,
             }).trim(),
           ).toBe("t3 v1.2.3");
           expect(await NodeFSP.readdir(versions)).toEqual([version]);

@@ -10,6 +10,8 @@ import {
   isWaylandSession,
   DBUS_NAME as NAME,
   DBUS_PATH as PATH,
+  LEGACY_DBUS_NAME,
+  LEGACY_DBUS_PATH,
 } from "./captureService.js";
 import { CaptureFeedback } from "./captureFeedback.js";
 
@@ -117,7 +119,7 @@ function takeSnapshot(animate) {
   });
 }
 
-export default class Shuv2CodeSnapShotExtension extends Extension {
+export default class S2CodeSnapShotExtension extends Extension {
   enable() {
     this._feedback = new CaptureFeedback();
     this._sessionChanged = Main.sessionMode.connect("updated", () => this._feedback.dispose());
@@ -132,15 +134,21 @@ export default class Shuv2CodeSnapShotExtension extends Extension {
         isWaylandSession(Meta) && !Main.sessionMode.isLocked && !Main.sessionMode.isGreeter,
       takeSnapshot,
     });
-    this._object = Gio.DBusExportedObject.wrapJSObject(XML, this);
-    this._object.export(Gio.DBus.session, PATH);
-    this._owner = Gio.bus_own_name_on_connection(
-      Gio.DBus.session,
-      NAME,
-      Gio.BusNameOwnerFlags.NONE,
-      null,
-      null,
-    );
+    this._registrations = [
+      [NAME, PATH],
+      [LEGACY_DBUS_NAME, LEGACY_DBUS_PATH],
+    ].map(([name, path]) => {
+      const object = Gio.DBusExportedObject.wrapJSObject(XML.replaceAll(NAME, name), this);
+      object.export(Gio.DBus.session, path);
+      const owner = Gio.bus_own_name_on_connection(
+        Gio.DBus.session,
+        name,
+        Gio.BusNameOwnerFlags.NONE,
+        null,
+        null,
+      );
+      return { object, owner };
+    });
   }
 
   get Version() {
@@ -186,10 +194,11 @@ export default class Shuv2CodeSnapShotExtension extends Extension {
     if (this._monitorsChanged) Main.layoutManager.disconnect(this._monitorsChanged);
     this._sessionChanged = 0;
     this._monitorsChanged = 0;
-    this._object?.unexport();
-    if (this._owner) Gio.bus_unown_name(this._owner);
+    for (const { object, owner } of this._registrations ?? []) {
+      object.unexport();
+      if (owner) Gio.bus_unown_name(owner);
+    }
     this._service = null;
-    this._object = null;
-    this._owner = null;
+    this._registrations = null;
   }
 }

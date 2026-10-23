@@ -1,24 +1,29 @@
 /** Shared by Expo config, release preflight and the dependency-free APK mirror. */
+// Expo and native identifiers remain registered to existing installations so
+// renaming the product cannot create a second app or lose credentials and OTA history.
 export const MOBILE_SLUG = "shuv2code";
 export const MOBILE_VARIANTS = {
   development: {
-    appName: "shuv2code Dev",
+    appName: "S2Code Dev",
     displayName: "S2Code Dev",
-    scheme: "shuv2code-dev",
+    scheme: "s2code-dev",
+    legacyScheme: "shuv2code-dev",
     iosBundleIdentifier: "dev.shuv.shuv2code.dev",
     androidPackage: "dev.shuv.shuv2code.dev",
   },
   preview: {
-    appName: "shuv2code Nightly",
+    appName: "S2Code Nightly",
     displayName: "S2Code Nightly",
-    scheme: "shuv2code-nightly",
+    scheme: "s2code-nightly",
+    legacyScheme: "shuv2code-nightly",
     iosBundleIdentifier: "dev.shuv.shuv2code.nightly",
     androidPackage: "dev.shuv.shuv2code.nightly",
   },
   production: {
-    appName: "shuv2code",
+    appName: "S2Code",
     displayName: "S2Code",
-    scheme: "shuv2code",
+    scheme: "s2code",
+    legacyScheme: "shuv2code",
     iosBundleIdentifier: "dev.shuv.shuv2code",
     androidPackage: "dev.shuv.shuv2code",
   },

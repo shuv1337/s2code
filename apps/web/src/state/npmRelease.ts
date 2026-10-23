@@ -3,24 +3,30 @@ import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { AsyncResult, Atom } from "effect/reactivity";
 
-/**
- * Whether `shuv2code@<version>` is published on npm. A 404 is false; network and
- * registry errors stay unknown. Both re-check every few minutes, so a release
- * that lands later shows up without a reload.
- */
-export const npmReleasePublishedAtom = Atom.family((version: string) =>
+export type ForkNpmPackage = "s2code" | "shuv2code";
+
+// Older releases exist only under shuv2code. Prefer the new package when both
+// publish, but retain the exact package that can install a requested version.
+export const npmReleasePackageAtom = Atom.family((version: string) =>
   Atom.make(
     Effect.gen(function* () {
-      const response = yield* HttpClient.get(
-        `https://registry.npmjs.org/shuv2code/${encodeURIComponent(version)}`,
-      );
-      if (response.status === 404) return false;
-      const body = yield* HttpClientResponse.filterStatusOk(response).pipe(
-        Effect.flatMap((ok) => ok.json),
-      );
-      return typeof body === "object" && body !== null && "version" in body
-        ? body.version === version
-        : false;
+      for (const packageName of ["s2code", "shuv2code"] as const) {
+        const body = yield* HttpClient.get(
+          `https://registry.npmjs.org/${packageName}/${encodeURIComponent(version)}`,
+        ).pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap((ok) => ok.json),
+          Effect.orElseSucceed(() => null),
+        );
+        if (
+          typeof body === "object" &&
+          body !== null &&
+          "version" in body &&
+          body.version === version
+        )
+          return packageName;
+      }
+      return null;
     }).pipe(
       // Tracing headers would make the browser send a CORS preflight, which npm rejects.
       Effect.provideService(HttpClient.TracerPropagationEnabled, false),
@@ -29,15 +35,23 @@ export const npmReleasePublishedAtom = Atom.family((version: string) =>
   ).pipe(
     Atom.withRefresh("5 minutes"),
     Atom.keepAlive,
-    Atom.withLabel(`npm-release-published:${version}`),
+    Atom.withLabel(`npm-release-package:${version}`),
   ),
 );
 
-const NO_VERSION_ATOM = Atom.make(AsyncResult.success(false)).pipe(
-  Atom.withLabel("npm-release-published:none"),
+export const npmReleasePublishedAtom = Atom.family((version: string) =>
+  Atom.make((get) => AsyncResult.map(get(npmReleasePackageAtom(version)), (name) => name !== null)),
 );
 
+const NO_VERSION_ATOM = Atom.make(AsyncResult.success<ForkNpmPackage | null>(null)).pipe(
+  Atom.withLabel("npm-release-package:none"),
+);
+
+export function useNpmReleasePackage(version: string | null): ForkNpmPackage | null {
+  const result = useAtomValue(version ? npmReleasePackageAtom(version) : NO_VERSION_ATOM);
+  return AsyncResult.getOrElse(result, () => null);
+}
+
 export function useNpmReleasePublished(version: string | null): boolean {
-  const result = useAtomValue(version ? npmReleasePublishedAtom(version) : NO_VERSION_ATOM);
-  return AsyncResult.getOrElse(result, () => false);
+  return useNpmReleasePackage(version) !== null;
 }

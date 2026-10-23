@@ -16,7 +16,16 @@ Optional version-override secrets: `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`.
 
 ## Accounts and human delivery proof
 
-Create a fork Expo account/project with slug `shuv2code`; authorize the token and production/preview environments. Register paid Apple Developer App IDs and provisioning/signing credentials for `dev.shuv.shuv2code` (production), `.nightly` (preview), and `.dev` (development), including derived `.widgets`, `.share`, `.watchkitapp` and `group.<bundle-id>` identities. Register the production App Store Connect app and a scoped submission API key. Confirm EAS-managed certificates/profiles belong to the configured Apple team, not upstream. Configure the fork's associated domains and OAuth/native sign-in registrations only for enabled auth.
+The visible app name is S2Code. Native bundle/package IDs, their derived Keychain
+and App Group identities, and the Expo slug/project remain unchanged for upgrade
+and credential continuity. Each native build registers its `s2code*` URL scheme
+alongside the matching `shuv2code*` alias. These scheme changes require a new native
+binary; do not deliver them only through OTA. Rename Expo/store display metadata
+in the existing registered projects after verifying ownership. Changing a bundle
+ID creates a separate app and requires an explicit data, signing, push and auth
+migration rather than a source-only rename.
+
+Retain the existing fork Expo project slug `shuv2code`; authorize the token and production/preview environments. Register paid Apple Developer App IDs and provisioning/signing credentials for `dev.shuv.shuv2code` (production), `.nightly` (preview), and `.dev` (development), including derived `.widgets`, `.share`, `.watchkitapp` and `group.<bundle-id>` identities. Register the production App Store Connect app and a scoped submission API key. Confirm EAS-managed certificates/profiles belong to the configured Apple team, not upstream. Configure the fork's associated domains and OAuth/native sign-in registrations only for enabled auth.
 
 Create a Google Play application `dev.shuv.shuv2code`, its configured release/testing tracks, and a project-scoped service account with access to that package. Provision a fork upload keystore through EAS and Play App Signing. Set the mirror certificate digest from the **Play app-signing certificate**, not the upload key. Register variant packages in fork Firebase when push is enabled. Establish APNs team/key and FCM relay credentials for enabled remote notifications.
 

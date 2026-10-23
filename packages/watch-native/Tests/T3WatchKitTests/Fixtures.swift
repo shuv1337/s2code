@@ -20,7 +20,7 @@ enum Fixtures {
   ) -> String {
     let run = activeRunId.map { "\"\($0)\"" } ?? "null"
     return """
-      {"environmentId":"\(environmentId)","threadId":"\(threadId)","projectId":"4e8c6d07-20d8-4c59-b4fe-19b9feac7ee1","labels":{"environment":"shuvbot","project":"shuv2code-nightly","thread":"Watch E2E smoke"},"provider":"codex","providerInstanceId":"\(providerInstanceId)","activity":"\(activity)","activeRunId":\(run),"capabilities":{"supportsActiveSteering":\(supportsSteering),"activeSteeringInterruptsTools":\(interruptsTools),"supportsQueuedMessages":true},"queuedCount":0,"pendingAttention":{"runtimeRequest":{"id":"runtime-request:provider:codex:1","kind":"command","createdAt":"2026-10-11T23:23:31.376Z"},"hasActionableProposedPlan":false},"latestAssistantExcerpt":"I'll list the repository root…","isReadOnly":\(isReadOnly),"parentThreadId":null,"snapshotRevision":278476,"updatedAt":"2026-10-11T23:17:23.510Z"}
+      {"environmentId":"\(environmentId)","threadId":"\(threadId)","projectId":"4e8c6d07-20d8-4c59-b4fe-19b9feac7ee1","labels":{"environment":"shuvbot","project":"s2code-nightly","thread":"Watch E2E smoke"},"provider":"codex","providerInstanceId":"\(providerInstanceId)","activity":"\(activity)","activeRunId":\(run),"capabilities":{"supportsActiveSteering":\(supportsSteering),"activeSteeringInterruptsTools":\(interruptsTools),"supportsQueuedMessages":true},"queuedCount":0,"pendingAttention":{"runtimeRequest":{"id":"runtime-request:provider:codex:1","kind":"command","createdAt":"2026-10-11T23:23:31.376Z"},"hasActionableProposedPlan":false},"latestAssistantExcerpt":"I'll list the repository root…","isReadOnly":\(isReadOnly),"parentThreadId":null,"snapshotRevision":278476,"updatedAt":"2026-10-11T23:17:23.510Z"}
       """
   }
 

@@ -1,5 +1,5 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { ensureProductHome } from "@t3tools/shared/productHome";
+import { ensureProductHome, resolveDefaultProductHome } from "@t3tools/shared/productHome";
 import {
   listLoginShellCandidates,
   mergePathEntries,
@@ -124,10 +124,10 @@ export const resolveBaseDir = Effect.fn(function* (
   raw: string | undefined,
   options: { readonly claim?: boolean } = {},
 ) {
-  const { join, resolve } = yield* Path.Path;
+  const { resolve } = yield* Path.Path;
   const directory =
     !raw || raw.trim().length === 0
-      ? join(
+      ? resolveDefaultProductHome(
           yield* HostProcess.HomeDirectory,
           resolveChannelIdentity(packageJson.version).homeDirectory,
         )

@@ -7,7 +7,10 @@ import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
@@ -81,6 +84,7 @@ export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
   readonly scheme: string;
+  readonly additionalSchemes?: readonly string[];
   readonly iconPath?: string;
 }): string {
   return [
@@ -92,7 +96,7 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    `MimeType=x-scheme-handler/${input.scheme};`,
+    `MimeType=${[input.scheme, ...(input.additionalSchemes ?? [])].map((scheme) => `x-scheme-handler/${scheme};`).join("")}`,
     "",
   ].join("\n");
 }
@@ -111,10 +115,13 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const assets = yield* DesktopAssets.DesktopAssets;
 
-  const scheme = ElectronProtocol.getDesktopScheme(
-    environment.isDevelopment,
-    environment.appVersion,
-  );
+  const schemes = environment.isDevelopment
+    ? ["s2code-dev", "shuv2code-dev"]
+    : [
+        resolveChannelIdentity(environment.appVersion).scheme,
+        resolveLegacyChannelIdentity(environment.appVersion).scheme,
+      ];
+  const scheme = schemes[0]!;
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
     environment.linuxDesktopEntryName,
@@ -130,6 +137,7 @@ export const make = Effect.gen(function* () {
       displayName: environment.displayName,
       execTarget,
       scheme,
+      additionalSchemes: schemes.slice(1),
       ...(environment.isPackaged ? { iconPath } : {}),
     });
     // Pre-ready setup normally wrote this already. Avoid truncating a valid
@@ -187,7 +195,11 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const command = ChildProcess.make(
         "xdg-mime",
-        ["default", environment.linuxDesktopEntryName, `x-scheme-handler/${scheme}`],
+        [
+          "default",
+          environment.linuxDesktopEntryName,
+          ...schemes.map((value) => `x-scheme-handler/${value}`),
+        ],
         {
           stdin: "ignore",
           stdout: "ignore",

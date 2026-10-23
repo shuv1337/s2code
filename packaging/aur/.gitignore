@@ -3,7 +3,7 @@ pkg/
 *.AppImage
 *.pkg.tar.zst
 .SRCINFO
-shuv2code-bin-*.png
-shuv2code-bin-*-LICENSE
-shuv2code-nightly-bin-*.png
-shuv2code-nightly-bin-*-LICENSE
+s2code-bin-*.png
+s2code-bin-*-LICENSE
+s2code-nightly-bin-*.png
+s2code-nightly-bin-*-LICENSE

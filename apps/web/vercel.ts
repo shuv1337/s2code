@@ -1,12 +1,16 @@
 import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
 import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 
-const routerOrigin = forkHostedOrigin(process.env.SHUV2CODE_HOSTED_APP_URL);
+const routerOrigin = forkHostedOrigin(
+  process.env.S2CODE_HOSTED_APP_URL?.trim() || process.env.SHUV2CODE_HOSTED_APP_URL,
+);
 const ROUTER_HOST = routerOrigin ? new URL(routerOrigin).hostname : "";
 const HOSTED_WEB_CHANNEL_COOKIE = "t3code_web_channel";
-const LATEST_ORIGIN = forkHostedOrigin(`https://${process.env.SHUV2CODE_WEB_LATEST_DOMAIN ?? ""}`);
+const LATEST_ORIGIN = forkHostedOrigin(
+  `https://${process.env.S2CODE_WEB_LATEST_DOMAIN?.trim() || process.env.SHUV2CODE_WEB_LATEST_DOMAIN?.trim() || ""}`,
+);
 const NIGHTLY_ORIGIN = forkHostedOrigin(
-  `https://${process.env.SHUV2CODE_WEB_NIGHTLY_DOMAIN ?? ""}`,
+  `https://${process.env.S2CODE_WEB_NIGHTLY_DOMAIN?.trim() || process.env.SHUV2CODE_WEB_NIGHTLY_DOMAIN?.trim() || ""}`,
 );
 const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
   {

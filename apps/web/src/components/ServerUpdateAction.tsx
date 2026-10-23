@@ -27,6 +27,7 @@ import { serverEnvironment, updateOutdatedServer } from "~/state/server";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { manualServerUpdateCommand } from "~/versionSkew";
+import { useNpmReleasePackage } from "~/state/npmRelease";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -109,7 +110,7 @@ export function useServerUpdate() {
         description:
           selfUpdate === "desktop-managed"
             ? `Desktop app relaunched on ${result.value.targetVersion}.`
-            : `Reconnected on shuv2code@${result.value.targetVersion}.`,
+            : `Reconnected on s2code@${result.value.targetVersion}.`,
       });
     }
     return { status: "updated" };
@@ -217,6 +218,9 @@ export function ServerUpdateAction({
   appearance = "button",
 }: Omit<ServerUpdateTarget, "continueThreadsAfterServerUpdate"> & UpdateButtonProps) {
   const isDesktopAppUpdate = selfUpdate === "desktop-managed";
+  const npmPackage = useNpmReleasePackage(
+    selfUpdate === null && installation?.kind !== "npm-global" ? targetVersion : null,
+  );
   const sessionStateAtom = environmentSession.sessionStateAtom(environmentId);
   const canUpdate = canUpdateServer(useAtomValue(sessionStateAtom));
   const continueThreadsAfterServerUpdate = useEnvironmentSettings(
@@ -233,8 +237,8 @@ export function ServerUpdateAction({
           installation?.kind === "npm-global" ? "Update command copied" : "Relaunch command copied",
         description:
           installation?.kind === "npm-global"
-            ? `Run \`${command}\` on ${serverLabel}, then restart t3 with your usual options.`
-            : `Stop t3 on ${serverLabel}, then relaunch with \`${command}\` using the same subcommand and options. This does not update an installed t3 command.`,
+            ? `Run \`${command}\` on ${serverLabel}, then restart S2Code with your usual options.`
+            : `Stop S2Code on ${serverLabel}, then relaunch with \`${command}\` using the same subcommand and options. This does not update an installed s2code command.`,
       });
     },
     onError: (error) => {
@@ -283,7 +287,9 @@ export function ServerUpdateAction({
   }
 
   const manualCommand =
-    selfUpdate === null ? manualServerUpdateCommand(targetVersion, installation) : null;
+    selfUpdate === null
+      ? manualServerUpdateCommand(targetVersion, installation, npmPackage ?? "s2code")
+      : null;
   const actionLabel =
     manualCommand !== null
       ? installation?.kind === "npm-global"
@@ -368,7 +374,7 @@ export function OutdatedServerUpdateAction({
     toastManager.add({
       type: "success",
       title: `${serverLabel} updated`,
-      description: `Reconnected on shuv2code@${result.value.targetVersion}.`,
+      description: `Reconnected on s2code@${result.value.targetVersion}.`,
     });
   };
   return (

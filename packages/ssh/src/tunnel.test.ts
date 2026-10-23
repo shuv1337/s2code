@@ -107,19 +107,21 @@ describe("ssh tunnel scripts", () => {
       const input = {
         archiveVersion: channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`,
       };
-      const home = `.shuv2code-v2${channel === "stable" ? "" : `-${channel}`}`;
+      const home = `.s2code-v2${channel === "stable" ? "" : `-${channel}`}`;
       const runner = SshTunnel.buildRemoteT3RunnerScript(input);
       const launch = SshTunnel.buildRemoteLaunchScript(input);
       const pairing = SshTunnel.buildRemotePairingScript("fixture", input);
       const stop = SshTunnel.buildRemoteStopScript("fixture", input);
-      assert.include(runner, `$HOME/${home}/runtime/versions`);
+      assert.include(runner, `T3_PRODUCT_HOME="$HOME/${home}"`);
+      assert.include(runner, "$T3_PRODUCT_HOME/runtime/versions");
       for (const script of [launch, pairing, stop]) {
-        assert.include(script, `$HOME/${home}/ssh-launch/`);
+        assert.include(script, `T3_PRODUCT_HOME="$HOME/${home}"`);
+        assert.include(script, "$T3_PRODUCT_HOME/ssh-launch/");
         assert.notInclude(script, "@@T3_HOME_DIRECTORY@@");
-        if (channel !== "stable") assert.notInclude(script, "$HOME/.shuv2code-v2/");
+        if (channel !== "stable") assert.notInclude(script, "$HOME/.s2code-v2/");
       }
-      assert.include(launch, `DEFAULT_SERVER_HOME="$HOME/${home}"`);
-      assert.include(pairing, `DEFAULT_SERVER_HOME="$HOME/${home}"`);
+      assert.include(launch, 'DEFAULT_SERVER_HOME="$T3_PRODUCT_HOME"');
+      assert.include(pairing, 'DEFAULT_SERVER_HOME="$T3_PRODUCT_HOME"');
       assert.include(launch, '--base-dir "$DEFAULT_SERVER_HOME"');
       assert.include(stop, '[ "$REMOTE_MANAGED" != "external" ]');
     },
@@ -135,12 +137,9 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(
       script,
-      'T3_RUNTIME_DIR="$HOME/.shuv2code-v2-preview/runtime/versions/$T3_ARCHIVE_VERSION"',
+      'T3_RUNTIME_DIR="$T3_PRODUCT_HOME/runtime/versions/$T3_ARCHIVE_VERSION"',
     );
-    assert.include(
-      script,
-      'T3_ARCHIVE="shuv2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"',
-    );
+    assert.include(script, 'T3_ARCHIVE="s2code-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"');
     assert.include(
       script,
       'T3_LEGACY_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"',
@@ -153,7 +152,7 @@ describe("ssh tunnel scripts", () => {
     assert.notInclude(script, 'exec t3 "$@"');
     assert.include(
       script,
-      'T3_LOCK="$HOME/.shuv2code-v2-preview/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"',
+      'T3_LOCK="$T3_PRODUCT_HOME/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"',
     );
     assert.include(script, 'while ! mkdir "$T3_LOCK" 2>/dev/null; do');
     assert.include(script, 'mv "$T3_LOCK/pid.tmp" "$T3_LOCK/pid"');
@@ -934,16 +933,14 @@ describe("archive runner script", () => {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const platform = hostPlatform === "darwin" ? "darwin" : "linux";
     const arch = hostArch === "arm64" ? "arm64" : "x64";
-    const stem = `${legacy ? "t3" : "shuv2code"}-${version}-${platform}-${arch}`;
+    const stem = `${legacy ? "t3" : "s2code"}-${version}-${platform}-${arch}`;
     const stage = `${root}/stage/${stem}`;
     const release = `${root}/mirror/v${version}`;
-    const channelHome = version.includes("-nightly.")
-      ? ".shuv2code-v2-nightly"
-      : ".shuv2code-v2-preview";
+    const channelHome = version.includes("-nightly.") ? ".s2code-v2-nightly" : ".s2code-v2-preview";
     const script = [
       "set -eu",
       `mkdir -p '${stage}' '${release}'`,
-      `printf '#!/bin/sh\\ntest "$(cat "$HOME/${channelHome}/.product-identity")" = shuv2code || exit 91\\necho t3 v${version}\\n' > '${stage}/t3'`,
+      `printf '#!/bin/sh\\ntest "$(cat "$HOME/${channelHome}/.product-identity")" = s2code || exit 91\\necho t3 v${version}\\n' > '${stage}/t3'`,
       `chmod +x '${stage}/t3'`,
       `tar -czf '${release}/${stem}.tar.gz' -C '${root}/stage' '${stem}'`,
       `cd '${release}' && (sha256sum '${stem}.tar.gz' 2>/dev/null || shasum -a 256 '${stem}.tar.gz') > SHA256SUMS`,
@@ -953,6 +950,75 @@ describe("archive runner script", () => {
     return `file://${root}/mirror`;
   });
 
+  it.effect.skipIf(windowsHost)("reuses a legacy owned remote cache and rejects ambiguity", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-ssh-upgrade-" });
+      const home = `${root}/home`;
+      const legacy = `${home}/.shuv2code-v2-preview`;
+      const current = `${home}/.s2code-v2-preview`;
+      const runtime = `${legacy}/runtime/versions/${archiveVersion}`;
+      yield* fs.makeDirectory(runtime, { recursive: true });
+      yield* fs.writeFileString(`${legacy}/.product-identity`, "shuv2code\n");
+      yield* fs.writeFileString(`${runtime}/.install-product`, "shuv2code\n");
+      yield* fs.writeFileString(`${runtime}/.install-complete`, `${archiveVersion}\n`);
+      yield* fs.writeFileString(
+        `${runtime}/t3`,
+        '#!/bin/sh\nprintf "%s\\n" "$S2CODE_HOME" "$SHUV2CODE_HOME"\n',
+        { mode: 0o755 },
+      );
+      const runner = `${root}/run.sh`;
+      yield* fs.writeFileString(
+        runner,
+        SshTunnel.buildRemoteT3RunnerScript({
+          archiveVersion,
+          releaseBaseUrl: `file://${root}/missing`,
+        }),
+      );
+      const old = yield* runRunner(home, runner);
+      assert.equal(old.exitCode, 0, old.stderr);
+      assert.equal(old.stdout, `${legacy}\n${legacy}\n`);
+      assert.isFalse(yield* fs.exists(current));
+      assert.equal(yield* fs.readFileString(`${legacy}/.product-identity`), "shuv2code\n");
+      yield* fs.makeDirectory(current);
+      yield* fs.writeFileString(`${current}/settings.json`, "other environment");
+      const ambiguous = yield* runRunner(home, runner);
+      assert.notEqual(ambiguous.exitCode, 0);
+      assert.include(ambiguous.stderr, "Both s2code and shuv2code homes contain state");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "reopens the pre-marker stable home without choosing new state",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-ssh-pre-marker-" });
+        const home = `${root}/home`;
+        const legacy = `${home}/.shuv2code-v2`;
+        const runtime = `${legacy}/runtime/versions/1.2.3`;
+        yield* fs.makeDirectory(runtime, { recursive: true });
+        yield* fs.writeFileString(`${runtime}/.install-product`, "shuv2code\n");
+        yield* fs.writeFileString(`${runtime}/.install-complete`, "1.2.3\n");
+        yield* fs.writeFileString(`${runtime}/t3`, '#!/bin/sh\nprintf "%s\\n" "$S2CODE_HOME"\n', {
+          mode: 0o755,
+        });
+        const runner = `${root}/run.sh`;
+        yield* fs.writeFileString(
+          runner,
+          SshTunnel.buildRemoteT3RunnerScript({
+            archiveVersion: "1.2.3",
+            releaseBaseUrl: `file://${root}/missing`,
+          }),
+        );
+        const result = yield* runRunner(home, runner);
+        assert.equal(result.exitCode, 0, result.stderr);
+        assert.equal(result.stdout, `${legacy}\n`);
+        assert.equal(yield* fs.readFileString(`${legacy}/.product-identity`), "shuv2code\n");
+        assert.isFalse(yield* fs.exists(`${home}/.s2code-v2`));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   for (const channel of ["nightly", "preview"])
     it.effect.skipIf(windowsHost)(
       `refuses unmarked ${channel} state in runner, launch and pairing before populating it`,
@@ -961,7 +1027,7 @@ describe("archive runner script", () => {
           const fs = yield* FileSystem.FileSystem;
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "ssh-unmarked-channel-" });
           const home = `${root}/home`;
-          const channelHome = `${home}/.shuv2code-v2-${channel}`;
+          const channelHome = `${home}/.s2code-v2-${channel}`;
           yield* fs.makeDirectory(`${channelHome}/userdata`, { recursive: true });
           yield* fs.writeFileString(`${channelHome}/userdata/statev2.sqlite`, "upstream-state");
           const input = {
@@ -998,7 +1064,7 @@ describe("archive runner script", () => {
           const version = `1.2.3-${channel}.20261014.1`;
           const releaseBaseUrl = yield* makeMirror(root, version, channel === "nightly");
           const home = `${root}/home`;
-          const stableCache = `${home}/.shuv2code-v2/runtime/versions/1.2.3`;
+          const stableCache = `${home}/.s2code-v2/runtime/versions/1.2.3`;
           yield* fs.makeDirectory(stableCache, { recursive: true });
           yield* fs.writeFileString(`${stableCache}/t3`, "stable-executable");
           const runner = `${root}/run-t3.sh`;
@@ -1011,12 +1077,12 @@ describe("archive runner script", () => {
           assert.include(result.stdout, `t3 v${version}`);
           assert.equal(yield* fs.readFileString(`${stableCache}/t3`), "stable-executable");
           assert.equal(
-            yield* fs.readFileString(`${home}/.shuv2code-v2-${channel}/.product-identity`),
-            "shuv2code\n",
+            yield* fs.readFileString(`${home}/.s2code-v2-${channel}/.product-identity`),
+            "s2code\n",
           );
           assert.equal(
             (yield* fs.readFileString(
-              `${home}/.shuv2code-v2-${channel}/runtime/versions/${version}/.install-complete`,
+              `${home}/.s2code-v2-${channel}/runtime/versions/${version}/.install-complete`,
             )).trim(),
             version,
           );
@@ -1037,13 +1103,10 @@ describe("archive runner script", () => {
             SshTunnel.buildRemoteT3RunnerScript({ archiveVersion, releaseBaseUrl }),
           );
           const home = `${root}/home`;
-          const versions = `${home}/.shuv2code-v2-preview/runtime/versions`;
+          const versions = `${home}/.s2code-v2-preview/runtime/versions`;
           const cache = `${versions}/${archiveVersion}`;
           yield* fs.makeDirectory(cache, { recursive: true });
-          yield* fs.writeFileString(
-            `${home}/.shuv2code-v2-preview/.product-identity`,
-            "shuv2code\n",
-          );
+          yield* fs.writeFileString(`${home}/.s2code-v2-preview/.product-identity`, "s2code\n");
           yield* fs.writeFileString(`${cache}/t3`, "old-runtime");
           yield* fs.writeFileString(`${cache}/.install-complete`, archiveVersion);
           yield* fs.makeDirectory(`${root}/bin`);
@@ -1087,9 +1150,9 @@ describe("archive runner script", () => {
           SshTunnel.buildRemoteT3RunnerScript({ archiveVersion, releaseBaseUrl }),
         );
         const home = `${root}/home`;
-        const cache = `${home}/.shuv2code-v2-preview/runtime/versions/${archiveVersion}`;
+        const cache = `${home}/.s2code-v2-preview/runtime/versions/${archiveVersion}`;
         yield* fs.makeDirectory(cache, { recursive: true });
-        yield* fs.writeFileString(`${home}/.shuv2code-v2-preview/.product-identity`, "shuv2code\n");
+        yield* fs.writeFileString(`${home}/.s2code-v2-preview/.product-identity`, "s2code\n");
         const sentinel = "#!/bin/sh\necho upstream-sentinel\nexit 1\n";
         yield* fs.writeFileString(`${cache}/t3`, sentinel);
         yield* fs.chmod(`${cache}/t3`, 0o755);
@@ -1097,7 +1160,7 @@ describe("archive runner script", () => {
         const installed = yield* runRunner(home, runner);
         assert.equal(installed.exitCode, 0, installed.stderr);
         assert.notInclude(installed.stdout + installed.stderr, "upstream-sentinel");
-        assert.equal((yield* fs.readFileString(`${cache}/.install-product`)).trim(), "shuv2code");
+        assert.equal((yield* fs.readFileString(`${cache}/.install-product`)).trim(), "s2code");
         // This is the exact retained launcher's completion predicate.
         assert.equal(
           (yield* fs.readFileString(`${cache}/.install-complete`)).trim(),
@@ -1135,7 +1198,7 @@ describe("archive runner script", () => {
           assert.equal(result.exitCode, 0, result.stderr);
           assert.include(result.stdout, `t3 v${archiveVersion}`);
         }
-        const versionsDir = `${home}/.shuv2code-v2-preview/runtime/versions`;
+        const versionsDir = `${home}/.s2code-v2-preview/runtime/versions`;
         assert.deepEqual(yield* fs.readDirectory(versionsDir), [archiveVersion]);
         assert.equal(
           (yield* fs.readFileString(`${versionsDir}/${archiveVersion}/.install-complete`)).trim(),
@@ -1227,10 +1290,11 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
     const fs = yield* FileSystem.FileSystem;
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-launch-script-" });
     const home = `${root}/home`;
-    const stateDir = `${home}/.shuv2code-v2/ssh-launch/test-state`;
+    const stateDir = `${home}/.s2code-v2/ssh-launch/test-state`;
     const fakeServer = `${root}/fake-t3.cjs`;
     const launch = `${root}/launch.sh`;
     yield* fs.makeDirectory(stateDir, { recursive: true });
+    yield* fs.writeFileString(`${home}/.s2code-v2/.product-identity`, "s2code\n");
     yield* fs.writeFileString(`${stateDir}/port`, `${yield* freeLoopbackPort}\n`);
     yield* fs.writeFileString(fakeServer, FAKE_SERVER);
     yield* fs.writeFileString(
@@ -1282,7 +1346,7 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
           "--port",
           "0",
           "--base-dir",
-          `${home}/.shuv2code-v2`,
+          `${home}/.s2code-v2`,
           ...flags,
         ];
         const server = yield* spawner.spawn(
@@ -1430,7 +1494,7 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         assert.include((yield* runScript(home, ["-c", `ps -o stat= -p ${zombie}`])).stdout, "Z");
         yield* fs.writeFileString(`${stateDir}/pid`, `${zombie}\n`);
         yield* fs.writeFileString(
-          `${home}/.shuv2code-v2/userdata/server-runtime.json`,
+          `${home}/.s2code-v2/userdata/server-runtime.json`,
           JSON.stringify({
             version: 1,
             pid: zombie,

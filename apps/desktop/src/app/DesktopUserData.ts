@@ -3,7 +3,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
-import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
 
 export class DesktopUserDataInitializationError extends Schema.TaggedError<DesktopUserDataInitializationError>()(
   "DesktopUserDataInitializationError",
@@ -48,9 +51,10 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
       !input.isDevelopment &&
       identity.channel !== "stable" &&
       input.homeDirectory !== undefined &&
-      input.baseDir === path.join(input.homeDirectory, identity.homeDirectory)
+      [identity, resolveLegacyChannelIdentity(input.appVersion ?? "")].some(
+        (candidate) => input.baseDir === path.join(input.homeDirectory!, candidate.homeDirectory),
+      )
     ) {
-      const sharedHome = path.join(input.homeDirectory, resolveChannelIdentity("").homeDirectory);
       const inspect = (resourcePath: string) =>
         fs
           .exists(resourcePath)
@@ -61,25 +65,26 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
           );
       // layerOwned has already created the channel home/marker by this point.
       // The old shared location remains worth disclosing on every such startup.
-      if (yield* inspect(sharedHome))
-        yield* Effect.logWarning(
-          `Starting ${identity.channel} with a separate home at ${input.baseDir}. Existing shared data remains untouched at ${sharedHome}; open stable to access it. No live database is copied or moved.`,
-        );
+      for (const candidate of [resolveChannelIdentity(""), resolveLegacyChannelIdentity("")]) {
+        const sharedHome = path.join(input.homeDirectory, candidate.homeDirectory);
+        if (yield* inspect(sharedHome))
+          yield* Effect.logWarning(
+            `Starting ${identity.channel} with a separate home at ${input.baseDir}. Existing shared data remains untouched at ${sharedHome}; open stable to access it. No live database is copied or moved.`,
+          );
+      }
     }
-    // V2 starts independently: never inspect or copy upstream/V1 profiles or encryption keys.
-    const destinationPath = path.join(
+    // The profile is a persistent credential identity, independent of the server home.
+    const profilePath = path.join(
       input.appDataDirectory,
-      input.isDevelopment
-        ? "shuv2code-v2-dev"
-        : resolveChannelIdentity(input.appVersion ?? "").profileDirectory,
+      input.isDevelopment ? "shuv2code-v2-dev" : identity.profileDirectory,
     );
     yield* fs
-      .exists(destinationPath)
+      .exists(profilePath)
       .pipe(
         Effect.mapError((cause) =>
-          DesktopUserDataInitializationError.fromFileSystem(cause, "inspect", destinationPath),
+          DesktopUserDataInitializationError.fromFileSystem(cause, "inspect", profilePath),
         ),
       );
-    return destinationPath;
+    return profilePath;
   },
 );

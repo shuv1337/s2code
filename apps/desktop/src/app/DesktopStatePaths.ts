@@ -1,3 +1,4 @@
+import { resolveDefaultProductHome } from "@t3tools/shared/productHome";
 import * as Option from "effect/Option";
 import { DEFAULT_HOME_DIRECTORY } from "@t3tools/shared/productIdentity";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
@@ -19,7 +20,7 @@ export function resolveDesktopBaseDir(input: {
   readonly appVersion?: string;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(
+    resolveDefaultProductHome(
       input.homeDirectory,
       input.appVersion === undefined
         ? DEFAULT_HOME_DIRECTORY

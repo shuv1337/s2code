@@ -54,7 +54,7 @@ const makeFakeArchives = Effect.fn("test.makeFakeArchives")(function* () {
   yield* fs.makeDirectory(archivesDir);
   for (const key of KEYS) {
     const archiveName = cliArchiveFileName(VERSION, key);
-    const stem = archiveName.replace(/\.tar\.gz$/, "");
+    const stem = archiveName.replace(/^s2code-/, "shuv2code-").replace(/\.tar\.gz$/, "");
     const stage = path.join(root, "stage", key);
     const contentDir = path.join(stage, stem);
     for (const dir of [
@@ -119,17 +119,17 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       // Platform packages in CLI_ARCHIVE_PLATFORM_KEYS order, launcher last.
       assert.deepStrictEqual(
         outputs.map((output) => output.name),
-        ["@shuv2code/t3-darwin-arm64", "@shuv2code/t3-linux-x64", "shuv2code"],
+        ["@s2code/t3-darwin-arm64", "@s2code/t3-linux-x64", "s2code", "shuv2code"],
       );
       for (const output of outputs) {
         assert.isTrue(yield* fs.exists(output.tarball), output.tarball);
       }
 
-      const linuxDir = path.join(fixture.outputDir, "@shuv2code/t3-linux-x64");
+      const linuxDir = path.join(fixture.outputDir, "@s2code/t3-linux-x64");
       const linuxManifest = yield* decodeManifest(
         yield* fs.readFileString(path.join(linuxDir, "package.json")),
       );
-      assert.equal(linuxManifest.name, "@shuv2code/t3-linux-x64");
+      assert.equal(linuxManifest.name, "@s2code/t3-linux-x64");
       assert.equal(linuxManifest.version, VERSION);
       assert.deepStrictEqual(linuxManifest.os, ["linux"]);
       assert.deepStrictEqual(linuxManifest.cpu, ["x64"]);
@@ -154,47 +154,59 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       // A root README, or npm would display a bundled dependency's.
       assert.include(
         yield* fs.readFileString(path.join(linuxDir, "README.md")),
-        "# @shuv2code/t3-linux-x64",
+        "# @s2code/t3-linux-x64",
       );
       assert.isTrue(yield* fs.exists(path.join(linuxDir, "node_modules/node-pty")));
       assert.equal(Number((yield* fs.stat(path.join(linuxDir, "t3"))).mode) & 0o111, 0o111);
 
       const darwinManifest = yield* decodeManifest(
         yield* fs.readFileString(
-          path.join(fixture.outputDir, "@shuv2code/t3-darwin-arm64/package.json"),
+          path.join(fixture.outputDir, "@s2code/t3-darwin-arm64/package.json"),
         ),
       );
       assert.deepStrictEqual(darwinManifest.os, ["darwin"]);
       assert.deepStrictEqual(darwinManifest.cpu, ["arm64"]);
 
-      const launcherDir = path.join(fixture.outputDir, "shuv2code");
+      const launcherDir = path.join(fixture.outputDir, "s2code");
       const launcherManifest = yield* decodeManifest(
         yield* fs.readFileString(path.join(launcherDir, "package.json")),
       );
-      assert.equal(launcherManifest.name, "shuv2code");
+      assert.equal(launcherManifest.name, "s2code");
       assert.equal(launcherManifest.version, VERSION);
       assert.deepStrictEqual(launcherManifest.bin, {
+        s2code: "./bin/t3.js",
         shuv2code: "./bin/t3.js",
         s2c: "./bin/t3.js",
       });
       assert.deepStrictEqual(launcherManifest.files, ["bin", "dist"]);
       assert.deepStrictEqual(launcherManifest.optionalDependencies, {
-        "@shuv2code/t3-darwin-arm64": VERSION,
-        "@shuv2code/t3-linux-x64": VERSION,
+        "@s2code/t3-darwin-arm64": VERSION,
+        "@s2code/t3-linux-x64": VERSION,
       });
       assert.isUndefined(launcherManifest.engines);
       assert.isTrue(yield* fs.exists(path.join(launcherDir, "bin/t3.js")));
+      const bridgeDir = path.join(fixture.outputDir, "shuv2code");
+      const bridgeManifest = yield* decodeManifest(
+        yield* fs.readFileString(path.join(bridgeDir, "package.json")),
+      );
+      assert.deepStrictEqual(bridgeManifest, { ...launcherManifest, name: "shuv2code" });
 
       // The scratch dirs must not be left behind next to the packages.
       const outputEntries = yield* fs.readDirectory(fixture.outputDir);
-      assert.deepStrictEqual(outputEntries.sort(), ["@shuv2code", "shuv2code", "shuv2code.tgz"]);
+      assert.deepStrictEqual(outputEntries.sort(), [
+        "@s2code",
+        "s2code",
+        "s2code.tgz",
+        "shuv2code",
+        "shuv2code.tgz",
+      ]);
 
       // The tarball is what gets published: it must carry node_modules (which
       // `npm publish <dir>` would strip) under npm's `package/` root, with the
       // executable bit intact.
       const listing = yield* run(
         "tar",
-        ["-tzvf", path.join(fixture.outputDir, "@shuv2code/t3-linux-x64.tgz")],
+        ["-tzvf", path.join(fixture.outputDir, "@s2code/t3-linux-x64.tgz")],
         { cwd: fixture.outputDir },
       );
       assert.equal(listing.exitCode, 0, listing.stderr);
@@ -221,6 +233,12 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
           `stub ${hostPlatform}-${hostArch} serve --port 1234`,
         );
         assert.equal(passthrough.exitCode, 7);
+        const bridge = yield* run(process.execPath, ["bin/t3.js", "serve", "--port", "1234"], {
+          cwd: bridgeDir,
+          env,
+        });
+        assert.equal(bridge.stdout, passthrough.stdout);
+        assert.equal(bridge.exitCode, passthrough.exitCode);
 
         // Run the entry point used by already-installed service updaters from
         // the published tarball, including their preflight arguments.

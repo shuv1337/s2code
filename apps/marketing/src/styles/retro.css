@@ -54,6 +54,13 @@ svg {
 section {
   scroll-margin-top: 24px;
 }
+.upstream-reference {
+  margin: 20px;
+  padding: 14px 18px;
+  background: var(--silver);
+  color: #000;
+  line-height: 1.5;
+}
 .skip-link {
   position: fixed;
   top: -80px;

@@ -51,7 +51,7 @@ describe("fork workflow gates", () => {
       eventName: "schedule",
       ref: "refs/heads/main",
       sha: "ab".repeat(20),
-      repo: { owner: "shuv1337", repo: "shuv2code" },
+      repo: { owner: "shuv1337", repo: "s2code" },
       payload: { repository: { default_branch: "main" } },
     };
     const core = {
@@ -82,7 +82,7 @@ describe("fork workflow gates", () => {
       "RELAY_URL",
     ])
       expect(desktop).toContain(`T3CODE_${name}:`);
-    expect(desktop).not.toContain("SHUV2CODE_CLERK_");
+    expect(desktop).not.toContain("S2CODE_CLERK_");
   });
 });
 

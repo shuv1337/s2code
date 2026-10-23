@@ -151,7 +151,7 @@ it("leaves upstream-named helpers untouched through discovery, install, upgrade 
   await NodeFSP.writeFile(legacyDesktop, "[Desktop Entry]\nX-T3Code-Capture-Helper=true\n");
   expect(await setup.state()).toMatchObject({
     status: "not-installed",
-    message: expect.stringContaining("upstream-named KDE"),
+    message: expect.stringContaining("older KDE"),
   });
   await setup.perform("install-kde-helper");
   await NodeFSP.writeFile(paths.bundle, "fork upgrade");
@@ -166,7 +166,7 @@ it("leaves upstream-named helpers untouched through discovery, install, upgrade 
   await setup.perform("remove-kde-helper");
   expect(await setup.state()).toMatchObject({
     status: "not-installed",
-    message: expect.stringContaining("upstream-named KDE"),
+    message: expect.stringContaining("older KDE"),
   });
   expect(await NodeFSP.readFile(legacyExecutable, "utf8")).toBe("upstream executable");
   expect((await NodeFSP.stat(legacyExecutable)).mode & 0o777).toBe(0o755);
@@ -178,13 +178,14 @@ it("leaves upstream-named helpers untouched through discovery, install, upgrade 
 it.each([
   "applications/com.t3tools.T3Code.KdeCapture.desktop",
   "t3code/kde-capture/t3-kde-snap-shot",
+  "shuv2code/kde-capture/shuv2code-kde-snap-shot",
 ])("detects the legacy KDE path %s read-only, without following it", async (legacy) => {
   const legacyPath = NodePath.join(paths.dataHome, legacy);
   await NodeFSP.mkdir(NodePath.dirname(legacyPath), { recursive: true });
   await NodeFSP.symlink(paths.bundle, legacyPath);
   expect(await setup.state()).toMatchObject({
     status: "not-installed",
-    message: expect.stringContaining("upstream-named KDE"),
+    message: expect.stringContaining("older KDE"),
   });
   expect(execute).not.toHaveBeenCalled();
   expect(await NodeFSP.readlink(legacyPath)).toBe(paths.bundle);
@@ -214,7 +215,7 @@ it.each(["install-kde-helper", "remove-kde-helper"] as const)(
     const upstream = NodePath.join(paths.dataHome, "t3code");
     await NodeFSP.mkdir(NodePath.join(upstream, "kde-capture"), { recursive: true });
     await NodeFSP.writeFile(NodePath.join(upstream, "kde-capture/shuv2code-kde-snap-shot"), "keep");
-    await NodeFSP.symlink(upstream, NodePath.join(paths.dataHome, "shuv2code"));
+    await NodeFSP.symlink(upstream, NodePath.join(paths.dataHome, "s2code"));
     await expect(setup.perform(action)).rejects.toThrow("regular directory");
     expect(
       await NodeFSP.readFile(

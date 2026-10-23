@@ -57,6 +57,7 @@ const layerDesktopClerk = (
     copyText: () => Effect.void,
   },
   appVersion = "1.2.3",
+  isPackaged = false,
 ) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
@@ -64,6 +65,7 @@ const layerDesktopClerk = (
     appDataDirectory: "/tmp/app-data",
     platform,
     appVersion,
+    isPackaged,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
   const electronApp = {
@@ -294,9 +296,9 @@ describe("DesktopClerk", () => {
   });
 });
 
-it.effect(
-  "provider auth deep links navigate and reveal the running desktop without handling Clerk URLs",
-  () => {
+it.effect.each(["shuv2code-dev", "s2code-dev"])(
+  "provider auth %s deep links navigate the saved renderer origin without handling Clerk URLs",
+  (scheme) => {
     storageMock.mockReturnValue(storageAdapter);
     createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
     const listeners = new Map<string, (...args: unknown[]) => void>();
@@ -323,7 +325,7 @@ it.effect(
       assert.equal(event.preventDefault.mock.calls.length, 0);
       listeners.get("second-instance")!({}, [
         "t3",
-        "shuv2code-dev://app/settings/providers?instanceId=work&code=never-forward",
+        `${scheme}://app/settings/providers?instanceId=work&code=never-forward`,
       ]);
       yield* Effect.promise(() => revealed.promise);
       assert.deepEqual(loadURL.mock.calls, [
@@ -449,6 +451,7 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.strictEqual(open("http://localhost:3000/"), 1);
       assert.strictEqual(open("shuv2code-dev://new?prompt=hi"), 1);
       assert.strictEqual(open("shuv2code-dev://threads/env-1/thread-1"), 1);
+      assert.strictEqual(open("s2code-dev://threads/env-1/thread-1"), 1);
       assert.strictEqual(open("t3code://new?prompt=hi"), 0);
       assert.strictEqual(open("shuv2code-nightly://new?prompt=hi"), 0);
       assert.strictEqual(open("shuv2code://new?prompt=hi"), 0);
@@ -460,6 +463,7 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
         "http://localhost:3000/",
         "shuv2code-dev://new?prompt=hi",
         "shuv2code-dev://threads/env-1/thread-1",
+        "s2code-dev://threads/env-1/thread-1",
       ]);
     }).pipe(
       Effect.provide(layerDesktopClerk(true, [], "darwin")),
@@ -487,10 +491,17 @@ it.effect.each(["stable", "nightly", "preview"])(
       storageMock.mockReturnValue(storageAdapter);
       createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
       const scheme = channel === "stable" ? "shuv2code" : `shuv2code-${channel}`;
+      const canonicalScheme = scheme.replace("shuv2code", "s2code");
       const version = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
       const received: string[] = [];
       const listeners = new Map<string, (...args: unknown[]) => void>();
+      const registrations: string[] = [];
       const electronApp = {
+        setAsDefaultProtocolClient: (scheme: string) =>
+          Effect.sync(() => {
+            registrations.push(scheme);
+            return true;
+          }),
         on: (name: string, listener: (...args: unknown[]) => void) =>
           Effect.sync(() => {
             listeners.set(name, listener);
@@ -515,11 +526,13 @@ it.effect.each(["stable", "nightly", "preview"])(
         );
         assert.equal(prevented, 0);
         open(event, own);
+        open(event, `${canonicalScheme}://threads/remote/thread`);
         yield* Effect.yieldNow;
-        assert.equal(prevented, 1);
-        assert.deepEqual(received, [own, own]);
+        assert.equal(prevented, 2);
+        assert.deepEqual(received, [own, own, `${canonicalScheme}://threads/remote/thread`]);
+        assert.deepEqual(registrations, [canonicalScheme, scheme]);
       }).pipe(
-        Effect.provide(layerDesktopClerk(false, [], "darwin", undefined, undefined, version)),
+        Effect.provide(layerDesktopClerk(false, [], "darwin", undefined, undefined, version, true)),
         Effect.provideService(HostProcess.Arguments, [
           "shuv2code",
           own,

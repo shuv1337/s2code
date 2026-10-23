@@ -2,7 +2,7 @@ import { AtomRegistry } from "effect/reactivity";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { afterAll, afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { npmReleasePublishedAtom } from "./npmRelease";
+import { npmReleasePackageAtom, npmReleasePublishedAtom } from "./npmRelease";
 
 const version = "0.0.46-nightly.20261012.3021";
 
@@ -42,11 +42,35 @@ describe("npmReleasePublishedAtom", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = new Request(fetchMock.mock.calls[0]?.[0] ?? "", fetchMock.mock.calls[0]?.[1]);
-    expect(request.url).toBe(`https://registry.npmjs.org/shuv2code/${version}`);
+    expect(request.url).toBe(`https://registry.npmjs.org/s2code/${version}`);
     expect(request.headers.get("traceparent")).toBeNull();
     expect(request.headers.get("b3")).toBeNull();
     expect(AsyncResult.getOrElse(result, () => false)).toBe(true);
   });
+
+  it.each([404, 503, "network"] as const)(
+    "falls back to the legacy package after canonical lookup returns %s",
+    async (failure) => {
+      fetchMock.mockImplementation(async (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (!url.includes("/s2code/")) return Response.json({ version });
+        if (failure === "network") throw new TypeError("Failed to fetch");
+        return new Response(null, { status: failure });
+      });
+      const registry = AtomRegistry.make();
+      const atom = npmReleasePackageAtom(version);
+      const unmount = registry.mount(atom);
+      try {
+        await vi.waitFor(() =>
+          expect(AsyncResult.getOrElse(registry.get(atom), () => null)).toBe("shuv2code"),
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        unmount();
+        registry.dispose();
+      }
+    },
+  );
 
   it("reports a version npm does not have as unpublished", async () => {
     fetchMock.mockImplementation(async () => new Response(null, { status: 404 }));
@@ -57,12 +81,13 @@ describe("npmReleasePublishedAtom", () => {
     expect(AsyncResult.getOrElse(result, () => true)).toBe(false);
   });
 
-  it("leaves a failed first check unknown, which callers read as unpublished", async () => {
+  it("returns no package when both registry checks fail", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
     const result = await settledCheck();
 
-    expect(AsyncResult.isFailure(result)).toBe(true);
+    expect(AsyncResult.isSuccess(result)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(AsyncResult.getOrElse(result, () => false)).toBe(false);
   });
 });

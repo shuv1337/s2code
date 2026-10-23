@@ -90,6 +90,7 @@ const LOGIN_SHELL_ENV_NAMES = [
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
+  "S2CODE_TELEMETRY_ENABLED",
   "SHUV2CODE_TELEMETRY_ENABLED",
   "__MISE_DIFF",
 ] as const;
@@ -465,6 +466,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "SSL_CERT_FILE",
       "SSL_CERT_DIR",
       "NODE_EXTRA_CA_CERTS",
+      "S2CODE_TELEMETRY_ENABLED",
       "SHUV2CODE_TELEMETRY_ENABLED",
     ] as const) {
       if (!config.env[name] && shellEnvironment[name]) {
@@ -472,7 +474,8 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       }
     }
 
-    const telemetryEnabled = config.env.SHUV2CODE_TELEMETRY_ENABLED?.trim();
+    const telemetryEnabled =
+      config.env.S2CODE_TELEMETRY_ENABLED?.trim() || config.env.SHUV2CODE_TELEMETRY_ENABLED?.trim();
     if (telemetryEnabled) config.env.T3CODE_TELEMETRY_ENABLED = telemetryEnabled;
     else delete config.env.T3CODE_TELEMETRY_ENABLED;
 

@@ -272,7 +272,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           : version.includes("-preview.")
             ? "preview"
             : "";
-        const scheme = `shuv2code${suffix ? `-${suffix}` : ""}`;
+        const scheme = `s2code${suffix ? `-${suffix}` : ""}`;
         for (const platform of ["mac", "linux", "win"] as const) {
           const config = yield* createBuildConfig(
             platform,
@@ -296,7 +296,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             protocols
               .flatMap((entry) => entry.schemes)
               .filter((entry) => entry !== "http" && entry !== "https"),
-            [scheme],
+            [scheme, `shuv2code${suffix ? `-${suffix}` : ""}`],
           );
           if (platform === "linux") {
             assert.equal(platformConfig.executableName, scheme);
@@ -324,8 +324,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "shuv2code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "shuv2code (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "S2Code (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "S2Code (Nightly)");
   });
 
   it("uses S2Code for desktop display metadata without changing the packaging identity", () => {
@@ -359,7 +359,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                SHUV2CODE_DESKTOP_UPDATE_REPOSITORY: "pingdotgg/t3code",
+                S2CODE_DESKTOP_UPDATE_REPOSITORY: "pingdotgg/t3code",
               },
             }),
           ),
@@ -762,10 +762,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).target, ["AppImage", "deb"]);
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "shuv2code", schemes: ["shuv2code"] },
+        { name: "s2code", schemes: ["s2code", "shuv2code"] },
       ]);
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).protocols, [
-        { name: "shuv2code", schemes: ["shuv2code"] },
+        { name: "s2code", schemes: ["s2code", "shuv2code"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
       const macInfo = (mac.mac as { extendInfo: Record<string, unknown> }).extendInfo;
@@ -1316,7 +1316,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             }).pipe(Effect.provide(spawner));
             const installed = path.join(
               stageResourcesDir,
-              `${backend}-capture/${backend === "kde" ? "shuv2code" : "t3"}-${backend}-snap-shot`,
+              `${backend}-capture/${backend === "kde" ? "s2code" : "t3"}-${backend}-snap-shot`,
             );
             assert.equal(yield* fs.readFileString(installed), `helper-${arch}`);
             assert.equal((yield* fs.stat(installed)).mode & 0o777, 0o755);
@@ -2174,7 +2174,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
       assert.deepStrictEqual(mac.protocols, [
-        { name: "shuv2code", schemes: ["shuv2code"] },
+        { name: "s2code", schemes: ["s2code", "shuv2code"] },
         { name: "Web site URL", schemes: ["http", "https"], role: "Viewer" },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
@@ -2257,7 +2257,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
     // Both the staging and the packaging config hang off this one decision:
     // Windows only, and only when CI handed the build a Linux CLI archive.
-    const runtimeArchivePath = "/tmp/shuv2code-1.2.3-linux-x64.tar.gz";
+    const runtimeArchivePath = "/tmp/s2code-1.2.3-linux-x64.tar.gz";
     assert.isTrue(bundlesWslRuntime({ platform: "win", runtimeArchivePath }));
     assert.isFalse(bundlesWslRuntime({ platform: "win", runtimeArchivePath: undefined }));
     assert.isFalse(bundlesWslRuntime({ platform: "linux", runtimeArchivePath }));
@@ -2268,9 +2268,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("parses Windows bsdtar member listings with CRLF line endings", () => {
     assert.deepStrictEqual(
       parseWslRuntimeArchiveMembers(
-        "./shuv2code-1.2.3-linux-x64/t3\r\nshuv2code-1.2.3-linux-x64/client/\r\n",
+        "./s2code-1.2.3-linux-x64/t3\r\ns2code-1.2.3-linux-x64/client/\r\n",
       ),
-      ["shuv2code-1.2.3-linux-x64/t3", "shuv2code-1.2.3-linux-x64/client"],
+      ["s2code-1.2.3-linux-x64/t3", "s2code-1.2.3-linux-x64/client"],
     );
   });
 
@@ -2282,7 +2282,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-wsl-runtime-stage-" });
         const sourceArchivePath = yield* makeLinuxCliArchiveFixture({
           root,
-          stem: "shuv2code-1.2.3-linux-x64",
+          stem: "s2code-1.2.3-linux-x64",
         });
         const stageAppDir = path.join(root, "app");
         const archivePath = path.join(stageAppDir, WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE.from);
@@ -2308,7 +2308,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         const path = yield* Path.Path;
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-wsl-runtime-missing-" });
         const error = yield* stageWslRuntimeArchive({
-          sourceArchivePath: path.join(root, "shuv2code-1.2.3-linux-x64.tar.gz"),
+          sourceArchivePath: path.join(root, "s2code-1.2.3-linux-x64.tar.gz"),
           archivePath: path.join(root, WSL_RUNTIME_ARCHIVE_NAME),
           hashPath: path.join(root, WSL_RUNTIME_ARCHIVE_HASH_NAME),
         }).pipe(Effect.flip);

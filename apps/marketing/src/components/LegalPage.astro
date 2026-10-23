@@ -16,7 +16,11 @@ const { title, description, heading, lede, effectiveDate, lastUpdated, sections 
 
 <Layout title={title} description={description} pageClass="legal-document-page">
   <div class="legal-page">
-    <a class="legal-index-link" href="/legal"><span aria-hidden="true">&#8592;</span> All legal documents</a>
+    <a class="legal-index-link" href="/legal"><span aria-hidden="true">&#8592;</span> Upstream legal references</a>
+    <p class="legal-reference">
+      This inherited document describes T3 Tools and T3 Code. It is retained as an
+      upstream reference, not an S2Code policy.
+    </p>
     <header class="legal-hero">
       <p class="eyebrow">T3 Tools, Inc. / Legal</p>
       <h1>{heading}</h1>
@@ -117,6 +121,14 @@ const { title, description, heading, lede, effectiveDate, lastUpdated, sections 
 
   .legal-index-link {
     display: none;
+  }
+
+  .legal-reference {
+    margin: 24px 0;
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    line-height: 1.6;
   }
 
   .legal-hero {

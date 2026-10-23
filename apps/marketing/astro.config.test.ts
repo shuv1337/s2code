@@ -13,3 +13,12 @@ it("uses only the fork marketing URL", async () => {
   vi.resetModules();
   expect((await import("./astro.config.mjs")).default.site).toBeUndefined();
 });
+
+it("prefers a nonempty canonical marketing URL and otherwise accepts the legacy value", async () => {
+  vi.stubEnv("SHUV2CODE_MARKETING_URL", "https://legacy.example");
+  vi.stubEnv("S2CODE_MARKETING_URL", " https://canonical.example ");
+  expect((await import("./astro.config.mjs")).default.site).toBe("https://canonical.example");
+  vi.stubEnv("S2CODE_MARKETING_URL", "");
+  vi.resetModules();
+  expect((await import("./astro.config.mjs")).default.site).toBe("https://legacy.example");
+});

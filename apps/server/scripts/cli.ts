@@ -2,6 +2,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as Config from "effect/Config";
 import * as FileSystem from "effect/FileSystem";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -20,7 +21,11 @@ import {
   ServerCliExecutableImportError,
 } from "./cliErrors.ts";
 import { publishPlatformsThenLauncher } from "./publishOrder.ts";
-import { assertForkNpmSet, assertForkDistTag } from "../../../scripts/lib/fork-release.ts";
+import {
+  assertForkNpmSet,
+  assertForkDistTag,
+  forkNpmPublishingReady,
+} from "../../../scripts/lib/fork-release.ts";
 import { ServerCliPublishGuardError } from "./cliErrors.ts";
 
 const RepoRoot = Effect.service(Path.Path).pipe(
@@ -158,7 +163,7 @@ const buildExeCmd = Command.make(
 
 /**
  * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@shuv2code/t3-<platform>.tgz` first, `shuv2code.tgz` last, so
+ * every `@s2code/t3-<platform>.tgz` first, then both launcher tarballs, so
  * the launcher is never installable before the executables it depends on.
  * Tarballs rather than directories because `npm publish <dir>` strips the
  * `node_modules/` the executable loads its native addons from.
@@ -180,8 +185,17 @@ const publishCmd = Command.make(
       const path = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
       const packagesDir = path.resolve(config.packagesDir);
-      const scopeDir = path.join(packagesDir, "@shuv2code");
-      const launcherTarball = path.join(packagesDir, "shuv2code.tgz");
+      const publishingEnvironment = yield* Config.all({
+        S2CODE_NPM_TRUSTED_PUBLISHING_READY: Config.String(
+          "S2CODE_NPM_TRUSTED_PUBLISHING_READY",
+        ).pipe(Config.withDefault("")),
+        FORK_NPM_TRUSTED_PUBLISHING_READY: Config.String("FORK_NPM_TRUSTED_PUBLISHING_READY").pipe(
+          Config.withDefault(""),
+        ),
+      });
+      const scopeDir = path.join(packagesDir, "@s2code");
+      const launcherTarball = path.join(packagesDir, "s2code.tgz");
+      const bridgeTarball = path.join(packagesDir, "shuv2code.tgz");
       const platformTarballs = (yield* fs
         .readDirectory(scopeDir)
         .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])))
@@ -196,10 +210,14 @@ const publishCmd = Command.make(
       if (!(yield* fs.exists(launcherTarball))) {
         return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
       }
+      if (!(yield* fs.exists(bridgeTarball))) {
+        return yield* new ServerCliBuildAssetMissingError({ assetPath: bridgeTarball });
+      }
 
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const manifestTexts = yield* Effect.forEach([...platformTarballs, launcherTarball], (file) =>
-        spawner.string(ChildProcess.make("tar", ["-xOf", file, "package/package.json"])),
+      const manifestTexts = yield* Effect.forEach(
+        [...platformTarballs, launcherTarball, bridgeTarball],
+        (file) => spawner.string(ChildProcess.make("tar", ["-xOf", file, "package/package.json"])),
       );
       yield* Effect.try({
         try: () => {
@@ -208,6 +226,10 @@ const publishCmd = Command.make(
           if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
             throw new Error("Invalid fork package version.");
           assertForkNpmSet(manifests, version);
+          if (!config.dryRun && !forkNpmPublishingReady(publishingEnvironment))
+            throw new Error(
+              "New s2code npm publishers and the shuv2code bridge must both be verified before publication.",
+            );
           assertForkDistTag(version, config.tag);
           if (config.access !== "public")
             throw new Error("Fork platform distribution must be public.");
@@ -233,15 +255,16 @@ const publishCmd = Command.make(
       });
 
       yield* publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish });
+      yield* publish(bridgeTarball);
     }),
 ).pipe(
   Command.withDescription(
-    "Publish the complete @shuv2code platform set and then the shuv2code launcher to npm.",
+    "Publish the complete @s2code platform set, s2code launcher and shuv2code compatibility bridge to npm.",
   ),
 );
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("T3 server build & publish CLI."),
+  Command.withDescription("S2Code server build & publish CLI."),
   Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
 );
 

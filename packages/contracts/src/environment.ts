@@ -60,7 +60,11 @@ export type ServerSelfUpdateMethod = typeof ServerSelfUpdateMethod.Type;
 
 export const ServerInstallation = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["npx", "pnpm-dlx", "bunx"]) }),
-  Schema.Struct({ kind: Schema.Literal("npm-global"), prefix: TrimmedNonEmptyString }),
+  Schema.Struct({
+    kind: Schema.Literal("npm-global"),
+    prefix: TrimmedNonEmptyString,
+    packageName: Schema.optionalKey(Schema.Literals(["s2code", "shuv2code"])),
+  }),
 ]);
 export type ServerInstallation = typeof ServerInstallation.Type;
 

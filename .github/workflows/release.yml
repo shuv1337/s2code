@@ -88,6 +88,7 @@ jobs:
           # Sign each platform whose credentials are complete; otherwise the
           # release is labeled UNSIGNED.
           ALLOW_UNSIGNED: "true"
+          S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}
           FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -196,7 +197,7 @@ jobs:
           pattern: cli-*
           merge-multiple: true
           path: prepared/release-assets
-      - name: Build the six public packages once from the verified-source archives
+      - name: Build the seven public packages once from the verified-source archives
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
@@ -224,6 +225,7 @@ jobs:
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
+      S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}
       FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
       NPM_TOKEN: ""
       NODE_AUTH_TOKEN: ""
@@ -262,7 +264,7 @@ jobs:
             exit 0
           fi
           npm_args=()
-          if [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then npm_args=(--npm shuv2code); fi
+          if [ "$S2CODE_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then npm_args=(--npm s2code); fi
           status=0
           bash .github/scripts/notify-discord-release.sh \
             --project S2Code \

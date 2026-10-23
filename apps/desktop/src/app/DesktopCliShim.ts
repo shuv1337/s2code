@@ -2,7 +2,11 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
-import { PRODUCT_CLI_SHIM_MARKER } from "@t3tools/shared/productIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
+import { PRODUCT_CLI_SHIM_MARKER, isOwnedCliShim } from "@t3tools/shared/productIdentity";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
@@ -13,6 +17,16 @@ const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
 export const MARKER = PRODUCT_CLI_SHIM_MARKER;
 
+export const launcherNames = (version: string) =>
+  Array.from(
+    new Set([
+      resolveChannelIdentity(version).executableName,
+      resolveLegacyChannelIdentity(version).executableName,
+      "s2c",
+      "shuv2code",
+    ]),
+  );
+
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";
 
 const shellWord = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -20,7 +34,7 @@ const shellWord = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 const cmdText = (value: string) => value.replaceAll("%", "%%");
 const cmdWord = (value: string) => `"${cmdText(value)}"`;
 
-const MOVED = "shuv2code has moved or been removed. Open the app once to update this command.";
+const MOVED = "S2Code has moved or been removed. Open the app once to update this command.";
 
 export type CliShimTarget =
   | { readonly kind: "appimage"; readonly appImage: string; readonly executableName: string }
@@ -59,7 +73,8 @@ export const renderCliShim = (input: {
           ]
         : []),
       `set "T3CODE_CLI_PATH=${cmdText(input.shimPath)}"`,
-      `if not defined SHUV2CODE_HOME set "SHUV2CODE_HOME=${cmdText(input.t3Home)}"`,
+      'if not defined S2CODE_HOME if defined SHUV2CODE_HOME set "S2CODE_HOME=%SHUV2CODE_HOME%"',
+      `if not defined S2CODE_HOME set "S2CODE_HOME=${cmdText(input.t3Home)}"`,
       'set "ELECTRON_RUN_AS_NODE=1"',
       // Electron's Windows executable starts without stdin; this tells the CLI to reopen the console.
       'set "T3CODE_DESKTOP_CLI_LAUNCHER=1"',
@@ -81,7 +96,7 @@ export const renderCliShim = (input: {
     `# ${MARKER}`,
     `export T3CODE_CLI_PATH=${shellWord(input.shimPath)}`,
     `home=${shellWord(input.t3Home)}`,
-    'export SHUV2CODE_HOME="${SHUV2CODE_HOME:-$home}"',
+    'export S2CODE_HOME="${S2CODE_HOME:-${SHUV2CODE_HOME:-$home}}"',
     "export ELECTRON_RUN_AS_NODE=1",
     `app=${shellWord(target.kind === "appimage" ? target.appImage : target.executable)}`,
     'if [ ! -x "$app" ]; then',
@@ -126,7 +141,7 @@ export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment[
   environment.path.join(
     environment.baseDir,
     "bin",
-    environment.platform === "win32" ? "shuv2code.cmd" : "shuv2code",
+    `${resolveChannelIdentity(environment.appVersion).executableName}${environment.platform === "win32" ? ".cmd" : ""}`,
   );
 
 export const install = Effect.gen(function* () {
@@ -147,27 +162,31 @@ export const install = Effect.gen(function* () {
         }),
         onNone: () => ({ kind: "direct" as const, executable: process.execPath, entry }),
       });
-  const content = renderCliShim({ target, shimPath, t3Home: environment.baseDir });
-
   return yield* Effect.gen(function* () {
-    const existing = yield* fs.readFileString(shimPath).pipe(Effect.option);
-    if (Option.isSome(existing) && !existing.value.includes(MARKER)) {
-      yield* logWarning("leaving a t3 launcher the app did not write", { shimPath });
-      return Option.none<string>();
-    }
-    if (Option.getOrUndefined(existing) !== content) {
-      yield* fs.makeDirectory(path.dirname(shimPath), { recursive: true });
-      const staging = `${shimPath}.${process.pid}.tmp`;
-      yield* fs.writeFileString(staging, content, { mode: 0o755 });
-      yield* fs.rename(staging, shimPath);
-      yield* logInfo("installed t3 launcher", { shimPath });
+    for (const name of launcherNames(environment.appVersion)) {
+      const aliasPath = path.join(environment.baseDir, "bin", `${name}${windows ? ".cmd" : ""}`);
+      const content = renderCliShim({ target, shimPath: aliasPath, t3Home: environment.baseDir });
+      const existing = yield* fs.readFileString(aliasPath).pipe(Effect.option);
+      if (Option.isSome(existing) && !isOwnedCliShim(existing.value)) {
+        yield* logWarning("leaving a launcher the app did not write", { shimPath: aliasPath });
+        if (aliasPath === shimPath) return Option.none<string>();
+        continue;
+      }
+      if (Option.getOrUndefined(existing) !== content) {
+        yield* fs.makeDirectory(path.dirname(aliasPath), { recursive: true });
+        const staging = `${aliasPath}.${process.pid}.tmp`;
+        yield* fs.writeFileString(staging, content, { mode: 0o755 });
+        yield* fs.rename(staging, aliasPath);
+        yield* logInfo("installed s2code launcher", { shimPath: aliasPath });
+      }
     }
     return Option.some(shimPath);
   }).pipe(
     Effect.catchCause((cause) =>
-      logWarning("could not install t3 launcher", { shimPath, cause: Cause.pretty(cause) }).pipe(
-        Effect.as(Option.none<string>()),
-      ),
+      logWarning("could not install s2code launcher", {
+        shimPath,
+        cause: Cause.pretty(cause),
+      }).pipe(Effect.as(Option.none<string>())),
     ),
     Effect.withSpan("desktop.cliShim.install"),
   );

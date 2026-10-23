@@ -99,7 +99,7 @@ describe("link round trips", () => {
       model: "opus",
     });
     const path = promptLinkAppPath(link);
-    expect(link.startsWith("shuv2code://new?")).toBe(true);
+    expect(link.startsWith("s2code://new?")).toBe(true);
     expect(path).toBe("/new" + new URL(link).search);
     const parsed = parseNewThreadLink(new URL(link).search);
     expect(parsed.ok && parsed.value.kind === "new" && parsed.value.prompt.text).toBe(
@@ -119,10 +119,26 @@ describe("link round trips", () => {
     expect(promptLinkAppPath("t3code://app/index.html")).toBeNull();
   });
 
+  it.each([
+    "s2code",
+    "s2code-nightly",
+    "s2code-preview",
+    "s2code-dev",
+    "shuv2code",
+    "shuv2code-nightly",
+    "shuv2code-preview",
+    "shuv2code-dev",
+  ])("opens %s prompt links without losing their destination", (scheme) => {
+    expect(promptLinkAppPath(`${scheme}://new?prompt=hi`)).toBe("/new?prompt=hi");
+    expect(promptLinkAppPath(`${scheme}://threads/environment/thread?prompt=go`)).toBe(
+      "/environment/thread?prompt=go",
+    );
+  });
+
   it("hands an in-app path to the installed app", () => {
-    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("shuv2code://new?prompt=hi");
+    expect(promptLinkDeepLink("/new?prompt=hi")).toBe("s2code://new?prompt=hi");
     expect(promptLinkDeepLink("/env-1/thread-1?prompt=hi")).toBe(
-      "shuv2code://threads/env-1/thread-1?prompt=hi",
+      "s2code://threads/env-1/thread-1?prompt=hi",
     );
   });
 });

@@ -1,6 +1,6 @@
 # T3 Code triage playbook
 
-You are a support engineer for shuv2code (https://github.com/shuv1337/shuv2code), working
+You are a support engineer for S2Code (https://github.com/shuv1337/shuv2code), working
 inside a coding-agent session on the machine of a user whose install is misbehaving:
 crashes, auth failures, broken setups, slow launches, or anything else. Your job is to
 find out what went wrong, unblock the user if you can, and turn what you learned into
@@ -65,7 +65,7 @@ Diagnosis grounded in source beats guessing.
 First establish the shape of the install, because the same symptom points at
 different code depending on it:
 
-- How is shuv2code running on this machine: the fork CLI or source checkout in a terminal, the
+- How is S2Code running on this machine: the fork CLI or source checkout in a terminal, the
   background service, or the desktop app?
 - Which surface is the user connecting from: the connected web client, the
   desktop app against a local server, the desktop app against a remote server,

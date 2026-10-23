@@ -68,7 +68,7 @@ export function buildShowcaseAgentActivity(
     });
   }
   return {
-    title: "shuv2code",
+    title: "S2Code",
     subtitle: "Agent work in progress",
     activeCount: rows.filter((row) => ACTIVE_PHASES.has(row.phase)).length,
     updatedAt: new Date(now).toISOString(),

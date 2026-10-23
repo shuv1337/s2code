@@ -15,18 +15,72 @@ import {
   runUpdate,
   isForkBootServiceCgroup,
   formatUpdatedLauncherCommand,
+  readLauncherTarget,
 } from "./update.ts";
 
 it("recognizes only exact fork boot service cgroup components", () => {
-  for (const unit of ["shuv2code-v2", "shuv2code-v2-nightly", "shuv2code-v2-preview"]) {
+  for (const unit of ["s2code-v2", "s2code-v2-nightly", "s2code-v2-preview"]) {
     assert.isTrue(isForkBootServiceCgroup(`0::/user.slice/${unit}.service\n`));
     assert.isTrue(isForkBootServiceCgroup(`0::/user.slice/${unit}.service/child`));
   }
-  for (const unit of ["t3code.service", "shuv2code-v2.service-other", "not-shuv2code-v2.service"])
+  for (const unit of ["t3code.service", "s2code-v2.service-other", "not-s2code-v2.service"])
     assert.isFalse(isForkBootServiceCgroup(`0::/user.slice/${unit}`));
 });
 
 it.layer(NodeServices.layer)("t3 update launcher", (it) => {
+  it.effect.each(["linux", "win32"] as const)(
+    "updates same-home direct aliases and preserves the old-updater bridge on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-alias-update-" });
+        const versionsDir = path.join(root, "runtime", "versions");
+        const oldExe = path.join(versionsDir, "1.0.0-nightly.1", "t3");
+        const newExe = path.join(versionsDir, "1.0.0-nightly.2", "t3");
+        const foreignExe = path.join(root, "other", "runtime", "versions", "1.0.0", "t3");
+        const bin = path.join(root, "bin");
+        yield* fs.makeDirectory(bin);
+        for (const executable of [oldExe, newExe, foreignExe]) {
+          yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+          yield* fs.writeFileString(executable, "");
+        }
+        const suffix = platform === "win32" ? ".cmd" : "";
+        const canonical = path.join(bin, `s2code-nightly${suffix}`);
+        const legacy = path.join(bin, `shuv2code-nightly${suffix}`);
+        const foreignAlias = path.join(bin, `s2c${suffix}`);
+        const stable = path.join(bin, `s2code${suffix}`);
+        const write = (file: string, target: string) =>
+          platform === "win32"
+            ? fs.writeFileString(file, `@echo off\r\n"${target}" %*`)
+            : fs.symlink(target, file);
+        yield* write(legacy, oldExe);
+        yield* write(canonical, legacy);
+        yield* write(foreignAlias, foreignExe);
+        yield* write(stable, oldExe);
+        const update = repointLauncher({
+          launchedAs: platform === "win32" ? oldExe : canonical,
+          currentVersion: "1.0.0-nightly.1",
+          versionsDir,
+          targetEntryPath: newExe,
+        }).pipe(Effect.provideService(HostProcess.Environment, { PATH: bin }));
+        assert.equal(Option.getOrUndefined(yield* update), canonical);
+        assert.deepEqual(yield* readLauncherTarget(canonical, "1.0.0-nightly.1"), {
+          target: newExe,
+          forwarder: true,
+        });
+        assert.equal((yield* readLauncherTarget(legacy, "1.0.0-nightly.1"))?.target, newExe);
+        assert.equal((yield* readLauncherTarget(foreignAlias))?.target, foreignExe);
+        assert.equal((yield* readLauncherTarget(stable))?.target, oldExe);
+        yield* fs.remove(canonical);
+        yield* fs.remove(legacy);
+        yield* write(canonical, oldExe);
+        yield* write(legacy, oldExe);
+        yield* update;
+        assert.equal((yield* readLauncherTarget(canonical, "1.0.0-nightly.1"))?.target, newExe);
+        assert.equal((yield* readLauncherTarget(legacy, "1.0.0-nightly.1"))?.target, newExe);
+      }).pipe(Effect.provideService(HostProcess.Platform, platform), Effect.scoped),
+  );
   it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"])(
     "rejects cross-channel flags and exact versions from %s without side effects",
     (currentVersion) =>
@@ -93,8 +147,8 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       const bin = path.join(root, "bin");
       yield* fs.makeDirectory(bin);
       const content = `@echo off\r\n"${oldExe}" %*`;
-      const stableShim = path.join(bin, "shuv2code.cmd");
-      const shim = path.join(bin, `shuv2code-${channel}.cmd`);
+      const stableShim = path.join(bin, "s2code.cmd");
+      const shim = path.join(bin, `s2code-${channel}.cmd`);
       yield* fs.writeFileString(stableShim, content);
       yield* fs.writeFileString(shim, content);
       const repointed = yield* repointLauncher({

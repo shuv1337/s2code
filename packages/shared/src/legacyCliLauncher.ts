@@ -3,7 +3,7 @@
  * launchers installed before 0.0.41 run with Node to start a new version they
  * just npm-installed. It forwards everything (arguments, stdio, the IPC
  * channel the launcher talks over, signals, exit status) to the platform
- * executable in the sibling `@t3code/t3-<platform>-<arch>` package.
+ * executable in the sibling `@s2code/t3-<platform>-<arch>` package.
  *
  * The first server started this way rewrites the service unit to run the
  * executable directly, so nothing depends on this file after one update.
@@ -17,14 +17,14 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const executableName = process.platform === "win32" ? "t3.exe" : "t3";
-const executable = join(dirname(require.resolve("@shuv2code/t3-" + process.platform + "-" + process.arch + "/package.json")), executableName);
+const executable = join(dirname(require.resolve("@s2code/t3-" + process.platform + "-" + process.arch + "/package.json")), executableName);
 const ipc = process.send !== undefined;
 const child = spawn(executable, process.argv.slice(2), {
   stdio: ipc ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
 });
 const fail = (error) => {
   if (!error) return;
-  process.stderr.write("t3: " + error.message + "\\n");
+  process.stderr.write("s2code: " + error.message + "\\n");
   child.kill("SIGTERM");
   process.exitCode = 1;
 };

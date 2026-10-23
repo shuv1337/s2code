@@ -150,13 +150,16 @@ export const make = Effect.gen(function* () {
         return yield* Effect.interrupt;
       }
 
+      const publicSchemes = ElectronProtocol.getPublicDesktopSchemes(
+        environment.isDevelopment,
+        environment.appVersion,
+      );
+      if (environment.isPackaged && environment.platform !== "linux") {
+        for (const scheme of publicSchemes) yield* electronApp.setAsDefaultProtocolClient(scheme);
+      }
       const startProviderAuthHandoff = (value: string | undefined) => {
         if (!value) return false;
-        const request = readCodexAuthHandoff(
-          value,
-          environment.isDevelopment,
-          ElectronProtocol.getDesktopScheme(environment.isDevelopment, environment.appVersion),
-        );
+        const request = readCodexAuthHandoff(value, environment.isDevelopment, publicSchemes[0]);
         if (!request) return false;
         void runPromise(
           Effect.gen(function* () {
@@ -183,12 +186,16 @@ export const make = Effect.gen(function* () {
       const resumeProviderAuth = (value: string | undefined) => {
         const destination = providerAuthReturnUrl(value);
         const expectedOrigin = `${ElectronProtocol.getDesktopScheme(environment.isDevelopment, environment.appVersion)}://app`;
-        if (!destination?.startsWith(`${expectedOrigin}/`)) return false;
+        if (!destination) return false;
+        const returnUrl = new URL(destination);
+        if (returnUrl.host !== "app" || !publicSchemes.includes(returnUrl.protocol.slice(0, -1)))
+          return false;
+        returnUrl.protocol = new URL(expectedOrigin).protocol;
         void runPromise(
           Effect.gen(function* () {
             const mainWindow = yield* electronWindow.currentMainOrFirst;
             if (Option.isNone(mainWindow)) return;
-            yield* Effect.promise(() => mainWindow.value.loadURL(destination));
+            yield* Effect.promise(() => mainWindow.value.loadURL(returnUrl.toString()));
             yield* electronWindow.reveal(mainWindow.value);
           }).pipe(
             Effect.catchCause((cause) =>
@@ -204,8 +211,7 @@ export const make = Effect.gen(function* () {
         if (
           protocol !== "http:" &&
           protocol !== "https:" &&
-          protocol !==
-            `${ElectronProtocol.getDesktopScheme(environment.isDevelopment, environment.appVersion)}:`
+          !publicSchemes.includes(protocol.slice(0, -1))
         )
           return false;
         void runPromise(webLinks.receive(value));

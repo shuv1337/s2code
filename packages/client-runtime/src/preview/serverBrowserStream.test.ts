@@ -68,9 +68,9 @@ describe("preview stream control", () => {
     [
       JSON.stringify({
         need: "sandbox",
-        command: "sudo /home/fork/bin/shuv2code-nightly browser setup",
+        command: "sudo /home/fork/bin/s2code-nightly browser setup",
       }),
-      "sudo /home/fork/bin/shuv2code-nightly browser setup",
+      "sudo /home/fork/bin/s2code-nightly browser setup",
     ],
     [
       JSON.stringify({

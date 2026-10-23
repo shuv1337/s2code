@@ -5,6 +5,7 @@ import type {
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
 import * as Config from "effect/Config";
+import type * as Cause from "effect/Cause";
 import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -144,7 +145,11 @@ function resolveDesktopRuntimeInfo(input: {
 
 const make = Effect.fn("desktop.environment.make")(function* (
   input: MakeDesktopEnvironmentInput,
-): Effect.fn.Return<DesktopEnvironment["Service"], Config.ConfigError, Path.Path> {
+): Effect.fn.Return<
+  DesktopEnvironment["Service"],
+  Config.ConfigError | Cause.UnknownError,
+  Path.Path
+> {
   const path = yield* Path.Path;
   const config = yield* DesktopConfig.DesktopConfig;
   const homeDirectory = input.homeDirectory;
@@ -158,12 +163,14 @@ const make = Effect.fn("desktop.environment.make")(function* (
       : input.platform === "darwin"
         ? path.join(homeDirectory, "Library", "Application Support")
         : Option.getOrElse(config.xdgConfigHome, () => path.join(homeDirectory, ".config"));
-  const baseDir = resolveDesktopBaseDir({
-    homeDirectory,
-    joinPath: path.join,
-    t3Home: config.t3Home,
-    appVersion: input.appVersion,
-  });
+  const baseDir = yield* Effect.try(() =>
+    resolveDesktopBaseDir({
+      homeDirectory,
+      joinPath: path.join,
+      t3Home: config.t3Home,
+      appVersion: input.appVersion,
+    }),
+  );
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
   const serverRoot =
@@ -235,7 +242,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     ),
     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment, input.appVersion),
     linuxWmClass: isDevelopment
-      ? "shuv2code-dev"
+      ? "s2code-dev"
       : resolveChannelIdentity(input.appVersion).executableName,
     linuxApplicationsDir,
     appImagePath: config.appImagePath,

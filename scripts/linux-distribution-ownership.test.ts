@@ -20,7 +20,7 @@ const repoRoot = NodePath.resolve(import.meta.dirname, "..");
 const aurRoot = NodePath.join(repoRoot, "packaging/aur");
 
 it("ignores downloaded fork AUR licenses without hiding recipes", () => {
-  for (const name of ["shuv2code-bin", "shuv2code-nightly-bin"]) {
+  for (const name of ["s2code-bin", "s2code-nightly-bin"]) {
     const license = `packaging/aur/${name}/${name}-1.2.3-LICENSE`;
     const ignored = NodeChildProcess.spawnSync("git", ["check-ignore", "--no-index", "--stdin"], {
       cwd: repoRoot,
@@ -82,9 +82,15 @@ it.effect(
         expect(deb.packageName).toBe(identity.executableName);
         expect(linux.executableName).toBe(identity.executableName);
         expect(linux.desktop.entry.StartupWMClass).toBe(identity.executableName);
-        expect(linux.protocols.flatMap((entry) => entry.schemes)).toEqual([identity.scheme]);
-        for (const claim of ["provides", "replaces", "conflicts"])
-          expect(deb).not.toHaveProperty(claim);
+        expect(linux.protocols.flatMap((entry) => entry.schemes)).toEqual([
+          identity.scheme,
+          identity.scheme.replace("s2code", "shuv2code"),
+        ]);
+        expect(deb).toMatchObject({
+          replaces: [identity.executableName.replace("s2code", "shuv2code")],
+          conflicts: [identity.executableName.replace("s2code", "shuv2code")],
+        });
+        expect(deb).not.toHaveProperty("provides");
         // electron-builder 26.15.6 FpmTarget maps the app tree to /opt/<sanitizedProductName>,
         // executableName to desktop/icons, and the after-install script creates its command link.
         // This reconstructed inventory is not proof of final package contents:
@@ -195,7 +201,7 @@ shellIt(
   () => {
     const toolEnv = tools();
     const manifests: string[][] = [];
-    for (const version of versions.slice(0, 2)) {
+    for (const version of versions.slice(1, 2)) {
       const identity = resolveChannelIdentity(version);
       const pkgname = `${identity.executableName}-bin`;
       const pkgdir = NodePath.join(root, pkgname, "package");
@@ -240,12 +246,21 @@ shellIt(
       expect(
         NodeFS.readFileSync(NodePath.join(pkgdir, `usr/bin/${identity.executableName}`), "utf8"),
       ).toContain(`exec /opt/${pkgname}/AppRun`);
-      expect(source).not.toMatch(/^(provides|replaces|conflicts)=/m);
+      for (const claim of ["provides", "replaces", "conflicts"])
+        expect(source).toContain(`${claim}=('${pkgname.replace("s2code", "shuv2code")}')`);
+      expect(
+        NodeFS.readlinkSync(
+          NodePath.join(
+            pkgdir,
+            `usr/bin/${identity.executableName.replace("s2code", "shuv2code")}`,
+          ),
+        ),
+      ).toBe(identity.executableName);
     }
   },
 );
 
-for (const version of versions.slice(0, 2))
+for (const version of versions.slice(1, 2))
   it.effect.skipIf(windowsHost)(
     `publishes ${version} only to the fork AUR remote and selects the actual build artifact`,
     () =>
@@ -272,8 +287,8 @@ for (const version of versions.slice(0, 2))
             ...process.env,
             ...toolEnv,
             RELEASE_TAG: `v${version}`,
-            SHUV2CODE_AUR_PRODUCT_ID: PRODUCT_ID,
-            SHUV2CODE_AUR_RELEASE_REPO: "shuv1337/shuv2code",
+            S2CODE_AUR_PRODUCT_ID: PRODUCT_ID,
+            S2CODE_AUR_RELEASE_REPO: "shuv1337/shuv2code",
             AUR_SSH_PRIVATE_KEY: "disposable-test-key",
             FIXTURE_ASSET: asset,
           },
@@ -330,9 +345,9 @@ for (const version of versions.slice(0, 2))
 
 shellIt.each([
   {},
-  { SHUV2CODE_AUR_PRODUCT_ID: PRODUCT_ID },
-  { SHUV2CODE_AUR_PRODUCT_ID: "t3code", SHUV2CODE_AUR_RELEASE_REPO: "pingdotgg/t3code" },
-  { SHUV2CODE_AUR_PRODUCT_ID: PRODUCT_ID, SHUV2CODE_AUR_RELEASE_REPO: "pingdotgg/t3code" },
+  { S2CODE_AUR_PRODUCT_ID: PRODUCT_ID },
+  { S2CODE_AUR_PRODUCT_ID: "t3code", S2CODE_AUR_RELEASE_REPO: "pingdotgg/t3code" },
+  { S2CODE_AUR_PRODUCT_ID: PRODUCT_ID, S2CODE_AUR_RELEASE_REPO: "pingdotgg/t3code" },
 ])("rejects missing or upstream publisher identities before external tools: %j", (identity) => {
   const toolEnv = tools();
   const result = NodeChildProcess.spawnSync(
@@ -352,3 +367,27 @@ shellIt.each([
   expect(result.stderr).toMatch(/is required|Refusing to publish/);
   expect(NodeFS.existsSync(toolEnv.TRACE_FILE)).toBe(false);
 });
+
+shellIt.each(["v1.2.3", "v1.2.3-preview.20261014.1"])(
+  "skips non-nightly AUR publication before external tools: %s",
+  (tag) => {
+    const toolEnv = tools();
+    const result = NodeChildProcess.spawnSync(
+      "bash",
+      [NodePath.join(aurRoot, "scripts/release.sh")],
+      {
+        env: {
+          PATH: toolEnv.PATH,
+          TRACE_FILE: toolEnv.TRACE_FILE,
+          RELEASE_TAG: tag,
+          S2CODE_AUR_PRODUCT_ID: PRODUCT_ID,
+          S2CODE_AUR_RELEASE_REPO: "shuv1337/shuv2code",
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("only nightly");
+    expect(NodeFS.existsSync(toolEnv.TRACE_FILE)).toBe(false);
+  },
+);

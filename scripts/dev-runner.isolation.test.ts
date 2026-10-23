@@ -9,7 +9,7 @@ it("ignores inherited upstream homes outside worktrees and honors only explicit 
   expect(
     resolveDevRunnerHome(undefined, undefined, {
       T3CODE_HOME: "/upstream",
-      SHUV2CODE_HOME: "/fork",
+      S2CODE_HOME: "/fork",
     }),
   ).toBe("/fork");
   expect(resolveDevRunnerHome(undefined, "/worktree/.t3", { T3CODE_HOME: "/upstream" })).toBe(
@@ -25,7 +25,7 @@ it.effect.each(["dev", "dev:desktop"] as const)(
         mode,
         baseEnv: {
           T3CODE_HOME: "/upstream",
-          SHUV2CODE_HOME: "/stale",
+          S2CODE_HOME: "/stale",
           T3CODE_DEV_AUTH_TOKEN: "development-token",
         },
         serverOffset: 0,
@@ -49,7 +49,7 @@ it.effect("removes ambient public homes when the dev runner selects its default"
   Effect.gen(function* () {
     const env = yield* createDevRunnerEnv({
       mode: "dev",
-      baseEnv: { T3CODE_HOME: "/upstream", SHUV2CODE_HOME: "/stale" },
+      baseEnv: { T3CODE_HOME: "/upstream", S2CODE_HOME: "/stale" },
       serverOffset: 0,
       webOffset: 0,
       t3Home: undefined,

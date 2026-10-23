@@ -28,7 +28,7 @@ desktop apps do not wait for npm. The confirmation lists each machine it skips
 and why, such as a machine that is offline or needs a manual update. Use the
 notice or **Settings → Connections** for those.
 
-If a desktop app restarts on its old version, T3 Code tells you the update did
+If a desktop app restarts on its old version, S2Code tells you the update did
 not apply. It does not install that version again on its own, even when another
 device asks. Use the update button on that machine to retry.
 
@@ -85,19 +85,19 @@ The offered action depends on how the server runs:
 On the host, run:
 
 ```sh
-shuv2code-nightly update <client-version>
+s2code-nightly update <client-version>
 ```
 
 Replace `<client-version>` with the version shown in the notice. The command
 asks before restarting the background service; if you decline, run
-`shuv2code-nightly service restart` when you are ready. For a server you started by hand,
+`s2code-nightly service restart` when you are ready. For a server you started by hand,
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
 If you run a published fork package with `npx` rather than an installed command, there is
 nothing to update on the host: stop the server and relaunch it as
-`npx shuv2code@<client-version>` with the same subcommand and options. Plain
-`npx shuv2code` picks the newest nightly, the only train this fork publishes. For source
+`npx s2code@<client-version>` with the same subcommand and options. Plain
+`npx s2code` picks the newest nightly, the only train this fork publishes. For source
 installs, update the fork checkout and rebuild; do not install upstream as recovery.
 
 ## If an update fails
@@ -133,7 +133,7 @@ These controls require a connected environment and permission to operate it.
 Provider update checks and restart continuation preferences are in
 **Settings → Maintenance**. If provider update checks are disabled, enable them
 there before refreshing to find newer versions. The same setting controls whether
-T3 Code downloads model catalog updates, so with it off new models may not appear
+S2Code downloads model catalog updates, so with it off new models may not appear
 until you enable it and refresh provider status.
 
 Install App Store or Google Play releases as usual. The mobile app can also

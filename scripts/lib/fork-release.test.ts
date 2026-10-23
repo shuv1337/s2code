@@ -18,6 +18,7 @@ import {
   desktopAssetGroups,
   publishAtomicReleaseIndex,
   FORK_RELEASE_INDEX_URL,
+  forkNpmPublishingReady,
 } from "./fork-release.ts";
 import serverPackage from "../../apps/server/package.json" with { type: "json" };
 const sha = "ab".repeat(20);
@@ -38,15 +39,28 @@ const manifests = (version = "1.2.3") =>
     name,
     version,
     repository: { url: "https://github.com/shuv1337/shuv2code" },
-    ...(name === "shuv2code"
+    ...(!name.startsWith("@s2code/")
       ? {
           optionalDependencies: Object.fromEntries(
-            FORK_NPM_PACKAGES.filter((name) => name !== "shuv2code").map((name) => [name, version]),
+            FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/")).map((name) => [
+              name,
+              version,
+            ]),
           ),
         }
       : {}),
   }));
 describe("fork release contract", () => {
+  it("requires separate attestations for the new npm names and legacy launcher", () => {
+    expect(forkNpmPublishingReady({ FORK_NPM_TRUSTED_PUBLISHING_READY: "true" })).toBe(false);
+    expect(forkNpmPublishingReady({ S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true" })).toBe(false);
+    expect(
+      forkNpmPublishingReady({
+        S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true",
+        FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
+      }),
+    ).toBe(true);
+  });
   it("keeps the last public index when atomic publication fails and uses a stable reader URL", async () => {
     const previous = { sha: "old-blob", content: '[{"tag_name":"v1.2.2","draft":false}]\n' };
     let current = previous;
@@ -156,7 +170,7 @@ describe("fork release contract", () => {
   });
   it("protects the private t3 workspace and exact public allowlist", () => {
     expect(serverPackage.private).toBe(true);
-    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(6);
+    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(7);
     for (const override of [
       { name: "t3" },
       { name: "@t3code/t3-linux-x64" },
@@ -170,7 +184,7 @@ describe("fork release contract", () => {
     expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3")).toThrow("All five");
     expect(() =>
       assertForkNpmManifest(
-        { ...manifests().at(-1), optionalDependencies: { "@shuv2code/t3-linux-x64": "1.2.3" } },
+        { ...manifests().at(-1), optionalDependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
         "1.2.3",
       ),
     ).toThrow("all five");
@@ -198,6 +212,7 @@ describe("fork release contract", () => {
       assets: [
         ...value.cliAssets,
         ...value.cliLegacyAssets,
+        ...value.cliPreviousAssets,
         ...desktopAssetGroups(value.version).map((group) => group[0]!),
         ...value.feedAssets,
         "SHA256SUMS",
@@ -212,14 +227,22 @@ describe("fork release contract", () => {
         { ...release, assets: [] },
       ]),
     ).toEqual([{ tag_name: "v1.2.3", draft: false }]);
+    expect(
+      forkReleaseIndex([
+        {
+          ...release,
+          assets: release.assets.filter((asset) => !asset.name.startsWith("s2code-")),
+        },
+      ]),
+    ).toEqual([{ tag_name: "v1.2.3", draft: false }]);
   });
   it("keeps AUR AppImage sources in the desktop release asset set", () => {
     const stableRecipe = NodeFS.readFileSync(
-      NodePath.join(import.meta.dirname, "../../packaging/aur/shuv2code-bin/PKGBUILD"),
+      NodePath.join(import.meta.dirname, "../../packaging/aur/s2code-bin/PKGBUILD"),
       "utf8",
     );
     const nightlyRecipe = NodeFS.readFileSync(
-      NodePath.join(import.meta.dirname, "../../packaging/aur/shuv2code-nightly-bin/PKGBUILD"),
+      NodePath.join(import.meta.dirname, "../../packaging/aur/s2code-nightly-bin/PKGBUILD"),
       "utf8",
     );
     expect(stableRecipe).toContain('_appimage="S2Code-${pkgver}-x86_64.AppImage"');

@@ -130,9 +130,10 @@ it.effect.each(["nightly", "preview"])(
       expect(yield* fs.exists(path.join(home, ".product-identity"))).toBe(false);
       yield* fs.remove(home, { recursive: true });
       const environment = yield* ownedEnvironment(root, channel);
-      expect(environment.baseDir).toBe(home);
-      expect(yield* fs.readDirectory(home)).toEqual([".product-identity"]);
-      expect(yield* fs.readFileString(path.join(home, ".product-identity"))).toBe("shuv2code\n");
+      const canonical = path.join(root, `.s2code-v2-${channel}`);
+      expect(environment.baseDir).toBe(canonical);
+      expect(yield* fs.readDirectory(canonical)).toEqual([".product-identity"]);
+      expect(yield* fs.readFileString(path.join(canonical, ".product-identity"))).toBe("s2code\n");
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 

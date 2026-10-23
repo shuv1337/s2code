@@ -19,10 +19,10 @@ const exportAndroidIcons = Effect.gen(function* () {
   const path = yield* Path.Path;
   const root = path.resolve(import.meta.dirname, "..");
   const master = yield* fs.readFileString(
-    path.join(root, "assets/brand/shuv2code-devil-terminal.svg"),
+    path.join(root, "assets/brand/s2code-devil-terminal.svg"),
   );
   const mono = yield* fs.readFileString(
-    path.join(root, "assets/brand/shuv2code-devil-terminal-monochrome.svg"),
+    path.join(root, "assets/brand/s2code-devil-terminal-monochrome.svg"),
   );
   const render = (svg: string, size: number, background?: string) =>
     Effect.tryPromise({
@@ -68,7 +68,7 @@ const exportAndroidIcons = Effect.gen(function* () {
     "android-notification-icon.png",
     yield* render(mono.replaceAll("currentColor", "#FFFFFF"), 96),
   );
-  yield* Console.log("Exported shuv2code Android icons from the approved SVG masters.");
+  yield* Console.log("Exported S2Code Android icons from the approved SVG masters.");
 });
 
 if (import.meta.main)

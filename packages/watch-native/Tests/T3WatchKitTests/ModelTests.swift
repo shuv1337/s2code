@@ -25,7 +25,7 @@ import Testing
     #expect(thread.activeRunId == Fixtures.runId)
     #expect(thread.pendingAttention.runtimeRequest?.kind == "command")
     #expect(thread.pendingAttention.needsAttention)
-    #expect(thread.labels.project == "shuv2code-nightly")
+    #expect(thread.labels.project == "s2code-nightly")
     #expect(WatchTimestamp.format(thread.updatedAt) == "2026-10-11T23:17:23.510Z")
   }
 
@@ -41,7 +41,7 @@ import Testing
   @Test func decodesNullableFields() throws {
     let json = Fixtures.thread(activeRunId: nil)
       .replacingOccurrences(of: "\"projectId\":\"4e8c6d07-20d8-4c59-b4fe-19b9feac7ee1\"", with: "\"projectId\":null")
-      .replacingOccurrences(of: "\"project\":\"shuv2code-nightly\"", with: "\"project\":null")
+      .replacingOccurrences(of: "\"project\":\"s2code-nightly\"", with: "\"project\":null")
       .replacingOccurrences(
         of: "{\"id\":\"runtime-request:provider:codex:1\",\"kind\":\"command\",\"createdAt\":\"2026-10-11T23:23:31.376Z\"}",
         with: "null")

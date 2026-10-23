@@ -1,4 +1,5 @@
 import type { DesktopCliCommandState } from "@t3tools/contracts";
+import { isOwnedCliShim } from "@t3tools/shared/productIdentity";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -73,6 +74,8 @@ export const make = Effect.gen(function* () {
   const windows = environment.platform === "win32";
   const launcher = DesktopCliShim.launcherPath(environment);
   const binDirectory = path.dirname(launcher);
+  const commandName = path.basename(launcher);
+  const aliases = DesktopCliShim.launcherNames(environment.appVersion);
   const ownedPathMarker = path.join(environment.stateDir, "cli-command-path-entry");
 
   const fail = (message: string) => new DesktopCliCommandError({ message });
@@ -90,8 +93,35 @@ export const make = Effect.gen(function* () {
       const info = yield* fs.stat(link);
       if (info.type !== "File" || Number(info.size) > 16_384) return false;
       const content = yield* fs.readFileString(link);
-      return content.includes(DesktopCliShim.MARKER);
+      return isOwnedCliShim(content);
     }).pipe(Effect.orElseSucceed(() => false));
+
+  const isCurrentHomeLink = (link: string) =>
+    Effect.gen(function* () {
+      if (!(yield* isOurLink(link))) return false;
+      const target = yield* fs.readLink(link);
+      const targetDirectory = path.dirname(path.resolve(path.dirname(link), target));
+      const [resolvedTarget, resolvedBin] = yield* Effect.all([
+        fs.realPath(targetDirectory),
+        fs.realPath(binDirectory),
+      ]);
+      return resolvedTarget === resolvedBin;
+    }).pipe(Effect.orElseSucceed(() => false));
+
+  const installAliases = (directory: string) =>
+    Effect.gen(function* () {
+      for (const alias of aliases) {
+        if (alias === commandName) continue;
+        const aliasPath = path.join(directory, alias);
+        if (yield* exists(aliasPath)) {
+          if (!(yield* isCurrentHomeLink(aliasPath))) continue;
+          yield* fs
+            .remove(aliasPath)
+            .pipe(Effect.mapError(() => fail(`Could not replace ${aliasPath}.`)));
+        }
+        yield* fs.symlink(launcher, aliasPath).pipe(Effect.ignore);
+      }
+    });
 
   const powershell = (env: Record<string, string>) =>
     Effect.scoped(
@@ -124,7 +154,7 @@ export const make = Effect.gen(function* () {
 
   const firstOnPath = Effect.gen(function* () {
     for (const directory of pathEntries(process.env.PATH, ":")) {
-      const candidate = path.join(directory, "shuv2code");
+      const candidate = path.join(directory, commandName);
       if (yield* exists(candidate)) return Option.some(candidate);
     }
     return Option.none<string>();
@@ -146,7 +176,7 @@ export const make = Effect.gen(function* () {
         : Option.none<string>();
     }
     for (const directory of unixCandidates(environment.homeDirectory, environment.platform)) {
-      const link = path.join(directory, "shuv2code");
+      const link = path.join(directory, commandName);
       if (yield* isOurLink(link)) return Option.some(link);
     }
     return Option.none<string>();
@@ -172,14 +202,14 @@ export const make = Effect.gen(function* () {
     Effect.provideService(FileSystem.FileSystem, fs),
     Effect.flatMap(
       Option.match({
-        onNone: () => Effect.fail(fail(`Could not set up the t3 launcher at ${launcher}.`)),
+        onNone: () => Effect.fail(fail(`Could not set up the s2code launcher at ${launcher}.`)),
         onSome: () => Effect.void,
       }),
     ),
   );
 
   const install: DesktopCliCommand["Service"]["install"] = Effect.gen(function* () {
-    if (!environment.isPackaged) return yield* fail("The t3 command needs an installed app.");
+    if (!environment.isPackaged) return yield* fail("The s2code command needs an installed app.");
     yield* ensureLauncher;
     if (windows) {
       const entries = pathEntries(yield* readUserPath, ";");
@@ -187,14 +217,17 @@ export const make = Effect.gen(function* () {
         yield* writeUserPath([...entries, binDirectory].join(";"));
         yield* fs
           .writeFileString(ownedPathMarker, `${binDirectory}\n`)
-          .pipe(Effect.mapError(() => fail("Added t3 to your PATH but could not record it.")));
+          .pipe(Effect.mapError(() => fail("Added s2code to your PATH but could not record it.")));
       }
       return yield* state;
     }
     const existing = yield* installedAt;
     if (Option.isSome(existing)) {
       const target = yield* fs.readLink(existing.value).pipe(Effect.option);
-      if (Option.getOrUndefined(target) === launcher) return yield* state;
+      if (Option.getOrUndefined(target) === launcher) {
+        yield* installAliases(path.dirname(existing.value));
+        return yield* state;
+      }
       yield* fs
         .remove(existing.value)
         .pipe(Effect.mapError(() => fail(`Could not replace ${existing.value}.`)));
@@ -202,7 +235,7 @@ export const make = Effect.gen(function* () {
     const shadowedBy = yield* foreignFirstOnPath;
     if (Option.isSome(shadowedBy)) {
       return yield* fail(
-        `Another t3 at ${shadowedBy.value} runs first in a new terminal. Remove it, or run the launcher directly at ${launcher}.`,
+        `Another s2code at ${shadowedBy.value} runs first in a new terminal. Remove it, or run the launcher directly at ${launcher}.`,
       );
     }
     const onPath = pathEntries(process.env.PATH, ":");
@@ -211,7 +244,7 @@ export const make = Effect.gen(function* () {
       ...candidates.filter((candidate) => onPath.includes(candidate)),
       ...candidates.filter((candidate) => !onPath.includes(candidate)),
     ]) {
-      const link = path.join(directory, "shuv2code");
+      const link = path.join(directory, commandName);
       const created = (yield* exists(directory))
         ? yield* writableDirectory(directory)
         : yield* fs.makeDirectory(directory, { recursive: true }).pipe(
@@ -223,10 +256,13 @@ export const make = Effect.gen(function* () {
         Effect.as(true),
         Effect.orElseSucceed(() => false),
       );
-      if (linked) return yield* state;
+      if (linked) {
+        yield* installAliases(directory);
+        return yield* state;
+      }
     }
     return yield* fail(
-      `Another t3 command is already installed, or no folder on your PATH is writable. Run the launcher directly at ${launcher}.`,
+      `Another s2code command is already installed, or no folder on your PATH is writable. Run the launcher directly at ${launcher}.`,
     );
   }).pipe(Effect.withSpan("desktop.cliCommand.install"));
 
@@ -238,12 +274,20 @@ export const make = Effect.gen(function* () {
         if (kept.length !== entries.length) yield* writeUserPath(kept.join(";"));
         yield* fs.remove(ownedPathMarker).pipe(Effect.ignore);
       }
+      for (const alias of aliases) {
+        const shim = path.join(binDirectory, `${alias}.cmd`);
+        const content = yield* fs.readFileString(shim).pipe(Effect.option);
+        if (Option.isSome(content) && isOwnedCliShim(content.value))
+          yield* fs.remove(shim).pipe(Effect.mapError(() => fail(`Could not remove ${shim}.`)));
+      }
       return yield* state;
     }
     for (const directory of unixCandidates(environment.homeDirectory, environment.platform)) {
-      const link = path.join(directory, "shuv2code");
-      if (yield* isOurLink(link)) {
-        yield* fs.remove(link).pipe(Effect.mapError(() => fail(`Could not remove ${link}.`)));
+      for (const alias of aliases) {
+        const link = path.join(directory, alias);
+        if (yield* alias === commandName ? isOurLink(link) : isCurrentHomeLink(link)) {
+          yield* fs.remove(link).pipe(Effect.mapError(() => fail(`Could not remove ${link}.`)));
+        }
       }
     }
     return yield* state;

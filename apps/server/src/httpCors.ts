@@ -14,6 +14,10 @@ export const browserApiCorsAllowedHeaders = [
 export const DESKTOP_RENDERER_ORIGINS = [
   "t3code://app",
   "t3code-dev://app",
+  "s2code://app",
+  "s2code-dev://app",
+  "s2code-nightly://app",
+  "s2code-preview://app",
   "shuv2code://app",
   "shuv2code-dev://app",
   "shuv2code-nightly://app",

@@ -7,11 +7,13 @@ client architecture with the devil-terminal identity and Apple Watch work.
 
 Use [fork builds](https://github.com/shuv1337/shuv2code/releases) or build from source with
 `vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#matrix-and-source)
-cover desktop artifacts. Published fork CLI packages use `shuv2code` / `s2c`.
+cover desktop artifacts. Published fork CLI packages use `s2code` / `s2c`.
 
-The installed fork starts with a fresh `~/.shuv2code-v2` home and separate Electron profile.
-Old S2Code and upstream T3 data are not imported automatically. `T3CODE_HOME` and other
-upstream configuration names still apply; choose a separate V2 home when overriding it.
+Fresh installations use `~/.s2code-v2` (with `-nightly` or `-preview` for those channels)
+and a separate Electron profile. Existing verified `~/.shuv2code-v2*` homes and profiles
+remain in place. If both names contain state, select the intended home explicitly with
+`S2CODE_HOME`; no databases are merged. Legacy `SHUV2CODE_*` settings remain accepted,
+with nonempty `S2CODE_*` values taking precedence. Installed fork commands ignore upstream `T3CODE_*` settings.
 The desktop automatically attaches to an already-running fork server in that home when
 their exact versions match. Quitting the desktop leaves that server running.
 
@@ -55,7 +57,7 @@ On Windows, in PowerShell:
 irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
 ```
 
-The fork publishes nightly builds only, so this installs the nightly train. Then run `shuv2code-nightly` to start the server and open the local web app. `shuv2code-nightly service install` keeps it running in the background, `shuv2code-nightly update` moves to a newer release, and `shuv2code-nightly --help` has the full reference.
+The fork publishes nightly builds only, so this installs the nightly train. Then run `s2code-nightly` to start the server and open the local web app. `s2code-nightly service install` keeps it running in the background, `s2code-nightly update` moves to a newer release, and `s2code-nightly --help` has the full reference.
 
 ### Desktop app
 
@@ -98,21 +100,15 @@ sudo apt install ./S2Code-VERSION-ARCH.deb
 #### Arch Linux (AUR)
 
 Fork recipes are implemented in [`packaging/aur`](./packaging/aur). They are not a
-claim that the packages have already been published to AUR. After publication, stable:
+claim that the package has already been published to AUR. The fork publishes only
+nightly; after AUR publication:
 
 ```bash
-yay -S shuv2code-bin
+yay -S s2code-nightly-bin
 ```
 
-Nightly:
-
-```bash
-yay -S shuv2code-nightly-bin
-```
-
-The two packages do not conflict with each other or upstream. Their commands are
-`shuv2code` and `shuv2code-nightly`, respectively. Preview builds are separate
-GitHub release artifacts, not an AUR package.
+The package owns `s2code-nightly` and retains `shuv2code-nightly` as an alias.
+It does not replace upstream T3 Code.
 
 ## Some notes
 

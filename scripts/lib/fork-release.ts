@@ -2,10 +2,12 @@ import {
   CLI_ARCHIVE_PLATFORM_KEYS,
   cliArchiveFileName,
   cliArchiveLegacyFileName,
+  cliArchivePreviousFileName,
 } from "@t3tools/shared/cliRelease";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import { PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 
-export const FORK_RELEASE_REPOSITORY = "shuv1337/shuv2code";
+export const FORK_RELEASE_REPOSITORY = PRODUCT_RELEASE_REPOSITORY;
 export const FORK_RELEASE_WORKFLOW = "release.yml";
 export const FORK_RELEASE_INDEX_BRANCH = "fork-release-index";
 export const FORK_RELEASE_INDEX_URL = `https://raw.githubusercontent.com/${FORK_RELEASE_REPOSITORY}/${FORK_RELEASE_INDEX_BRANCH}/index.json`;
@@ -25,9 +27,13 @@ export async function publishAtomicReleaseIndex(
     throw new Error("Published release index content mismatch.");
 }
 export const FORK_NPM_PACKAGES = [
-  ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@shuv2code/t3-${key}`),
+  ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`),
+  "s2code",
   "shuv2code",
 ];
+export const forkNpmPublishingReady = (env: Readonly<Record<string, string | undefined>>) =>
+  env.S2CODE_NPM_TRUSTED_PUBLISHING_READY === "true" &&
+  env.FORK_NPM_TRUSTED_PUBLISHING_READY === "true";
 export const FORK_DESKTOP_MATRIX = [
   {
     label: "macOS arm64",
@@ -129,7 +135,7 @@ export function releaseSigningPolicy(channel: string, allowUnsigned: boolean, en
 }
 /**
  * The npm dist-tags a channel publishes, primary tag first. The fork ships only
- * nightly, so a nightly also moves `latest`; `npx shuv2code` would otherwise
+ * nightly, so a nightly also moves `latest`; `npx s2code` would otherwise
  * install the placeholder version that trusted publishing required.
  */
 export function forkDistTags(channel: string) {
@@ -181,6 +187,9 @@ export function forkReleasePlan(input: {
     cliAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(input.version, key)),
     cliLegacyAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
       cliArchiveLegacyFileName(input.version, key),
+    ),
+    cliPreviousAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
+      cliArchivePreviousFileName(input.version, key),
     ),
     feedAssets:
       input.channel === "preview"
@@ -245,8 +254,8 @@ export function assertForkNpmManifest(value: unknown, version: string) {
     throw new Error(
       "Refusing publication outside the exact fork package/version/repository allowlist.",
     );
-  if (manifest.name === "shuv2code") {
-    const expected = FORK_NPM_PACKAGES.filter((name) => name !== "shuv2code");
+  if (manifest.name === "s2code" || manifest.name === "shuv2code") {
+    const expected = FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/"));
     if (
       Object.keys(manifest.optionalDependencies ?? {}).length !== expected.length ||
       expected.some((name) => manifest.optionalDependencies?.[name] !== version)
@@ -266,7 +275,7 @@ export function assertForkNpmSet(manifests: ReadonlyArray<unknown>, version: str
     checked.length !== FORK_NPM_PACKAGES.length ||
     new Set(checked.map((manifest) => manifest.name)).size !== FORK_NPM_PACKAGES.length
   )
-    throw new Error("All five platform packages and the launcher are required.");
+    throw new Error("All five platform packages, the launcher and its legacy bridge are required.");
   return checked;
 }
 export function assertForkDistTag(version: string, tag: string) {
@@ -308,7 +317,7 @@ export function forkReleaseIndex(
       const prefix = resolveChannelIdentity(version).channel === "stable" ? "latest" : "nightly";
       return [
         ...CLI_ARCHIVE_PLATFORM_KEYS.flatMap((key) => [
-          cliArchiveFileName(version, key),
+          cliArchivePreviousFileName(version, key),
           cliArchiveLegacyFileName(version, key),
         ]),
         "SHA256SUMS",

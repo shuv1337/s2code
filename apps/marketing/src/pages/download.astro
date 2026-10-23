@@ -16,7 +16,7 @@ const imageProps = {
 } satisfies Partial<ComponentProps<typeof Image>>;
 ---
 
-<Layout title="Download — shuv2code" description="Download shuv2code for macOS, Windows, or Linux.">
+<Layout title="Download — S2Code" description="Download S2Code for macOS, Windows, or Linux.">
   <div class="download-page" id="download-page" data-channel="stable">
     <!-- The sky lives behind the header and fades to the page. It only shows on the nightly channel. -->
     <header class="download-head">
@@ -26,7 +26,7 @@ const imageProps = {
           <Image class="head-icon--stable" src={iconStable} width={64} height={64} loading="eager" {...imageProps} />
           <Image class="head-icon--nightly" src={iconNightly} width={64} height={64} loading="eager" {...imageProps} />
         </span>
-        <h1 class="heading">Download shuv2code</h1>
+        <h1 class="heading">Download S2Code</h1>
       </div>
       <div class="channel-toggle" role="tablist" aria-label="Release channel" data-rise style="--d:90ms">
         <span class="channel-thumb" aria-hidden="true"></span>
@@ -147,11 +147,11 @@ const imageProps = {
         </div>
         <code class="cli-line cli-line--stable">curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh</code>
         <code class="cli-line cli-line--stable">irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex</code>
-        <code class="cli-line cli-line--nightly">curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | SHUV2CODE_CHANNEL=nightly sh</code>
-        <code class="cli-line cli-line--nightly">$env:SHUV2CODE_CHANNEL="nightly"; irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex</code>
-        <p class="cli-note">Or try it once without installing:</p>
-        <code class="cli-line cli-line--stable">npx shuv2code@latest</code>
-        <code class="cli-line cli-line--nightly">npx shuv2code@nightly</code>
+        <code class="cli-line cli-line--nightly">curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | S2CODE_CHANNEL=nightly sh</code>
+        <code class="cli-line cli-line--nightly">$env:S2CODE_CHANNEL="nightly"; irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex</code>
+        <p class="cli-note">Once the renamed npm package is published, try it without installing. Until then, use the release installer above.</p>
+        <code class="cli-line cli-line--stable">npx s2code@latest</code>
+        <code class="cli-line cli-line--nightly">npx s2code@nightly</code>
       </section>
     </div>
 

@@ -18,10 +18,10 @@
       Connect from desktop, web, or mobile to continue working remotely.
     </p>
   </description>
-  <launchable type="desktop-id">shuv2code.desktop</launchable>
-  <icon type="stock">shuv2code</icon>
+  <launchable type="desktop-id">s2code.desktop</launchable>
+  <icon type="stock">s2code</icon>
   <provides>
-    <binary>shuv2code</binary>
+    <binary>s2code</binary>
   </provides>
   <categories>
     <category>Development</category>

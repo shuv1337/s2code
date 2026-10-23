@@ -10,7 +10,7 @@ server must support the Watch API.
 ## Connect a server
 
 Open T3 Watch and enter the server's URL. Choose **Pair**, then approve the code
-on that server with `shuv2code pair --watch --approve CODE`. Pairing creates a separate
+on that server with `s2code pair --watch --approve CODE`. Pairing creates a separate
 Watch session; removing the environment from Watch does not revoke that session
 on the server.
 

@@ -16,6 +16,7 @@ const {
 } = require("../../scripts/lib/mobile-release-identity.ts");
 
 const PLAY_API = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications";
+const RELEASE_TITLE = "S2Code for Android (nightly)";
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -144,7 +145,7 @@ async function uploadApk(
         "--prerelease",
         "--latest=false",
         "--title",
-        "shuv2code for Android (nightly)",
+        RELEASE_TITLE,
         "--notes",
         notes,
       );
@@ -181,9 +182,9 @@ async function main() {
   }
 
   const safeName = build.versionName.replace(/[^0-9A-Za-z.]+/g, "-").replace(/^-|-$/g, "");
-  const apkName = `shuv2code-android-${safeName}-${build.versionCode}.apk`;
+  const apkName = `s2code-android-${safeName}-${build.versionCode}.apk`;
   const notes = [
-    `shuv2code for Android, mirrored from the fork Google Play ${trackName} track. Current build: ${build.versionName} (${build.versionCode}).`,
+    `S2Code for Android, mirrored from the fork Google Play ${trackName} track. Current build: ${build.versionName} (${build.versionCode}).`,
     "",
     "The package name and Play app-signing certificate were verified against the fork configuration before attachment. Only the newest fork build is kept here.",
   ].join("\n");
@@ -208,15 +209,18 @@ async function main() {
   // Reconciled on every run so an interrupted cleanup finishes on the next one.
   for (const stale of assets) {
     if (
-      stale.name.startsWith("shuv2code-android-") &&
+      /^(?:s2code|shuv2code)-android-/.test(stale.name) &&
       stale.name.endsWith(".apk") &&
       stale.name !== apkName
     ) {
       gh("release", "delete-asset", tag, stale.name, "--yes");
     }
   }
-  if (release && release.body.replace(/\r\n/g, "\n").trim() !== notes) {
-    gh("release", "edit", tag, "--notes", notes);
+  if (
+    release &&
+    (release.name !== RELEASE_TITLE || release.body.replace(/\r\n/g, "\n").trim() !== notes)
+  ) {
+    gh("release", "edit", tag, "--title", RELEASE_TITLE, "--notes", notes);
   }
 }
 

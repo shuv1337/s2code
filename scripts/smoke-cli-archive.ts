@@ -16,6 +16,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as NetService from "@t3tools/shared/Net";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import { windowsSystemTar } from "./build-cli-archive.ts";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
@@ -41,6 +42,7 @@ const runExecutable = Effect.fn("runExecutable")(function* (
   executable: string,
   args: ReadonlyArray<string>,
   cwd: string,
+  env: Readonly<Record<string, string>> = {},
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const child = yield* spawner.spawn(
@@ -48,7 +50,7 @@ const runExecutable = Effect.fn("runExecutable")(function* (
       cwd,
       // Empty PATH: the archive must not reach a system node, and the
       // launcher context must not leak in from a developer shell.
-      env: { PATH: "", HOME: cwd, USERPROFILE: cwd, TMPDIR: cwd, TEMP: cwd },
+      env: { PATH: "", HOME: cwd, USERPROFILE: cwd, TMPDIR: cwd, TEMP: cwd, ...env },
       extendEnv: false,
     }),
   );
@@ -118,6 +120,90 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     });
   }
 
+  if (platform === "win32") {
+    const hostEnv = yield* HostProcess.Environment;
+    const systemRoot = hostEnv.SystemRoot ?? hostEnv.WINDIR ?? "C:\\Windows";
+    const powershell = path.join(
+      systemRoot,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    );
+    const installerHome = path.join(scratch, "installer home");
+    const bin = path.join(scratch, "installer bin");
+    const cache = path.join(installerHome, "runtime", "versions", input.expectVersion);
+    yield* fs.makeDirectory(cache, { recursive: true });
+    yield* fs.copyFile(executable, path.join(cache, "t3.exe"));
+    yield* fs.writeFileString(path.join(installerHome, ".product-identity"), "shuv2code\n");
+    yield* fs.writeFileString(path.join(cache, ".install-product"), "shuv2code\n");
+    yield* fs.writeFileString(path.join(cache, ".install-complete"), `${input.expectVersion}\n`);
+    const env = {
+      SystemRoot: systemRoot,
+      WINDIR: systemRoot,
+      ComSpec: path.join(systemRoot, "System32", "cmd.exe"),
+      PROCESSOR_ARCHITECTURE: (yield* HostProcess.Architecture) === "arm64" ? "ARM64" : "AMD64",
+      S2CODE_HOME: installerHome,
+      S2CODE_VERSION: input.expectVersion,
+      S2CODE_INSTALL_BIN_DIR: bin,
+      // The cache is complete; any unexpected download must fail locally.
+      S2CODE_RELEASE_BASE_URL: "http://127.0.0.1:1",
+    };
+    const installed = yield* runExecutable(
+      powershell,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        path.join(import.meta.dirname, "install.ps1"),
+      ],
+      scratch,
+      env,
+    );
+    if (installed.exitCode !== 0)
+      return yield* new CliArchiveSmokeError({
+        step: "installing Windows command aliases",
+        detail: installed.stderr,
+      });
+    const command = resolveChannelIdentity(input.expectVersion).executableName;
+    for (const name of [command, command.replace("s2code", "shuv2code")]) {
+      const alias = yield* runExecutable(
+        powershell,
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${name}.cmd') --version; exit $LASTEXITCODE`,
+        ],
+        scratch,
+        env,
+      );
+      if (alias.exitCode !== 0 || alias.stdout.trim() !== version.stdout.trim())
+        return yield* new CliArchiveSmokeError({
+          step: `running ${name}.cmd`,
+          detail: `${alias.stdout}${alias.stderr}`,
+        });
+    }
+    const invalid = yield* runExecutable(
+      powershell,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `& (Join-Path $env:S2CODE_INSTALL_BIN_DIR '${command}.cmd') --not-a-real-option; exit $LASTEXITCODE`,
+      ],
+      scratch,
+      env,
+    );
+    if (invalid.exitCode === 0)
+      return yield* new CliArchiveSmokeError({
+        step: "forwarding Windows command failures",
+        detail: "invalid option exited successfully",
+      });
+  }
+
   const net = yield* NetService.NetService;
   const port = yield* net.findAvailablePort(47700);
   const home = path.join(scratch, "home");
@@ -133,7 +219,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
           USERPROFILE: home,
           TMPDIR: scratch,
           TEMP: scratch,
-          SHUV2CODE_HOME: home,
+          S2CODE_HOME: home,
         },
         extendEnv: false,
       },

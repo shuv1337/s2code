@@ -57,7 +57,7 @@ it.effect("ignores inherited upstream home and port before deriving state paths"
     NodeFS.mkdirSync(upstream);
     NodeFS.writeFileSync(NodePath.join(upstream, "sentinel"), "unchanged");
     const config = yield* resolve({ T3CODE_HOME: upstream, T3CODE_PORT: "4444" });
-    expect(config.baseDir).toBe(NodePath.join(root, ".shuv2code-v2"));
+    expect(config.baseDir).toBe(NodePath.join(root, ".s2code-v2"));
     expect(config.port).not.toBe(4444);
     expect(NodeFS.readdirSync(upstream)).toEqual(["sentinel"]);
   }),
@@ -65,13 +65,13 @@ it.effect("ignores inherited upstream home and port before deriving state paths"
 it.effect("honors explicit fork settings and keeps CLI flags above them", () =>
   Effect.gen(function* () {
     const config = yield* resolve({
-      SHUV2CODE_HOME: NodePath.join(root, "custom"),
-      SHUV2CODE_PORT: "4773",
+      S2CODE_HOME: NodePath.join(root, "custom"),
+      S2CODE_PORT: "4773",
     });
     expect(config.baseDir).toBe(NodePath.join(root, "custom"));
     expect(config.port).toBe(4773);
     const overridden = yield* resolve(
-      { SHUV2CODE_HOME: NodePath.join(root, "custom"), SHUV2CODE_PORT: "4773" },
+      { S2CODE_HOME: NodePath.join(root, "custom"), S2CODE_PORT: "4773" },
       {
         baseDir: Option.some(NodePath.join(root, "explicit")),
         port: Option.some(5773),
@@ -85,13 +85,13 @@ it.effect("does not open inherited upstream state even with a launcher context",
   Effect.gen(function* () {
     const home = NodePath.join(root, "service-home");
     NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
-    NodeFS.writeFileSync(NodePath.join(home, ".product-identity"), "shuv2code\n");
+    NodeFS.writeFileSync(NodePath.join(home, ".product-identity"), "s2code\n");
     NodeFS.writeFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "original-db");
     const config = yield* resolve({
       T3CODE_HOME: home,
       T3_SERVICE_LAUNCHER_CONTEXT: JSON.stringify({ version: "1.2.3" }),
     });
-    expect(config.baseDir).toBe(NodePath.join(root, ".shuv2code-v2"));
+    expect(config.baseDir).toBe(NodePath.join(root, ".s2code-v2"));
     expect(config.dbPath).not.toBe(NodePath.join(home, "userdata", "statev2.sqlite"));
     expect(NodeFS.readFileSync(NodePath.join(home, "userdata", "statev2.sqlite"), "utf8")).toBe(
       "original-db",
@@ -102,7 +102,7 @@ it.effect("refuses an explicit upstream home before opening or creating state", 
   Effect.gen(function* () {
     const upstream = NodePath.join(root, ".t3");
     NodeFS.mkdirSync(upstream);
-    const failure = yield* resolve({ SHUV2CODE_HOME: upstream }).pipe(Effect.flip);
+    const failure = yield* resolve({ S2CODE_HOME: upstream }).pipe(Effect.flip);
     expect(String(failure)).toContain("upstream .t3 home");
     expect(NodeFS.readdirSync(upstream)).toEqual([]);
   }),

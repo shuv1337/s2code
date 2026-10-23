@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
  * Turns the per-platform CLI archives of one release into the npm packages
- * behind `npx shuv2code`: one `@shuv2code/t3-<platformKey>` package per
- * archive holding the archive's contents verbatim, plus the `shuv2code` launcher
+ * behind `npx s2code`: one `@s2code/t3-<platformKey>` package per
+ * archive holding the archive's contents verbatim, plus the `s2code` launcher
  * that lists them as optionalDependencies and execs the one npm installed.
  * The bytes a user gets from npm are therefore the release archive's, and
  * running them needs neither a Node runtime, npm, nor a native build.
  *
  * Output layout under `--output-dir`:
  *
- *   @shuv2code/t3-<platformKey>/     archive contents flattened + package.json
- *   @shuv2code/t3-<platformKey>.tgz  the same tree as an npm tarball
- *   shuv2code/                     launcher: package.json, bin/t3.js, README.md
- *   shuv2code.tgz                  the launcher as an npm tarball
+ *   @s2code/t3-<platformKey>/     archive contents flattened + package.json
+ *   @s2code/t3-<platformKey>.tgz  the same tree as an npm tarball
+ *   s2code/                     launcher: package.json, bin/t3.js, README.md
+ *   s2code.tgz                  the launcher as an npm tarball
  *
  * The tarballs are what gets published. `npm publish <dir>` always drops
  * `node_modules/` (npm-packlist ignores it whatever `files` says, and
@@ -20,6 +20,7 @@
  * not), whereas `npm publish <tarball>` uploads the bytes as given.
  */
 import { legacyCliLauncherScript } from "@t3tools/shared/legacyCliLauncher";
+import { PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -43,8 +44,9 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import { windowsSystemTar } from "./build-cli-archive.ts";
 
-export const NPM_PLATFORM_PACKAGE_SCOPE = "@shuv2code";
-export const NPM_LAUNCHER_PACKAGE_NAME = "shuv2code";
+export const NPM_PLATFORM_PACKAGE_SCOPE = "@s2code";
+export const NPM_LAUNCHER_PACKAGE_NAME = "s2code";
+export const NPM_BRIDGE_PACKAGE_NAME = "shuv2code";
 
 const encodePackageJson = Schema.encodeEffect(fromJsonStringPretty(Schema.Unknown));
 
@@ -107,7 +109,7 @@ export function npmPlatformPackageManifest(
   return {
     name: npmPlatformPackageName(platformKey),
     version,
-    description: `shuv2code CLI executable for ${platformKey}`,
+    description: `s2code CLI executable for ${platformKey}`,
     license: serverPackageJson.license,
     repository: serverPackageJson.repository,
     os: [os],
@@ -155,7 +157,7 @@ export function npmPlatformPackageReadme(platformKey: CliArchivePlatformKey): st
   return [
     `# ${npmPlatformPackageName(platformKey)}`,
     "",
-    `The T3 Code CLI executable for ${platformKey}. Do not install this package directly:`,
+    `The S2Code CLI executable for ${platformKey}. Do not install this package directly:`,
     `it is an optional dependency of \`${NPM_LAUNCHER_PACKAGE_NAME}\`, which picks the package for the`,
     "current platform and runs the executable inside it.",
     "",
@@ -163,23 +165,24 @@ export function npmPlatformPackageReadme(platformKey: CliArchivePlatformKey): st
     `npx ${NPM_LAUNCHER_PACKAGE_NAME}@latest`,
     "```",
     "",
-    "Source and documentation: https://github.com/shuv1337/shuv2code",
+    `Source and documentation: https://github.com/${PRODUCT_RELEASE_REPOSITORY}`,
     "",
   ].join("\n");
 }
 
-/** package.json for the `t3` launcher. No engines: bin/t3.js is trivial CJS. */
+/** package.json for the S2Code launcher. No engines: bin/t3.js is trivial CJS. */
 export function npmLauncherPackageManifest(
   version: string,
   platformKeys: ReadonlyArray<CliArchivePlatformKey>,
+  name: string = NPM_LAUNCHER_PACKAGE_NAME,
 ) {
   return {
-    name: NPM_LAUNCHER_PACKAGE_NAME,
+    name,
     version,
-    description: "shuv2code CLI. Installs the self-contained executable for this platform.",
+    description: "s2code CLI. Installs the self-contained executable for this platform.",
     license: serverPackageJson.license,
     repository: serverPackageJson.repository,
-    bin: { shuv2code: "./bin/t3.js", s2c: "./bin/t3.js" },
+    bin: { s2code: "./bin/t3.js", shuv2code: "./bin/t3.js", s2c: "./bin/t3.js" },
     files: ["bin", "dist"],
     optionalDependencies: Object.fromEntries(
       platformKeys.map((key) => [npmPlatformPackageName(key), version]),
@@ -188,7 +191,7 @@ export function npmLauncherPackageManifest(
 }
 
 /**
- * The launcher every `npx t3` runs. Plain CommonJS with no dependencies so it
+ * The launcher every `npx s2code` runs. Plain CommonJS with no dependencies so it
  * loads on any Node that npm itself runs on; the real work happens in the
  * single-executable it execs.
  */
@@ -207,10 +210,10 @@ try {
 } catch {
   process.stderr.write(
     [
-      "shuv2code: no CLI build is available for this platform (" + key + ").",
+      "s2code: no CLI build is available for this platform (" + key + ").",
       "Supported platforms: " + SUPPORTED.join(", ") + ".",
-      "If yours is listed, reinstall shuv2code so npm fetches its optional dependency.",
-      "The desktop app and release archives are at https://github.com/shuv1337/shuv2code/releases",
+      "If yours is listed, reinstall s2code so npm fetches its optional dependency.",
+      "The desktop app and release archives are at https://github.com/${PRODUCT_RELEASE_REPOSITORY}/releases",
       "",
     ].join("\\n"),
   );
@@ -220,7 +223,7 @@ try {
 const executable = join(packageDir, process.platform === "win32" ? "t3.exe" : "t3");
 const result = spawnSync(executable, process.argv.slice(2), { stdio: "inherit" });
 if (result.error) {
-  process.stderr.write("t3: failed to start " + executable + ": " + result.error.message + "\\n");
+  process.stderr.write("s2code: failed to start " + executable + ": " + result.error.message + "\\n");
   process.exit(1);
 }
 // A child killed by a signal has no status; report it the way a shell would.
@@ -370,6 +373,7 @@ const stageLauncherPackage = Effect.fn("stageLauncherPackage")(function* (input:
   readonly outputDir: string;
   readonly version: string;
   readonly platformKeys: ReadonlyArray<CliArchivePlatformKey>;
+  readonly name: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -381,7 +385,7 @@ const stageLauncherPackage = Effect.fn("stageLauncherPackage")(function* (input:
   yield* fs.makeDirectory(path.join(stageDir, "bin"), { recursive: true });
   yield* fs.writeFileString(
     path.join(stageDir, "package.json"),
-    `${yield* encodePackageJson(npmLauncherPackageManifest(input.version, input.platformKeys))}\n`,
+    `${yield* encodePackageJson(npmLauncherPackageManifest(input.version, input.platformKeys, input.name))}\n`,
   );
   const launcherScript = path.join(stageDir, "bin/t3.js");
   yield* fs.writeFileString(launcherScript, NPM_LAUNCHER_SCRIPT);
@@ -395,9 +399,9 @@ const stageLauncherPackage = Effect.fn("stageLauncherPackage")(function* (input:
     yield* fs.copyFile(readme, path.join(stageDir, "README.md"));
   }
   const output: NpmPackageOutput = {
-    name: NPM_LAUNCHER_PACKAGE_NAME,
-    packageDir: path.join(input.outputDir, NPM_LAUNCHER_PACKAGE_NAME),
-    tarball: path.join(input.outputDir, `${NPM_LAUNCHER_PACKAGE_NAME}.tgz`),
+    name: input.name,
+    packageDir: path.join(input.outputDir, input.name),
+    tarball: path.join(input.outputDir, `${input.name}.tgz`),
   };
   yield* packAndPlace({ stageDir: scratch, ...output });
   return output;
@@ -439,11 +443,14 @@ export const buildNpmPlatformPackages = Effect.fn("buildNpmPlatformPackages")(fu
   );
   const outputs = [
     ...platformOutputs,
-    yield* stageLauncherPackage({
-      outputDir: input.outputDir,
-      version: input.version,
-      platformKeys: archives.map((entry) => entry.key),
-    }),
+    ...(yield* Effect.forEach([NPM_LAUNCHER_PACKAGE_NAME, NPM_BRIDGE_PACKAGE_NAME], (name) =>
+      stageLauncherPackage({
+        name,
+        outputDir: input.outputDir,
+        version: input.version,
+        platformKeys: archives.map((entry) => entry.key),
+      }),
+    )),
   ];
 
   for (const output of outputs) {
@@ -461,9 +468,7 @@ const command = Command.make(
   "build-npm-platform-packages",
   {
     archivesDir: Flag.String("archives-dir").pipe(
-      Flag.withDescription(
-        "Directory holding the release's shuv2code-<version>-<platform> archives.",
-      ),
+      Flag.withDescription("Directory holding the release's s2code-<version>-<platform> archives."),
     ),
     version: Flag.String("version").pipe(
       Flag.withDescription(
@@ -479,7 +484,7 @@ const command = Command.make(
   buildNpmPlatformPackages,
 ).pipe(
   Command.withDescription(
-    "Build the t3 launcher and @t3code/t3-<platform> npm packages from CLI release archives.",
+    "Build the s2code launcher, shuv2code bridge, and @s2code/t3-<platform> npm packages from CLI release archives.",
   ),
 );
 

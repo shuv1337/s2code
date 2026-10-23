@@ -1,12 +1,15 @@
 # Maintained in https://github.com/shuv1337/shuv2code/tree/main/packaging/aur
 
-pkgname=shuv2code-bin
+pkgname=s2code-bin
 pkgver=0.0.0
 pkgrel=1
 pkgdesc='Desktop control surface for local coding agents'
 arch=('x86_64')
 url='https://github.com/shuv1337/shuv2code'
 license=('MIT')
+provides=('shuv2code-bin')
+conflicts=('shuv2code-bin')
+replaces=('shuv2code-bin')
 depends=(
   'alsa-lib'
   'at-spi2-core'
@@ -70,31 +73,32 @@ package() {
   chmod -R u=rwX,go=rX "$pkgdir/opt/$pkgname"
   chmod 4755 "$pkgdir/opt/$pkgname/chrome-sandbox"
 
-  install -Dm755 /dev/stdin "$pkgdir/usr/bin/shuv2code" <<'EOF'
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/s2code" <<'EOF'
 #!/bin/sh
-exec /opt/shuv2code-bin/AppRun "$@"
+exec /opt/s2code-bin/AppRun "$@"
 EOF
+  ln -s s2code "$pkgdir/usr/bin/shuv2code"
 
   # Icon lookup only sees sizes registered in hicolor's index.theme (max 512x512).
   local icon size_dir
-  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/shuv2code.png; do
-    size_dir="${icon%/apps/shuv2code.png}"
+  for icon in "$srcdir"/squashfs-root/usr/share/icons/hicolor/*/apps/s2code.png; do
+    size_dir="${icon%/apps/s2code.png}"
     install -Dm644 "$icon" \
-      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/shuv2code.png"
+      "$pkgdir/usr/share/icons/hicolor/${size_dir##*/}/apps/s2code.png"
   done
 
-  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/shuv2code.desktop" <<'EOF'
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/s2code.desktop" <<'EOF'
 [Desktop Entry]
 Name=S2Code
 Comment=Desktop control surface for local coding agents
-Exec=shuv2code %U
-TryExec=shuv2code
+Exec=s2code %U
+TryExec=s2code
 Terminal=false
 Type=Application
-Icon=shuv2code
-StartupWMClass=shuv2code
+Icon=s2code
+StartupWMClass=s2code
 Categories=Development;
-MimeType=x-scheme-handler/shuv2code;
+MimeType=x-scheme-handler/s2code;x-scheme-handler/shuv2code;
 EOF
 
   install -Dm644 "$srcdir/${pkgname}-${pkgver}-LICENSE" \

@@ -289,7 +289,9 @@ export function resolveDevRunnerHome(
   env: NodeJS.ProcessEnv,
 ) {
   return (
-    (explicit?.trim() || undefined) ?? worktreeHome ?? (env.SHUV2CODE_HOME?.trim() || undefined)
+    (explicit?.trim() || undefined) ??
+    worktreeHome ??
+    (env.S2CODE_HOME?.trim() || env.SHUV2CODE_HOME?.trim() || undefined)
   );
 }
 
@@ -324,9 +326,11 @@ export function createDevRunnerEnv({
     if (configuredBaseDir !== undefined) {
       // Internal alias only after explicit fork/worktree selection, never from ambient T3CODE_HOME.
       output.T3CODE_HOME = resolvedBaseDir;
+      output.S2CODE_HOME = resolvedBaseDir;
       output.SHUV2CODE_HOME = resolvedBaseDir;
     } else {
       delete output.T3CODE_HOME;
+      delete output.S2CODE_HOME;
       delete output.SHUV2CODE_HOME;
     }
 
@@ -421,8 +425,10 @@ export function createDevRunnerEnv({
       "TAILSCALE_SERVE_PORT",
     ]) {
       const value = output[`T3CODE_${key}`];
-      if (value !== undefined) output[`SHUV2CODE_${key}`] = value;
-      else delete output[`SHUV2CODE_${key}`];
+      for (const prefix of ["S2CODE", "SHUV2CODE"]) {
+        if (value !== undefined) output[`${prefix}_${key}`] = value;
+        else delete output[`${prefix}_${key}`];
+      }
     }
     return output;
   });

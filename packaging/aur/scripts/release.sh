@@ -2,22 +2,20 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-product_id="${SHUV2CODE_AUR_PRODUCT_ID:?SHUV2CODE_AUR_PRODUCT_ID is required}"
-repo="${SHUV2CODE_AUR_RELEASE_REPO:?SHUV2CODE_AUR_RELEASE_REPO is required}"
-if [[ "$product_id" != shuv2code || "$repo" != shuv1337/shuv2code ]]; then
-  echo 'Refusing to publish outside the shuv2code fork package namespace.' >&2
+product_id="${S2CODE_AUR_PRODUCT_ID:?S2CODE_AUR_PRODUCT_ID is required}"
+repo="${S2CODE_AUR_RELEASE_REPO:?S2CODE_AUR_RELEASE_REPO is required}"
+if [[ "$product_id" != s2code || "$repo" != shuv1337/shuv2code ]]; then
+  echo 'Refusing to publish outside the s2code fork package namespace.' >&2
   exit 1
 fi
 tag="${RELEASE_TAG:?RELEASE_TAG is required}"
 pkgrel="${PKGREL:-1}"
 [[ "$pkgrel" =~ ^[1-9][0-9]*$ ]] || { echo 'PKGREL must be a positive integer.' >&2; exit 1; }
 
-if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  pkgname="$product_id-bin"
-elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]]; then
+if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]]; then
   pkgname="$product_id-nightly-bin"
 else
-  echo "Release $tag does not publish an AUR package."
+  echo "Release $tag does not publish an AUR package; this fork publishes only nightly."
   exit 0
 fi
 
@@ -85,7 +83,7 @@ aur_remote="ssh://aur@aur.archlinux.org/$pkgname.git"
 git clone "$aur_remote" "$aur_dir"
 cp PKGBUILD .SRCINFO "$aur_dir/"
 cd "$aur_dir"
-git config user.name 'shuv2code-ci'
+git config user.name 's2code-ci'
 git config user.email 'shuv1337@users.noreply.github.com'
 git add -A
 

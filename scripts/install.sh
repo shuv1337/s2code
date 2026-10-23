@@ -1,36 +1,54 @@
 #!/bin/sh
-# Installs the T3 Code CLI from a GitHub Release archive. Needs only sh, tar,
+# Installs the S2Code CLI from a GitHub Release archive. Needs only sh, tar,
 # sha256sum or shasum, and curl or wget; no Node, npm, or compiler.
 #
 #   curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
 #
 # Environment:
-#   SHUV2CODE_CHANNEL           release train to follow: stable, nightly, or preview
+#   S2CODE_CHANNEL           release train to follow: stable, nightly, or preview
 #                            (default: nightly, the only train the fork publishes)
-#   SHUV2CODE_VERSION           exact version to install (overrides SHUV2CODE_CHANNEL)
-#   SHUV2CODE_HOME              Server home directory (default: ~/.shuv2code-v2-<channel>,
-#                            or ~/.shuv2code-v2 for stable)
-#   SHUV2CODE_INSTALL_BIN_DIR   where the `shuv2code` symlink goes (default: ~/.local/bin)
-#   SHUV2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
+#   S2CODE_VERSION           exact version to install (overrides S2CODE_CHANNEL)
+#   S2CODE_HOME              Server home directory (default: ~/.s2code-v2-<channel>,
+#                            or ~/.s2code-v2 for stable)
+#   S2CODE_INSTALL_BIN_DIR   where the `s2code` symlink goes (default: ~/.local/bin)
+#   S2CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #
-# The archive is unpacked into $SHUV2CODE_HOME/runtime/versions/<version>, the
-# same layout `t3 service install` uses, so the service reuses this download
+# The archive is unpacked into $S2CODE_HOME/runtime/versions/<version>, the
+# same layout `s2code service install` uses, so the service reuses this download
 # instead of fetching the release again.
 set -eu
 
+# New public names take precedence over deprecated unattended-install inputs.
+product_setting() {
+  canonical="$(printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [ -n "$canonical" ]; then printf '%s' "$canonical"
+  else printf '%s' "$2" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; fi
+}
+is_product_identity_prefix() {
+  case s2code in "$1"*) return 0 ;; esac
+  case shuv2code in "$1"*) return 0 ;; esac
+  return 1
+}
+S2CODE_HOME="$(product_setting "${S2CODE_HOME:-}" "${SHUV2CODE_HOME:-}")"
+S2CODE_CHANNEL="$(product_setting "${S2CODE_CHANNEL:-}" "${SHUV2CODE_CHANNEL:-}")"
+S2CODE_VERSION="$(product_setting "${S2CODE_VERSION:-}" "${SHUV2CODE_VERSION:-}")"
+S2CODE_INSTALL_BIN_DIR="$(product_setting "${S2CODE_INSTALL_BIN_DIR:-}" "${SHUV2CODE_INSTALL_BIN_DIR:-}")"
+S2CODE_RELEASE_BASE_URL="$(product_setting "${S2CODE_RELEASE_BASE_URL:-}" "${SHUV2CODE_RELEASE_BASE_URL:-}")"
+S2CODE_IMPORT_UPSTREAM="$(product_setting "${S2CODE_IMPORT_UPSTREAM:-}" "${SHUV2CODE_IMPORT_UPSTREAM:-}")"
+# Existing update clients still use the repository's current published location.
 repo="shuv1337/shuv2code"
-base_url="${SHUV2CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
-t3_home="${SHUV2CODE_HOME:-$HOME/.shuv2code-v2}"
-bin_dir="${SHUV2CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
+base_url="${S2CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
+t3_home="${S2CODE_HOME:-$HOME/.s2code-v2}"
+bin_dir="${S2CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 
 fail() {
-  printf '\nt3 install: %s\n' "$1" >&2
+  printf '\ns2code install: %s\n' "$1" >&2
   exit 1
 }
 
-[ -z "${SHUV2CODE_IMPORT_UPSTREAM:-}" ] || fail "Upstream import is not supported; choose a separate SHUV2CODE_HOME."
-if [ -n "${T3CODE_HOME:-}" ] && [ -z "${SHUV2CODE_HOME:-}" ]; then
-  printf '%s\n' "shuv2code: ignoring T3CODE_HOME; use SHUV2CODE_HOME to configure the fork's home." >&2
+[ -z "${S2CODE_IMPORT_UPSTREAM:-}" ] || fail "Upstream import is not supported; choose a separate S2CODE_HOME."
+if [ -n "${T3CODE_HOME:-}" ] && [ -z "${S2CODE_HOME:-}" ]; then
+  printf '%s\n' "s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home." >&2
 fi
 canonical_dir() (
   if [ -d "$1" ]; then cd -P "$1" && pwd -P
@@ -53,7 +71,7 @@ step() {
 if "$interactive"; then
   printf '\n%s' "$bold" >&2
   printf '  %s\n' '██████████ ████████ ' >&2
-  printf '  %s\n' '    ███       ▄██▀       shuv2code' >&2
+  printf '  %s\n' '    ███       ▄██▀       s2code' >&2
   printf '  %s%s     %sCLI installer%s\n' '    ███       ████▄ ' "$reset" "$muted" "$reset$bold" >&2
   printf '  %s\n' '    ███    ▄     ███' >&2
   printf '  %s\n' '    ███    ███████▀ ' >&2
@@ -153,8 +171,8 @@ else
   fail "sha256sum or shasum is required"
 fi
 
-channel="${SHUV2CODE_CHANNEL:-nightly}"
-version="${SHUV2CODE_VERSION:-}"
+channel="${S2CODE_CHANNEL:-nightly}"
+version="${S2CODE_VERSION:-}"
 if [ -z "$version" ]; then
   # Tags are v<semver>; the channel is the prerelease identifier, or none for
   # stable. Only tags of the requested train are considered, so a stable
@@ -162,45 +180,57 @@ if [ -z "$version" ]; then
   case "$channel" in
     stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)' ;;
     nightly | preview) tag_pattern="v\([0-9][^\"]*-${channel}\.[0-9]*\.[0-9]*\)" ;;
-    *) fail "SHUV2CODE_CHANNEL must be stable, nightly, or preview" ;;
+    *) fail "S2CODE_CHANNEL must be stable, nightly, or preview" ;;
   esac
   tmp_index="$(mktemp)"
   fetch "https://api.github.com/repos/${repo}/releases?per_page=100" "$tmp_index"
   version="$(sed -n "s/.*\"tag_name\": *\"${tag_pattern}\".*/\1/p" "$tmp_index" | head -n 1)"
   rm -f "$tmp_index"
-  [ -n "$version" ] || fail "could not find a ${channel} release; set SHUV2CODE_VERSION"
+  [ -n "$version" ] || fail "could not find a ${channel} release; set S2CODE_VERSION"
 fi
 case "$version" in
   *-preview.*)
     printf '%s\n' \
-      "t3 ${version} is a preview build." \
+      "s2code ${version} is a preview build." \
       "  Preview builds are cut by maintainers from unreleased branches to exercise the release" \
       "  pipeline. They can be broken, receive no fixes, and are never offered as updates." \
-      "  Set SHUV2CODE_CHANNEL=nightly (the default) for a supported build." >&2
-    if [ "$channel" != "preview" ] && [ -z "${SHUV2CODE_VERSION:-}" ]; then
+      "  Set S2CODE_CHANNEL=nightly (the default) for a supported build." >&2
+    if [ "$channel" != "preview" ] && [ -z "${S2CODE_VERSION:-}" ]; then
       fail "refusing a preview build that was not explicitly requested"
     fi
     ;;
 esac
 
-stem="shuv2code-${version}-${platform}-${arch}"
+stem="s2code-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"
+previous_archive="shuv2code-${version}-${platform}-${arch}.tar.gz"
 legacy_stem="t3-${version}-${platform}-${arch}"
 legacy_archive="${legacy_stem}.tar.gz"
-command_name=shuv2code
+command_name=s2code
 prerelease="${version#*-}"
 case "$prerelease" in
-  nightly.*) command_name=shuv2code-nightly ;;
-  preview.*|pr.*) command_name=shuv2code-preview ;;
+  nightly.*) command_name=s2code-nightly ;;
+  preview.*|pr.*) command_name=s2code-preview ;;
 esac
-if [ -z "${SHUV2CODE_HOME:-}" ]; then
+if [ -z "${S2CODE_HOME:-}" ]; then
   case "$prerelease" in
-    nightly.*) t3_home="$HOME/.shuv2code-v2-nightly" ;;
-    preview.*|pr.*) t3_home="$HOME/.shuv2code-v2-preview" ;;
+    nightly.*) t3_home="$HOME/.s2code-v2-nightly" ;;
+    preview.*|pr.*) t3_home="$HOME/.s2code-v2-preview" ;;
   esac
+  legacy_home="$HOME/.shuv2code-v2${command_name#s2code}"
+  if [ -d "$legacy_home" ] && [ -n "$(ls -A "$legacy_home" | grep -v '^\.product-identity$')" ]; then
+    if [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home" | grep -v '^\.product-identity$')" ] && [ "$(canonical_dir "$t3_home")" != "$(canonical_dir "$legacy_home")" ]; then
+      fail "Both S2Code homes contain state. Choose S2CODE_HOME explicitly; they will not be merged."
+    fi
+    [ ! -L "$legacy_home/.product-identity" ] && [ -f "$legacy_home/.product-identity" ] || fail "Cannot establish product ownership of the legacy home. Verify it offline and choose S2CODE_HOME explicitly."
+    case "$(tr -d '\r\n' < "$legacy_home/.product-identity")" in
+      s2code|shuv2code) t3_home="$legacy_home" ;;
+      *) fail "Cannot establish product ownership of the legacy home. Verify it offline and choose S2CODE_HOME explicitly." ;;
+    esac
+  fi
 fi
 t3_home="$(canonical_dir "$t3_home")"
-case "$(printf '%s/' "$t3_home" | tr '[:upper:]' '[:lower:]')" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate SHUV2CODE_HOME." ;; esac
+case "$(printf '%s/' "$t3_home" | tr '[:upper:]' '[:lower:]')" in */.t3/*) fail "Refusing an upstream .t3 home; choose a separate S2CODE_HOME." ;; esac
 user_home="$(canonical_dir "$HOME")"
 default_fork_home=false
 case "$t3_home" in "$user_home/.shuv2code-v2") default_fork_home=true ;; esac
@@ -208,18 +238,41 @@ case "$t3_home" in "$user_home/.shuv2code-v2") default_fork_home=true ;; esac
 [ ! -e "$t3_home/.product-identity" ] || [ -f "$t3_home/.product-identity" ] || fail "Product metadata must be a regular file."
 if [ -f "$t3_home/.product-identity" ]; then
   home_product="$(tr -d '\r\n' < "$t3_home/.product-identity")"
-  case shuv2code in "$home_product"*) ;; *) fail "Home belongs to another product." ;; esac
+  is_product_identity_prefix "$home_product" || fail "Home belongs to another product."
 else home_product=
 fi
-if [ "$home_product" != shuv2code ] && [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home" | grep -v '^\.product-identity$')" ] && ! "$default_fork_home"; then
-  fail "Cannot establish product ownership. Choose an empty SHUV2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing shuv2code."
+if [ "$home_product" != s2code ] && [ "$home_product" != shuv2code ] && [ -d "$t3_home" ] && [ -n "$(ls -A "$t3_home" | grep -v '^\.product-identity$')" ] && ! "$default_fork_home"; then
+  fail "Cannot establish product ownership. Choose an empty S2CODE_HOME; verify old custom fork homes offline before adding .product-identity containing s2code."
 fi
 for child in userdata dev runtime; do
   case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
 done
+# A new alias must not replace another installation or an unrelated command.
+bin_dir="$(canonical_dir "$bin_dir")"
+legacy_command_name="shuv2code${command_name#s2code}"
+for command in "$command_name" "$legacy_command_name"; do
+  installed_command="$bin_dir/$command"
+  if [ -e "$installed_command" ] || [ -L "$installed_command" ]; then
+    [ -L "$installed_command" ] || fail "Refusing to replace an existing command: $installed_command"
+    link_target="$(readlink "$installed_command")"
+    case "$link_target" in /*) ;; *) link_target="$bin_dir/$link_target" ;; esac
+    if [ "$command" = "$command_name" ] && [ "$link_target" = "$bin_dir/$legacy_command_name" ]; then
+      [ -L "$link_target" ] || fail "Refusing a canonical command without an owned legacy launcher: $installed_command"
+      link_target="$(readlink "$link_target")"
+      case "$link_target" in /*) ;; *) link_target="$bin_dir/$link_target" ;; esac
+    fi
+    case "$(canonical_dir "$(dirname "$link_target")")/$(basename "$link_target")" in
+      "$t3_home"/runtime/versions/*/t3) ;;
+      *) fail "Refusing to replace a command owned by another installation: $installed_command" ;;
+    esac
+  fi
+done
 mkdir -p "$t3_home"
 home_marker_tmp="$(mktemp "$t3_home/.product-identity.XXXXXX")"
-printf '%s\n' shuv2code > "$home_marker_tmp"
+if [ "$home_product" != shuv2code ] && [ "$home_product" != s2code ]; then
+  if "$default_fork_home"; then home_product=shuv2code; else home_product=s2code; fi
+fi
+printf '%s\n' "$home_product" > "$home_marker_tmp"
 mv "$home_marker_tmp" "$t3_home/.product-identity"
 
 # The release records its own signing policy. A release without one, or an
@@ -228,7 +281,7 @@ release_metadata="$(mktemp)"
 if fetch "${base_url}/v${version}/release.json" "$release_metadata" 2>/dev/null &&
   grep -q '"unsigned": *true' "$release_metadata"; then
   printf '%s\n' \
-    "shuv2code ${version} is an UNSIGNED build." \
+    "s2code ${version} is an UNSIGNED build." \
     "  At least one platform was built without signing credentials, so its code signature" \
     "  and notarization are absent and your system may refuse to run it without an override." >&2
 fi
@@ -244,13 +297,13 @@ case "$(canonical_dir "$target_dir")/" in "$t3_home/"*) ;; *) fail "Refusing for
 product=
 if [ -e "$target_dir/.install-product" ]; then
   product="$(tr -d '\r' < "$target_dir/.install-product")" || fail "Could not read runtime product metadata."
-  case shuv2code in "$product"*) ;; *) fail "Refusing to reuse or replace a foreign runtime cache." ;; esac
+  is_product_identity_prefix "$product" || fail "Refusing to reuse or replace a foreign runtime cache."
 fi
 marker=
 if [ -e "${target_dir}/.install-complete" ]; then
   marker="$(tr -d '\r' < "${target_dir}/.install-complete")" || fail "Could not read runtime metadata; refusing to replace the cache."
 fi
-if [ -x "${target_dir}/t3" ] && [ "$product" = shuv2code ] && [ "$marker" = "$version" ]; then
+if [ -x "${target_dir}/t3" ] && { [ "$product" = s2code ] || [ "$product" = shuv2code ]; } && [ "$marker" = "$version" ]; then
   step "Version ${version} is already downloaded."
 else
   mkdir -p "$versions_dir"
@@ -277,18 +330,19 @@ else
   trap 'printf "\n" >&2; exit 143' TERM
 
   if "$interactive"; then printf '\r\033[2K' >&2; fi
-  printf '  %sInstalling%s shuv2code %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
+  printf '  %sInstalling%s s2code %s%s%s\n\n' "$muted" "$reset" "$bold" "$version" "$reset" >&2
   step "Downloading..."
   fetch_status=0
   fetch "${base_url}/v${version}/SHA256SUMS" "${staging}/SHA256SUMS" || fetch_status=$?
   if [ "$fetch_status" -eq 44 ]; then
-    fail "shuv2code ${version} has no release archive for ${platform}-${arch}"
+    fail "s2code ${version} has no release archive for ${platform}-${arch}"
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
   if ! grep -q " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS"; then
-    archive="$legacy_archive"
-    stem="$legacy_stem"
+    [ "$home_product" = shuv2code ] || fail "This release predates the S2Code transition. A fresh S2Code home requires the first bridge release; existing verified shuv2code homes can still install it."
+    archive="$previous_archive"
+    if ! grep -q " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS"; then archive="$legacy_archive"; fi
   fi
   expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
   [ -n "$expected" ] || fail "no release archive for ${platform}-${arch} is listed in SHA256SUMS"
@@ -298,12 +352,12 @@ else
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
-  step "Extracting shuv2code..."
+  step "Extracting s2code..."
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
   "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
-  printf '%s\n' shuv2code > "${staging}/.install-product"
+  printf '%s\n' "$home_product" > "${staging}/.install-product"
   validated=true
   if [ -e "$target_dir" ]; then
     previous_parent="$(mktemp -d "${versions_dir}/.previous-XXXXXX")"
@@ -316,11 +370,13 @@ else
   trap - EXIT
 fi
 
-step "Setting up the shuv2code command..."
+step "Setting up the s2code command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/$command_name"
+# Installed old updaters only repoint their legacy command.
+ln -sfn "${target_dir}/t3" "${bin_dir}/$legacy_command_name"
+ln -sfn "${bin_dir}/$legacy_command_name" "${bin_dir}/$command_name"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
-printf '  %sInstalled shuv2code %s%s\n\n' "$green" "$version" "$reset" >&2
+printf '  %sInstalled s2code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
   *":${bin_dir}:"*) printf '  Run %s%s%s to get started.\n\n' "$bold" "$command_name" "$reset" ;;
   *) printf '  Add %s to your PATH, then run %s%s%s.\n\n' "$bin_dir" "$bold" "$command_name" "$reset" ;;

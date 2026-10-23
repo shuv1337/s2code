@@ -106,7 +106,7 @@ function install(
             request,
             new Response(
               request.url.endsWith("SHA256SUMS")
-                ? `${failure === "checksum" ? "0".repeat(64) : digest}  shuv2code-${version}-${platform}-x64.${platform === "win32" ? "zip" : "tar.gz"}\n`
+                ? `${failure === "checksum" ? "0".repeat(64) : digest}  s2code-${version}-${platform}-x64.${platform === "win32" ? "zip" : "tar.gz"}\n`
                 : archive,
               {
                 status:
@@ -164,11 +164,42 @@ it.effect("records identity and reuses only a complete owned cache", () =>
     expect(NodeFS.readFileSync(runtime.sentinelPath, "utf8").trim()).toBe(version);
     expect(
       NodeFS.readFileSync(NodePath.join(runtime.versionDir, ".install-product"), "utf8").trim(),
-    ).toBe("shuv2code");
+    ).toBe("s2code");
     expect(first.requests).toHaveLength(2);
     const second = install(home);
     expect(yield* second.result).toEqual(runtime);
     expect(second.requests).toEqual([]);
+  }),
+);
+
+it.effect("keeps newly downloaded runtimes readable by a legacy home's running launcher", () =>
+  Effect.gen(function* () {
+    const home = NodePath.join(root, "legacy");
+    NodeFS.mkdirSync(home);
+    NodeFS.writeFileSync(NodePath.join(home, ".product-identity"), "shuv2code\n");
+    const runtime = yield* install(home).result;
+    expect(NodeFS.readFileSync(NodePath.join(runtime.versionDir, ".install-product"), "utf8")).toBe(
+      "shuv2code\n",
+    );
+    expect(NodeFS.readFileSync(NodePath.join(home, ".product-identity"), "utf8")).toBe(
+      "shuv2code\n",
+    );
+  }),
+);
+
+it.effect.each(["s2", "shuv2"])("repairs an interrupted owned runtime marker %s", (marker) =>
+  Effect.gen(function* () {
+    const home = NodePath.join(root, "partial-runtime");
+    ensureProductHome(home);
+    const cache = NodePath.join(home, "runtime", "versions", version);
+    NodeFS.mkdirSync(cache, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(cache, ".install-product"), marker);
+    NodeFS.writeFileSync(NodePath.join(cache, "t3"), "incomplete-runtime");
+    const attempt = install(home);
+    const installed = yield* attempt.result;
+    expect(attempt.requests).toHaveLength(2);
+    expect(NodeFS.readFileSync(installed.entryPath, "utf8")).toBe("fork-runtime");
+    expect(NodeFS.readFileSync(NodePath.join(cache, ".install-product"), "utf8")).toBe("s2code\n");
   }),
 );
 
@@ -211,7 +242,7 @@ it.effect.each(["1.2.3\n", "t3code\n1.2.3\n"])(
 );
 it.effect("refetches unmarked metadata even under a fork-named directory", () =>
   Effect.gen(function* () {
-    const home = NodePath.join(root, ".shuv2code-v2");
+    const home = NodePath.join(root, ".s2code-v2");
     ensureProductHome(home);
     const cache = NodePath.join(home, "runtime", "versions", version);
     NodeFS.mkdirSync(cache, { recursive: true });

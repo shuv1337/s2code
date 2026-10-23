@@ -55,21 +55,21 @@ standard theme.
 Run this on the server to set a default and switch connected clients to it:
 
 ```bash
-shuv2code theme set nightfall
+s2code theme set nightfall
 ```
 
 Clients that are offline apply it when they reconnect. Each client applies the setting once;
-choosing another theme afterward sticks until the next `shuv2code theme set`. Run the command again to
+choosing another theme afterward sticks until the next `s2code theme set`. Run the command again to
 reapply it, even if the name is unchanged.
 
-`shuv2code theme clear` removes the default without changing anyone's current theme. `shuv2code theme show` lists
+`s2code theme clear` removes the default without changing anyone's current theme. `s2code theme show` lists
 the default and published themes.
 
 ### Publish a theme
 
-Save a theme exported from the fork into its channel home (stable: `~/.shuv2code-v2/userdata/themes/`) on the server, or the `themes`
+Save a theme exported from the fork into its channel home (stable: `~/.s2code-v2/userdata/themes/`) on the server, or the `themes`
 directory under your custom state directory. The filename supplies the theme ID: `nightfall.json`
-can be selected with `shuv2code theme set nightfall`. Keep the filename stable when updating its colors.
+can be selected with `s2code theme set nightfall`. Keep the filename stable when updating its colors.
 Do not use `system`, `light`, `dark`, or a built-in theme's ID.
 
 For an integration that generates a palette, this shorter format also works:

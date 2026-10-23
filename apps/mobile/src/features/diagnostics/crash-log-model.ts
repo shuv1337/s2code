@@ -51,7 +51,7 @@ export function formatStartupCrashReport(
   records: ReadonlyArray<StartupCrashRecord>,
   app: { readonly version: string; readonly build: string },
 ): string {
-  const header = `shuv2code ${app.version} (${app.build})`;
+  const header = `S2Code ${app.version} (${app.build})`;
   if (records.length === 0) return `${header}\nNo startup crashes recorded.`;
   return [
     header,

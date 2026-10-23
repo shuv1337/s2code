@@ -14,6 +14,11 @@ const testState = vi.hoisted(() => ({
   clipboard: vi.fn(),
   continueThreadsAfterServerUpdate: false,
   sessionAtom: null as unknown,
+  npmPackage: "s2code" as "s2code" | "shuv2code" | null,
+}));
+
+vi.mock(import("~/state/npmRelease"), () => ({
+  useNpmReleasePackage: () => testState.npmPackage,
 }));
 
 vi.mock(import("~/hooks/useCopyToClipboard"), async (original) => ({
@@ -137,6 +142,7 @@ beforeEach(() => {
   testState.toast.mockReset();
   testState.clipboard.mockReset();
   testState.continueThreadsAfterServerUpdate = false;
+  testState.npmPackage = "s2code";
   sessionAtom = Atom.make<SessionResult>(AsyncResult.success(currentSession));
   testState.sessionAtom = sessionAtom;
   resetConfirmDialogForTests();
@@ -215,21 +221,21 @@ describe("ServerUpdateAction", () => {
       "Copy update command",
       "npm install --global --prefix '/opt/node' shuv2code@0.0.45",
       "Update command copied",
-      "then restart t3",
+      "then restart S2Code",
     ],
     [
       { kind: "npx" },
       "Copy relaunch command",
-      "npx shuv2code@0.0.45",
+      "npx s2code@0.0.45",
       "Relaunch command copied",
-      "This does not update an installed t3 command.",
+      "This does not update an installed s2code command.",
     ],
     [
       undefined,
       "Copy relaunch command",
-      "npx shuv2code@0.0.45",
+      "npx s2code@0.0.45",
       "Relaunch command copied",
-      "This does not update an installed t3 command.",
+      "This does not update an installed s2code command.",
     ],
   ] satisfies ReadonlyArray<
     readonly [ServerInstallation | undefined, string, string, string, string]
@@ -249,6 +255,15 @@ describe("ServerUpdateAction", () => {
     },
   );
 
+  it("can copy a relaunch command before npm availability is known", async () => {
+    testState.npmPackage = null;
+    await renderAction({ selfUpdate: null, targetVersion: "0.0.45" });
+    expect(button("Copy relaunch command")!.disabled).toBe(false);
+    await click("Copy relaunch command");
+    expect(testState.clipboard).toHaveBeenCalledWith("npx s2code@0.0.45");
+    expect(testState.updateServer).not.toHaveBeenCalled();
+  });
+
   it("reports success only after the shared update flow reconnects", async () => {
     testState.updateServer.mockResolvedValue(success());
 
@@ -262,7 +277,7 @@ describe("ServerUpdateAction", () => {
     expect(testState.toast).toHaveBeenCalledWith({
       type: "success",
       title: "Test server updated",
-      description: "Reconnected on shuv2code@0.0.31.",
+      description: "Reconnected on s2code@0.0.31.",
     });
   });
 

@@ -8,6 +8,6 @@ export function shouldHandleAppLink(url: string): boolean {
   return (
     !url.includes("expo-development-client") &&
     !url.includes("://expo-sharing") &&
-    !/^(?:shuv2code|t3code)(-dev|-preview|-nightly)?:\/*$/.test(url)
+    !/^(?:s2code|shuv2code|t3code)(-dev|-preview|-nightly)?:\/*$/.test(url)
   );
 }

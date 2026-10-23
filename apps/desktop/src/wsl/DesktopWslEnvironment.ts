@@ -13,7 +13,10 @@ import { buildRemoteNodeEnvScript } from "@t3tools/ssh/tunnel";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import {
+  resolveChannelIdentity,
+  resolveLegacyChannelIdentity,
+} from "@t3tools/shared/channelIdentity";
 import { PRODUCT_ID, PRODUCT_HOME_MARKER } from "@t3tools/shared/productIdentity";
 import { parseWslDistroList, type WslDistro } from "./wslPathParsing.ts";
 
@@ -264,11 +267,25 @@ const WSL_RUNTIME_SELECTION_GRACE_MINUTES = 5;
 
 const sanitizeWslRuntimeId = (value: string): string => value.replace(/[^A-Za-z0-9._-]/g, "_");
 
+const buildWslHomeSelectionScript = (version: string) =>
+  [
+    `channel_home="$HOME/${resolveChannelIdentity(version).homeDirectory}"`,
+    `legacy_home="$HOME/${resolveLegacyChannelIdentity(version).homeDirectory}"`,
+    'if [ -e "$legacy_home" ] || [ -L "$legacy_home" ]; then',
+    '  [ ! -L "$legacy_home" ] && [ ! -L "$legacy_home/.product-identity" ] || { printf "Refusing linked legacy WSL state.\\n" >&2; exit 1; }',
+    '  if [ -n "$(ls -A "$legacy_home" | grep -v \'^\\.product-identity$\')" ]; then',
+    '    [ -f "$legacy_home/.product-identity" ] || { printf "Cannot verify legacy WSL home ownership.\\n" >&2; exit 1; }',
+    '    case "$(cat "$legacy_home/.product-identity")" in s2code|shuv2code) ;; *) printf "WSL home belongs to another product.\\n" >&2; exit 1 ;; esac',
+    '    [ ! -d "$channel_home" ] || [ -z "$(ls -A "$channel_home" | grep -v \'^\\.product-identity$\')" ] || { printf "Both s2code and shuv2code WSL homes contain state. Select the intended home first.\\n" >&2; exit 1; }',
+    '    channel_home="$legacy_home"',
+    "  fi",
+    "fi",
+  ].join("\n");
+
 /** Claim an empty Linux-side home before preflight makes it nonempty, including archive-failure fallback. */
 const buildWslHomeOwnershipScript = (version: string) => {
-  const identity = resolveChannelIdentity(version);
   return [
-    `channel_home="$HOME/${identity.homeDirectory}"`,
+    buildWslHomeSelectionScript(version),
     `home_marker="$channel_home/${PRODUCT_HOME_MARKER}"`,
     'for owned_path in "$channel_home" "$home_marker" "$channel_home/userdata" "$channel_home/runtime" "$channel_home/wsl-runtime"; do',
     '  [ ! -L "$owned_path" ] || { printf "Refusing a linked WSL home path.\\n" >&2; exit 1; }',
@@ -278,13 +295,10 @@ const buildWslHomeOwnershipScript = (version: string) => {
     'exec 8< "$channel_home"',
     "flock -x 8",
     'if [ -e "$home_marker" ]; then',
-    `  [ -f "$home_marker" ] && [ "$(cat "$home_marker")" = ${shellQuote(PRODUCT_ID)} ] || { printf 'WSL home belongs to another product.\\n' >&2; exit 1; }`,
+    '  [ -f "$home_marker" ] || { printf "WSL home belongs to another product.\\n" >&2; exit 1; }',
+    '  case "$(cat "$home_marker")" in s2code|shuv2code) ;; *) printf "WSL home belongs to another product.\\n" >&2; exit 1 ;; esac',
     "else",
-    ...(identity.channel === "stable"
-      ? []
-      : [
-          '  [ -z "$(ls -A "$channel_home")" ] || { printf "Cannot establish product ownership of WSL home; verify existing data offline before adding its fork marker.\\n" >&2; exit 1; }',
-        ]),
+    '  [ -z "$(ls -A "$channel_home")" ] || { printf "Cannot establish product ownership of WSL home; verify existing data offline before adding its fork marker.\\n" >&2; exit 1; }',
     '  home_marker_tmp=$(mktemp "$channel_home/.product-identity.XXXXXX")',
     "  trap 'rm -f \"$home_marker_tmp\"' EXIT",
     `  printf '%s\\n' ${shellQuote(PRODUCT_ID)} > "$home_marker_tmp"`,
@@ -306,7 +320,7 @@ export const buildWslRuntimeInstallScript = (
   return [
     "set -eu",
     buildWslHomeOwnershipScript(version),
-    `runtime_parent="$HOME/${resolveChannelIdentity(version).homeDirectory}/wsl-runtime"`,
+    'runtime_parent="$channel_home/wsl-runtime"',
     `runtime_root="$runtime_parent/${safeRuntimeId}"`,
     `ready_marker="$runtime_root/${WSL_RUNTIME_READY_MARKER}"`,
     "runtime_entry_runs() {",
@@ -403,7 +417,8 @@ export const buildWslRuntimePruneScript = (runtimeId: string, version = ""): str
   const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
   return [
     "set -eu",
-    `runtime_parent="$HOME/${resolveChannelIdentity(version).homeDirectory}/wsl-runtime"`,
+    buildWslHomeSelectionScript(version),
+    'runtime_parent="$channel_home/wsl-runtime"',
     `current_runtime="$runtime_parent/${safeRuntimeId}"`,
     '[ -d "$runtime_parent" ] || exit 0',
     // Serialize the whole retention decision so two backends cannot select
@@ -460,7 +475,8 @@ export const buildWslRuntimeInvalidateScript = (runtimeId: string, version = "")
   const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
   return [
     "set -eu",
-    `rm -f "$HOME/${resolveChannelIdentity(version).homeDirectory}/wsl-runtime/${safeRuntimeId}/${WSL_RUNTIME_READY_MARKER}"`,
+    buildWslHomeSelectionScript(version),
+    `rm -f "$channel_home/wsl-runtime/${safeRuntimeId}/${WSL_RUNTIME_READY_MARKER}"`,
   ].join("\n");
 };
 

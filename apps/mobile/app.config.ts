@@ -1,4 +1,5 @@
 import type { ExpoConfig } from "expo/config";
+import { applyDevelopmentProductOverrides } from "@t3tools/shared/productIdentity";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 import * as NodeURL from "node:url";
 import { materializeMobileFirebaseConfig } from "../../scripts/lib/mobile-firebase-config.ts";
@@ -17,6 +18,7 @@ import {
 type AppVariant = "development" | "preview" | "production";
 
 const repoEnv = loadRepoEnv();
+applyDevelopmentProductOverrides(repoEnv);
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
@@ -163,7 +165,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "SubscriptionUsage",
         displayName: "Subscription usage",
-        description: "Subscription quotas from your connected shuv2code environments.",
+        description: "Subscription quotas from your connected S2Code environments.",
         ios: {
           configuration: {
             title: "Subscription usage",
@@ -214,7 +216,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active shuv2code agents.",
+        description: "Shows the current state of active S2Code agents.",
         // Live Activity companion; there is no Android presentation for it.
         android: null,
         ios: { supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"] },
@@ -257,7 +259,7 @@ const config: ExpoConfig = {
   name: variant.appName,
   slug: MOBILE_SLUG,
   platforms: ["ios", "android"],
-  scheme: variant.scheme,
+  scheme: [variant.scheme, variant.legacyScheme],
   version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.0.0",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
@@ -296,8 +298,8 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow shuv2code to connect to servers on your local network or tailnet.",
-      NSPhotoLibraryAddUsageDescription: "Allow shuv2code to save images to your photo library.",
+        "Allow S2Code to connect to servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow S2Code to save images to your photo library.",
       // "Audio, AirPlay, and Picture in Picture": the browser screen's system
       // picture in picture needs it to start and to stay up outside the app.
       UIBackgroundModes: ["audio"],
@@ -410,7 +412,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow shuv2code to use your microphone for voice input.",
+        microphonePermission: "Allow S2Code to use your microphone for voice input.",
         recordAudioAndroid: false,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
@@ -419,7 +421,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow shuv2code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow S2Code to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,

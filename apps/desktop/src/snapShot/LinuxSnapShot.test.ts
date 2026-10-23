@@ -56,6 +56,7 @@ class FakeBus extends NodeEvents.EventEmitter {
   portalVersion = 3;
   targets: number | undefined = 8;
   extensionVersion: number | undefined;
+  legacyExtensionOnly = false;
   kdeVersion: number | undefined = 5;
   kdeError: Error | undefined;
   status = 0;
@@ -68,7 +69,7 @@ class FakeBus extends NodeEvents.EventEmitter {
   sendResponse = true;
   differentHandle = false;
   wrongSender = false;
-  requestName = vi.fn(async () => RequestNameReply.PRIMARY_OWNER);
+  requestName = vi.fn(async (_name: string, _flags?: number) => RequestNameReply.PRIMARY_OWNER);
   disconnect = vi.fn();
   send = vi.fn();
 
@@ -115,7 +116,10 @@ class FakeBus extends NodeEvents.EventEmitter {
                 : { AvailableTargets: new Variant("u", this.targets) }),
             },
           ]);
-        if (this.extensionVersion === undefined)
+        if (
+          this.extensionVersion === undefined ||
+          (this.legacyExtensionOnly && message.destination === "io.github.shuv1337.s2code.SnapShot")
+        )
           throw new DBusError("org.freedesktop.DBus.Error.ServiceUnknown", "Absent");
         return reply([{ Version: new Variant("u", this.extensionVersion) }]);
       case "GetNameOwner":
@@ -284,6 +288,19 @@ it("retains the authenticated connection until the compositor flight has landed"
   expect(bus.disconnect).toHaveBeenCalledOnce();
 });
 
+it("uses an installed legacy fork extension with its matching caller identity", async () => {
+  bus.portalVersion = 2;
+  bus.extensionVersion = 2;
+  bus.legacyExtensionOnly = true;
+  const snapshot = await captureLinuxWindow(appId, { flash: false, animate: false });
+  expect(snapshot).toMatchObject({ png, window: metadata });
+  expect(bus.requestName.mock.calls[0]?.[0]).toBe("io.github.shuv1337.shuv2code.SnapShot.Client");
+  const capture = bus.calls.find((call) => call.member === "CaptureWithFeedback");
+  expect(capture?.destination).toBe("io.github.shuv1337.shuv2code.SnapShot");
+  expect(capture?.path).toBe("/io/github/shuv1337/shuv2code/SnapShot");
+  await snapshot!.feedback!.complete();
+});
+
 it("keeps capture working with v1 and does not request unavailable effects", async () => {
   bus.portalVersion = 2;
   bus.extensionVersion = 1;
@@ -371,13 +388,13 @@ it.each([
     bus.extensionVersion = 1;
     expect(await captureLinuxWindow(client)).toEqual({ png, window: metadata });
     expect(bus.requestName).toHaveBeenCalledWith(
-      `io.github.shuv1337.shuv2code.SnapShot.Client${suffix}`,
+      `io.github.shuv1337.s2code.SnapShot.Client${suffix}`,
       expect.any(Number),
     );
     expect(bus.calls.find((call) => call.member === "Capture")).toMatchObject({
-      destination: "io.github.shuv1337.shuv2code.SnapShot",
-      interface: "io.github.shuv1337.shuv2code.SnapShot",
-      path: "/io/github/shuv1337/shuv2code/SnapShot",
+      destination: "io.github.shuv1337.s2code.SnapShot",
+      interface: "io.github.shuv1337.s2code.SnapShot",
+      path: "/io/github/shuv1337/s2code/SnapShot",
     });
     expect(bus.calls.some((call) => call.member === "Screenshot")).toBe(false);
   },

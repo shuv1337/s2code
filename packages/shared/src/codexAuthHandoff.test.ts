@@ -30,17 +30,36 @@ const input = {
 const callbackUrl = `http://127.0.0.1:54213/auth/callback?state=${"a".repeat(43)}&code=one-time-code&client_id=oaiapp_test`;
 
 describe("Codex desktop handoff", () => {
-  it.each(["shuv2code", "shuv2code-nightly", "shuv2code-preview", "shuv2code-dev"])(
-    "returns OAuth handoffs to the owning %s installation",
-    (scheme) => {
-      const request = { ...input, returnUrl: `${scheme}://app/settings/providers` };
+  it.each([
+    "s2code",
+    "s2code-nightly",
+    "s2code-preview",
+    "s2code-dev",
+    "shuv2code",
+    "shuv2code-nightly",
+    "shuv2code-preview",
+    "shuv2code-dev",
+  ])("returns OAuth handoffs to the owning %s installation", (scheme) => {
+    const request = { ...input, returnUrl: `${scheme}://app/settings/providers` };
+    const link = codexAuthHandoffUrl(request);
+    expect(new URL(link).protocol).toBe(`${scheme}:`);
+    expect(readCodexAuthHandoff(link, false, scheme)).toEqual(request);
+    expect(readCodexAuthHandoff(link, false, "t3code")).toBeUndefined();
+    if (scheme !== "s2code" && scheme !== "shuv2code")
+      expect(readCodexAuthHandoff(link, false)).toBeUndefined();
+  });
+  it.each(["", "-nightly", "-preview", "-dev"])(
+    "accepts the old %s handoff only in the matching renamed channel",
+    (channel) => {
+      const request = { ...input, returnUrl: `shuv2code${channel}://app/settings/providers` };
       const link = codexAuthHandoffUrl(request);
-      expect(new URL(link).protocol).toBe(`${scheme}:`);
-      expect(readCodexAuthHandoff(link, false, scheme)).toEqual(request);
-      expect(readCodexAuthHandoff(link, false, "t3code")).toBeUndefined();
-      if (scheme !== "shuv2code") expect(readCodexAuthHandoff(link, false)).toBeUndefined();
+      expect(readCodexAuthHandoff(link, false, `s2code${channel}`)).toEqual(request);
+      expect(
+        readCodexAuthHandoff(link, false, channel === "-nightly" ? "s2code" : "s2code-nightly"),
+      ).toBeUndefined();
     },
   );
+
   it("keeps the local web return route, account, and environment with the code in a fragment", () => {
     expect(readCodexAuthHandoff(codexAuthHandoffUrl(input), false)).toEqual(input);
     const delivery = codexAuthDeliveryUrl(input, callbackUrl);

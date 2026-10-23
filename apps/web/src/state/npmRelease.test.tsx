@@ -8,7 +8,7 @@ import { useNpmReleasePublished } from "./npmRelease";
 afterEach(() => vi.unstubAllGlobals());
 
 it("offers a version only when it is published in the fork npm package", async () => {
-  const url = "https://registry.npmjs.org/shuv2code/1.2.3";
+  const url = "https://registry.npmjs.org/s2code/1.2.3";
   const requests: string[] = [];
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {

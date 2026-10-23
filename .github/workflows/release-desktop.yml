@@ -130,7 +130,7 @@ jobs:
       T3CODE_CLERK_JWT_TEMPLATE: ${{ inputs.clerk_jwt_template }}
       T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
       T3CODE_RELAY_URL: ${{ inputs.relay_url }}
-      SHUV2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/shuv2code
+      S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/shuv2code
     steps:
       # This repository is public, so Git needs no credentials. checkout's
       # credential cleanup runs submodule foreach even with submodules disabled,
@@ -501,7 +501,7 @@ jobs:
 
               export T3CODE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
               if [[ -n "$MACOS_PROVISIONING_PROFILE" ]]; then
-                profile_path="$RUNNER_TEMP/shuv2code.provisionprofile"
+                profile_path="$RUNNER_TEMP/s2code.provisionprofile"
                 printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
                 security cms -D -i "$profile_path" >/dev/null
                 export T3CODE_MACOS_PROVISIONING_PROFILE="$profile_path"
@@ -515,7 +515,7 @@ jobs:
           elif [[ "${{ inputs.platform }}" == "win" ]]; then
             # Embed the Linux CLI archive built by the same-arch Linux job as
             # the WSL runtime. Required for a working WSL backend on Windows.
-            args+=(--wsl-runtime "$GITHUB_WORKSPACE"/wsl-runtime/shuv2code-*-linux-${{ inputs.arch }}.tar.gz)
+            args+=(--wsl-runtime "$GITHUB_WORKSPACE"/wsl-runtime/s2code-*-linux-${{ inputs.arch }}.tar.gz)
             if has_all \
               "$AZURE_TENANT_ID" \
               "$AZURE_CLIENT_ID" \

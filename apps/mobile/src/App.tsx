@@ -38,7 +38,15 @@ if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const appLinking = {
-  prefixes: [Linking.createURL("/"), "shuv2code://", "shuv2code-dev://", "shuv2code-nightly://"],
+  prefixes: [
+    Linking.createURL("/"),
+    "s2code://",
+    "s2code-dev://",
+    "s2code-nightly://",
+    "shuv2code://",
+    "shuv2code-dev://",
+    "shuv2code-nightly://",
+  ],
   // Keep the compact thread list available beneath a directly opened thread.
   config: { initialRouteName: "Home" },
   filter: shouldHandleAppLink,

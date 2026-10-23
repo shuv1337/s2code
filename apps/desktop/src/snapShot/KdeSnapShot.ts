@@ -112,14 +112,15 @@ export class KdeCaptureSetup {
     const legacy = await Promise.all(
       [
         NodePath.join(this.paths.dataHome, "t3code", "kde-capture", "t3-kde-snap-shot"),
+        NodePath.join(this.paths.dataHome, "shuv2code", "kde-capture", "shuv2code-kde-snap-shot"),
         NodePath.join(this.paths.dataHome, "applications", "com.t3tools.T3Code.KdeCapture.desktop"),
       ].map(capturePathExists),
     ).catch(() => undefined);
     const warning =
       legacy === undefined
-        ? "Could not check upstream-named KDE registrations. This setup changes only fork-owned files."
+        ? "Could not check older KDE registrations. This setup changes only the current fork helper."
         : legacy.some(Boolean)
-          ? "An upstream-named KDE capture installation is still present. It may belong to upstream T3 Code or an older fork build. Removing the fork helper does not revoke that installation's capture access; review it separately if you no longer use it."
+          ? "An older KDE capture installation is still present. It may belong to upstream T3 Code or an older fork build. Removing the current helper does not revoke that installation's capture access; review it separately if you no longer use it."
           : undefined;
     return warning ? { ...state, message: `${state.message} ${warning}` } : state;
   }
