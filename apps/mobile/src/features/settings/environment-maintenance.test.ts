@@ -201,7 +201,7 @@ describe("environment release checks", () => {
     expect(await findEnvironmentUpdate("1.1.0", signal)).toBeNull();
     expect(await findEnvironmentUpdate("1.3.0", signal)).toBeNull();
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.github.com/repos/shuv1337/shuv2code/releases?per_page=100&page=1",
+      "https://api.github.com/repos/shuv1337/s2code/releases?per_page=100&page=1",
       { signal },
     );
   });

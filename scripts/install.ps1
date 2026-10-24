@@ -1,7 +1,7 @@
 # Installs the S2Code CLI from a GitHub Release archive on Windows. Needs
 # only PowerShell 5.1+; no Node, npm, or compiler.
 #
-#   irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.ps1 | iex
 #
 # Environment:
 #   S2CODE_CHANNEL           release train to follow: stable, nightly, or preview
@@ -26,7 +26,7 @@ foreach ($key in @("HOME", "CHANNEL", "VERSION", "INSTALL_BIN_DIR", "RELEASE_BAS
   [Environment]::SetEnvironmentVariable("S2CODE_$key", $(if ($canonical) { $canonical.Trim() } else { $null }))
 }
 # Retain the current published repository until its external cutover is verified.
-$repo = "shuv1337/shuv2code"
+$repo = "shuv1337/s2code"
 $baseUrl = if ($env:S2CODE_RELEASE_BASE_URL) { $env:S2CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
 $t3Home = if ($env:S2CODE_HOME) { $env:S2CODE_HOME } else { Join-Path $HOME ".s2code-v2" }
 $binDir = if ($env:S2CODE_INSTALL_BIN_DIR) { $env:S2CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }

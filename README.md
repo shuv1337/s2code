@@ -5,7 +5,7 @@ client architecture with the devil-terminal identity and Apple Watch work.
 
 ## Run this fork
 
-Use [fork builds](https://github.com/shuv1337/shuv2code/releases) or build from source with
+Use [fork builds](https://github.com/shuv1337/s2code/releases) or build from source with
 `vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#matrix-and-source)
 cover desktop artifacts. Published fork CLI packages use `s2code` / `s2c`.
 
@@ -48,20 +48,20 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 ### Command line
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.ps1 | iex
 ```
 
 The fork publishes nightly builds only, so this installs the nightly train. Then run `s2code-nightly` to start the server and open the local web app. `s2code-nightly service install` keeps it running in the background, `s2code-nightly update` moves to a newer release, and `s2code-nightly --help` has the full reference.
 
 ### Desktop app
 
-Fork builds are distributed as nightly releases through [shuv1337/shuv2code GitHub Releases](https://github.com/shuv1337/shuv2code/releases).
+Fork builds are distributed as nightly releases through [shuv1337/s2code GitHub Releases](https://github.com/shuv1337/s2code/releases).
 They are separate installations and may coexist with upstream T3 Code.
 Release files retain the `S2Code-<version>-<arch>` artifact naming convention.
 
@@ -91,7 +91,7 @@ brew install --cask t3-code
 
 #### Debian, Ubuntu (`.deb`)
 
-Download the nightly `.deb` from the fork's [GitHub Releases](https://github.com/shuv1337/shuv2code/releases), then install that exact file:
+Download the nightly `.deb` from the fork's [GitHub Releases](https://github.com/shuv1337/s2code/releases), then install that exact file:
 
 ```bash
 sudo apt install ./S2Code-VERSION-ARCH.deb

@@ -1,4 +1,4 @@
-const REPO = "shuv1337/shuv2code";
+const REPO = "shuv1337/s2code";
 
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 export const NIGHTLY_RELEASES_URL = `${RELEASES_URL}?q=nightly&expanded=true`;

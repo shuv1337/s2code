@@ -108,7 +108,7 @@ function publishFixture(
 ) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
-    repository: "shuv1337/shuv2code",
+    repository: "shuv1337/s2code",
     sha: "ab".repeat(20),
     channel,
     version: `1.2.3-${channel}.20261014.1`,
@@ -240,8 +240,7 @@ describe("fork publication fixtures", () => {
       ).toBe(true);
       expect(
         state.commands.some(
-          (args) =>
-            args.includes("PATCH") && args.includes("repos/shuv1337/shuv2code/releases/1234"),
+          (args) => args.includes("PATCH") && args.includes("repos/shuv1337/s2code/releases/1234"),
         ),
       ).toBe(true);
       expect(

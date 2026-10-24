@@ -1,11 +1,11 @@
-# Maintained in https://github.com/shuv1337/shuv2code/tree/main/packaging/aur
+# Maintained in https://github.com/shuv1337/s2code/tree/main/packaging/aur
 
 pkgname=s2code-bin
 pkgver=0.0.0
 pkgrel=1
 pkgdesc='Desktop control surface for local coding agents'
 arch=('x86_64')
-url='https://github.com/shuv1337/shuv2code'
+url='https://github.com/shuv1337/s2code'
 license=('MIT')
 provides=('shuv2code-bin')
 conflicts=('shuv2code-bin')
@@ -46,8 +46,8 @@ options=('!debug' '!strip')
 
 _appimage="S2Code-${pkgver}-x86_64.AppImage"
 source=(
-  "$_appimage::https://github.com/shuv1337/shuv2code/releases/download/v${pkgver}/$_appimage"
-  "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/shuv2code/v${pkgver}/LICENSE"
+  "$_appimage::https://github.com/shuv1337/s2code/releases/download/v${pkgver}/$_appimage"
+  "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/s2code/v${pkgver}/LICENSE"
 )
 sha256sums=(
   # The publisher replaces these placeholders with verified fork release digests.

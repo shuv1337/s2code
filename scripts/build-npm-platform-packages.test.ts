@@ -278,7 +278,7 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       assert.equal(unsupported.exitCode, 1);
       assert.include(unsupported.stderr, "linux-x64");
       assert.include(unsupported.stderr, "win32-arm64");
-      assert.include(unsupported.stderr, "https://github.com/shuv1337/shuv2code/releases");
+      assert.include(unsupported.stderr, "https://github.com/shuv1337/s2code/releases");
     }),
   );
 });

@@ -58,7 +58,7 @@ const googleAccount = {
 };
 const mirrorEnv = {
   PACKAGE_NAME: MOBILE_VARIANTS.production.androidPackage,
-  GH_REPO: "shuv1337/shuv2code",
+  GH_REPO: "shuv1337/s2code",
   PLAY_TRACK: "fork-nightly",
   GOOGLE_PLAY_SIGNING_CERT_SHA256: "ab".repeat(32),
   GOOGLE_PLAY_PROJECT_ID: "fork-project",

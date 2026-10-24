@@ -16,13 +16,13 @@ installation, choose a release with `s2code` CLI archives. Do not substitute
 upstream's `t3` package or installers.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.ps1 | iex
 ```
 
 The fork publishes nightly builds only, so the installer follows the nightly train
@@ -96,10 +96,10 @@ is the only train this fork publishes.
 
 There is no standalone fork executable for Intel Macs. To
 run a server there, build it from source with Node.js 24 and `vp`
-([Install vp](https://github.com/shuv1337/shuv2code#install-vp)):
+([Install vp](https://github.com/shuv1337/s2code#install-vp)):
 
 ```bash
-git clone https://github.com/shuv1337/shuv2code s2code
+git clone https://github.com/shuv1337/s2code s2code
 cd s2code && vp i && vp run build:desktop
 node apps/server/dist/bin.mjs
 ```
@@ -135,7 +135,7 @@ apps and their services first, back up the source, then copy into the separate
 nightly home while everything is offline. Do not share or link a live database.
 
 When a verified fork release is published, download the intended channel from
-[S2Code releases](https://github.com/shuv1337/shuv2code/releases). If it is not
+[S2Code releases](https://github.com/shuv1337/s2code/releases). If it is not
 available yet, build the fork from source rather than installing upstream as a
 substitute. Artifacts keep the `S2Code-<version>-<arch>` file naming, but the
 installed package identities, commands, icons and desktop entries are fork-owned

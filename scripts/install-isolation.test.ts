@@ -500,7 +500,7 @@ describe
       const result = runInstaller(kind);
       expect(result.status, result.stderr + result.stdout).toBe(0);
       const requests = NodeFS.readFileSync(env.FIXTURE_REQUESTS!, "utf8").trim().split(/\r?\n/);
-      expect(requests.every((url) => url.includes("shuv1337/shuv2code"))).toBe(true);
+      expect(requests.every((url) => url.includes("shuv1337/s2code"))).toBe(true);
       expect(
         NodeFS.readFileSync(NodePath.join(upstream, kind === "sh" ? "t3" : "t3.exe"), "utf8"),
       ).toBe("upstream-sentinel");

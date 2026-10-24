@@ -13,7 +13,7 @@
   <icon type="stock">s2code-preview</icon>
   <provides><binary>s2code-preview</binary></provides>
   <categories><category>Development</category></categories>
-  <url type="homepage">https://github.com/shuv1337/shuv2code</url>
-  <url type="bugtracker">https://github.com/shuv1337/shuv2code/issues</url>
-  <url type="vcs-browser">https://github.com/shuv1337/shuv2code</url>
+  <url type="homepage">https://github.com/shuv1337/s2code</url>
+  <url type="bugtracker">https://github.com/shuv1337/s2code/issues</url>
+  <url type="vcs-browser">https://github.com/shuv1337/s2code</url>
 </component>

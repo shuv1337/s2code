@@ -34,7 +34,7 @@ function fixture(
   const version = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
   const signing = options.signing ?? { mac: true, win: true, unsigned: false };
   const plan = forkReleasePlan({
-    repository: "shuv1337/shuv2code",
+    repository: "shuv1337/s2code",
     sha: "ab".repeat(20),
     version,
     channel,

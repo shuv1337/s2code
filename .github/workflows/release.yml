@@ -24,7 +24,7 @@ permissions:
 # Their accounts and fork-owned destinations are separate prerequisites (#276/#268).
 jobs:
   due:
-    if: github.repository == 'shuv1337/shuv2code'
+    if: github.repository == 'shuv1337/s2code'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

@@ -10,7 +10,7 @@ export const LEGACY_PRODUCT_CLI_SHIM_MARKER = `Written by ${LEGACY_PRODUCT_ID}: 
 export const isOwnedCliShim = (content: string) =>
   content.includes(PRODUCT_CLI_SHIM_MARKER) || content.includes(LEGACY_PRODUCT_CLI_SHIM_MARKER);
 // Keep installed updaters on the published repository until the external cutover.
-export const PRODUCT_RELEASE_REPOSITORY = "shuv1337/shuv2code";
+export const PRODUCT_RELEASE_REPOSITORY = "shuv1337/s2code";
 const PRODUCT_RELEASES_URL = `https://github.com/${PRODUCT_RELEASE_REPOSITORY}/releases`;
 
 export const isProductIdentity = (value: string) =>

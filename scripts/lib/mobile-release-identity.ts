@@ -255,7 +255,7 @@ export function mobileTrack(env: Environment, profile: string) {
 export function mirrorConfiguration(env: Environment) {
   if (requiredMobileSetting(env, "PACKAGE_NAME") !== MOBILE_VARIANTS.production.androidPackage)
     throw new Error("APK mirror must query the fork production package.");
-  if (requiredMobileSetting(env, "GH_REPO") !== "shuv1337/shuv2code")
+  if (requiredMobileSetting(env, "GH_REPO") !== "shuv1337/s2code")
     throw new Error("APK mirror may publish only to the fork repository.");
   const track = requiredMobileSetting(env, "PLAY_TRACK");
   if (!/^[a-z0-9_-]+$/i.test(track)) throw new Error("Configured Play mirror track is invalid.");

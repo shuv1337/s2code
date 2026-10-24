@@ -1,13 +1,14 @@
 # Fork releases
 
 The canonical pipeline is `.github/workflows/release.yml`, restricted to
-`shuv1337/shuv2code`. It replaces the artifact-only `fork-desktop.yml` workflow.
+`shuv1337/s2code`. It replaces the artifact-only `fork-desktop.yml` workflow.
 Do not use an upstream release, npm scope, signing identity or deployment as a substitute.
 
-Repository and installer URLs remain `shuv1337/shuv2code` until the repository is
-renamed together with workflow guards, npm trusted publisher bindings and updater
-feeds. A missing `shuv1337/s2code` repository or available npm name does not prove
-ownership. Provision and verify `s2code` and `@s2code` before enabling publication;
+The repository was renamed from `shuv1337/shuv2code`. Installed builds still carry
+the old name in their updater feed and installer URLs and rely on GitHub's rename
+redirect, so never create a new repository named `shuv2code`. npm trusted publishers
+bind to the repository name and must name `shuv1337/s2code`. An available npm name
+does not prove ownership. Provision and verify `s2code` and `@s2code` before enabling publication;
 keep the existing package's trusted publisher configured for the bridge. Do not
 move the maintainer checkout while project paths and attached worktrees use it.
 Signed desktop app IDs, Electron renderer origins and profile directories retain
@@ -96,7 +97,7 @@ rolling `index.json` on the dedicated `fork-release-index` branch is written las
 The Contents API publishes a commit with the previous blob SHA as a compare-and-swap;
 there is no delete-before-upload window. A failed update leaves the last index available.
 The index URL is
-`https://raw.githubusercontent.com/shuv1337/shuv2code/fork-release-index/index.json`.
+`https://raw.githubusercontent.com/shuv1337/s2code/fork-release-index/index.json`.
 This index is available to mirrors or other consumers; publishing it does not
 add a runtime discovery protocol or mirror configuration. Current client update
 checks retain the fork npm/GitHub sources. Consumers of the rolling index should
@@ -142,7 +143,7 @@ invoked by this pipeline; configure their fork identities in their owning work.
 npm is optional (see [Nightly only](#nightly-only)). To enable it, human npm setup
 must establish ownership/bootstrap of the six canonical package names, retain the
 legacy bridge package, and configure trusted publishers
-for **calling workflow filename `release.yml`**, repository `shuv1337/shuv2code`, environment `fork-release`. Enable both direct `npm publish`
+for **calling workflow filename `release.yml`**, repository `shuv1337/s2code`, environment `fork-release`. Enable both direct `npm publish`
 and `npm dist-tag` allowed actions for each package. The readiness variable is an
 explicit human attestation, not an authentication test. `npm whoami`, token names,
 404 responses and `npm publish --dry-run` do not verify trusted-publisher readiness.

@@ -327,7 +327,7 @@ for (const version of versions.slice(1, 2))
             ...toolEnv,
             RELEASE_TAG: `v${version}`,
             S2CODE_AUR_PRODUCT_ID: PRODUCT_ID,
-            S2CODE_AUR_RELEASE_REPO: "shuv1337/shuv2code",
+            S2CODE_AUR_RELEASE_REPO: "shuv1337/s2code",
             AUR_SSH_PRIVATE_KEY: "disposable-test-key",
             FIXTURE_ASSET: asset,
           },
@@ -351,7 +351,7 @@ for (const version of versions.slice(1, 2))
         expect(
           calls
             .filter((call) => call.tool === "gh")
-            .every((call) => call.args.some((arg) => arg.startsWith("repos/shuv1337/shuv2code/"))),
+            .every((call) => call.args.some((arg) => arg.startsWith("repos/shuv1337/s2code/"))),
         ).toBe(true);
         const recipe = NodeFS.readFileSync(
           NodePath.join(repo, `packaging/aur/${pkgname}/PKGBUILD`),
@@ -376,8 +376,8 @@ for (const version of versions.slice(1, 2))
         );
         expect(sources.status, sources.stderr).toBe(0);
         expect(sources.stdout.trim().split("\n")).toEqual([
-          `${asset}::https://github.com/shuv1337/shuv2code/releases/download/v${version}/${asset}`,
-          `${pkgname}-${version.replace("-", "_")}-LICENSE::https://raw.githubusercontent.com/shuv1337/shuv2code/v${version}/LICENSE`,
+          `${asset}::https://github.com/shuv1337/s2code/releases/download/v${version}/${asset}`,
+          `${pkgname}-${version.replace("-", "_")}-LICENSE::https://raw.githubusercontent.com/shuv1337/s2code/v${version}/LICENSE`,
         ]);
       }),
   );
@@ -420,7 +420,7 @@ shellIt.each(["v1.2.3", "v1.2.3-preview.20261014.1"])(
           TRACE_FILE: toolEnv.TRACE_FILE,
           RELEASE_TAG: tag,
           S2CODE_AUR_PRODUCT_ID: PRODUCT_ID,
-          S2CODE_AUR_RELEASE_REPO: "shuv1337/shuv2code",
+          S2CODE_AUR_RELEASE_REPO: "shuv1337/s2code",
         },
         encoding: "utf8",
       },
