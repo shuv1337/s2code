@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shuv1337/shuv2code",
+    "url": "https://github.com/shuv1337/s2code",
     "directory": "apps/server"
   },
   "bin": {

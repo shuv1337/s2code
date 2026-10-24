@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 product_id="${S2CODE_AUR_PRODUCT_ID:?S2CODE_AUR_PRODUCT_ID is required}"
 repo="${S2CODE_AUR_RELEASE_REPO:?S2CODE_AUR_RELEASE_REPO is required}"
-if [[ "$product_id" != s2code || "$repo" != shuv1337/shuv2code ]]; then
+if [[ "$product_id" != s2code || "$repo" != shuv1337/s2code ]]; then
   echo 'Refusing to publish outside the s2code fork package namespace.' >&2
   exit 1
 fi

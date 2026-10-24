@@ -2,7 +2,7 @@
 # Installs the S2Code CLI from a GitHub Release archive. Needs only sh, tar,
 # sha256sum or shasum, and curl or wget; no Node, npm, or compiler.
 #
-#   curl -fsSL https://raw.githubusercontent.com/shuv1337/shuv2code/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.sh | sh
 #
 # Environment:
 #   S2CODE_CHANNEL           release train to follow: stable, nightly, or preview
@@ -36,7 +36,7 @@ S2CODE_INSTALL_BIN_DIR="$(product_setting "${S2CODE_INSTALL_BIN_DIR:-}" "${SHUV2
 S2CODE_RELEASE_BASE_URL="$(product_setting "${S2CODE_RELEASE_BASE_URL:-}" "${SHUV2CODE_RELEASE_BASE_URL:-}")"
 S2CODE_IMPORT_UPSTREAM="$(product_setting "${S2CODE_IMPORT_UPSTREAM:-}" "${SHUV2CODE_IMPORT_UPSTREAM:-}")"
 # Existing update clients still use the repository's current published location.
-repo="shuv1337/shuv2code"
+repo="shuv1337/s2code"
 base_url="${S2CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
 t3_home="${S2CODE_HOME:-$HOME/.s2code-v2}"
 bin_dir="${S2CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"

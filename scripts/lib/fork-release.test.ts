@@ -27,7 +27,7 @@ const fullCredentials = Object.fromEntries(
 );
 const plan = (channel = "stable", version = "1.2.3") =>
   forkReleasePlan({
-    repository: "shuv1337/shuv2code",
+    repository: "shuv1337/s2code",
     sha,
     version,
     channel,
@@ -38,7 +38,7 @@ const manifests = (version = "1.2.3") =>
   FORK_NPM_PACKAGES.map((name) => ({
     name,
     version,
-    repository: { url: "https://github.com/shuv1337/shuv2code" },
+    repository: { url: "https://github.com/shuv1337/s2code" },
     ...(!name.startsWith("@s2code/")
       ? {
           optionalDependencies: Object.fromEntries(
@@ -80,7 +80,7 @@ describe("fork release contract", () => {
     await publishAtomicReleaseIndex(next, store);
     expect(current.content).toBe(next);
     expect(FORK_RELEASE_INDEX_URL).toBe(
-      "https://raw.githubusercontent.com/shuv1337/shuv2code/fork-release-index/index.json",
+      "https://raw.githubusercontent.com/shuv1337/s2code/fork-release-index/index.json",
     );
   });
   it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
@@ -111,7 +111,7 @@ describe("fork release contract", () => {
     for (const channel of ["nightly", "preview"]) {
       const version = `1.2.3-${channel}.20261014.1`;
       const value = forkReleasePlan({
-        repository: "shuv1337/shuv2code",
+        repository: "shuv1337/s2code",
         sha,
         version,
         channel,
@@ -133,7 +133,7 @@ describe("fork release contract", () => {
   it("keeps a half-signed nightly out of the updater feed it cannot serve", () => {
     const value = (mac: boolean, win: boolean) =>
       forkReleasePlan({
-        repository: "shuv1337/shuv2code",
+        repository: "shuv1337/s2code",
         sha,
         version: "1.2.3-nightly.20261014.1",
         channel: "nightly",

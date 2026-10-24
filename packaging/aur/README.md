@@ -2,7 +2,7 @@
 
 This directory retains the channel-generic `s2code-bin` and `s2code-nightly-bin`
 recipes, but this fork publishes only `s2code-nightly-bin`. Both repackage the fork's x86_64 AppImage from
-[shuv1337/shuv2code releases](https://github.com/shuv1337/shuv2code/releases).
+[shuv1337/s2code releases](https://github.com/shuv1337/s2code/releases).
 Recipes being present does not mean the AUR packages or a fork release have been published.
 Checked-in versions/checksums are deliberately unreleased placeholders; the publisher fills
 them from a real release, rather than reusing an upstream artifact or disabling verification.
@@ -26,7 +26,7 @@ exists, arrange its package merge separately. Package replacement metadata does
 not rename or merge AUR records.
 
 The publisher requires `S2CODE_AUR_PRODUCT_ID=s2code` and
-`S2CODE_AUR_RELEASE_REPO=shuv1337/shuv2code`. Missing or different identities fail
+`S2CODE_AUR_RELEASE_REPO=shuv1337/s2code`. Missing or different identities fail
 before release lookup or publishing. AUR SSH URLs are derived only from that guarded
 fork identity, never from an arbitrary package target. Without `AUR_SSH_PRIVATE_KEY`,
 it builds and validates locally but skips publishing.
@@ -35,7 +35,7 @@ To validate a release on Arch Linux:
 
 ```bash
 sudo pacman -Syu --needed base-devel github-cli jq namcap
-S2CODE_AUR_PRODUCT_ID=s2code S2CODE_AUR_RELEASE_REPO=shuv1337/shuv2code \
+S2CODE_AUR_PRODUCT_ID=s2code S2CODE_AUR_RELEASE_REPO=shuv1337/s2code \
   GH_TOKEN=$(gh auth token) RELEASE_TAG=vYOUR_RELEASE_VERSION \
   packaging/aur/scripts/release.sh
 ```

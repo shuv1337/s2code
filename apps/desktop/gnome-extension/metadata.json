@@ -4,5 +4,5 @@
   "description": "Allows S2Code to capture the focused window, identify it for optional accessibility text, and animate it into S2Code. Disable this extension to revoke access.",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "version": 3,
-  "url": "https://github.com/shuv1337/shuv2code"
+  "url": "https://github.com/shuv1337/s2code"
 }

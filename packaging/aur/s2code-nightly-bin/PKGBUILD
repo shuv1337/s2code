@@ -1,11 +1,11 @@
-# Maintained in https://github.com/shuv1337/shuv2code/tree/main/packaging/aur
+# Maintained in https://github.com/shuv1337/s2code/tree/main/packaging/aur
 
 pkgname=s2code-nightly-bin
 pkgver=0.0.0_nightly.19700101.0
 pkgrel=1
 pkgdesc='Nightly desktop control surface for local coding agents'
 arch=('x86_64')
-url='https://github.com/shuv1337/shuv2code'
+url='https://github.com/shuv1337/s2code'
 license=('MIT')
 provides=('shuv2code-nightly-bin')
 conflicts=('shuv2code-nightly-bin')
@@ -47,8 +47,8 @@ options=('!debug' '!strip')
 _release_version="${pkgver/_nightly./-nightly.}"
 _appimage="S2Code-${_release_version}-x86_64.AppImage"
 source=(
-  "$_appimage::https://github.com/shuv1337/shuv2code/releases/download/v${_release_version}/$_appimage"
-  "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/shuv2code/v${_release_version}/LICENSE"
+  "$_appimage::https://github.com/shuv1337/s2code/releases/download/v${_release_version}/$_appimage"
+  "${pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/shuv1337/s2code/v${_release_version}/LICENSE"
 )
 sha256sums=(
   # The publisher replaces these placeholders with verified fork release digests.

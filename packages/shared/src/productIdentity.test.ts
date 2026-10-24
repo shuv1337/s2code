@@ -11,7 +11,7 @@ import {
 
 it("routes desktop downloads only to the fork and makes mobile distribution explicitly unavailable", () => {
   expect(resolveProductDownload(false)).toEqual({
-    url: "https://github.com/shuv1337/shuv2code/releases",
+    url: "https://github.com/shuv1337/s2code/releases",
     label: "Fork releases",
   });
   expect(resolveProductDownload(true)).toEqual({
