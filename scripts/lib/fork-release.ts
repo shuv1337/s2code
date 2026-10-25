@@ -204,6 +204,28 @@ export function forkReleasePlan(input: {
 }
 export type ForkReleasePlan = ReturnType<typeof forkReleasePlan>;
 
+// Keep display text separate from the plan serialized into release.json.
+export function forkReleaseTitle(plan: Pick<ForkReleasePlan, "title">) {
+  return plan.title.replace(/^UNSIGNED — /, "");
+}
+
+// Publication consumes prepared assets whose receipts match this policy; signed
+// macOS receipts are written only after signature, team and stapled-ticket checks.
+export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha">) {
+  return [
+    "Local/direct desktop and CLI release.",
+    "### macOS",
+    plan.signing.mac
+      ? "The macOS desktop apps (arm64 and x64) are signed and notarized, with stapled tickets verified in the update ZIPs. The DMG containers themselves are not signed."
+      : "WARNING: The macOS desktop apps are unsigned and not notarized. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
+    "### Windows",
+    plan.signing.win
+      ? "The Windows installers (arm64 and x64) are signed."
+      : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
+    `Source: ${plan.sha}.`,
+  ].join("\n\n");
+}
+
 export function desktopAssetGroups(version: string) {
   return FORK_DESKTOP_MATRIX.flatMap((target) => {
     const extensions =

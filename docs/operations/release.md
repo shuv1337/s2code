@@ -57,9 +57,11 @@ update ZIP for signature, team and stapled ticket, and the Windows installer for
 its publisher. `spctl` is logged but not a gate, because hosted runners report
 "Insufficient Context" for a stapled app. The DMG container itself is not
 signed, and the Windows receipt needs 7-Zip on the runner to read the
-installer's payload. A platform
-without complete credentials ships unsigned, and the release title, body and
-`release.json` say so. Partial credentials are not proof of signing.
+installer's payload. A platform without complete credentials ships unsigned.
+Release titles identify the version and channel; the body describes signing
+separately under macOS and Windows, including warnings and updater limitations
+for unsigned platforms. `release.json` retains the per-platform signing policy
+and aggregate unsigned flag. Partial credentials are not proof of signing.
 
 An unsigned macOS or Windows build publishes no updater feed, because those
 updaters require a signature, and the release is then left out of the rolling

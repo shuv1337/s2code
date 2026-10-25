@@ -12,7 +12,7 @@ import {
   npmPlatformPackageManifest,
   npmLauncherPackageManifest,
 } from "./build-npm-platform-packages.ts";
-import { forkReleasePlan } from "./lib/fork-release.ts";
+import { forkReleasePlan, forkReleaseTitle } from "./lib/fork-release.ts";
 import { releaseCommandError } from "./fork-release.ts";
 
 const shim = `import fs from 'node:fs'; import crypto from 'node:crypto';
@@ -105,6 +105,7 @@ function publishFixture(
   tags: Record<string, Record<string, string>> = {},
   /** Every Nth registry answer of a kind fails with a retryable status. */
   flaky: { tags?: number; versions?: number } = {},
+  signing = { mac: false, win: false, unsigned: true },
 ) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
@@ -112,7 +113,7 @@ function publishFixture(
     sha: "ab".repeat(20),
     channel,
     version: `1.2.3-${channel}.20261014.1`,
-    signing: { mac: false, win: false, unsigned: true },
+    signing,
     npm,
   });
   try {
@@ -156,7 +157,7 @@ function publishFixture(
         commands: [],
         // What a create must send, so a dropped field fails the fixture.
         prerelease: plan.channel !== "stable",
-        title: plan.title,
+        title: forkReleaseTitle(plan),
         release: {
           id: 1234,
           tag_name: plan.tag,
@@ -227,6 +228,34 @@ function publishFixture(
 }
 
 describe("fork publication fixtures", () => {
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32").each([
+    { mac: true, win: false },
+    { mac: true, win: true },
+    { mac: false, win: true },
+    { mac: false, win: false },
+  ])("creates platform-specific release notes for macOS=$mac and Windows=$win", ({ mac, win }) => {
+    const { result, state, plan } = publishFixture(
+      "new-release",
+      "refs/heads/main",
+      false,
+      "preview",
+      {},
+      {},
+      { mac, win, unsigned: !mac || !win },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const create = state.commands.find((args) => args.includes("POST"))!;
+    expect(create).toContain(`name=S2Code preview v${plan.version}`);
+    const body = create.find((arg) => arg.startsWith("body="))!;
+    expect(body).not.toContain("UNSIGNED build:");
+    expect(body.includes("are signed and notarized")).toBe(mac);
+    expect(body.includes("WARNING: The macOS desktop apps are unsigned")).toBe(!mac);
+    expect(body.includes("### Windows\n\nThe Windows installers are unsigned.")).toBe(!win);
+    expect(body.includes("### Windows\n\nThe Windows installers (arm64 and x64) are signed.")).toBe(
+      win,
+    );
+    expect(state.release.draft).toBe(false);
+  });
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "resumes an existing draft invisible to the tags API and uploads/publishes by its exact ID",
     () => {
