@@ -39,11 +39,11 @@ const exportAndroidIcons = Effect.gen(function* () {
   const write = (name: string, contents: Uint8Array) =>
     fs.writeFile(path.join(root, "apps/mobile/assets", name), contents);
   for (const [variant, color] of [
-    ["prod", "#D35C46"],
+    ["prod", "#E5161A"],
     ["dev", "#176BFF"],
     ["nightly", "#7656E8"],
   ] as const) {
-    const svg = master.replaceAll("#D35C46", color);
+    const svg = master.replaceAll("#E5161A", color);
     yield* write(
       `android-icon-foreground${variant === "prod" ? "" : `-${variant}`}.png`,
       yield* render(svg, 432),
