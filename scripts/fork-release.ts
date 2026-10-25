@@ -21,6 +21,8 @@ import {
   RELEASE_CREDENTIAL_VARIABLES,
   releaseSigningPolicy,
   forkReleasePlan,
+  forkReleaseBody,
+  forkReleaseTitle,
   requiredDesktopAssets,
   assertForkNpmSet,
   assertForkNpmManifest,
@@ -640,9 +642,9 @@ async function publishPrepared(plan: ForkReleasePlan) {
               "-F",
               `prerelease=${plan.channel !== "stable"}`,
               "-f",
-              `name=${plan.title}`,
+              `name=${forkReleaseTitle(plan)}`,
               "-f",
-              `body=${plan.signing.unsigned ? "UNSIGNED build: signing credentials were unavailable for at least one platform, so its signature and notarization are absent. Unsigned macOS and Windows builds ship no updater feed and are never offered as automatic updates; install them deliberately. " : ""}Local/direct desktop and CLI release. Source: ${plan.sha}.`,
+              `body=${forkReleaseBody(plan)}`,
             ),
           ) as Release;
         } catch (error) {

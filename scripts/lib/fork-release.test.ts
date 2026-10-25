@@ -10,6 +10,8 @@ import {
   WIN_RELEASE_CREDENTIALS,
   releaseSigningPolicy,
   forkReleasePlan,
+  forkReleaseBody,
+  forkReleaseTitle,
   assertForkNpmSet,
   assertForkNpmManifest,
   assertForkDistTag,
@@ -107,7 +109,7 @@ describe("fork release contract", () => {
     expect(() => releaseSigningPolicy("stable", true, fullCredentials)).toThrow("Stable");
     expect(() => releaseSigningPolicy("nightly", false, {})).toThrow("allow_unsigned");
   });
-  it("labels explicitly opted-in unsigned nightly and preview builds, but never stable", () => {
+  it("keeps unsigned disclosures in platform sections for nightly and preview builds", () => {
     for (const channel of ["nightly", "preview"]) {
       const version = `1.2.3-${channel}.20261014.1`;
       const value = forkReleasePlan({
@@ -118,10 +120,12 @@ describe("fork release contract", () => {
         signing: releaseSigningPolicy(channel, true, {}),
         npm: false,
       });
-      expect(value.title).toContain("UNSIGNED");
+      expect(forkReleaseTitle(value)).not.toContain("UNSIGNED");
       if (channel === "nightly") {
-        expect(value.title).toBe(`UNSIGNED — S2Code Nightly v${version}`);
+        expect(forkReleaseTitle(value)).toBe(`S2Code Nightly v${version}`);
       }
+      expect(forkReleaseBody(value)).toContain("WARNING: The macOS desktop apps are unsigned");
+      expect(forkReleaseBody(value)).toContain("The Windows installers are unsigned.");
       expect(value.distTag).toBe(channel);
       // Unsigned macOS and Windows builds carry no updater feed; Linux
       // updates are checksum-only and keep theirs.
@@ -129,6 +133,35 @@ describe("fork release contract", () => {
         channel === "preview" ? [] : ["nightly-linux.yml", "nightly-linux-arm64.yml"],
       );
     }
+  });
+  it.each([
+    { mac: true, win: false },
+    { mac: true, win: true },
+    { mac: false, win: true },
+    { mac: false, win: false },
+  ])("describes macOS=$mac and Windows=$win independently", ({ mac, win }) => {
+    const value = forkReleasePlan({
+      repository: "shuv1337/s2code",
+      sha,
+      version: "1.2.3-nightly.20261014.1",
+      channel: "nightly",
+      signing: { mac, win, unsigned: !mac || !win },
+      npm: false,
+    });
+    expect(forkReleaseTitle(value)).toBe(`S2Code Nightly v${value.version}`);
+    expect(value.title.startsWith("UNSIGNED — ")).toBe(!mac || !win);
+    const body = forkReleaseBody(value);
+    const macSection = body.split("### macOS\n\n")[1]!.split("### Windows")[0]!;
+    const winSection = body.split("### Windows\n\n")[1]!;
+    expect(macSection.includes("are signed and notarized")).toBe(mac);
+    expect(macSection.includes("stapled tickets verified")).toBe(mac);
+    expect(macSection.includes("WARNING:")).toBe(!mac);
+    expect(macSection.includes("no updater feed")).toBe(!mac);
+    expect(winSection.includes("are signed.")).toBe(win);
+    expect(winSection.includes("are unsigned.")).toBe(!win);
+    expect(winSection.includes("no updater feed")).toBe(!win);
+    expect(body).toContain(`Source: ${sha}.`);
+    expect(value.signing.unsigned).toBe(!mac || !win);
   });
   it("keeps a half-signed nightly out of the updater feed it cannot serve", () => {
     const value = (mac: boolean, win: boolean) =>
