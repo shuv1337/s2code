@@ -378,13 +378,13 @@ describe("fork publication fixtures", () => {
         expect(promotions.filter(([pkg]) => pkg === name).map(([, tag]) => tag)).toEqual(
           name === held ? ["nightly"] : ["nightly", "latest"],
         );
-      expect(promotions.filter(([pkg]) => pkg === "s2code").map(([, tag]) => tag)).toEqual([
+      expect(promotions.filter(([pkg]) => pkg === "@s2code/cli").map(([, tag]) => tag)).toEqual([
         "nightly",
         "latest",
       ]);
-      expect(promotions.findIndex(([pkg]) => pkg === "s2code")).toBe(promotions.length - 4);
+      expect(promotions.findIndex(([pkg]) => pkg === "@s2code/cli")).toBe(promotions.length - 4);
       expect(promotions.slice(-2).map(([pkg]) => pkg)).toEqual(["shuv2code", "shuv2code"]);
-      expect(state.tags["s2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(state.tags["@s2code/cli"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });
     },
@@ -411,7 +411,7 @@ describe("fork publication fixtures", () => {
           ([command, subcommand]) => command === "npm" && subcommand === "publish",
         ),
       ).toBe(false);
-      expect(state.tags["s2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(state.tags["@s2code/cli"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
     },
   );

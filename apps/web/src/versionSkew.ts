@@ -9,6 +9,7 @@ import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import * as Schema from "effect/Schema";
 
 import { APP_VERSION } from "./branding";
+import type { ForkNpmPackage } from "./state/npmRelease";
 import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 
 export interface VersionMismatch {
@@ -104,7 +105,7 @@ export function supportsServerUpdateThreadContinuation(
 export function manualServerUpdateCommand(
   targetVersion: string,
   installation?: ServerInstallation,
-  packageName: "s2code" | "shuv2code" = "s2code",
+  packageName: ForkNpmPackage = "@s2code/cli",
 ): string {
   if (installation?.kind === "npm-global") {
     const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;

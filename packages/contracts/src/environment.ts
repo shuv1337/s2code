@@ -63,7 +63,7 @@ export const ServerInstallation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("npm-global"),
     prefix: TrimmedNonEmptyString,
-    packageName: Schema.optionalKey(Schema.Literals(["s2code", "shuv2code"])),
+    packageName: Schema.optionalKey(Schema.Literals(["@s2code/cli", "shuv2code"])),
   }),
 ]);
 export type ServerInstallation = typeof ServerInstallation.Type;

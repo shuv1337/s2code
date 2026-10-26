@@ -39,9 +39,9 @@ describe("versionSkew", () => {
       manualServerUpdateCommand("2.0.0", {
         kind: "npm-global",
         prefix: "/opt/node",
-        packageName: "s2code",
+        packageName: "@s2code/cli",
       }),
-    ).toBe("npm install --global --prefix '/opt/node' s2code@2.0.0");
+    ).toBe("npm install --global --prefix '/opt/node' @s2code/cli@2.0.0");
     expect(
       manualServerUpdateCommand("2.0.0", {
         kind: "npm-global",
@@ -55,12 +55,12 @@ describe("versionSkew", () => {
   });
 
   it("keeps runner and unknown commands as relaunches", () => {
-    expect(manualServerUpdateCommand("0.0.45")).toBe("npx s2code@0.0.45");
-    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe("npx s2code@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45")).toBe("npx @s2code/cli@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe("npx @s2code/cli@0.0.45");
     expect(manualServerUpdateCommand("0.0.45", { kind: "pnpm-dlx" })).toBe(
-      "pnpm dlx s2code@0.0.45",
+      "pnpm dlx @s2code/cli@0.0.45",
     );
-    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx s2code@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx @s2code/cli@0.0.45");
   });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";

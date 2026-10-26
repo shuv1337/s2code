@@ -10,7 +10,12 @@ import {
   resolveChannelIdentity,
   resolveLegacyChannelIdentity,
 } from "@t3tools/shared/channelIdentity";
-import { PRODUCT_ID, LEGACY_PRODUCT_ID, isOwnedCliShim } from "@t3tools/shared/productIdentity";
+import {
+  PRODUCT_ID,
+  LEGACY_PRODUCT_ID,
+  NPM_PACKAGE_NAME,
+  isOwnedCliShim,
+} from "@t3tools/shared/productIdentity";
 
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -43,6 +48,9 @@ const InstallManifest = Schema.Struct({
 });
 const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(InstallManifest));
 
+const npmPackageBinName = (packageName: typeof NPM_PACKAGE_NAME | typeof LEGACY_PRODUCT_ID) =>
+  packageName === NPM_PACKAGE_NAME ? PRODUCT_ID : LEGACY_PRODUCT_ID;
+
 /** Prove the running package and its global bin belong together before suggesting an update. */
 const resolveOwnedServerInstallation = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -53,7 +61,7 @@ const resolveOwnedServerInstallation = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const entry = yield* fs.realPath(executable ? executablePath : (args[1] ?? ""));
   const match =
-    /^(.*)\/lib\/node_modules\/(s2code|shuv2code)\/(?:dist\/bin\.mjs|bin\/t3\.js|node_modules\/@(?:s2code|shuv2code)\/t3-[^/]+\/t3)$/.exec(
+    /^(.*)\/lib\/node_modules\/(@s2code\/cli|shuv2code)\/(?:dist\/bin\.mjs|bin\/t3\.js|node_modules\/@(?:s2code|shuv2code)\/t3-[^/]+\/t3)$/.exec(
       entry,
     );
   if (!match) {
@@ -71,21 +79,22 @@ const resolveOwnedServerInstallation = Effect.gen(function* () {
   )
     return null;
 
-  const packageName = match[2] === "s2code" ? "s2code" : "shuv2code";
+  const packageName = match[2] === NPM_PACKAGE_NAME ? NPM_PACKAGE_NAME : LEGACY_PRODUCT_ID;
+  const binName = npmPackageBinName(packageName);
   const packageRoot = path.join(prefix, "lib/node_modules", packageName);
   const manifest = yield* fs
     .readFileString(path.join(packageRoot, "package.json"))
     .pipe(Effect.flatMap(decodeInstallManifest));
-  if (manifest.name !== packageName || !manifest.bin?.[packageName]) return null;
-  const bin = yield* fs.realPath(path.join(packageRoot, manifest.bin[packageName]!));
-  const globalBin = yield* fs.realPath(path.join(prefix, "bin", packageName));
+  if (manifest.name !== packageName || !manifest.bin?.[binName]) return null;
+  const bin = yield* fs.realPath(path.join(packageRoot, manifest.bin[binName]!));
+  const globalBin = yield* fs.realPath(path.join(prefix, "bin", binName));
   if (globalBin !== bin) return null;
   if (executable) {
     const nativeManifest = yield* fs
       .readFileString(path.join(path.dirname(entry), "package.json"))
       .pipe(Effect.flatMap(decodeInstallManifest));
     if (
-      manifest.bin[packageName]! !== "./bin/t3.js" ||
+      manifest.bin[binName]! !== "./bin/t3.js" ||
       manifest.optionalDependencies?.[nativeManifest.name] !== nativeManifest.version ||
       nativeManifest.version !== manifest.version
     )
@@ -108,10 +117,10 @@ function suggestedPackageSpec(version: string): string {
   const channel = resolveChannelIdentity(version).channel;
   // Preview/PR recovery stays on the installed version, never a mutable tag or stable.
   return channel === "preview"
-    ? `${PRODUCT_ID}@${version}`
+    ? `${NPM_PACKAGE_NAME}@${version}`
     : channel === "nightly"
-      ? `${PRODUCT_ID}@nightly`
-      : PRODUCT_ID;
+      ? `${NPM_PACKAGE_NAME}@nightly`
+      : NPM_PACKAGE_NAME;
 }
 
 export function formatCliCommand(input: {
@@ -145,7 +154,7 @@ const resolveCliInvocation = Effect.fnUntraced(function* (
   if (installation?.kind === "npm-global") {
     const path = yield* Path.Path;
     return {
-      command: `${quote(path.join(installation.prefix, "bin", installation.packageName))} ${commandArgs}`,
+      command: `${quote(path.join(installation.prefix, "bin", npmPackageBinName(installation.packageName)))} ${commandArgs}`,
       pathCommand: true,
       launcher: false,
     };

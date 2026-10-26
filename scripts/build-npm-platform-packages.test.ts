@@ -119,7 +119,7 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       // Platform packages in CLI_ARCHIVE_PLATFORM_KEYS order, launcher last.
       assert.deepStrictEqual(
         outputs.map((output) => output.name),
-        ["@s2code/t3-darwin-arm64", "@s2code/t3-linux-x64", "s2code", "shuv2code"],
+        ["@s2code/t3-darwin-arm64", "@s2code/t3-linux-x64", "@s2code/cli", "shuv2code"],
       );
       for (const output of outputs) {
         assert.isTrue(yield* fs.exists(output.tarball), output.tarball);
@@ -167,17 +167,13 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       assert.deepStrictEqual(darwinManifest.os, ["darwin"]);
       assert.deepStrictEqual(darwinManifest.cpu, ["arm64"]);
 
-      const launcherDir = path.join(fixture.outputDir, "s2code");
+      const launcherDir = path.join(fixture.outputDir, "@s2code/cli");
       const launcherManifest = yield* decodeManifest(
         yield* fs.readFileString(path.join(launcherDir, "package.json")),
       );
-      assert.equal(launcherManifest.name, "s2code");
+      assert.equal(launcherManifest.name, "@s2code/cli");
       assert.equal(launcherManifest.version, VERSION);
-      assert.deepStrictEqual(launcherManifest.bin, {
-        s2code: "./bin/t3.js",
-        shuv2code: "./bin/t3.js",
-        s2c: "./bin/t3.js",
-      });
+      assert.deepStrictEqual(launcherManifest.bin, { s2code: "./bin/t3.js" });
       assert.deepStrictEqual(launcherManifest.files, ["bin", "dist"]);
       assert.deepStrictEqual(launcherManifest.optionalDependencies, {
         "@s2code/t3-darwin-arm64": VERSION,
@@ -189,17 +185,15 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       const bridgeManifest = yield* decodeManifest(
         yield* fs.readFileString(path.join(bridgeDir, "package.json")),
       );
-      assert.deepStrictEqual(bridgeManifest, { ...launcherManifest, name: "shuv2code" });
+      assert.deepStrictEqual(bridgeManifest, {
+        ...launcherManifest,
+        name: "shuv2code",
+        bin: { s2code: "./bin/t3.js", shuv2code: "./bin/t3.js", s2c: "./bin/t3.js" },
+      });
 
       // The scratch dirs must not be left behind next to the packages.
       const outputEntries = yield* fs.readDirectory(fixture.outputDir);
-      assert.deepStrictEqual(outputEntries.sort(), [
-        "@s2code",
-        "s2code",
-        "s2code.tgz",
-        "shuv2code",
-        "shuv2code.tgz",
-      ]);
+      assert.deepStrictEqual(outputEntries.sort(), ["@s2code", "shuv2code", "shuv2code.tgz"]);
 
       // The tarball is what gets published: it must carry node_modules (which
       // `npm publish <dir>` would strip) under npm's `package/` root, with the

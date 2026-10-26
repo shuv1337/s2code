@@ -8,8 +8,10 @@ The repository was renamed from `shuv1337/shuv2code`. Installed builds still car
 the old name in their updater feed and installer URLs and rely on GitHub's rename
 redirect, so never create a new repository named `shuv2code`. npm trusted publishers
 bind to the repository name and must name `shuv1337/s2code`. An available npm name
-does not prove ownership. Provision and verify `s2code` and `@s2code` before enabling publication;
-keep the existing package's trusted publisher configured for the bridge. Do not
+does not prove ownership. npm rejects the bare `s2code` name as too similar to existing
+packages, so the launcher is `@s2code/cli`. It installs only the `s2code` command, because
+`npx` runs a scoped package only when it has a single bin; the `shuv2code` bridge keeps its
+extra command names. Keep the bridge's trusted publisher configured. Do not
 move the maintainer checkout while project paths and attached worktrees use it.
 Signed desktop app IDs, Electron renderer origins and profile directories retain
 their installed identities so the rename does not create another app or strand
@@ -87,7 +89,7 @@ Answers the registry could not give (429, 5xx, timeouts) are retried within that
 budget; a mismatched tarball or a package outside the allowlist fails at once.
 After the release publishes, the `nightly` dist-tag is promoted, platform
 packages first and the launcher last. A nightly moves `latest` as well, so
-`npx s2code` installs the newest nightly instead of the placeholder version
+`npx @s2code/cli` installs the newest nightly instead of the placeholder version
 that trusted publishing required; `nightly` refuses to move backwards, while
 `latest` is left alone with a log line when a newer version already holds it.
 

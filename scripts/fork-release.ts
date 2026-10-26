@@ -9,6 +9,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
+import { NPM_PACKAGE_NAME } from "@t3tools/shared/productIdentity";
 import {
   FORK_RELEASE_REPOSITORY,
   FORK_RELEASE_INDEX_BRANCH,
@@ -345,7 +346,7 @@ export function assertPackagedWslRuntime(payloadDir: string, expected: string) {
 export function inspectForkNpmPackages(directory: string, version: string) {
   const tarballs = [
     ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@s2code", `t3-${key}.tgz`)),
-    Path.join(directory, "s2code.tgz"),
+    Path.join(directory, "@s2code", "cli.tgz"),
     Path.join(directory, "shuv2code.tgz"),
   ];
   const manifests = tarballs.map(
@@ -668,14 +669,14 @@ async function publishPrepared(plan: ForkReleasePlan) {
     publishNpm: async () => {
       if (!plan.npm) return;
       const results = await Promise.allSettled(
-        packages.filter((pkg) => pkg.manifest.name.startsWith("@s2code/")).map(publishPackage),
+        packages.filter((pkg) => pkg.manifest.name.startsWith("@s2code/t3-")).map(publishPackage),
       );
       const failures = results.filter((result) => result.status === "rejected");
       if (failures.length)
         throw new Error(
           `A fork platform package failed publication/verification; launcher publication was skipped. ${failures.map((result) => (result.reason instanceof Error ? result.reason.message : "Unknown publication failure.")).join(" ")}`,
         );
-      await publishPackage(packages.find((pkg) => pkg.manifest.name === "s2code")!);
+      await publishPackage(packages.find((pkg) => pkg.manifest.name === NPM_PACKAGE_NAME)!);
       await publishPackage(packages.find((pkg) => pkg.manifest.name === "shuv2code")!);
     },
     verifyNpm,

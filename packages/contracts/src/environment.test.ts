@@ -33,7 +33,7 @@ describe("ExecutionEnvironmentDescriptor", () => {
     for (const installation of [
       { kind: "npx" },
       { kind: "npm-global", prefix: "/opt/node" },
-      { kind: "npm-global", prefix: "/opt/node", packageName: "s2code" },
+      { kind: "npm-global", prefix: "/opt/node", packageName: "@s2code/cli" },
       { kind: "npm-global", prefix: "/opt/node", packageName: "shuv2code" },
     ]) {
       expect(
