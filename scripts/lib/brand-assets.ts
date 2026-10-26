@@ -37,12 +37,13 @@ export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;
 
 export type WebAssetChannel = (typeof WEB_ASSET_CHANNELS)[number];
 
-export function resolveWebAssetBrandForChannel(channel: WebAssetChannel): WebAssetBrand {
-  return channel === "nightly" ? "nightly" : "production";
+// Nightly is the fork's production distribution, including its red artwork.
+export function resolveWebAssetBrandForChannel(_channel: WebAssetChannel): WebAssetBrand {
+  return "production";
 }
 
-export function resolveWebAssetBrandForPackageVersion(version: string): WebAssetBrand {
-  return /^[^-+]+-(?:nightly|preview)\./.test(version) ? "nightly" : "production";
+export function resolveWebAssetBrandForPackageVersion(_version: string): WebAssetBrand {
+  return "production";
 }
 
 export interface IconOverride {
@@ -64,25 +65,22 @@ const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
     favicon32Png: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
     appleTouchIconPng: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
   },
-  nightly: {
-    faviconIco: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
-    favicon16Png: BRAND_ASSET_PATHS.nightlyWebFavicon16Png,
-    favicon32Png: BRAND_ASSET_PATHS.nightlyWebFavicon32Png,
-    appleTouchIconPng: BRAND_ASSET_PATHS.nightlyWebAppleTouchIconPng,
-  },
   production: {
     faviconIco: BRAND_ASSET_PATHS.productionWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.productionWebFavicon16Png,
     favicon32Png: BRAND_ASSET_PATHS.productionWebFavicon32Png,
     appleTouchIconPng: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
   },
-} as const satisfies Record<WebAssetBrand, Record<keyof typeof WEB_ICON_TARGET_FILENAMES, string>>;
+} as const satisfies Record<
+  Exclude<WebAssetBrand, "nightly">,
+  Record<keyof typeof WEB_ICON_TARGET_FILENAMES, string>
+>;
 
 export function resolveWebIconOverrides(
   brand: WebAssetBrand,
   targetDirectory: string,
 ): ReadonlyArray<IconOverride> {
-  const sourcePaths = WEB_ICON_SOURCE_PATHS_BY_BRAND[brand];
+  const sourcePaths = WEB_ICON_SOURCE_PATHS_BY_BRAND[brand === "nightly" ? "production" : brand];
   return [
     {
       sourceRelativePath: sourcePaths.faviconIco,

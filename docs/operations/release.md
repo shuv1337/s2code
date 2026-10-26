@@ -13,9 +13,11 @@ packages, so the launcher is `@s2code/cli`. It installs only the `s2code` comman
 `npx` runs a scoped package only when it has a single bin; the `shuv2code` bridge keeps its
 extra command names. Keep the bridge's trusted publisher configured. Do not
 move the maintainer checkout while project paths and attached worktrees use it.
-Signed desktop app IDs, Electron renderer origins and profile directories retain
-their installed identities so the rename does not create another app or strand
-credentials. Public app names and URL schemes use S2Code and `s2code`.
+Signed desktop app IDs, Electron renderer origins, profile directories and the
+internal Electron package name retain their installed identities. Electron selects
+the Keychain/libsecret key from that package name before asynchronous startup;
+changing it strands encrypted connections even when the profile path stays the same.
+Public app names and URL schemes use S2Code and `s2code`.
 
 ## Matrix and source
 
@@ -44,7 +46,8 @@ canonical platform packages, preserving upgrades for existing npm installs.
 
 ## Nightly only
 
-The fork publishes only nightly releases. `release.yml` runs once a day and
+The fork publishes only nightly releases, using the red production artwork.
+`release.yml` runs once a day and
 releases `main` when it has new commits and the last nightly is at least six
 hours old. A manual **Run workflow** on `main` releases right away. The release
 scripts keep upstream's stable and preview code paths so upstream merges stay

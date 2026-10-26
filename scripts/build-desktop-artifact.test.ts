@@ -292,7 +292,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           );
           assert.equal(config.copyright, "Copyright © 2026 S2Code contributors");
           assert.equal(config.appId, `dev.shuv.shuv2code${suffix ? `.${suffix}` : ""}`);
-          assert.deepEqual(config.extraMetadata, { name: scheme });
+          assert.deepEqual(config.extraMetadata, {
+            name: `shuv2code${suffix ? `-${suffix}` : ""}`,
+          });
           const platformConfig = config[
             platform === "linux" ? "linux" : platform === "mac" ? "mac" : "win"
           ] as Record<string, unknown>;
@@ -340,7 +342,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopDisplayName("0.0.17-nightly.20260413.42"), "S2Code (Nightly)");
   });
 
-  it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
+  it("uses the fork production artwork for stable and nightly packages", () => {
     assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17"), {
       macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
@@ -348,15 +350,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-nightly.20260413.42"), {
-      macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
+      macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
     });
   });
 
-  it("switches the bundled splash and favicon branding for nightly versions", () => {
+  it("uses production splash and favicon branding for nightly versions", () => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
-    assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");
+    assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "production");
   });
 
   it.effect("resolves GitHub desktop publish config from Effect config", () =>

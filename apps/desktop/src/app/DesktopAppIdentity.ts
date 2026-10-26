@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import { resolveLegacyChannelIdentity } from "@t3tools/shared/channelIdentity";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
@@ -91,11 +92,12 @@ export const make = Effect.gen(function* () {
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;
-    // Electron removes spaces from this name to build the native User-Agent
-    // product token, but leaves parentheses intact. Keep the runtime name valid
-    // without rewriting preview sessions (which breaks Turnstile, #7110).
+    // Electron keys safeStorage by app name. Keep the packaged credential identity
+    // stable even after readiness; branding belongs in the display metadata below.
     yield* electronApp.setName(
-      `${environment.branding.baseName} ${environment.branding.stageLabel}`,
+      environment.isDevelopment
+        ? `${environment.branding.baseName} ${environment.branding.stageLabel}`
+        : resolveLegacyChannelIdentity(environment.appVersion).executableName,
     );
     yield* electronApp.setAboutPanelOptions({
       applicationName: environment.displayName,

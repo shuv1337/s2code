@@ -66,22 +66,22 @@ describe("brand-assets", () => {
     });
   });
 
-  it("maps hosted nightly web assets to nightly icons", () => {
+  it("maps hosted nightly web assets to production icons", () => {
     expect(resolveWebIconOverrides("nightly", "apps/web/dist")).toContainEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
+      sourceRelativePath: BRAND_ASSET_PATHS.productionWebFaviconIco,
       targetRelativePath: "apps/web/dist/favicon.ico",
     });
   });
 
   it("maps hosted release channels to web asset brands", () => {
     expect(resolveWebAssetBrandForChannel("latest")).toBe("production");
-    expect(resolveWebAssetBrandForChannel("nightly")).toBe("nightly");
+    expect(resolveWebAssetBrandForChannel("nightly")).toBe("production");
   });
 
   it("maps package versions to web asset brands", () => {
     expect(resolveWebAssetBrandForPackageVersion("0.0.29")).toBe("production");
-    expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("nightly");
-    expect(resolveWebAssetBrandForPackageVersion("0.0.29-preview.20260723.882")).toBe("nightly");
+    expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("production");
+    expect(resolveWebAssetBrandForPackageVersion("0.0.29-preview.20260723.882")).toBe("production");
   });
 
   it("keeps development, nightly, and production icon families separate", () => {

@@ -2930,15 +2930,7 @@ export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 
-export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
-  if (resolveDesktopUpdateChannel(version) === "nightly") {
-    return {
-      macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
-    };
-  }
-
+export function resolveDesktopBuildIconAssets(_version: string): DesktopBuildIconAssets {
   return {
     macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
     linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
@@ -2996,7 +2988,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const schemes = [identity.scheme, legacyIdentity.scheme];
   const buildConfig: Record<string, unknown> = {
     appId: identity.appId,
-    extraMetadata: { name: identity.executableName },
+    // Electron initializes safeStorage from package.name before our async startup.
+    // A public rename must not select a new Keychain/libsecret encryption key.
+    extraMetadata: { name: legacyIdentity.executableName },
     protocols: [{ name: identity.executableName, schemes }],
     productName: resolveDesktopProductName(version),
     copyright: "Copyright © 2026 S2Code contributors",
