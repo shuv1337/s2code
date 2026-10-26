@@ -4,6 +4,8 @@ export const DEFAULT_HOME_DIRECTORY = ".s2code-v2";
 export const LEGACY_HOME_DIRECTORY = ".shuv2code-v2";
 export const PRODUCT_ID = "s2code";
 export const LEGACY_PRODUCT_ID = "shuv2code";
+// npm rejects the bare `s2code` name as too similar to existing packages.
+export const NPM_PACKAGE_NAME = "@s2code/cli";
 export const PRODUCT_HOME_MARKER = ".product-identity";
 export const PRODUCT_CLI_SHIM_MARKER = `Written by ${PRODUCT_ID}: runs the desktop app's bundled CLI.`;
 export const LEGACY_PRODUCT_CLI_SHIM_MARKER = `Written by ${LEGACY_PRODUCT_ID}: runs the desktop app's bundled CLI.`;

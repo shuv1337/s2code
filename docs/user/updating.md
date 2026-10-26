@@ -96,8 +96,8 @@ or `--tailscale-serve`.
 
 If you run a published fork package with `npx` rather than an installed command, there is
 nothing to update on the host: stop the server and relaunch it as
-`npx s2code@<client-version>` with the same subcommand and options. Plain
-`npx s2code` picks the newest nightly, the only train this fork publishes. For source
+`npx @s2code/cli@<client-version>` with the same subcommand and options. Plain
+`npx @s2code/cli` picks the newest nightly, the only train this fork publishes. For source
 installs, update the fork checkout and rebuild; do not install upstream as recovery.
 
 ## If an update fails

@@ -524,7 +524,7 @@ function ConnectAccountOption({
             <p className="text-sm text-muted-foreground">
               Run this on each computer you want to connect.
             </p>
-            <CommandBlock command="npx s2code connect" className="mt-3" />
+            <CommandBlock command="npx @s2code/cli connect" className="mt-3" />
             <p className="mt-3 text-xs text-muted-foreground">
               Keep S2Code running. Select the computers you want to set up above.
             </p>
@@ -633,10 +633,10 @@ function PairingForm({
             <p className="pt-3 text-sm text-muted-foreground">
               Run this on the computer with your code.
             </p>
-            <CommandBlock command="npx s2code pair" className="mt-2" />
+            <CommandBlock command="npx @s2code/cli pair" className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Start S2Code first, or run <code className="font-mono">npx s2code serve</code>. Add{" "}
-              <code className="font-mono">--tailscale</code> to use your tailnet.
+              Start S2Code first, or run <code className="font-mono">npx @s2code/cli serve</code>.
+              Add <code className="font-mono">--tailscale</code> to use your tailnet.
             </p>
           </CollapsiblePanel>
         </Collapsible>

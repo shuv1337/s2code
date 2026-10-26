@@ -26,25 +26,25 @@ import {
 
 it("formats package runner commands from their cache entry paths", () => {
   for (const [entryPath, expected] of [
-    ["/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs", "npx s2code serve"],
+    ["/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs", "npx @s2code/cli serve"],
     [
       "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\t3\\dist\\bin.mjs",
-      "npx s2code serve",
+      "npx @s2code/cli serve",
     ],
-    ["/home/theo/.cache/pnpm/dlx/abc/node_modules/t3/dist/bin.mjs", "pnpm dlx s2code serve"],
+    ["/home/theo/.cache/pnpm/dlx/abc/node_modules/t3/dist/bin.mjs", "pnpm dlx @s2code/cli serve"],
     [
       "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/t3/dist/bin.mjs",
-      "pnpm dlx s2code serve",
+      "pnpm dlx @s2code/cli serve",
     ],
     [
       "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\t3\\dist\\bin.mjs",
-      "pnpm dlx s2code serve",
+      "pnpm dlx @s2code/cli serve",
     ],
-    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx s2code serve"],
-    ["/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs", "bunx s2code serve"],
+    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx @s2code/cli serve"],
+    ["/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs", "bunx @s2code/cli serve"],
     [
       "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\t3\\dist\\bin.mjs",
-      "bunx s2code serve",
+      "bunx @s2code/cli serve",
     ],
   ] as const) {
     assert.equal(formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }), expected);
@@ -67,11 +67,11 @@ it("treats stable installs as direct invocations", () => {
 
 it("re-suggests the prerelease channel only for prerelease builds", () => {
   for (const [version, expected] of [
-    ["0.0.31-nightly.20260729", "npx s2code@nightly serve"],
-    ["0.0.31-preview.20260729.1", "npx s2code@0.0.31-preview.20260729.1 serve"],
-    ["0.0.31-pr.42.1", "npx s2code@0.0.31-pr.42.1 serve"],
-    ["0.0.31-foo-preview.20260729.1", "npx s2code serve"],
-    ["0.0.31", "npx s2code serve"],
+    ["0.0.31-nightly.20260729", "npx @s2code/cli@nightly serve"],
+    ["0.0.31-preview.20260729.1", "npx @s2code/cli@0.0.31-preview.20260729.1 serve"],
+    ["0.0.31-pr.42.1", "npx @s2code/cli@0.0.31-pr.42.1 serve"],
+    ["0.0.31-foo-preview.20260729.1", "npx @s2code/cli serve"],
+    ["0.0.31", "npx @s2code/cli serve"],
   ] as const) {
     assert.equal(
       formatCliCommand({
@@ -91,7 +91,7 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "npx s2code@nightly serve",
+    "npx @s2code/cli@nightly serve",
   );
   assert.equal(
     formatCliCommand({
@@ -99,7 +99,7 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "bunx s2code serve",
+    "bunx @s2code/cli serve",
   );
   assert.equal(
     formatCliCommand({
@@ -140,12 +140,12 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       const npx = "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs";
       // sudo's secure_path already has a system Node.
       expect(yield* rootCommand({ node: "/usr/bin/node", entry: npx })).toBe(
-        "sudo npx s2code browser setup",
+        "sudo npx @s2code/cli browser setup",
       );
       // nvm, fnm, and tarball installs are dropped by sudo's PATH reset.
       expect(
         yield* rootCommand({ node: "/home/theo/.nvm/versions/node/v24/bin/node", entry: npx }),
-      ).toBe('sudo env "PATH=$PATH" npx s2code browser setup');
+      ).toBe('sudo env "PATH=$PATH" npx @s2code/cli browser setup');
       expect(
         yield* rootCommand({
           node: "/home/theo/.local/node/bin/node",
@@ -316,15 +316,18 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
               Effect.provideService(HostProcess.ExecutablePath, entry),
               Effect.provideService(HostProcess.IsExecutable, true),
             ),
-          ).toBe("npx s2code service install");
+          ).toBe("npx @s2code/cli service install");
         }
       }
     }),
   );
 
-  it.effect.each(["s2code", "shuv2code"] as const)(
+  it.effect.each([
+    ["@s2code/cli", "s2code"],
+    ["shuv2code", "shuv2code"],
+  ] as const)(
     "requires the %s npm prefix bin to point to the running package",
-    (packageName) =>
+    ([packageName, binName]) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -332,7 +335,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
         const prefix = path.join(root, "bunx-tools");
         const packageRoot = path.join(prefix, "lib/node_modules", packageName);
         const entry = path.join(packageRoot, "dist/bin.mjs");
-        const globalBin = path.join(prefix, "bin", packageName);
+        const globalBin = path.join(prefix, "bin", binName);
         yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
         yield* fs.makeDirectory(path.dirname(globalBin), { recursive: true });
         yield* fs.writeFileString(entry, "");
@@ -341,7 +344,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
           JSON.stringify({
             name: packageName,
             version: "0.0.45",
-            bin: { [packageName]: "./dist/bin.mjs" },
+            bin: { [binName]: "./dist/bin.mjs" },
           }),
         );
         const resolve = resolveServerInstallation.pipe(
@@ -371,7 +374,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
           Effect.provideService(HostProcess.Environment, {}),
           Effect.provideService(HostProcess.Platform, "linux"),
         );
-        expect(command).toBe(`${yield* fs.realPath(prefix)}/bin/${packageName} service install`);
+        expect(command).toBe(`${yield* fs.realPath(prefix)}/bin/${binName} service install`);
         expect(
           formatServiceStatus(
             {
@@ -400,7 +403,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped();
       const prefix = path.join(root, "bunx-tools");
-      const packageRoot = path.join(prefix, "lib/node_modules/s2code");
+      const packageRoot = path.join(prefix, "lib/node_modules/@s2code/cli");
       const launcher = path.join(packageRoot, "bin/t3.js");
       const entry = path.join(packageRoot, "node_modules/@s2code/t3-linux-x64/t3");
       yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
@@ -410,7 +413,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
       yield* fs.writeFileString(entry, "");
       yield* fs.writeFileString(
         path.join(packageRoot, "package.json"),
-        '{"name":"s2code","version":"0.0.45","bin":{"s2code":"./bin/t3.js"},"optionalDependencies":{"@s2code/t3-linux-x64":"0.0.45"}}',
+        '{"name":"@s2code/cli","version":"0.0.45","bin":{"s2code":"./bin/t3.js"},"optionalDependencies":{"@s2code/t3-linux-x64":"0.0.45"}}',
       );
       yield* fs.symlink(launcher, path.join(prefix, "bin/s2code"));
       const resolve = resolveServerInstallation.pipe(
@@ -422,7 +425,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
         ["0.0.44", null],
         [
           "0.0.45",
-          { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "s2code" },
+          { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "@s2code/cli" },
         ],
       ]) {
         yield* fs.writeFileString(

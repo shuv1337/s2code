@@ -14,7 +14,7 @@ const testState = vi.hoisted(() => ({
   clipboard: vi.fn(),
   continueThreadsAfterServerUpdate: false,
   sessionAtom: null as unknown,
-  npmPackage: "s2code" as "s2code" | "shuv2code" | null,
+  npmPackage: "@s2code/cli" as "@s2code/cli" | "shuv2code" | null,
 }));
 
 vi.mock(import("~/state/npmRelease"), () => ({
@@ -142,7 +142,7 @@ beforeEach(() => {
   testState.toast.mockReset();
   testState.clipboard.mockReset();
   testState.continueThreadsAfterServerUpdate = false;
-  testState.npmPackage = "s2code";
+  testState.npmPackage = "@s2code/cli";
   sessionAtom = Atom.make<SessionResult>(AsyncResult.success(currentSession));
   testState.sessionAtom = sessionAtom;
   resetConfirmDialogForTests();
@@ -226,14 +226,14 @@ describe("ServerUpdateAction", () => {
     [
       { kind: "npx" },
       "Copy relaunch command",
-      "npx s2code@0.0.45",
+      "npx @s2code/cli@0.0.45",
       "Relaunch command copied",
       "This does not update an installed s2code command.",
     ],
     [
       undefined,
       "Copy relaunch command",
-      "npx s2code@0.0.45",
+      "npx @s2code/cli@0.0.45",
       "Relaunch command copied",
       "This does not update an installed s2code command.",
     ],
@@ -260,7 +260,7 @@ describe("ServerUpdateAction", () => {
     await renderAction({ selfUpdate: null, targetVersion: "0.0.45" });
     expect(button("Copy relaunch command")!.disabled).toBe(false);
     await click("Copy relaunch command");
-    expect(testState.clipboard).toHaveBeenCalledWith("npx s2code@0.0.45");
+    expect(testState.clipboard).toHaveBeenCalledWith("npx @s2code/cli@0.0.45");
     expect(testState.updateServer).not.toHaveBeenCalled();
   });
 

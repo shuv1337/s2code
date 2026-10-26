@@ -41,10 +41,10 @@ const manifests = (version = "1.2.3") =>
     name,
     version,
     repository: { url: "https://github.com/shuv1337/s2code" },
-    ...(!name.startsWith("@s2code/")
+    ...(!name.startsWith("@s2code/t3-")
       ? {
           optionalDependencies: Object.fromEntries(
-            FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/")).map((name) => [
+            FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/t3-")).map((name) => [
               name,
               version,
             ]),

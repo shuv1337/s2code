@@ -3,16 +3,16 @@ import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { AsyncResult, Atom } from "effect/reactivity";
 
-export type ForkNpmPackage = "s2code" | "shuv2code";
+export type ForkNpmPackage = "@s2code/cli" | "shuv2code";
 
 // Older releases exist only under shuv2code. Prefer the new package when both
 // publish, but retain the exact package that can install a requested version.
 export const npmReleasePackageAtom = Atom.family((version: string) =>
   Atom.make(
     Effect.gen(function* () {
-      for (const packageName of ["s2code", "shuv2code"] as const) {
+      for (const packageName of ["@s2code/cli", "shuv2code"] as const) {
         const body = yield* HttpClient.get(
-          `https://registry.npmjs.org/${packageName}/${encodeURIComponent(version)}`,
+          `https://registry.npmjs.org/${packageName.replace("/", "%2f")}/${encodeURIComponent(version)}`,
         ).pipe(
           Effect.flatMap(HttpClientResponse.filterStatusOk),
           Effect.flatMap((ok) => ok.json),

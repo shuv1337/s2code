@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Turns the per-platform CLI archives of one release into the npm packages
- * behind `npx s2code`: one `@s2code/t3-<platformKey>` package per
- * archive holding the archive's contents verbatim, plus the `s2code` launcher
+ * behind `npx @s2code/cli`: one `@s2code/t3-<platformKey>` package per
+ * archive holding the archive's contents verbatim, plus the `@s2code/cli` launcher
  * that lists them as optionalDependencies and execs the one npm installed.
  * The bytes a user gets from npm are therefore the release archive's, and
  * running them needs neither a Node runtime, npm, nor a native build.
@@ -11,8 +11,8 @@
  *
  *   @s2code/t3-<platformKey>/     archive contents flattened + package.json
  *   @s2code/t3-<platformKey>.tgz  the same tree as an npm tarball
- *   s2code/                     launcher: package.json, bin/t3.js, README.md
- *   s2code.tgz                  the launcher as an npm tarball
+ *   @s2code/cli/                launcher: package.json, bin/t3.js, README.md
+ *   @s2code/cli.tgz             the launcher as an npm tarball
  *
  * The tarballs are what gets published. `npm publish <dir>` always drops
  * `node_modules/` (npm-packlist ignores it whatever `files` says, and
@@ -20,7 +20,7 @@
  * not), whereas `npm publish <tarball>` uploads the bytes as given.
  */
 import { legacyCliLauncherScript } from "@t3tools/shared/legacyCliLauncher";
-import { PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
+import { NPM_PACKAGE_NAME, PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -45,7 +45,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 import { windowsSystemTar } from "./build-cli-archive.ts";
 
 export const NPM_PLATFORM_PACKAGE_SCOPE = "@s2code";
-export const NPM_LAUNCHER_PACKAGE_NAME = "s2code";
+export const NPM_LAUNCHER_PACKAGE_NAME = NPM_PACKAGE_NAME;
 export const NPM_BRIDGE_PACKAGE_NAME = "shuv2code";
 
 const encodePackageJson = Schema.encodeEffect(fromJsonStringPretty(Schema.Unknown));
@@ -182,7 +182,12 @@ export function npmLauncherPackageManifest(
     description: "s2code CLI. Installs the self-contained executable for this platform.",
     license: serverPackageJson.license,
     repository: serverPackageJson.repository,
-    bin: { s2code: "./bin/t3.js", shuv2code: "./bin/t3.js", s2c: "./bin/t3.js" },
+    // npx runs a scoped package only when it has one bin, so the new launcher
+    // ships just `s2code`; the legacy bridge keeps every name it already installed.
+    bin:
+      name === NPM_BRIDGE_PACKAGE_NAME
+        ? { s2code: "./bin/t3.js", shuv2code: "./bin/t3.js", s2c: "./bin/t3.js" }
+        : { s2code: "./bin/t3.js" },
     files: ["bin", "dist"],
     optionalDependencies: Object.fromEntries(
       platformKeys.map((key) => [npmPlatformPackageName(key), version]),
@@ -191,7 +196,7 @@ export function npmLauncherPackageManifest(
 }
 
 /**
- * The launcher every `npx s2code` runs. Plain CommonJS with no dependencies so it
+ * The launcher every `npx @s2code/cli` runs. Plain CommonJS with no dependencies so it
  * loads on any Node that npm itself runs on; the real work happens in the
  * single-executable it execs.
  */

@@ -89,7 +89,7 @@ instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
 Do not use `npx t3` to try this fork: it downloads upstream. Once the fork npm
-package is published, `npx s2code` runs the newest nightly, because nightly
+package is published, `npx @s2code/cli` runs the newest nightly, because nightly
 is the only train this fork publishes.
 
 ### Intel Macs

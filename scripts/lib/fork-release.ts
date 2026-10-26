@@ -5,7 +5,7 @@ import {
   cliArchivePreviousFileName,
 } from "@t3tools/shared/cliRelease";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
-import { PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
+import { NPM_PACKAGE_NAME, PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 
 export const FORK_RELEASE_REPOSITORY = PRODUCT_RELEASE_REPOSITORY;
 export const FORK_RELEASE_WORKFLOW = "release.yml";
@@ -28,7 +28,7 @@ export async function publishAtomicReleaseIndex(
 }
 export const FORK_NPM_PACKAGES = [
   ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`),
-  "s2code",
+  NPM_PACKAGE_NAME,
   "shuv2code",
 ];
 export const forkNpmPublishingReady = (env: Readonly<Record<string, string | undefined>>) =>
@@ -135,7 +135,7 @@ export function releaseSigningPolicy(channel: string, allowUnsigned: boolean, en
 }
 /**
  * The npm dist-tags a channel publishes, primary tag first. The fork ships only
- * nightly, so a nightly also moves `latest`; `npx s2code` would otherwise
+ * nightly, so a nightly also moves `latest`; `npx @s2code/cli` would otherwise
  * install the placeholder version that trusted publishing required.
  */
 export function forkDistTags(channel: string) {
@@ -276,8 +276,8 @@ export function assertForkNpmManifest(value: unknown, version: string) {
     throw new Error(
       "Refusing publication outside the exact fork package/version/repository allowlist.",
     );
-  if (manifest.name === "s2code" || manifest.name === "shuv2code") {
-    const expected = FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/"));
+  if (manifest.name === NPM_PACKAGE_NAME || manifest.name === "shuv2code") {
+    const expected = FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/t3-"));
     if (
       Object.keys(manifest.optionalDependencies ?? {}).length !== expected.length ||
       expected.some((name) => manifest.optionalDependencies?.[name] !== version)
