@@ -1,7 +1,8 @@
 # Product usage data
 
-The S2Code server sends product usage events to upstream T3 Code's endpoint at `ingest.t3.codes`,
-associated with a hashed account or installation identifier. To count how many installations one person
+Product usage events are off unless you opt in by setting `S2CODE_TELEMETRY_ENABLED=true` in the
+server's environment before starting it. When enabled, the S2Code server sends product usage events
+to upstream T3 Code's endpoint at `ingest.t3.codes`, associated with a hashed account or installation identifier. To count how many installations one person
 uses, the server also sends hashed account identifiers: your T3 Connect account, your OpenAI and
 Claude accounts when you are signed in, and a random identifier for each device that connects. The endpoint keeps a copy of each
 event and forwards events to PostHog. Events include the provider, model, reasoning effort,
@@ -11,8 +12,8 @@ available.
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
 
-To disable product events and relay tracing, set `S2CODE_TELEMETRY_ENABLED=false` in the server's
-environment before starting it. Relay tracing also stops when `S2CODE_OTEL_SDK_DISABLED` or
+Relay tracing goes to S2Code's own relay and stays on unless you set
+`S2CODE_TELEMETRY_ENABLED=false`. It also stops when `S2CODE_OTEL_SDK_DISABLED` or
 `OTEL_SDK_DISABLED` turns OpenTelemetry export off. The web app in a browser, including one the
 `s2code` CLI opens, does not read these variables.
 
