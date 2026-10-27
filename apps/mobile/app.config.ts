@@ -1,6 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 import { applyDevelopmentProductOverrides } from "@t3tools/shared/productIdentity";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
 import { materializeMobileFirebaseConfig } from "../../scripts/lib/mobile-firebase-config.ts";
 
@@ -34,6 +35,17 @@ const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
+
+// EAS assigns store build numbers remotely (eas.json appVersionSource), so a
+// local build would otherwise always report build 1. Stamp local builds with
+// the commit count so a device install shows which commit it came from.
+const localBuildNumber = process.env.EAS_BUILD
+  ? undefined
+  : Number(
+      NodeChildProcess.execFileSync("git", ["rev-list", "--count", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
+    );
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
@@ -268,6 +280,7 @@ const config: ExpoConfig = {
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
+    ...(localBuildNumber ? { buildNumber: String(localBuildNumber) } : {}),
     // Configure the fork's signing team explicitly for non-interactive builds.
     ...(appleTeamId ? { appleTeamId } : {}),
     associatedDomains: mobileAuthDomains(repoEnv),
@@ -311,6 +324,7 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
+    ...(localBuildNumber ? { versionCode: localBuildNumber } : {}),
     ...(googleServicesFile ? { googleServicesFile } : {}),
     adaptiveIcon: {
       backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
