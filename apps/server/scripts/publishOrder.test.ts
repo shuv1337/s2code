@@ -1,6 +1,5 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Latch from "effect/Latch";
 
 import { publishPlatformsThenLauncher } from "./publishOrder.ts";
@@ -47,11 +46,11 @@ it.effect("finishes the other uploads and skips the launcher when one fails", ()
   Effect.gen(function* () {
     const { events, publish } = yield* fakePublish("b.tgz");
 
-    const exit = yield* Effect.exit(
+    const error = yield* Effect.flip(
       publishPlatformsThenLauncher({ platformTarballs, launcherTarball, publish }),
     );
 
-    assert.deepStrictEqual(exit, Exit.fail("b.tgz failed"));
+    assert.strictEqual(error, "b.tgz failed");
     assert.includeMembers(events, ["end a.tgz", "end c.tgz"]);
     assert.notInclude(events, `start ${launcherTarball}`);
   }),
