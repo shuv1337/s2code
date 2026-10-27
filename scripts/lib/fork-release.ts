@@ -315,7 +315,7 @@ export function assertForkDistTag(version: string, tag: string) {
     );
 }
 /**
- * #272 consumes this tag_name/draft shape. Preview and incomplete/draft
+ * The release feed consumes this tag_name/draft shape. Preview and incomplete/draft
  * releases never enter it, and neither does a release missing a platform feed,
  * which is how an unsigned macOS or Windows build stays out of automatic updates.
  */

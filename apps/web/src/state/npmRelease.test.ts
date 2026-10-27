@@ -42,7 +42,7 @@ describe("npmReleasePublishedAtom", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = new Request(fetchMock.mock.calls[0]?.[0] ?? "", fetchMock.mock.calls[0]?.[1]);
-    expect(request.url).toBe(`https://registry.npmjs.org/s2code/${version}`);
+    expect(request.url).toBe(`https://registry.npmjs.org/@s2code%2fcli/${version}`);
     expect(request.headers.get("traceparent")).toBeNull();
     expect(request.headers.get("b3")).toBeNull();
     expect(AsyncResult.getOrElse(result, () => false)).toBe(true);
@@ -53,7 +53,7 @@ describe("npmReleasePublishedAtom", () => {
     async (failure) => {
       fetchMock.mockImplementation(async (input) => {
         const url = input instanceof Request ? input.url : String(input);
-        if (!url.includes("/s2code/")) return Response.json({ version });
+        if (!url.includes("/@s2code%2fcli/")) return Response.json({ version });
         if (failure === "network") throw new TypeError("Failed to fetch");
         return new Response(null, { status: failure });
       });

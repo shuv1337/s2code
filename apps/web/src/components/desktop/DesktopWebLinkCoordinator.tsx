@@ -174,6 +174,7 @@ export function DesktopWebLinkCoordinator() {
     });
   });
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- links held for the primary arrive before it is ready; readiness flipping is what releases them, and the subscription below must not restart with it.
   useEffect(() => {
     if (!ready) return;
     for (const url of pendingPrimaryLinksRef.current.splice(0)) {

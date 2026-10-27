@@ -8,15 +8,9 @@ import * as Effect from "effect/Effect";
 import type { Caller } from "./threadAccess.ts";
 
 /**
- * Work a linked environment starts here stays within that link. An agent
- * reaches this environment through a link as one MCP client session, and
- * everything that session starts, and everything that work starts in turn,
- * carries the session in `linkOrigin`. Such a caller may change only work from
- * the same link: not the user's own threads, not projects or settings, and
- * not work from another link. Reads are not fenced.
- *
- * This is a routing rule for T3's own tools. An agent the link starts still
- * runs as this environment's user.
+ * Work started through a link (and all it starts) carries the session in `linkOrigin` and may
+ * change only work from that link: not the user's threads, projects, settings, or other links.
+ * Reads are not fenced. This routes T3's own tools; agents still run as this environment's user.
  */
 
 /** The link a caller acts for: its own session, or the link that started its thread. */

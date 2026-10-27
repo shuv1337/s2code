@@ -1,18 +1,9 @@
 "use strict";
 
-// Adds the T3 Watch single-target watchOS app to the generated iOS project and
-// embeds it in the iPhone app. Watch sources stay outside apps/mobile/ios
-// (prebuild --clean deletes it) and are referenced by relative path, as is the
-// optional local Swift package linked into the watch target.
-//
-// Idempotent: the target, embed phase, group, product and package reference are
-// found by name/path and reused, and every object this plugin owns gets a UUID
-// derived from the target name, so repeated prebuilds (clean or incremental)
-// rewrite the same objects instead of adding new ones.
-//
-// DEVELOPMENT_TEAM is left unset, like expo-sharing's extension: Expo's
-// prebuild team mod runs before this one, and `expo run:ios` applies the
-// selected team to every native target when it signs.
+// Adds the T3 Watch app to the generated iOS project; sources stay outside apps/mobile/ios
+// (prebuild --clean deletes it). Idempotent: owned objects are found by name and get UUIDs
+// derived from the target name, so prebuilds rewrite rather than duplicate. DEVELOPMENT_TEAM
+// stays unset: `expo run:ios` applies the selected team to every native target when signing.
 
 const crypto = require("crypto");
 const fs = require("fs");

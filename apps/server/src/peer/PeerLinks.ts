@@ -193,18 +193,21 @@ const make = Effect.gen(function* () {
       Effect.option,
     );
 
-  const prove = (origin: string, environmentId: EnvironmentId, pinnedKey?: string) =>
-    Effect.gen(function* () {
+  const prove = Effect.fn("PeerLinks.prove")(
+    function* (origin: string, environmentId: EnvironmentId, pinnedKey?: string) {
       const nonce = Base64Url.encode(yield* crypto.randomBytes(32).pipe(Effect.orDie));
       const client = yield* clientFor(origin);
       const proof = yield* client.metadata.proof({ payload: { nonce } });
       return PeerProof.verify(proof, nonce, environmentId, pinnedKey ?? proof.publicKey)
         ? Option.some(proof.publicKey)
         : Option.none<string>();
-    }).pipe(
-      Effect.timeout(probeTimeout(origin)),
-      Effect.orElseSucceed(() => Option.none<string>()),
-    );
+    },
+    (effect, origin) =>
+      effect.pipe(
+        Effect.timeout(probeTimeout(origin)),
+        Effect.orElseSucceed(() => Option.none<string>()),
+      ),
+  );
 
   const verifiedDescriptor = Effect.fn("PeerLinks.verifiedDescriptor")(function* (
     origin: string,
@@ -246,8 +249,8 @@ const make = Effect.gen(function* () {
     );
 
   /** Signs in to the peer's `/mcp` with a pairing code: register, decide, exchange. */
-  const signIn = (origin: string, input: PeerLinkCreateInput, clientName: string) =>
-    Effect.gen(function* () {
+  const signIn = Effect.fn("PeerLinks.signIn")(
+    function* (origin: string, input: PeerLinkCreateInput, clientName: string) {
       const client = yield* clientFor(origin);
       // Only the peer's own refusals are rejections. A dropped connection or
       // an answer this version cannot read is classified below.
@@ -336,28 +339,31 @@ const make = Effect.gen(function* () {
             ),
           ),
         );
-    }).pipe(
-      // Endpoint errors are mapped above; what is left is the transport or an
-      // answer this version cannot decode.
-      Effect.catchTags({
-        SchemaError: (cause) =>
-          Effect.fail(
-            new PeerLinkError({
-              reason: "incompatible",
-              message: `${origin} answered in a shape this version does not understand. Update both environments.`,
-              cause,
-            }),
-          ),
-        HttpClientError: (cause) =>
-          Effect.fail(
-            new PeerLinkError({
-              reason: "unreachable",
-              message: `${origin} stopped answering while linking.`,
-              cause,
-            }),
-          ),
-      }),
-    );
+    },
+    (effect, origin) =>
+      effect.pipe(
+        // Endpoint errors are mapped above; what is left is the transport or an
+        // answer this version cannot decode.
+        Effect.catchTags({
+          SchemaError: (cause) =>
+            Effect.fail(
+              new PeerLinkError({
+                reason: "incompatible",
+                message: `${origin} answered in a shape this version does not understand. Update both environments.`,
+                cause,
+              }),
+            ),
+          HttpClientError: (cause) =>
+            Effect.fail(
+              new PeerLinkError({
+                reason: "unreachable",
+                message: `${origin} stopped answering while linking.`,
+                cause,
+              }),
+            ),
+        }),
+      ),
+  );
 
   const link: PeerLinks["Service"]["link"] = Effect.fn("PeerLinks.link")(function* (input) {
     const origins = yield* Effect.forEach([input.url, ...(input.alternateUrls ?? [])], peerOrigin);

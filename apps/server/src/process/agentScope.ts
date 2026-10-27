@@ -20,17 +20,10 @@ import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
- * All fork environments, development servers, and release channels deliberately
- * share one agents/terminals budget per systemd user manager, even though channels
- * are independent installations. A runaway in one can kill an agent in another.
- * app-s2code-agents.slice is below app-s2code.slice, whose parent app.slice
- * also contains the server service. Keep the service's CPUWeight/IOWeight: the
- * intermediate fork slice still competes with it; renaming does not remove that.
- *
- * Existing pre-upgrade scopes stay in app-t3code-agents.slice until their sessions
- * exit, and its runtime limits last until the user manager restarts. We neither
- * move nor sweep/reset those scopes: their names cannot distinguish old fork work
- * from upstream work. Only newly launched sessions use the fork slice.
+ * All fork environments, dev servers, and release channels share one agents budget per systemd
+ * user manager, so a runaway in one can kill an agent in another. Keep the service's
+ * CPUWeight/IOWeight: the fork slice still competes with it under app.slice. Pre-upgrade scopes
+ * stay in app-t3code-agents.slice and are never moved or swept (indistinguishable from upstream).
  */
 const AGENT_SLICE = `app-${PRODUCT_ID}-agents.slice`;
 
@@ -48,17 +41,9 @@ export const leftoverAgentSlices = (stateDir: string) => [
 const GiB = 1024 ** 3;
 
 /**
- * Memory limits for this product's agents slice, not a host-wide reservation.
- * The cap leaves about 6 GiB outside this slice before throttling and 4 GiB before
- * a cgroup kill to give the server, sshd, and tailscaled room. Other workloads can
- * use that room: in particular, upstream has its own independent RAM-minus-4-GiB
- * cap. Two 12-GiB slices on a 16-GiB host do not preserve 4 GiB globally. We cannot
- * safely change upstream's budget, and merely detecting its slice does not prove
- * how much it will consume later. Operators must limit concurrent work across
- * products or set an aggregate host policy; agent oom_score_adj is only a fallback
- * preference for the global OOM killer, not a memory reservation.
- * Small machines still give agents
- * at least half of RAM before throttling and three quarters before a kill.
+ * Per-product cap, not a host reservation: upstream's slice has its own, so operators must bound
+ * concurrent work across products. Leaves ~6 GiB outside before throttling and 4 GiB before a
+ * kill (server, sshd, tailscaled); small hosts give agents >= 1/2 RAM to throttle, 3/4 to kill.
  */
 function agentSliceMemoryLimits(totalBytes: number) {
   return {

@@ -44,11 +44,9 @@ export type PeerLinkHealth =
   | { readonly kind: "expired" };
 
 /**
- * What a link's row says about it. `expiresInDays` is set only inside the
- * warning window, while the link still works but has to be renewed soon.
- * Listing only checks that the peer answers, so a link whose last call failed
- * (the peer revoked it, say) is `failing` with the recorded reason; the next
- * successful call clears it.
+ * `expiresInDays` is set only inside the renewal warning window. Listing only checks the peer
+ * answers, so a link whose last call failed (e.g. revoked by the peer) is `failing` with the
+ * recorded reason until the next successful call clears it.
  */
 export function peerLinkHealth(link: PeerLinkSummary, now: DateTime.Utc): PeerLinkHealth {
   if (link.status === "expired" || DateTime.isLessThanOrEqualTo(link.expiresAt, now)) {

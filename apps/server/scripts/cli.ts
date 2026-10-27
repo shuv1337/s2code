@@ -175,11 +175,9 @@ const buildExeCmd = Command.make(
 );
 
 /**
- * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@s2code/t3-<platform>.tgz` first, then both launcher tarballs, so
- * the launcher is never installable before the executables it depends on.
- * Tarballs rather than directories because `npm publish <dir>` strips the
- * `node_modules/` the executable loads its native addons from.
+ * Publishes every `@s2code/t3-<platform>.tgz` before the launcher tarballs so the launcher is
+ * never installable before its executables. Tarballs, because `npm publish <dir>` strips the
+ * `node_modules/` holding the native addons.
  */
 const publishCmd = Command.make(
   "publish",

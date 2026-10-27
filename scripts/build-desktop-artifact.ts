@@ -1094,11 +1094,9 @@ export const WSL_RUNTIME_ARCHIVE_HASH_EXTRA_RESOURCE = {
   to: WSL_RUNTIME_ARCHIVE_HASH_NAME,
 } as const;
 
-// The WSL runtime is the Linux CLI release archive (s2code-<version>-linux-<arch>
-// .tar.gz, built by scripts/build-cli-archive.ts) copied in verbatim, so WSL
-// runs the exact bytes a Linux user downloads. This one predicate decides both
-// whether the archive is staged and whether the packaging config ships it:
-// listing an extraResource whose source was never written fails electron-builder.
+// The WSL runtime is the Linux CLI release archive copied verbatim, so WSL runs the exact bytes
+// a Linux user downloads. One predicate decides both staging and packaging: an extraResource
+// whose source was never written fails electron-builder.
 export const bundlesWslRuntime = (input: {
   readonly platform: typeof BuildPlatform.Type;
   readonly runtimeArchivePath: string | undefined;
@@ -1696,8 +1694,10 @@ export function stagePatchedDependenciesFrom(
   });
 }
 
+const isStagePatchedDependencyMismatchError = Schema.is(StagePatchedDependencyMismatchError);
+
 function stagePatchMismatchFromCause(cause: unknown): StagePatchedDependencyMismatchError {
-  if (Schema.is(StagePatchedDependencyMismatchError)(cause)) return cause;
+  if (isStagePatchedDependencyMismatchError(cause)) return cause;
   return new StagePatchedDependencyMismatchError({
     mismatches: [
       {
@@ -1710,11 +1710,9 @@ function stagePatchMismatchFromCause(cause: unknown): StagePatchedDependencyMism
 }
 
 /**
- * A staged install has no lockfile, so pnpm resolves ranges again. Its default
- * minimumReleaseAge is 24 hours: a newer prerelease that still satisfies
- * `^1.2.0-beta.15` becomes eligible a day after publish, and pnpm then rejects
- * the install because `patchedDependencies` names the older exact version.
- * Pin a range that is anchored on the patched version so that patch still applies.
+ * A staged install has no lockfile, and pnpm's 24h minimumReleaseAge later admits a newer
+ * prerelease within `^1.2.0-beta.15`, which fails because `patchedDependencies` names the older
+ * exact version. Pin a range anchored on the patched version so the patch still applies.
  */
 export function pinPatchedStageDependencies(
   dependencies: Readonly<Record<string, string>>,
@@ -3216,12 +3214,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     buildConfig.deb = {
       packageName: identity.executableName,
-      // DebOptions has no Replaces or Conflicts fields. electron-builder 26
-      // rejects those unknown properties, and with more than one of them the
-      // validator collapses the failure into "configuration.deb should be null".
-      // fpm 1.17 writes these flags into the control file, but only when they
-      // appear before the first source=dest mapping. Provides stays unset so
-      // this package is not a stand-in for the previous name.
+      // DebOptions has no Replaces/Conflicts: electron-builder 26 rejects unknown properties.
+      // fpm 1.17 writes these flags only when they precede the first source=dest mapping.
+      // Provides stays unset so this package is not a stand-in for the previous name.
       fpm: [
         "--replaces",
         legacyIdentity.executableName,
@@ -3602,14 +3597,9 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
 });
 
 /**
- * Prove a staged production install actually carries the FFmpeg executable.
- *
- * ffmpeg-static is an optional dependency so win32-arm64, which has no binary,
- * can install at all. Optional also means any transient failure is tolerated
- * silently, and the package resolves to a path for every supported platform
- * whether or not the install script wrote the file, so both the package and the
- * executable are checked. Every stage install runs this except win32-arm64,
- * where transcription is knowingly unavailable.
+ * ffmpeg-static is optional (win32-arm64 has no binary), so a failed install is silent and the
+ * package still resolves a path; check both package and executable. Every stage install runs
+ * this except win32-arm64, where transcription is knowingly unavailable.
  */
 export const assertStagedFfmpeg = Effect.fn("desktopArtifact.assertStagedFfmpeg")(
   function* (input: {

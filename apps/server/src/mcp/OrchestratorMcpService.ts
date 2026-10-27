@@ -1581,127 +1581,125 @@ const make = Effect.gen(function* () {
   });
 
   /** `mode=wait` on a task already recorded, as `delegateTask` does for its own. */
-  const awaitTask = (
+  const awaitTask = Effect.fn("OrchestratorMcpService.awaitTask")(function* (
     scope: McpThreadInvocationScope,
     taskId: NodeId,
     requestedTimeoutMs: number | undefined,
-  ): Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure> =>
-    Effect.gen(function* () {
-      const timeoutMs = Math.min(
-        MAX_WAIT_TIMEOUT_MS,
-        Math.max(1, requestedTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
-      );
-      const waited = yield* waitForTask(scope, taskId, timeoutMs);
-      if (Option.isSome(waited)) return waited.value;
-      // As for a local task: once the blocking wait ends, a later result wakes the parent.
-      yield* threadManagement
-        .dispatch({
-          type: "delegated_task.wake-policy",
-          commandId: stableCommandId({
-            scope,
-            requestKey: taskId,
-            operation: "delegate-task-wake-policy",
-          }),
-          parentThreadId: scope.thread.threadId,
-          taskId,
-          completionWake: "always",
-        })
-        .pipe(Effect.ignoreCause({ log: true }));
-      return yield* readTask(scope, taskId, true, true);
-    });
+  ) {
+    const timeoutMs = Math.min(
+      MAX_WAIT_TIMEOUT_MS,
+      Math.max(1, requestedTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
+    );
+    const waited = yield* waitForTask(scope, taskId, timeoutMs);
+    if (Option.isSome(waited)) return waited.value;
+    // As for a local task: once the blocking wait ends, a later result wakes the parent.
+    yield* threadManagement
+      .dispatch({
+        type: "delegated_task.wake-policy",
+        commandId: stableCommandId({
+          scope,
+          requestKey: taskId,
+          operation: "delegate-task-wake-policy",
+        }),
+        parentThreadId: scope.thread.threadId,
+        taskId,
+        completionWake: "always",
+      })
+      .pipe(Effect.ignoreCause({ log: true }));
+    return yield* readTask(scope, taskId, true, true);
+  });
 
   /**
    * A task that runs in a linked environment, answered from its row here:
    * the follower records its result once its thread there ends.
    */
-  const readRemoteTask = (
+  const readRemoteTask = Effect.fn("OrchestratorMcpService.readRemoteTask")(function* (
     scope: McpThreadInvocationScope,
     task: OrchestrationV2Subagent,
     waitTimedOut: boolean,
     acknowledgeTerminal: boolean,
     acknowledgementOperation: string,
-  ): Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure> =>
-    Effect.gen(function* () {
-      const status: OrchestratorMcpDelegateTaskResult["status"] =
-        task.result === null
-          ? "running"
-          : task.status === "completed" ||
-              task.status === "failed" ||
-              task.status === "cancelled" ||
-              task.status === "interrupted"
-            ? task.status
-            : "completed";
-      const terminal = isTerminalTaskStatus(status);
-      if (
-        acknowledgeTerminal &&
-        terminal &&
-        task.completionDelivery?.state !== "acknowledged" &&
-        task.completionDelivery?.state !== "disposed"
-      ) {
-        const parentProjection = yield* loadProjection(scope.thread.threadId);
-        const observingRun = ThreadManagementService.latestActiveRun(parentProjection);
-        yield* threadManagement
-          .dispatch({
-            type: "delegated_task.completion-delivery.acknowledge",
-            commandId: stableCommandId({
-              scope,
-              requestKey: yield* requestKey(undefined),
-              operation: acknowledgementOperation,
-            }),
-            parentThreadId: scope.thread.threadId,
-            taskId: task.id,
-            observedByRunId:
-              observingRun?.providerInstanceId === scope.thread.providerInstanceId
-                ? observingRun.id
-                : null,
-          })
-          .pipe(
-            Effect.mapError((error) =>
-              failure(
-                "orchestration_error",
-                `Unable to acknowledge delegated task ${task.id}: ${errorMessage(error)}`,
-              ),
+  ) {
+    const status: OrchestratorMcpDelegateTaskResult["status"] =
+      task.result === null
+        ? "running"
+        : task.status === "completed" ||
+            task.status === "failed" ||
+            task.status === "cancelled" ||
+            task.status === "interrupted"
+          ? task.status
+          : "completed";
+    const terminal = isTerminalTaskStatus(status);
+    if (
+      acknowledgeTerminal &&
+      terminal &&
+      task.completionDelivery?.state !== "acknowledged" &&
+      task.completionDelivery?.state !== "disposed"
+    ) {
+      const parentProjection = yield* loadProjection(scope.thread.threadId);
+      const observingRun = ThreadManagementService.latestActiveRun(parentProjection);
+      yield* threadManagement
+        .dispatch({
+          type: "delegated_task.completion-delivery.acknowledge",
+          commandId: stableCommandId({
+            scope,
+            requestKey: yield* requestKey(undefined),
+            operation: acknowledgementOperation,
+          }),
+          parentThreadId: scope.thread.threadId,
+          taskId: task.id,
+          observedByRunId:
+            observingRun?.providerInstanceId === scope.thread.providerInstanceId
+              ? observingRun.id
+              : null,
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            failure(
+              "orchestration_error",
+              `Unable to acknowledge delegated task ${task.id}: ${errorMessage(error)}`,
             ),
-          );
-      }
-      return {
-        taskId: task.id,
-        childThreadId: null,
-        ...(task.remoteChild === undefined
-          ? {}
-          : {
-              remoteChild: {
-                environmentId: task.remoteChild.environmentId,
-                label: task.remoteChild.label,
-                ...(task.remoteChild.launchError === undefined
-                  ? {}
-                  : { launchError: task.remoteChild.launchError }),
-                ...(task.remoteChild.threadId === undefined
-                  ? {}
-                  : { threadId: task.remoteChild.threadId }),
-              },
-            }),
-        childRunId: null,
-        childNodeId: task.id,
-        status,
-        workState: terminal ? "result_available" : "working",
-        hasPendingChildRuns: false,
-        providerInstanceId: task.providerInstanceId,
-        model: task.model,
-        summary: task.result,
-        resultContextTransferId: null,
-        latestTerminalRunId: null,
-        latestTerminalStatus: terminal
-          ? (status as OrchestratorMcpDelegateTaskResult["latestTerminalStatus"])
-          : null,
-        latestTerminalSummary: terminal ? task.result : null,
-        latestTerminalResultContextTransferId: null,
-        // Its questions are asked and answered in the environment it runs in.
-        hasPendingQuestion: false,
-        pendingApproval: null,
-        waitTimedOut,
-      } satisfies OrchestratorMcpDelegateTaskResult;
-    });
+          ),
+        );
+    }
+    return {
+      taskId: task.id,
+      childThreadId: null,
+      ...(task.remoteChild === undefined
+        ? {}
+        : {
+            remoteChild: {
+              environmentId: task.remoteChild.environmentId,
+              label: task.remoteChild.label,
+              ...(task.remoteChild.launchError === undefined
+                ? {}
+                : { launchError: task.remoteChild.launchError }),
+              ...(task.remoteChild.threadId === undefined
+                ? {}
+                : { threadId: task.remoteChild.threadId }),
+            },
+          }),
+      childRunId: null,
+      childNodeId: task.id,
+      status,
+      workState: terminal ? "result_available" : "working",
+      hasPendingChildRuns: false,
+      providerInstanceId: task.providerInstanceId,
+      model: task.model,
+      summary: task.result,
+      resultContextTransferId: null,
+      latestTerminalRunId: null,
+      latestTerminalStatus: terminal
+        ? (status as OrchestratorMcpDelegateTaskResult["latestTerminalStatus"])
+        : null,
+      latestTerminalSummary: terminal ? task.result : null,
+      latestTerminalResultContextTransferId: null,
+      // Its questions are asked and answered in the environment it runs in.
+      hasPendingQuestion: false,
+      pendingApproval: null,
+      waitTimedOut,
+    } satisfies OrchestratorMcpDelegateTaskResult;
+  });
 
   const waitForTask = Effect.fn("OrchestratorMcpService.waitForTask")(
     function* (scope: McpThreadInvocationScope, taskId: NodeId, _timeoutMs: number) {

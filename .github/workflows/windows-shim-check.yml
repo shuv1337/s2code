@@ -143,8 +143,6 @@ jobs:
 
       - name: Build web client and CLI executable
         shell: bash
-        env:
-          VP_NODE_VERSION: "26.8.2"
         run: |
           set -euo pipefail
           vp run --filter @t3tools/web build

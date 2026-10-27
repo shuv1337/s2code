@@ -1,18 +1,7 @@
 /**
- * Migrations this fork carries that upstream T3 Code does not.
- *
- * They run on a track of their own, after upstream's, recorded in
- * `FORK_MIGRATIONS_TABLE`. The Effect migrator skips every id at or below the
- * highest one it has recorded, so a fork migration that took one of upstream's
- * ids would make upstream's migration at that id never run. Keeping
- * `Migrations.ts` identical to upstream's lets upstream migrations merge as is.
- *
- * `Migrations.ts` holds only migrations already on upstream's main branch.
- * Add fork-only migrations here, numbered after the last entry, and so are
- * migrations ported from upstream pull requests that upstream has not merged:
- * their ids are not final until it does. When upstream merges one, add a
- * reconcile step that records upstream's id as applied for databases that ran
- * it on this track, then drop it here.
+ * Fork-only migrations, on their own track after upstream's (`FORK_MIGRATIONS_TABLE`): the
+ * migrator skips ids at or below its highest, so sharing upstream's ids would skip theirs.
+ * Unmerged upstream ports live here too; once upstream merges one, reconcile it and drop it here.
  */
 
 import * as Effect from "effect/Effect";
@@ -21,7 +10,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import ForkMigration0001 from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import ForkMigration0002 from "./ForkMigrations/0002_WatchPairingRequests.ts";
-// Upstream peer links (pingdotgg/t3code#16655, #16695), unmerged upstream as 063/064.
+// Upstream peer links, unmerged upstream as 063/064.
 import ForkMigration0003 from "./ForkMigrations/0003_PeerLinks.ts";
 import ForkMigration0004 from "./ForkMigrations/0004_PeerLinkFence.ts";
 

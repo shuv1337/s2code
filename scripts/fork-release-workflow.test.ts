@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- Execute checked-in guard/signature steps with offline fixtures, never GitHub or signing services.
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -37,7 +37,7 @@ describe("fork workflow gates", () => {
         {
           draft: false,
           tag_name: "v1.2.3-nightly.20261014.1",
-          published_at: new Date().toISOString(),
+          published_at: "2026-10-14T06:00:00.000Z",
         },
       ],
       rest: {
@@ -62,11 +62,18 @@ describe("fork workflow gates", () => {
       info: () => {},
     };
     const require = NodeModule.createRequire(new URL("../package.json", import.meta.url));
-    await execute(require, github, context, core);
-    expect(outputs).toEqual({ allowed_ref: "true", due: "false" });
-    expect(notices.join(" ")).toContain("No release needed");
-    await execute(require, github, { ...context, ref: "refs/heads/feature" }, core);
-    expect(outputs).toEqual({ allowed_ref: "false", due: "false" });
+    // The latest nightly went out an hour ago, inside the release interval.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.parse("2026-10-14T07:00:00.000Z"));
+      await execute(require, github, context, core);
+      expect(outputs).toEqual({ allowed_ref: "true", due: "false" });
+      expect(notices.join(" ")).toContain("No release needed");
+      await execute(require, github, { ...context, ref: "refs/heads/feature" }, core);
+      expect(outputs).toEqual({ allowed_ref: "false", due: "false" });
+    } finally {
+      vi.useRealTimers();
+    }
     const publish = workflow.split("  publish:\n")[1]!;
     expect(publish).toContain("needs.due.outputs.allowed_ref == 'true'");
     expect(publish).toContain("github.event.repository.default_branch");

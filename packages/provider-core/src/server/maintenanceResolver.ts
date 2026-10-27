@@ -498,12 +498,9 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
     });
   }
   if (commandPaths.some(isBunGlobalCommandPath)) {
-    // A fork published under its own name (shuvcode for OpenCode) must update
-    // and compare against that package; installing the driver's package would
-    // leave the configured binary untouched. Bun blocks install scripts of
-    // untrusted packages and still exits 0, which leaves a package whose
-    // postinstall places its native binary (@opencode/cli) as a failing stub,
-    // so this package is trusted.
+    // A fork published under its own name (shuvcode for OpenCode) must update that package, or
+    // the configured binary stays untouched. It is trusted because Bun silently skips untrusted
+    // install scripts, leaving its postinstall-placed native binary as a failing stub.
     const bunPackageName = bunGlobalPackageFromCommandPath(context.realCommandPath) ?? packageName;
     return makeProviderMaintenanceCapabilities({
       provider: definition.provider,

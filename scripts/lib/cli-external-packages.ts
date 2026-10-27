@@ -58,11 +58,9 @@ export function selectCliRuntimeExternalDependencies(
 }
 
 /**
- * Externals a build may legitimately end up without. ffmpeg-static publishes no
- * win32-arm64 binary and its install script exits non-zero there, which fails a
- * whole `pnpm install` for a required dependency. The server treats a missing
- * FFmpeg as `transcription_unavailable`, so the package is optional everywhere
- * rather than conditional on one architecture.
+ * ffmpeg-static has no win32-arm64 binary and its install script fails there, which would fail
+ * a whole `pnpm install` if required. The server treats missing FFmpeg as
+ * `transcription_unavailable`, so it is optional everywhere.
  */
 export const CLI_OPTIONAL_EXTERNAL_PACKAGES = ["ffmpeg-static"] as const;
 

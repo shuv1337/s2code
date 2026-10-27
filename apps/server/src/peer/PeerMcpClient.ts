@@ -157,8 +157,8 @@ const make = Effect.gen(function* () {
     return sessionId;
   });
 
-  const call: PeerMcpClient["Service"]["call"] = (input) =>
-    Effect.gen(function* () {
+  const call: PeerMcpClient["Service"]["call"] = Effect.fn("PeerMcpClient.call")(
+    function* (input) {
       const resolved = yield* links
         .resolve(input.environmentId)
         .pipe(Effect.mapError(fromLinkError));
@@ -250,22 +250,25 @@ const make = Effect.gen(function* () {
             }),
         ),
       );
-    }).pipe(
-      Effect.tapError((error) =>
-        links.recordOutcome(input.environmentId, { error: error.message }),
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.tapError((error) =>
+          links.recordOutcome(input.environmentId, { error: error.message }),
+        ),
+        Effect.tap(() => links.recordOutcome(input.environmentId, { error: null })),
+        // Recorded above with the transport's own message; the agent hears it plainly.
+        Effect.catchTags({
+          HttpClientError: () =>
+            Effect.fail(
+              new OrchestratorMcpFailure({
+                code: "orchestration_error",
+                message: "The linked environment stopped answering.",
+              }),
+            ),
+        }),
       ),
-      Effect.tap(() => links.recordOutcome(input.environmentId, { error: null })),
-      // Recorded above with the transport's own message; the agent hears it plainly.
-      Effect.catchTags({
-        HttpClientError: () =>
-          Effect.fail(
-            new OrchestratorMcpFailure({
-              code: "orchestration_error",
-              message: "The linked environment stopped answering.",
-            }),
-          ),
-      }),
-    );
+  );
 
   return PeerMcpClient.of({ call });
 });

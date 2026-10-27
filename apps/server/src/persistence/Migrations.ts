@@ -208,11 +208,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
-  // s2code fork: reconcile fork-track history, then run fork migrations
-  // after upstream's. `toMigrationInclusive` names an upstream id, so a partial
-  // run leaves the fork track alone. Only upstream's migrations are returned.
-  // The reconciles run before the V2 check: until they move them, fork rows
-  // hold upstream's ids 62 and 63, which the check would reject.
+  // s2code fork: reconcile fork-track history, then run fork migrations after upstream's;
+  // a partial run (`toMigrationInclusive` names an upstream id) leaves the fork track alone.
+  // Reconciles precede the V2 check because fork rows hold upstream ids 62 and 63 until moved.
   const fullRun = toMigrationInclusive === undefined;
   const watchPreviewMigrations = fullRun ? yield* reconcileWatchPreviewMigration() : [];
   const movedForkMigrations = fullRun ? yield* reconcileForkMigrationTrack() : [];

@@ -120,11 +120,9 @@ export const assertTargetWithinLimits = (
   );
 
 /**
- * A caller's thread is live while it is not archived, runs on the caller's
- * provider instance, and has an active run or a background subagent that
- * instance started. A background subagent outlives its run and calls tools
- * with its thread's credential, which is revoked when the provider process
- * goes away.
+ * Live: not archived, on the caller's provider instance, with an active run or a background
+ * subagent that instance started. A background subagent outlives its run and calls tools with
+ * its thread's credential, revoked when the provider process goes away.
  */
 export const isLiveCallerShell = (
   shell: Pick<
