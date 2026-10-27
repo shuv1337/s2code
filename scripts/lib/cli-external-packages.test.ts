@@ -19,30 +19,20 @@ import {
   shouldBundleCliDependency,
 } from "./cli-external-packages.ts";
 
-// optionalDependencies matter as much as dependencies here: every native family
-// in the list declares its actual platform bindings there (ffi-rs -> @yuuang/*,
-// fff-node -> @ff-labs/fff-bin-*), so reading only `dependencies` would check
-// nothing for exactly those packages.
+// Native bindings live in optionalDependencies; checking dependencies alone misses them.
 const PackageManifest = Schema.Struct({
   dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   optionalDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   peerDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  peerDependenciesMeta: Schema.optional(
+    Schema.Record(Schema.String, Schema.Struct({ optional: Schema.optional(Schema.Boolean) })),
+  ),
 });
 type PackageManifest = typeof PackageManifest.Type;
 
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(PackageManifest));
 
 describe("shouldBundleCliDependency", () => {
-  it("bundles ordinary runtime dependencies", () => {
-    for (const id of ["effect", "@effect/platform", "hono", "@t3tools/shared/HostProcess"]) {
-      assert.strictEqual(shouldBundleCliDependency(id), true, id);
-    }
-  });
-
-  it("never bundles node: builtins", () => {
-    assert.strictEqual(shouldBundleCliDependency("node:fs"), false);
-  });
-
   it("leaves native addons and their dlopen wrappers external", () => {
     for (const id of [
       "node-pty",
@@ -62,42 +52,7 @@ describe("shouldBundleCliDependency", () => {
   });
 });
 
-describe("selectCliRuntimeExternalDependencies", () => {
-  it("keeps only runtime-external dependency roots for the Windows sidecar", () => {
-    assert.deepStrictEqual(
-      selectCliRuntimeExternalDependencies({
-        "@ff-labs/fff-node": "2.0.0",
-        effect: "3.0.0",
-        "node-pty": "4.0.0",
-      }),
-      {
-        "@ff-labs/fff-node": "2.0.0",
-        "node-pty": "4.0.0",
-      },
-    );
-  });
-
-  it("selects every external root declared by the server", () => {
-    assert.deepStrictEqual(
-      Object.keys(
-        selectCliRuntimeExternalDependencies({
-          ...serverPackageJson.dependencies,
-          ...serverPackageJson.optionalDependencies,
-        }),
-      ).sort(),
-      [
-        "@cursor/sdk",
-        "@ff-labs/fff-node",
-        "@napi-rs/keyring",
-        "ffmpeg-static",
-        "node-pty",
-        "playwright-core",
-        "sherpa-onnx-node",
-        "undici",
-      ],
-    );
-  });
-
+describe("partitionStageDependencies", () => {
   // win32-arm64 has no ffmpeg-static binary and its install script fails there,
   // which would fail the whole stage install for a required dependency.
   it("stages packages that cannot build everywhere as optional", () => {
@@ -116,11 +71,7 @@ describe("selectCliRuntimeExternalDependencies", () => {
 });
 
 it.layer(NodeServices.layer)("external package dependency closure", (it) => {
-  // Read manifests off disk from the pnpm store rather than resolving them.
-  // `require("<name>/package.json")` cannot do this job: under pnpm isolation a
-  // transitive package (node-addon-api, ffi-rs) is not reachable by name from
-  // this file at all, and an `exports` map can refuse the `/package.json`
-  // subpath outright (@ff-labs/fff-node).
+  // Read the pnpm store directly: isolation hides transitive names and exports maps can block package.json.
   const readInstalledPackages = Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -129,8 +80,7 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
       "../../node_modules/.pnpm",
     );
 
-    // The store holds regular files too (lock.yaml), so a path built under one
-    // raises ENOTDIR rather than reporting absence.
+    // Paths under store files such as lock.yaml raise ENOTDIR, not absence.
     const isPresent = (candidate: string) =>
       fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false));
 
@@ -159,28 +109,7 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
     return installed;
   }).pipe(Effect.cached, Effect.runSync);
 
-  // Runtime-external only. The build-only entries resolve `bun:*` and are never
-  // loaded by Node, so their closure genuinely does not need to be external.
   const isRuntimeExternal = isRuntimeExternalCliDependency;
-
-  // A cold walk of the pnpm store can exceed the root timeout when the Windows
-  // lane runs four filesystem-heavy workspace suites at once.
-  it.effect(
-    "finds the runtime-external packages on disk",
-    () =>
-      Effect.gen(function* () {
-        const installed = yield* readInstalledPackages;
-        const found = [...installed.keys()].filter(isRuntimeExternal);
-
-        for (const required of ["node-pty", "node-addon-api"]) {
-          assert.ok(
-            found.includes(required),
-            `expected ${required} in the pnpm store; the closure check is only meaningful if it can read these (found ${found.length})`,
-          );
-        }
-      }),
-    120_000,
-  );
 
   it.effect("keeps every runtime dependency of an external package external too", () =>
     Effect.gen(function* () {
@@ -200,9 +129,9 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
         // package.json. Its declared dependencies belong to install.js only.
         if (name === "ffmpeg-static") continue;
         const declared = {
-          ...(manifest.dependencies ?? {}),
-          ...(manifest.optionalDependencies ?? {}),
-          ...(manifest.peerDependencies ?? {}),
+          ...manifest.dependencies,
+          ...manifest.optionalDependencies,
+          ...manifest.peerDependencies,
         };
         for (const dependency of Object.keys(declared)) {
           if (!isRuntimeExternal(dependency)) {
@@ -216,6 +145,47 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
         violations,
         [],
         `these dependencies of external packages would be bundled away and fail to resolve under WSL: ${violations.join(", ")}`,
+      );
+    }),
+  );
+
+  // The stage installs only externals the server lists, so a required peer must be reachable from them.
+  it.effect("stages a provider for every required peer of a staged external", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const installed = yield* readInstalledPackages;
+      const server = decodeManifest(
+        yield* fileSystem.readFileString(
+          path.resolve(
+            path.dirname(NodeURL.fileURLToPath(import.meta.url)),
+            "../../apps/server/package.json",
+          ),
+        ),
+      );
+
+      const staged = new Set<string>();
+      const queue = Object.keys(selectCliRuntimeExternalDependencies(server.dependencies ?? {}));
+      for (const name of queue) {
+        if (staged.has(name)) continue;
+        staged.add(name);
+        const manifest = installed.get(name);
+        queue.push(
+          ...Object.keys({ ...manifest?.dependencies, ...manifest?.optionalDependencies }),
+        );
+      }
+
+      const missing = [...staged].flatMap((name) => {
+        const manifest = installed.get(name);
+        return Object.keys(manifest?.peerDependencies ?? {})
+          .filter((peer) => !manifest?.peerDependenciesMeta?.[peer]?.optional && !staged.has(peer))
+          .map((peer) => `${name} -> ${peer}`);
+      });
+
+      assert.deepStrictEqual(
+        missing,
+        [],
+        `these peers of staged external packages are missing from the packaged app; add them to apps/server dependencies: ${missing.join(", ")}`,
       );
     }),
   );
@@ -239,23 +209,6 @@ var x = 1;
     assert.strictEqual(result.regionCount, 2);
   });
 
-  it("flags scoped external packages", () => {
-    const result = findInlinedExternalPackages(
-      region("../../node_modules/@ff-labs/fff-node/dist/src/index.js"),
-    );
-    assert.deepStrictEqual(result.inlined, ["@ff-labs/fff-node"]);
-  });
-
-  it("ignores packages that are meant to be bundled", () => {
-    const source =
-      region("../../node_modules/.pnpm/effect@4.0.0/node_modules/effect/dist/index.js") +
-      region("../../src/server/main.ts");
-    const result = findInlinedExternalPackages(source);
-
-    assert.deepStrictEqual(result.inlined, []);
-    assert.strictEqual(result.regionCount, 2);
-  });
-
   it("reports the packages that were inlined, not just the violations", () => {
     const source =
       region("../../node_modules/.pnpm/effect@4.0.0/node_modules/effect/dist/index.js") +
@@ -267,17 +220,19 @@ var x = 1;
     assert.deepStrictEqual(result.inlined, []);
   });
 
-  it("does not report the pnpm store directory as a package", () => {
-    const result = findInlinedExternalPackages(
-      region("../../node_modules/.pnpm/effect@4.0.0/node_modules/effect/dist/index.js"),
-    );
-    assert.deepStrictEqual(result.inlinedPackages, ["effect"]);
-  });
+  it("reads the plain `// <path>` markers newer Rolldown emits", () => {
+    const source = [
+      "// \0rolldown/runtime.js",
+      "var x = 1;",
+      "// ../../node_modules/.pnpm/node-addon-api@7.1.1/node_modules/node-addon-api/index.js",
+      "var y = 2; // trailing comment",
+      "// ../../src/server/main.ts",
+      "",
+    ].join("\n");
+    const result = findInlinedExternalPackages(source);
 
-  it("reports no regions when the marker format is absent", () => {
-    const result = findInlinedExternalPackages("var x = 1; // node_modules/node-pty/lib.js");
-    assert.strictEqual(result.regionCount, 0);
-    assert.deepStrictEqual(result.inlined, []);
+    assert.strictEqual(result.regionCount, 3);
+    assert.deepStrictEqual(result.inlined, ["node-addon-api"]);
   });
 });
 

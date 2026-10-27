@@ -110,7 +110,6 @@ function Fetch([string] $uri, [string] $destination, [switch] $progress) {
     Invoke-WebRequest -Uri $uri -OutFile $destination -UseBasicParsing
     return
   }
-  # Read the response once, displaying actual bytes received at most ten times a second.
   Add-Type -AssemblyName System.Net.Http
   $client = New-Object System.Net.Http.HttpClient
   $response = $source = $file = $null
@@ -159,9 +158,7 @@ if ($interactive) {
 }
 Step "Finding your release..."
 
-# PROCESSOR_ARCHITEW6432 reports the real machine when a 32-bit PowerShell
-# runs under WOW64; RuntimeInformation needs .NET 4.7.1+, which 5.1 hosts
-# may lack.
+# PROCESSOR_ARCHITEW6432 bypasses WOW64 emulation; 5.1 hosts can lack RuntimeInformation's required .NET version.
 $rawArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $arch = switch ($rawArch) {
   "AMD64" { "x64" }
@@ -172,17 +169,25 @@ $arch = switch ($rawArch) {
 $channel = if ($env:S2CODE_CHANNEL) { $env:S2CODE_CHANNEL } else { "nightly" }
 $version = $env:S2CODE_VERSION
 if (-not $version) {
-  # Tags are v<semver>; the channel is the prerelease identifier, or none for
-  # stable. Only tags of the requested train are considered, so a stable
-  # install can never pick up a nightly or preview build by accident.
   $tagPattern = switch ($channel) {
     "stable" { '^v\d+\.\d+\.\d+$' }
     "nightly" { '^v\d+\.\d+\.\d+-nightly\.\d+\.\d+$' }
     "preview" { '^v\d+\.\d+\.\d+-preview\.\d+\.\d+$' }
     default { Fail "S2CODE_CHANNEL must be stable, nightly, or preview" }
   }
-  $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=100" -Headers @{ "User-Agent" = "t3-install" }
-  $tag = ($releases | Where-Object { -not $_.draft -and $_.tag_name -match $tagPattern } | Select-Object -First 1).tag_name
+  if ($channel -eq "stable") {
+    # release.yml marks only plain stable releases latest. This is a github.com
+    # page, so it is not cut off by a page of newer nightlies or the API quota.
+    $release = Invoke-RestMethod -Uri "https://github.com/$repo/releases/latest" -Headers @{ "User-Agent" = "t3-install"; "Accept" = "application/json" }
+    $tag = ($release | Where-Object { $_.tag_name -match $tagPattern }).tag_name
+  } else {
+    $tag = $null
+    for ($page = 1; -not $tag -and $page -le 10; $page++) {
+      $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=100&page=$page" -Headers @{ "User-Agent" = "t3-install" }
+      $tag = ($releases | Where-Object { -not $_.draft -and $_.tag_name -match $tagPattern } | Select-Object -First 1).tag_name
+      if (-not $releases) { break }
+    }
+  }
   if (-not $tag) { Fail "could not find a $channel release; set S2CODE_VERSION" }
   $version = $tag.Substring(1)
 }
@@ -427,6 +432,12 @@ New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 # Installed old updaters only repoint their legacy command.
 [System.IO.File]::WriteAllText($legacyCommand, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
 [System.IO.File]::WriteAllText((Join-Path $binDir "$commandName.cmd"), $canonicalForwarder, (New-Object System.Text.UTF8Encoding $false))
+# Pruning keeps what this shim points at; a background service cannot see $binDir otherwise.
+$launchers = Join-Path $t3Home "runtime\launchers"
+$shimPath = (Resolve-Path $legacyCommand).Path
+if (-not ((Test-Path $launchers) -and ((Get-Content $launchers) -contains $shimPath))) {
+  [System.IO.File]::AppendAllText($launchers, "$shimPath`r`n", (New-Object System.Text.UTF8Encoding $false))
+}
 if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
 [Console]::Error.WriteLine("  ${green}Installed s2code $version$reset`n")
 if (($env:PATH -split ";") -notcontains $binDir) {

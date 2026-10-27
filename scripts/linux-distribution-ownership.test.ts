@@ -105,12 +105,9 @@ it.effect(
         expect(deb).not.toHaveProperty("provides");
         expect(deb).not.toHaveProperty("replaces");
         expect(deb).not.toHaveProperty("conflicts");
-        // electron-builder 26.15.6 FpmTarget maps the app tree to /opt/<sanitizedProductName>,
-        // executableName to desktop/icons, and the after-install script creates its command link.
-        // This reconstructed inventory is not proof of final package contents:
-        // inspect real DEBs with dpkg-deb --contents and Arch packages with
-        // pacman -Qlp before release, including the extracted AppImage layout.
-        // These product names contain no filename characters that need sanitizing.
+        // Mirrors electron-builder 26.15.6 FpmTarget layout (app tree in /opt/<productName>,
+        // after-install command link). Not proof of real contents: check DEBs with
+        // dpkg-deb --contents and Arch with pacman -Qlp (plus the AppImage) before release.
         const files = [
           `/opt/${String(config.productName)}/resources/app.asar`,
           `/opt/${String(config.productName)}/${linux.executableName}`,

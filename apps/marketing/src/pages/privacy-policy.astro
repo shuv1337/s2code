@@ -17,7 +17,7 @@ const sections = [
 ---
 
 <LegalPage
-  title="Privacy Policy — T3 Code"
+  title="Privacy Policy | T3 Code"
   description="How T3 Tools, Inc. handles information when you use T3 Code, app.t3.codes, and t3.codes."
   heading="T3 Code Privacy Policy"
   lede="This Privacy Policy describes how T3 Tools, Inc. collects, uses, and shares personal information when you use the T3 Code desktop, mobile, and hosted web applications, visit the t3.codes marketing site, or use the optional T3 Connect service."
@@ -82,9 +82,9 @@ const sections = [
               headline.
             </li>
             <li>
-              <strong>Product usage data.</strong> By default, T3 Code sends us anonymous usage
+              <strong>Product usage data.</strong> If you opt in, S2Code sends anonymous usage
               data, such as which provider and model a turn used, whether it succeeded, and your app
-              version and operating system. We use it to improve the product. You can turn this off
+              version and operating system. It is off by default and you can turn it off again
               at any time; see “Product Usage Data” under Your Choices below.
             </li>
             <li>
@@ -344,9 +344,9 @@ const sections = [
 
           <h3>Product Usage Data</h3>
           <p>
-            To stop sending product usage data, set the environment variable{" "}
-            <code>SHUV2CODE_TELEMETRY_ENABLED=false</code>{" "}where T3 Code runs, for example in your
-            shell profile, and restart T3 Code.
+            S2Code sends product usage data only if you opt in by setting the environment variable{" "}
+            <code>S2CODE_TELEMETRY_ENABLED=true</code>{" "}where S2Code runs, for example in your
+            shell profile, and restarting S2Code.
           </p>
 
           <h3>Cookies and Local Data</h3>

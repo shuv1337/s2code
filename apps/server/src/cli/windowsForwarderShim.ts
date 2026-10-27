@@ -1,13 +1,7 @@
 /**
- * Body of the canonical Windows command (`s2code.cmd`).
- *
- * The legacy command stays a direct `"<t3.exe>" %*` shim because installed
- * updaters only rewrite that file. This one reads that line and runs the exe
- * with its own `%*`, so an old updater is still followed and arguments are
- * parsed once. `call "<legacy>.cmd" %*` parses `%` and `^` a second time.
- * Putting the legacy line in `for /f ... do %%L` does not expand `%*` either:
- * FOR substitution happens after percent expansion, so `%*` has to be source
- * text in this file. The last four characters of the legacy line are `" %*`.
+ * Body of `s2code.cmd`. Installed updaters only rewrite the legacy `"<t3.exe>" %*` shim, so this
+ * reads its line and runs the exe with our own `%*`: `call` would re-parse `%`/`^`, and FOR
+ * substitution happens after percent expansion. The legacy line's last four chars are `" %*`.
  */
 export function windowsForwarderShim(legacyCommand: string): string {
   return [

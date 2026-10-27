@@ -7,7 +7,7 @@ import {
   MessageId,
   NodeId,
   type OrchestrationV2Run,
-  type OrchestrationV2Subagent,
+  type OrchestratorMcpFailure,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -26,6 +26,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -51,6 +52,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
@@ -60,6 +62,7 @@ import * as SourceControlRepositoryService from "../sourceControl/SourceControlR
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
+import * as PeerMcpClient from "./PeerMcpClient.ts";
 import { descriptorOf, layerLinkingEnvironment, linkTo, servePeer } from "./PeerLinks.testkit.ts";
 import * as RemoteDelegation from "./RemoteDelegation.ts";
 
@@ -495,6 +498,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
+        getById: () => Effect.succeedNone,
         // More than a page, so finding the project with this repository pages.
         listPage: ({ cursor, limit }) =>
           Effect.succeed({
@@ -505,6 +509,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     ),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
     Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
     Layer.provide(NodeServices.layer),
   );
 };
@@ -576,9 +581,10 @@ const makeLaptop = (
             Layer.mock(ProjectService.ProjectService)({
               // A cold enrichment cache: the project itself reports no identity yet.
               getById: () =>
-                Effect.succeed(
-                  Option.some({ workspaceRoot: "/home/me/app", repositoryIdentity: null } as never),
-                ),
+                Effect.succeedSome({
+                  workspaceRoot: "/home/me/app",
+                  repositoryIdentity: null,
+                } as never),
             }),
           ),
           Layer.provide(
@@ -599,10 +605,13 @@ const makeLaptop = (
       Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(
+        Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
+      ),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+      Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
       Layer.fresh,
     );
     const here = yield* Layer.build(layerHere);
@@ -1284,15 +1293,7 @@ it.effect("a Stop never launches a task whose recovered launch failed", () =>
         commandId: CommandId.make("command:stop:after-failed-launch"),
       });
       // Its follower, still backing off from the refusal, looks again.
-      let task: OrchestrationV2Subagent | undefined;
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        task = (yield* after.orchestrator.getThreadProjection(parentThreadId)).subagents.find(
-          (candidate) => candidate.id === taskId,
-        );
-        if (task?.remoteChild?.stoppedThere === true) break;
-        yield* TestClock.adjust(Duration.minutes(5));
-        yield* Effect.sleep(Duration.millis(50)).pipe(TestClock.withLive);
-      }
+      const task = yield* awaitPastBackoff(stoppedThere(after, taskId));
       expect(yield* Ref.get(thread.launchIds)).toEqual([]);
       expect(task?.remoteChild).toMatchObject({ stoppedThere: true, stopCount: 1 });
       expect(task?.remoteChild?.launchError).toContain(
@@ -1896,11 +1897,14 @@ it.effect("stopping the parent stops its task there", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-/** Waits until the task here records that the `stopCount`th Stop after its result reached there. */
+/**
+ * Waits until the task here records that the `stopCount`th Stop after its result reached there,
+ * or, with `null`, that its own cancel did, which counts no Stop.
+ */
 const stoppedThere = (
   laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>,
   taskId: NodeId,
-  stopCount = 1,
+  stopCount: number | null = 1,
 ) =>
   laptopEnv.orchestrator
     .streamStoredEventsFrom({
@@ -1914,7 +1918,7 @@ const stoppedThere = (
           stored.event.type === "subagent.updated" &&
           stored.event.payload.id === taskId &&
           stored.event.payload.remoteChild?.stoppedThere === true &&
-          stored.event.payload.remoteChild.stopCount === stopCount,
+          stored.event.payload.remoteChild.stopCount === (stopCount ?? undefined),
       ),
       Stream.runHead,
       Effect.map((stored) =>
@@ -1923,6 +1927,38 @@ const stoppedThere = (
           : undefined,
       ),
     );
+
+/**
+ * Awaits `milestone` while a follower backs off on the test clock. Its retry
+ * sleeps only after a request over a real socket fails, so the clock keeps
+ * moving until the milestone lands rather than for a fixed number of steps.
+ */
+const awaitPastBackoff = <A, E, R>(milestone: Effect.Effect<A, E, R>) =>
+  Effect.raceFirst(
+    milestone,
+    TestClock.adjust(Duration.minutes(5)).pipe(
+      Effect.andThen(Effect.sleep(Duration.millis(20)).pipe(TestClock.withLive)),
+      Effect.forever,
+    ),
+  );
+
+/** The laptop's links, offering each failed call to a peer to `failures`. */
+const linkingReportingFailures = Effect.gen(function* () {
+  const linking = yield* layerLinkingEnvironment(laptop).pipe(Layer.build);
+  const failures = yield* Queue.unbounded<OrchestratorMcpFailure>();
+  const peers = Context.get(linking, PeerMcpClient.PeerMcpClient);
+  return {
+    failures,
+    linking: Context.add(
+      linking,
+      PeerMcpClient.PeerMcpClient,
+      PeerMcpClient.PeerMcpClient.of({
+        call: (input) =>
+          peers.call(input).pipe(Effect.tapError((error) => Queue.offer(failures, error))),
+      }),
+    ),
+  };
+});
 
 it.effect("stopping the parent stops follow-up work on a task there that has its result", () =>
   Effect.scoped(
@@ -2076,17 +2112,14 @@ it.effect("a parent stopped while the box is unreachable still stops its task th
         ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
       >([]);
       const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
-      const a = yield* makeLaptop(database, offers);
+      const { linking, failures } = yield* linkingReportingFailures;
+      const a = yield* makeLaptop(database, offers, linking);
       yield* linkTo(a.links, b, "full-access");
       yield* seedParent(a);
       // The box sleeps as soon as the task is there, so its follower backs off.
       const delegated = yield* delegateToBox(a);
       yield* Ref.set(b.descriptor, descriptorOf("environment-elsewhere", "Elsewhere"));
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        const [link] = yield* a.links.list;
-        if (link?.lastError !== null && link?.lastError !== undefined) break;
-        yield* Effect.sleep(Duration.millis(20)).pipe(TestClock.withLive);
-      }
+      yield* Queue.take(failures);
       // The parent is stopped meanwhile.
       yield* a.threads.stopDelegatedTasks({
         threadId: parentThreadId,
@@ -2096,11 +2129,7 @@ it.effect("a parent stopped while the box is unreachable still stops its task th
 
       // Once the box is back, the follower's next attempt stops the task there.
       yield* Ref.set(b.descriptor, box);
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        if (yield* Deferred.isDone(thread.interruptedOnce)) break;
-        yield* TestClock.adjust(Duration.minutes(5));
-        yield* Effect.sleep(Duration.millis(50)).pipe(TestClock.withLive);
-      }
+      yield* awaitPastBackoff(Deferred.await(thread.interruptedOnce));
       expect(yield* Ref.get(thread.interrupted)).toBe(1);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
@@ -2137,13 +2166,7 @@ it.effect("a task cancelled while the box is unreachable is stopped there after 
       yield* after.remote.start();
       yield* Deferred.await(thread.interruptedOnce);
       // Once the stop is recorded, nothing is owed there any more.
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        const task = (yield* after.orchestrator.getThreadProjection(parentThreadId)).subagents.find(
-          (candidate) => candidate.id === delegated.taskId,
-        );
-        if (task?.remoteChild?.stoppedThere === true) break;
-        yield* Effect.sleep(Duration.millis(20)).pipe(TestClock.withLive);
-      }
+      yield* stoppedThere(after, delegated.taskId, null);
       expect(yield* after.projections.getOpenRemoteDelegatedTasks).toEqual([]);
       expect(yield* Ref.get(thread.stops)).toEqual(["thread.stop", "delegated-tasks"]);
       // The result here is still the cancel's.

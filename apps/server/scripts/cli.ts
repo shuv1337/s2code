@@ -12,6 +12,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
+import { injectLinuxArm64Sea } from "../../../scripts/lib/linux-arm64-sea.ts";
+import rootPackageJson from "../../../package.json" with { type: "json" };
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   ServerCliBuildAssetMissingError,
@@ -101,7 +104,7 @@ const buildCmd = Command.make(
         yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
         yield* Effect.log("[cli] Bundled web app into dist/client");
       } else {
-        yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
+        yield* Effect.logWarning("[cli] Web dist not found. Skipping client bundle.");
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
@@ -125,17 +128,20 @@ const buildExeCmd = Command.make(
       const serverDir = path.join(repoRoot, "apps/server");
 
       yield* Effect.log("[cli] Building single-executable...");
+      const target = Option.getOrUndefined(config.target);
+      // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
+      const linuxArm64 =
+        !target &&
+        (yield* HostProcess.Platform) === "linux" &&
+        (yield* HostProcess.Architecture) === "arm64";
       const spawnCommand = yield* resolveSpawnCommand("vp", ["pack"]);
       yield* runCommand(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
           cwd: serverDir,
           env: {
             ...process.env,
-            T3CODE_PACK_EXE: "1",
-            ...Option.match(config.target, {
-              onNone: () => ({}),
-              onSome: (target) => ({ T3CODE_PACK_EXE_TARGET: target }),
-            }),
+            T3CODE_PACK_EXE: linuxArm64 ? "bundle" : "1",
+            T3CODE_PACK_EXE_TARGET: target ?? "",
           },
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",
@@ -143,13 +149,20 @@ const buildExeCmd = Command.make(
         }),
       );
 
-      // The executable can only `import` built-ins. A file-backed import
-      // passes the bundler and `node dist/bin.mjs`, then throws inside the
-      // binary, so read the emitted module graph rather than trusting config.
+      // Executables reject non-builtin imports even when bundling succeeds; inspect the emitted graph.
       const bundlePath = path.join(serverDir, "dist-exe/bin.mjs");
       const specifiers = findEsmImportsOfExternalPackages(yield* fs.readFileString(bundlePath));
       if (specifiers.length > 0) {
         return yield* new ServerCliExecutableImportError({ bundlePath, specifiers });
+      }
+      // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
+      if (linuxArm64) {
+        yield* injectLinuxArm64Sea({
+          bundlePath,
+          outputPath: path.join(serverDir, "dist-exe/t3"),
+          nodeVersion: rootPackageJson.engines.node,
+          verbose: config.verbose,
+        });
       }
       yield* Effect.log(
         "[cli] Built dist-exe/t3 (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
@@ -157,16 +170,14 @@ const buildExeCmd = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    "Build the server as a Node single-executable (needs a Node 25.7+ host for --build-sea). The binary still resolves native packages from a node_modules tree beside it.",
+    `Build the server as a Node single-executable. Native builds require Node ${rootPackageJson.engines.node}; explicit cross-target builds need a Node 25.7+ host for --build-sea. Linux ARM64 builds only on a Linux ARM64 host. The binary still resolves native packages from a node_modules tree beside it.`,
   ),
 );
 
 /**
- * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@s2code/t3-<platform>.tgz` first, then both launcher tarballs, so
- * the launcher is never installable before the executables it depends on.
- * Tarballs rather than directories because `npm publish <dir>` strips the
- * `node_modules/` the executable loads its native addons from.
+ * Publishes every `@s2code/t3-<platform>.tgz` before the launcher tarballs so the launcher is
+ * never installable before its executables. Tarballs, because `npm publish <dir>` strips the
+ * `node_modules/` holding the native addons.
  */
 const publishCmd = Command.make(
   "publish",

@@ -24,9 +24,8 @@ printed by the server, not an upstream `t3` command.
 The desktop app uses a running service instead of starting its own server, and
 quitting the app leaves the service running. When the app has updated past the
 service, it moves the service to its own version on launch, interrupting work
-running in it. The app's network access setting does not apply to the service,
-which listens on `127.0.0.1` unless `SHUV2CODE_HOST` is set in its environment;
-use [Tailscale Serve](./remote-access.md) to reach it from other devices.
+running in it. The app's network access setting does not apply to the service;
+see [Local network access](#local-network-access).
 
 Uninstalling the service leaves your projects, threads, and settings intact.
 Running `s2code service install` again repairs a service that `s2code service status`
@@ -49,8 +48,41 @@ Preview builds do not update automatically.
 
 `s2code uninstall` removes only that channel's background service, launcher, and
 downloaded versions after showing you the list and asking once. Your projects,
-threads, and settings under the fork channel's home (stable: `~/.s2code-v2/userdata`) are kept. Pass `--yes` from a
-script.
+threads, and settings under the fork channel's home (stable: `~/.s2code-v2/userdata`) are kept,
+along with `service.env` in that home. Pass `--yes` from a script.
+
+## Local network access
+
+The service listens on your local network and Tailscale addresses, so the
+desktop and mobile apps on the same network connect directly. The service does
+not answer on public addresses, and every device still needs to pair. To keep
+the service reachable from this machine only, set `SHUV2CODE_HOST=127.0.0.1` in
+`service.env` (below). Any `SHUV2CODE_HOST` value replaces this default.
+
+## Configure the service environment
+
+Put custom environment variables in `service.env` in the service channel's home
+directory (stable: `~/.s2code-v2/service.env`). This file survives service
+installation and updates. For example:
+
+```dotenv
+SHUV2CODE_PORT=3773
+SHUV2CODE_HOST=127.0.0.1
+```
+
+Use `KEY=VALUE` entries, quoting values that contain spaces or `#`. Values are
+literal: shell commands and variable expansion are not evaluated. Entries
+override the inherited service environment, except for `PATH`, the home
+directory variables, `T3_BOOT_SERVICE_UNIT`, and `T3_SERVICE_LAUNCHER_CONTEXT`
+(including case variants).
+
+Run `s2code service restart` after changing the file. Changes apply when the
+service starts again; switching the server version alone keeps the current
+values. For a service installed before env-file support, run
+`s2code service install` once with an up-to-date CLI.
+A missing file is ignored; other read failures stop service startup.
+If the file contains credentials, restrict access to that file with `chmod 600`
+(for the stable home, `chmod 600 ~/.s2code-v2/service.env`).
 
 ## Platform support
 
@@ -125,14 +157,14 @@ Downloads, it may need Full Disk Access for the runtime executable listed in
 the channel's launchd plist (stable: `~/Library/LaunchAgents/dev.shuv.s2code.v2.service.plist`).
 
 For failures after signing in to T3 Connect, see
-[connection troubleshooting](./remote-access.md#t3-connect-troubleshooting).
+[connection troubleshooting](./t3-connect-troubleshooting.md).
 
 ## Reclaim database space
 
 S2Code removes superseded internal history on its own while it runs; your
 conversations are kept. Databases created before this shrank automatically
 still hold the freed space on disk until a one-time offline repair returns it
-and turns on automatic shrinking. Settings > Storage (web and desktop) or
+and turns on automatic shrinking. Settings > Maintenance (web and desktop) or
 Settings > Maintenance (mobile) suggests the repair when at least 1 GiB can be
 reclaimed.
 

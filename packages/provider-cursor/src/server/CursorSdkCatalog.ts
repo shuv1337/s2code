@@ -28,6 +28,10 @@ export class CursorSdkCatalogError extends Schema.TaggedError<CursorSdkCatalogEr
       ? "Cursor SDK authentication failed."
       : "Cursor SDK catalog request failed.";
   }
+
+  get planRequired(): boolean {
+    return this.cause instanceof CursorSdkError && this.cause.code === "plan_required";
+  }
 }
 
 export class CursorSdkCatalog extends Context.Service<
@@ -91,14 +95,15 @@ export const makeCursorSdkCatalog = Effect.fn("CursorSdkCatalog.make")(function*
       Exit.isSuccess(exit) && exit.value.length > 0 ? Duration.minutes(30) : Duration.zero,
   });
   return CursorSdkCatalog.of({
-    read: (apiKey) =>
-      Effect.all(
+    read: Effect.fn("CursorSdkCatalog.read")(function (apiKey) {
+      return Effect.all(
         {
           user: retryTransientFailures(probes.readUser(apiKey)),
           models: retryTransientFailures(Cache.get(modelCache, apiKey)),
         },
         { concurrency: "unbounded" },
-      ),
+      );
+    }),
   });
 });
 

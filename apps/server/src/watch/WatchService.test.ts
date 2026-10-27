@@ -88,6 +88,7 @@ const dependencies = Layer.mergeAll(
     } as const),
   }),
   Layer.mock(ProviderInstances.ProviderInstanceRegistry)({
+    // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
     getInstance: () => Effect.succeed(undefined),
   }),
 ).pipe(Layer.provideMerge(database), Layer.provideMerge(runtime));

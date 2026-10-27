@@ -1,9 +1,7 @@
 /**
- * OAuth-style device authorization for the Watch. The Watch starts a request and polls with its
- * device code; the owner approves the short user code elsewhere (today `t3 pair --watch
- * --approve`), which mints an ordinary one-time `watch.` credential the Watch then exchanges at
- * `/oauth/token`. Approvals may be written by another process, so every read goes to SQLite and
- * expiry is applied lazily on each call.
+ * OAuth-style device authorization for the Watch: it polls with its device code while the owner
+ * approves the user code elsewhere, minting a one-time `watch.` credential for `/oauth/token`.
+ * Approvals may come from another process, so reads go to SQLite and expiry is applied lazily.
  */
 import {
   WATCH_PAIRING_DEFAULT_CLIENT_LABEL,
@@ -431,7 +429,9 @@ const make = Effect.gen(function* () {
     approve,
     deny,
     listPending,
-    expireStale: () => DateTime.now.pipe(Effect.flatMap(expireStaleAt)),
+    expireStale: Effect.fn("WatchPairingStore.expireStale")(function* () {
+      return yield* expireStaleAt(yield* DateTime.now);
+    }),
   });
 });
 

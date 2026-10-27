@@ -5,10 +5,7 @@ import type * as Path from "effect/Path";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-/**
- * The agent gates each write behind `session/request_permission`, so only
- * path containment is checked here.
- */
+/** The agent requests permission for every write; check only path containment here. */
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
 function isInsideRoot(path: Path.Path, root: string, candidate: string): boolean {
@@ -16,10 +13,7 @@ function isInsideRoot(path: Path.Path, root: string, candidate: string): boolean
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-/**
- * Symlinks resolve before the check, including the final component, so a link
- * inside the workspace cannot read or write through to a file outside it.
- */
+/** Resolve all symlinks, including the final component, before checking workspace containment. */
 const resolveClientFilePath = Effect.fn("AntigravityClientFiles.resolveClientFilePath")(
   function* (input: {
     readonly fileSystem: FileSystem.FileSystem;

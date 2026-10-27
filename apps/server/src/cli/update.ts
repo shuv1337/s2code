@@ -27,9 +27,11 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import {
   ensurePinnedRuntimeInstalled,
+  launcherOwnsVersionsDir,
   pinnedRuntimeCommand,
   PinnedRuntimeInstallError,
   pinnedRuntimePaths,
+  prunePinnedRuntimes,
 } from "../cloud/pinnedRuntime.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -63,27 +65,29 @@ const decodeReleaseIndex = Schema.decodeUnknownEffect(Schema.fromJsonString(Rele
 const RELEASE_INDEX_TIMEOUT = Duration.seconds(30);
 const RELEASE_INDEX_MAX_PAGES = 10;
 
-const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(function* (
+export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(function* (
   channel: CliReleaseChannel,
 ) {
   const httpClient = yield* HttpClient.HttpClient;
+  const environment = yield* HostProcess.Environment;
+  const githubToken = environment.GH_TOKEN?.trim() || environment.GITHUB_TOKEN?.trim() || undefined;
   for (let page = 1; page <= RELEASE_INDEX_MAX_PAGES; page += 1) {
-    const body = yield* httpClient
-      .execute(
-        HttpClientRequest.get(cliReleaseIndexPageUrl(page)).pipe(
-          HttpClientRequest.setHeader("Accept", "application/vnd.github+json"),
-        ),
-      )
-      .pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap((response) => response.text),
-        Effect.mapError(() => new CliUpdateError({ reason: "Could not list t3 releases." })),
-        Effect.timeoutOrElse({
-          duration: RELEASE_INDEX_TIMEOUT,
-          orElse: () =>
-            Effect.fail(new CliUpdateError({ reason: "Timed out listing t3 releases." })),
-        }),
-      );
+    const request = HttpClientRequest.get(cliReleaseIndexPageUrl(page)).pipe(
+      HttpClientRequest.setHeader("Accept", "application/vnd.github+json"),
+    );
+    const authenticatedRequest =
+      githubToken === undefined
+        ? request
+        : HttpClientRequest.setHeader(request, "Authorization", `Bearer ${githubToken}`);
+    const body = yield* httpClient.execute(authenticatedRequest).pipe(
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap((response) => response.text),
+      Effect.mapError(() => new CliUpdateError({ reason: "Could not list t3 releases." })),
+      Effect.timeoutOrElse({
+        duration: RELEASE_INDEX_TIMEOUT,
+        orElse: () => Effect.fail(new CliUpdateError({ reason: "Timed out listing t3 releases." })),
+      }),
+    );
     const releases = yield* decodeReleaseIndex(body).pipe(
       Effect.mapError(
         () => new CliUpdateError({ reason: "The t3 release index had an unexpected shape." }),
@@ -95,15 +99,6 @@ const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(function* (
   }
   return yield* new CliUpdateError({ reason: `No published ${channel} release was found.` });
 });
-
-export function launcherOwnsVersionsDir(
-  path: Path.Path,
-  versionsDir: string,
-  candidate: string,
-): boolean {
-  const relative = path.relative(versionsDir, path.resolve(candidate));
-  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
 
 export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(function* (
   launcher: string,
@@ -224,11 +219,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   return Option.some(launcher);
 });
 
-/**
- * Node keeps the shell's spelling in argv0: a launcher symlink or `./t3` resolves against the
- * working directory, while a bare `t3` was found on PATH and has to be looked up there again, or
- * the launcher symlink is never seen.
- */
+/** Node preserves argv0's spelling; resolve bare names on PATH to find the launcher symlink. */
 export const resolveLauncherPath = Effect.gen(function* () {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
@@ -565,18 +556,16 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     targetEntryPath: runtime.entryPath,
   });
 
-  // The service switch runs in this process against the target version: the downloaded runtime
-  // has already proven it runs (the `--version` check above), and doing it here rather than
-  // through the target's own CLI means a downgrade to a version without today's commands still
-  // works.
-  let serviceUpdated = false;
+  // Use today's service manager for the target version. Inside the service it hands off to
+  // the target CLI, so stopping this process cannot interrupt the switch.
+  let servicePlan: BootService.BootServicePlan | undefined;
   if (serviceInstalled && !serviceCurrent) {
     yield* Console.log(
       restartService
         ? "Restarting the background service..."
         : "Updating the background service...",
     );
-    yield* BootService.BootService.pipe(
+    servicePlan = yield* BootService.BootService.pipe(
       Effect.flatMap((target) =>
         target.install({ allowDowngrade: input.allowDowngrade, start: restartService }),
       ),
@@ -594,7 +583,17 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
           }),
       ),
     );
-    serviceUpdated = restartService;
+  }
+
+  // A handed-off service install rewrites the unit later, while the old launcher may be stopped.
+  if (servicePlan?.handedOff !== true) {
+    // A stopped service's unit still names the launcher runtime it will start.
+    const unit = yield* fs.readFileString(status.unitPath).pipe(Effect.option);
+    yield* prunePinnedRuntimes({
+      baseDir: input.baseDir,
+      keep: [currentVersion, targetVersion],
+      references: Option.toArray(Option.flatMapNullishOr(unit, BootService.bootServiceProgramOf)),
+    });
   }
 
   progress.success(`Installed T3 Code ${targetVersion}`);
@@ -605,7 +604,11 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   } else {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);
   }
-  if (serviceUpdated) {
+  if (servicePlan?.handedOff === true) {
+    yield* Console.log(
+      `  Background service switching to ${targetVersion} from a separate systemd unit, since this session runs inside it and disconnects when it restarts. Result: ${servicePlan.logPath}`,
+    );
+  } else if (servicePlan !== undefined && restartService) {
     yield* Console.log(`  Background service restarted on ${targetVersion}`);
   } else if (serviceInstalled && serviceCurrent) {
     yield* Console.log(`  Background service already on ${targetVersion}`);

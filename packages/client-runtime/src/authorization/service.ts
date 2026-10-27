@@ -218,37 +218,41 @@ export const make = Effect.gen(function* () {
       timeoutMs?: number,
       endpoint: { readonly httpBaseUrl: string; readonly wsBaseUrl: string } = token.endpoint,
     ) {
-      const ticketProof = yield* signer
-        .createProof({
-          method: "POST",
-          url: environmentEndpointUrl(endpoint.httpBaseUrl, "/api/auth/websocket-ticket"),
-          accessToken: token.accessToken,
-        })
-        .pipe(
-          Effect.mapError(
-            () =>
-              new ConnectionBlockedError({
-                reason: "configuration",
-                detail: "Could not create the websocket authorization proof.",
-              }),
-          ),
-        );
       return yield* resolveRemoteDpopWebSocketConnectionUrl({
         wsBaseUrl: endpoint.wsBaseUrl,
         httpBaseUrl: endpoint.httpBaseUrl,
         accessToken: token.accessToken,
-        dpopProof: ticketProof,
+        createProof: (proof) =>
+          signer.createProof(proof).pipe(
+            Effect.mapError(
+              () =>
+                new ConnectionBlockedError({
+                  reason: "configuration",
+                  detail: "Could not create the websocket authorization proof.",
+                }),
+            ),
+          ),
         clientMetadata: presentation.metadata,
         connectionMethod: "relay",
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+      });
     },
+    Effect.provideService(HttpClient.HttpClient, httpClient),
   );
 
   const sessionChanged = () =>
     new ConnectionBlockedError({
       reason: "authentication",
       detail: "Your cloud sign-in changed. Sign in again to authorize the environment.",
+    });
+
+  // A missing identity before the attempt captures one means the cloud session
+  // is still loading, not a sign-out. Only a captured identity that goes away
+  // or changes is evidence of one.
+  const sessionPending = () =>
+    new ConnectionTransientError({
+      reason: "session-pending",
+      detail: "Waiting for the T3 Connect sign-in to load.",
     });
 
   const assertSession = Effect.fnUntraced(function* (
@@ -362,7 +366,7 @@ export const make = Effect.gen(function* () {
   ) {
     const session = yield* cloudSession.identity;
     if (Option.isNone(session)) {
-      return yield* sessionChanged();
+      return yield* sessionPending();
     }
     const identity = session.value;
     const thumbprint = yield* signer.thumbprint.pipe(
@@ -518,6 +522,7 @@ export const make = Effect.gen(function* () {
       if (endpoint !== undefined && cachedSocket.failure._tag !== "EnvironmentAuthInvalidError") {
         return yield* mapDpopSocketError(cachedSocket.failure);
       }
+      yield* assertSession(selected.identity);
       selected = yield* getDpopToken({
         ...input,
         rejectedAccessToken: selected.token.accessToken,
@@ -540,14 +545,17 @@ export const make = Effect.gen(function* () {
 
   return RemoteEnvironmentAuthorization.of({
     authorizeBearer,
-    authorizeDpop: (input) =>
-      authorizeDpop(input).pipe(Effect.withSpan("environment.authorization")),
-    authorizeDpopHttp: (input) =>
-      getDpopToken(input).pipe(
+    authorizeDpop: Effect.fn("environment.authorization")(function (input) {
+      return authorizeDpop(input);
+    }),
+    // The relay tracer must wrap span creation, not just the token request.
+    authorizeDpopHttp: Effect.fnUntraced(function* (input) {
+      return yield* getDpopToken(input).pipe(
         Effect.map(({ token }) => httpAuthorization(token)),
         Effect.withSpan("environment.authorization.http"),
         withRelayClientTracing,
-      ),
+      );
+    }),
   });
 });
 

@@ -7,6 +7,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -20,7 +21,12 @@ import kotlin.math.max
 class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
   private val container = FrameLayout(context)
   private val terminalCanvas = TerminalCanvasView(context)
-  private val inputView = EditText(context)
+
+  // Newer Android can request autofill even with importantForAutofill=no.
+  // Reporting no autofill type keeps terminal input out of credential autofill.
+  private val inputView = object : EditText(context) {
+    override fun getAutofillType(): Int = View.AUTOFILL_TYPE_NONE
+  }
   private val onInput by EventDispatcher()
   private val onResize by EventDispatcher()
   private val onCapture by EventDispatcher()
@@ -49,6 +55,7 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
     }
   private var terminalHandle = 0L
   private var fedBuffer = ""
+  private var streamedOutput: TerminalOutputBuffer? = null
   private var cols = 0
   private var rows = 0
   private var clearingInput = false
@@ -270,7 +277,6 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
           onInput(mapOf("data" to "\u007F"))
           true
         }
-        // Hardware keyboard Ctrl+A..Z -> control bytes 0x01..0x1A (Ctrl+C, Ctrl+Z, ...).
         event.isCtrlPressed && keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
           onInput(
             mapOf("data" to (keyCode - KeyEvent.KEYCODE_A + 1).toChar().toString()),
@@ -356,6 +362,7 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
       paletteColors,
     )
     fedBuffer = ""
+    streamedOutput?.let { output -> feedOutput(output.data) }
   }
 
   private fun recreateTerminal() {
@@ -375,7 +382,7 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
   }
 
   private fun feedPendingBuffer() {
-    if (terminalHandle == 0L || initialBuffer == fedBuffer) return
+    if (streamedOutput != null || terminalHandle == 0L || initialBuffer == fedBuffer) return
     if (!initialBuffer.startsWith(fedBuffer)) {
       recreateTerminal()
       if (terminalHandle == 0L) return
@@ -392,6 +399,29 @@ class T3TerminalView(context: Context, appContext: AppContext) : ExpoView(contex
     }
     fedBuffer = initialBuffer
     renderSnapshot()
+  }
+
+  fun writeOutput(data: String, reset: Boolean) {
+    if (isCleanedUp) return
+    val output = streamedOutput ?: TerminalOutputBuffer()
+    val bytes = data.toByteArray(Charsets.UTF_8)
+    output.write(bytes, reset)
+    streamedOutput = output
+    if (reset) {
+      recreateTerminal()
+    } else if (terminalHandle != 0L) {
+      feedOutput(bytes)
+      renderSnapshot()
+    }
+  }
+
+  private fun feedOutput(data: ByteArray) {
+    if (terminalHandle == 0L || data.isEmpty()) return
+    emitResponse(GhosttyBridge.nativeFeed(terminalHandle, data))
+    if (terminalCanvas.hasActiveSelection()) {
+      GhosttyBridge.nativeClearSelection(terminalHandle)
+      terminalCanvas.resetSelectionState()
+    }
   }
 
   private fun renderSnapshot() {

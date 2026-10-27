@@ -5,9 +5,9 @@ import { expect, it } from "@effect/vitest";
 import * as DesktopConfig from "./DesktopConfig.ts";
 
 function resolve(env: Record<string, string>) {
-  return Effect.gen(function* () {
-    return yield* DesktopConfig.DesktopConfig;
-  }).pipe(Effect.provide(DesktopConfig.layerTest(resolveProductEnvironment(env))));
+  return DesktopConfig.DesktopConfig.pipe(
+    Effect.provide(DesktopConfig.layerTest(resolveProductEnvironment(env))),
+  );
 }
 it.effect("does not inherit upstream home, port or telemetry configuration", () =>
   Effect.gen(function* () {
