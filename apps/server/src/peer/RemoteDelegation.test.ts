@@ -51,6 +51,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
@@ -495,6 +496,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
+        getById: () => Effect.succeedNone,
         // More than a page, so finding the project with this repository pages.
         listPage: ({ cursor, limit }) =>
           Effect.succeed({
@@ -505,6 +507,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
     ),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
     Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
     Layer.provide(NodeServices.layer),
   );
 };
@@ -576,9 +579,10 @@ const makeLaptop = (
             Layer.mock(ProjectService.ProjectService)({
               // A cold enrichment cache: the project itself reports no identity yet.
               getById: () =>
-                Effect.succeed(
-                  Option.some({ workspaceRoot: "/home/me/app", repositoryIdentity: null } as never),
-                ),
+                Effect.succeedSome({
+                  workspaceRoot: "/home/me/app",
+                  repositoryIdentity: null,
+                } as never),
             }),
           ),
           Layer.provide(
@@ -599,10 +603,13 @@ const makeLaptop = (
       Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(
+        Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
+      ),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
       Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+      Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
       Layer.fresh,
     );
     const here = yield* Layer.build(layerHere);

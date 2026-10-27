@@ -22,37 +22,33 @@ import { authLocationFlags, type CliAuthLocationFlags, resolveCliAuthConfig } fr
  * Links live in this environment's database and secret store, so these
  * commands work whether or not its server is running.
  */
-const runWithPeerLinks = <A, E>(
+const runWithPeerLinks = Effect.fn("cli.environment.runWithPeerLinks")(function* <A, E>(
   flags: CliAuthLocationFlags,
   run: (links: PeerLinks.PeerLinks["Service"]) => Effect.Effect<A, E>,
   options?: { readonly quietLogs?: boolean },
-) =>
-  Effect.gen(function* () {
-    const logLevel = yield* GlobalFlag.LogLevel;
-    const config = yield* resolveCliAuthConfig(flags, logLevel);
-    return yield* PeerLinks.PeerLinks.pipe(
-      Effect.flatMap(run),
-      Effect.provide(
-        PeerLinks.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              ServerSecretStore.layer,
-              SqlitePersistence.layerConfig,
-              FetchHttpClient.layer,
-            ),
-          ),
-          Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
-          Layer.provide(ServerConfig.layer(config)),
-          Layer.provide(
-            Layer.succeed(
-              References.MinimumLogLevel,
-              options?.quietLogs ? "Error" : config.logLevel,
-            ),
+) {
+  const logLevel = yield* GlobalFlag.LogLevel;
+  const config = yield* resolveCliAuthConfig(flags, logLevel);
+  return yield* PeerLinks.PeerLinks.pipe(
+    Effect.flatMap(run),
+    Effect.provide(
+      PeerLinks.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            ServerSecretStore.layer,
+            SqlitePersistence.layerConfig,
+            FetchHttpClient.layer,
           ),
         ),
+        Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provide(
+          Layer.succeed(References.MinimumLogLevel, options?.quietLogs ? "Error" : config.logLevel),
+        ),
       ),
-    );
-  });
+    ),
+  );
+});
 
 const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Emit JSON instead of human-readable output."),

@@ -2,11 +2,11 @@ import type { ProjectionRecordField } from "../orchestration-v2/ProjectionStore.
 import {
   CommandId,
   OrchestratorMcpFailure,
+  ThreadId,
   type ProjectId,
   type ProviderInstanceId,
   type ProviderInteractionMode,
   type RuntimeMode,
-  type ThreadId,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -22,6 +22,27 @@ export const unavailable = () =>
     code: "orchestration_error",
     message: "The operation could not be completed.",
   });
+
+/**
+ * Threads an agent starts over MCP are `mcp:<uuid>`, and agents often paste the
+ * bare uuid. The id is never rewritten, so permission checks keyed on it still
+ * hold; the miss only names a live thread the caller could read by its full id.
+ */
+export const threadNotFound = Effect.fn("mcp.threadNotFound")(function* (
+  threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadShell">,
+  threadId: ThreadId,
+  message: string,
+) {
+  const prefixed = ThreadId.make(`mcp:${threadId}`);
+  const shell = yield* threads.getThreadShell(prefixed).pipe(Effect.orElseSucceed(() => null));
+  return yield* new OrchestratorMcpFailure({
+    code: "thread_not_found",
+    message:
+      shell === null || shell.deletedAt !== null
+        ? message
+        : `${message} Did you mean \`${prefixed}\`?`,
+  });
+});
 
 export const dispatchFailure = (
   error: OrchestratorV2Error | ThreadManagement.ThreadManagementProviderInstanceDisabledError,
@@ -175,10 +196,7 @@ export const readThread = Effect.fn("mcp.readThread")(function* <
   const targetId = yield* resolveThreadId(context, threadId);
   const shell = yield* context.threads.getThreadShell(targetId).pipe(Effect.mapError(unavailable));
   if (shell === null || shell.deletedAt !== null) {
-    return yield* new OrchestratorMcpFailure({
-      code: "thread_not_found",
-      message: "The thread was not found.",
-    });
+    return yield* threadNotFound(context.threads, targetId, "The thread was not found.");
   }
   const projection = yield* context.threads
     .getProjectThreadRecords({ projectId: shell.projectId, threadId: targetId }, fields, {

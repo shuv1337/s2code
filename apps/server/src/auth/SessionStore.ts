@@ -5,6 +5,7 @@ import {
   type AuthClientMetadata,
   type AuthClientSession,
   type AuthEnvironmentScope,
+  AuthWebSocketTicketUse,
   type ClientSurface,
   RuntimeMode,
   type ServerAuthSessionMethod,
@@ -63,6 +64,10 @@ export interface VerifiedSession {
   readonly watchRestriction?: WatchRestriction;
   /** An MCP client that is another T3 Code environment's peer link. */
   readonly peerLink?: true;
+}
+
+export interface VerifiedWebSocketTicket extends VerifiedSession {
+  readonly audience?: AuthWebSocketTicketUse;
 }
 
 export type SessionCredentialChange =
@@ -394,6 +399,8 @@ export class SessionStore extends Context.Service<
       sessionId: AuthSessionId,
       input?: {
         readonly ttl?: Duration.Duration;
+        readonly audience?: AuthWebSocketTicketUse;
+        readonly proofKeyThumbprint?: string;
       },
     ) => Effect.Effect<
       {
@@ -404,7 +411,7 @@ export class SessionStore extends Context.Service<
     >;
     readonly verifyWebSocketToken: (
       token: string,
-    ) => Effect.Effect<VerifiedSession, SessionCredentialError>;
+    ) => Effect.Effect<VerifiedWebSocketTicket, SessionCredentialError>;
     readonly listActive: () => Effect.Effect<
       ReadonlyArray<AuthClientSession>,
       SessionCredentialInternalError
@@ -456,6 +463,8 @@ const WebSocketClaims = Schema.Struct({
   v: Schema.Literal(1),
   kind: Schema.Literal("websocket"),
   sid: AuthSessionId,
+  aud: Schema.optionalKey(AuthWebSocketTicketUse),
+  jkt: Schema.optionalKey(Schema.String),
   iat: Schema.Number,
   exp: Schema.Number,
 });
@@ -495,7 +504,7 @@ function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthCli
   };
 }
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
@@ -552,33 +561,34 @@ export const make = Effect.gen(function* () {
       sessionId,
     }).pipe(Effect.asVoid);
 
-  const loadActiveSession = (sessionId: AuthSessionId) =>
-    Effect.gen(function* () {
-      const row = yield* authSessions.getById({ sessionId });
-      if (Option.isNone(row) || row.value.revokedAt !== null) {
-        return Option.none<AuthClientSession>();
-      }
+  const loadActiveSession = Effect.fn("SessionStore.loadActiveSession")(function* (
+    sessionId: AuthSessionId,
+  ) {
+    const row = yield* authSessions.getById({ sessionId });
+    if (Option.isNone(row) || row.value.revokedAt !== null) {
+      return Option.none<AuthClientSession>();
+    }
 
-      const connectedSessions = yield* Ref.get(connectedSessionsRef);
-      const connected = connectedSessions.has(row.value.sessionId);
-      const now = yield* DateTime.now;
-      if (!connected && row.value.expiresAt.epochMilliseconds <= now.epochMilliseconds) {
-        return Option.none<AuthClientSession>();
-      }
-      return Option.some(
-        toAuthClientSession({
-          sessionId: row.value.sessionId,
-          subject: row.value.subject,
-          scopes: row.value.scopes,
-          method: row.value.method,
-          client: toClientMetadata(row.value.client),
-          issuedAt: row.value.issuedAt,
-          expiresAt: row.value.expiresAt,
-          lastConnectedAt: row.value.lastConnectedAt,
-          connected,
-        }),
-      );
-    });
+    const connectedSessions = yield* Ref.get(connectedSessionsRef);
+    const connected = connectedSessions.has(row.value.sessionId);
+    const now = yield* DateTime.now;
+    if (!connected && row.value.expiresAt.epochMilliseconds <= now.epochMilliseconds) {
+      return Option.none<AuthClientSession>();
+    }
+    return Option.some(
+      toAuthClientSession({
+        sessionId: row.value.sessionId,
+        subject: row.value.subject,
+        scopes: row.value.scopes,
+        method: row.value.method,
+        client: toClientMetadata(row.value.client),
+        issuedAt: row.value.issuedAt,
+        expiresAt: row.value.expiresAt,
+        lastConnectedAt: row.value.lastConnectedAt,
+        connected,
+      }),
+    );
+  });
 
   const markConnected: SessionStore["Service"]["markConnected"] = (sessionId) =>
     Ref.modify(connectedSessionsRef, (current) => {
@@ -883,6 +893,8 @@ export const make = Effect.gen(function* () {
       v: 1,
       kind: "websocket",
       sid: sessionId,
+      ...(input?.audience ? { aud: input.audience } : {}),
+      ...(input?.proofKeyThumbprint ? { jkt: input.proofKeyThumbprint } : {}),
       iat: issuedAt.epochMilliseconds,
       exp: expiresAt.epochMilliseconds,
     };
@@ -975,7 +987,9 @@ export const make = Effect.gen(function* () {
       expiresAt: row.value.expiresAt,
       subject: row.value.subject,
       scopes: row.value.scopes,
-    } satisfies VerifiedSession;
+      ...(claims.aud ? { audience: claims.aud } : {}),
+      ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
+    } satisfies VerifiedWebSocketTicket;
   });
 
   const listActive: SessionStore["Service"]["listActive"] = Effect.fn("SessionStore.listActive")(

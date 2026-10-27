@@ -24,6 +24,7 @@ import * as SourceControlRepositoryService from "../sourceControl/SourceControlR
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
@@ -166,10 +167,13 @@ const serveBox = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) =>
         ),
       ),
       Layer.provide(NodeServices.layer),
+      Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
       Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(
+        Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
+      ),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       Layer.provide(ServerSettings.layerTest()),
       Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
@@ -213,6 +217,7 @@ const makeLaptop = Effect.gen(function* () {
       ),
     ),
     Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
     Layer.provide(PeerForwarding.layer),
     Layer.provide(Layer.succeedContext(linking)),
     Layer.provide(NodeCrypto.layer),
@@ -238,7 +243,7 @@ const makeLaptop = Effect.gen(function* () {
     Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
     Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-    Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+    Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
     Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
     Layer.provide(ServerSettings.layerTest()),
     Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),

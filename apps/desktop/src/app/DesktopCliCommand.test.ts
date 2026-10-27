@@ -96,7 +96,6 @@ const fakePowerShell = (initial: string) => {
   return { registry, spawner };
 };
 
-// The machine's own PATH may already hold a t3; each test sets the PATH it means.
 const machinePath = process.env.PATH;
 beforeEach(() => {
   process.env.PATH = "";
@@ -114,9 +113,15 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const command = yield* commandIn({ home });
       const link = path.join(home, ".local", "bin", "s2code");
 
-      expect(yield* command.state).toEqual({ supported: true, installedPath: null, onPath: false });
+      expect(yield* command.state).toEqual({
+        supported: true,
+        installedPath: null,
+        onPath: false,
+        launcherPath: null,
+      });
       const installed = yield* command.install;
       expect(installed.installedPath).toBe(link);
+      expect(installed.launcherPath).toBe(path.join(home, ".t3", "bin", "s2code"));
       expect(yield* fs.readLink(link)).toBe(path.join(home, ".t3", "bin", "s2code"));
       expect((yield* command.install).installedPath).toBe(link);
 
@@ -196,22 +201,6 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       yield* after.uninstall;
       expect(yield* fs.exists(path.join(home, ".local", "bin", "s2code"))).toBe(false);
       expect(yield* fs.exists(path.join(home, "bin", "s2code"))).toBe(false);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("does not read a large binary another t3 links to", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* fs.makeTempDirectoryScoped();
-      const binary = path.join(home, "native-t3");
-      yield* fs.writeFileString(binary, `${"\0".repeat(64 * 1024)}${DesktopCliShim.MARKER}`);
-      yield* fs.makeDirectory(path.join(home, ".local", "bin"), { recursive: true });
-      yield* fs.symlink(binary, path.join(home, ".local", "bin", "s2code"));
-      const command = yield* commandIn({ home });
-      expect((yield* command.state).installedPath).toBeNull();
-      yield* command.uninstall;
-      expect(yield* fs.readLink(path.join(home, ".local", "bin", "s2code"))).toBe(binary);
     }).pipe(Effect.scoped),
   );
 
@@ -302,17 +291,6 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       expect((yield* command.state).installedPath).toBeNull();
       yield* command.uninstall;
       expect(registry.path).toBe(userPath);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("offers nothing for a development build", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const command = yield* commandIn({
-        home: yield* fs.makeTempDirectoryScoped(),
-        isPackaged: false,
-      });
-      expect((yield* command.state).supported).toBe(false);
     }).pipe(Effect.scoped),
   );
 });

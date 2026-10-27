@@ -94,7 +94,7 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
           }),
           install: () => Effect.die("not invoked"),
           withStopped: () => Effect.die("not invoked"),
-          restart: Effect.succeed(false),
+          restart: Effect.succeed("skipped"),
           uninstall: Effect.gen(function* () {
             assert.equal(yield* fs.exists(executable).pipe(Effect.orDie), true);
             removals++;
@@ -148,7 +148,7 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
           }),
           install: () => Effect.die("not invoked"),
           withStopped: () => Effect.die("not invoked"),
-          restart: Effect.succeed(false),
+          restart: Effect.succeed("skipped"),
           uninstall: Effect.sync(() => {
             removals++;
             return true;

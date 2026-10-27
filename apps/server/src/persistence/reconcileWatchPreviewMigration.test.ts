@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { forkMigrationManifest } from "./ForkMigrations.ts";
-import { migrationEntries, runMigrations } from "./Migrations.ts";
+import { migrationManifest, runMigrations } from "./Migrations.ts";
 import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
 
@@ -12,7 +12,7 @@ const it = makeMethods(test);
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
 
-const upstreamAfter61 = migrationEntries
+const upstreamAfter61 = migrationManifest
   .filter(([id]) => id > 61)
   .map(([id, name]) => [id, name] as const);
 

@@ -74,13 +74,15 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
       Effect.provide([
         NodeHttpServer.layerHttpServices,
         HttpApiBuilder.group(EnvironmentHttpApi, "metadata", (handlers) =>
-          handlers.handle(
-            "descriptor",
-            Effect.fn("test.environment.metadata.descriptor")(function* () {
-              calls.descriptor += 1;
-              return yield* scenario.descriptor?.() ?? unexpectedEndpoint("metadata.descriptor");
-            }),
-          ),
+          handlers
+            .handle(
+              "descriptor",
+              Effect.fn("test.environment.metadata.descriptor")(function* () {
+                calls.descriptor += 1;
+                return yield* scenario.descriptor?.() ?? unexpectedEndpoint("metadata.descriptor");
+              }),
+            )
+            .handle("proof", () => unexpectedEndpoint("metadata.proof")),
         ),
         HttpApiBuilder.group(EnvironmentHttpApi, "auth", (handlers) =>
           handlers
@@ -102,6 +104,7 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
             )
             .handle("token", () => unexpectedEndpoint("auth.token"))
             .handle("webSocketTicket", () => unexpectedEndpoint("auth.webSocketTicket"))
+            .handle("webSocketTicketFor", () => unexpectedEndpoint("auth.webSocketTicketFor"))
             .handle(
               "pairingCredential",
               Effect.fn("test.environment.auth.pairingCredential")(function* ({ payload }) {

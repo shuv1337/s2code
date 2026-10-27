@@ -31,6 +31,7 @@ import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderRepl
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -128,13 +129,14 @@ const layerTools = Layer.mergeAll(
   Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
   Layer.provide(
     Layer.mock(ProjectService.ProjectService)({
-      getById: () => Effect.die("unused"),
+      getById: () => Effect.succeedNone,
       update: () => Effect.die("A linked caller must never reach a project update."),
     }),
   ),
   Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
   Layer.provide(Layer.mock(ThreadSearch.ThreadSearch)({})),
+  Layer.provide(Layer.mock(DocumentText.DocumentText)({})),
   Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
   Layer.provide(
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/p" }),

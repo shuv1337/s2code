@@ -253,19 +253,13 @@ const resolveInstallLauncher = Effect.gen(function* () {
     : Option.none<string>();
 });
 
-/**
- * Quotes `value` for PowerShell, the default Windows terminal. Always quoted,
- * so a path reads the same whether or not it holds a space. Inside double
- * quotes `"` and its typographic forms (which also end the string) double,
- * and `$` and the backtick are escaped so nothing expands.
- */
+/** PowerShell also treats typographic quotes as delimiters; escape them and suppress expansion. */
 const powershellWord = (value: string) =>
   `"${value
     .replaceAll("`", "``")
     .replaceAll("$", "`$")
     .replace(/["\u201C\u201D\u201E]/g, "$&$&")}"`;
 
-/** Quotes a word for the host's shell: POSIX, or PowerShell on Windows. */
 const hostShellWord = (platform: NodeJS.Platform, value: string) =>
   platform === "win32" ? powershellWord(value) : shellWord(value);
 
@@ -295,16 +289,17 @@ export const resolveHostCliCommand = Effect.fnUntraced(function* (
  * PATH through unless Node is on root's PATH too. An absolute launcher needs
  * neither.
  */
-export const resolveRootCliCommand = (subcommand: string) =>
-  Effect.gen(function* () {
-    const { command, launcher } = yield* resolveHostCliCommand(subcommand);
-    if (launcher) return `sudo ${command}`;
-    const executablePath = yield* HostProcess.ExecutablePath;
-    const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>
-      executablePath.startsWith(`${directory}/`),
-    );
-    return systemNode ? `sudo ${command}` : `sudo env "PATH=$PATH" ${command}`;
-  });
+export const resolveRootCliCommand = Effect.fn("invocation.resolveRootCliCommand")(function* (
+  subcommand: string,
+) {
+  const { command, launcher } = yield* resolveHostCliCommand(subcommand);
+  if (launcher) return `sudo ${command}`;
+  const executablePath = yield* HostProcess.ExecutablePath;
+  const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>
+    executablePath.startsWith(`${directory}/`),
+  );
+  return systemNode ? `sudo ${command}` : `sudo env "PATH=$PATH" ${command}`;
+});
 
 const ROOT_PATH_DIRECTORIES = [
   "/usr/local/sbin",

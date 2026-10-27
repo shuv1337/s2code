@@ -140,7 +140,7 @@ it.layer(NodeServices.layer)("Watch auth", (it) => {
         );
         for (const attempt of [
           auth.authenticateHttpRequest(request(token.access_token)).pipe(Effect.asVoid),
-          auth.authenticateWebSocketUpgrade(wsRequest).pipe(Effect.asVoid),
+          auth.authenticateWebSocketUpgrade(wsRequest, "rpc").pipe(Effect.asVoid),
           auth.authenticateMcpClient(request(token.access_token)).pipe(Effect.asVoid),
         ]) {
           expect(yield* attempt.pipe(Effect.flip)).toMatchObject({
@@ -151,7 +151,7 @@ it.layer(NodeServices.layer)("Watch auth", (it) => {
         for (const attempt of [
           auth.authenticateWatchClient(request(token.access_token)),
           auth.authenticateHttpRequest(request(token.access_token)),
-          auth.authenticateWebSocketUpgrade(wsRequest),
+          auth.authenticateWebSocketUpgrade(wsRequest, "rpc"),
         ]) {
           expect(yield* attempt.pipe(Effect.flip)).toMatchObject({
             _tag: "ServerAuthInvalidCredentialError",

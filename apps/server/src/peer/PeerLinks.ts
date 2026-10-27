@@ -203,34 +203,35 @@ const make = Effect.gen(function* () {
         : Option.none<string>();
     }).pipe(
       Effect.timeout(probeTimeout(origin)),
-      Effect.catch(() => Effect.succeed(Option.none<string>())),
+      Effect.orElseSucceed(() => Option.none<string>()),
     );
 
-  const verifiedDescriptor = (origin: string, environmentId: EnvironmentId, publicKey: string) =>
-    Effect.gen(function* () {
-      const descriptor = yield* describe(origin);
-      if (Option.isNone(descriptor) || descriptor.value.environmentId !== environmentId) {
-        return Option.none();
-      }
-      const proof = yield* prove(origin, environmentId, publicKey);
-      return Option.isSome(proof) ? descriptor : Option.none();
-    });
+  const verifiedDescriptor = Effect.fn("PeerLinks.verifiedDescriptor")(function* (
+    origin: string,
+    environmentId: EnvironmentId,
+    publicKey: string,
+  ) {
+    const descriptor = yield* describe(origin);
+    if (Option.isNone(descriptor) || descriptor.value.environmentId !== environmentId) {
+      return Option.none();
+    }
+    const proof = yield* prove(origin, environmentId, publicKey);
+    return Option.isSome(proof) ? descriptor : Option.none();
+  });
 
-  const toLink = (row: PeerLinkRow) =>
-    Effect.gen(function* () {
-      return {
-        environmentId: EnvironmentId.make(row.environment_id),
-        launchIdentity: yield* launchIdentity(row.secret_name),
-        label: row.label,
-        urls: yield* decodeUrls(row.urls_json),
-        access: yield* decodeAccess(row.access),
-        linkedAt: DateTime.makeUnsafe(row.linked_at),
-        expiresAt: DateTime.makeUnsafe(row.expires_at),
-        lastReachedAt:
-          row.last_reached_at === null ? null : DateTime.makeUnsafe(row.last_reached_at),
-        lastError: row.last_error,
-      } satisfies StoredPeerLink;
-    }).pipe(Effect.catch(failStorage));
+  const toLink = Effect.fn("PeerLinks.toLink")(function* (row: PeerLinkRow) {
+    return {
+      environmentId: EnvironmentId.make(row.environment_id),
+      launchIdentity: yield* launchIdentity(row.secret_name),
+      label: row.label,
+      urls: yield* decodeUrls(row.urls_json),
+      access: yield* decodeAccess(row.access),
+      linkedAt: DateTime.makeUnsafe(row.linked_at),
+      expiresAt: DateTime.makeUnsafe(row.expires_at),
+      lastReachedAt: row.last_reached_at === null ? null : DateTime.makeUnsafe(row.last_reached_at),
+      lastError: row.last_error,
+    } satisfies StoredPeerLink;
+  }, Effect.catch(failStorage));
 
   const readRows = sql<PeerLinkRow>`
     SELECT * FROM peer_environment_links ORDER BY label, environment_id
@@ -358,98 +359,94 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const link: PeerLinks["Service"]["link"] = (input) =>
-    Effect.gen(function* () {
-      const origins = yield* Effect.forEach(
-        [input.url, ...(input.alternateUrls ?? [])],
-        peerOrigin,
-      );
-      const primary = origins[0]!;
-      const descriptor = yield* describe(primary);
-      if (Option.isNone(descriptor)) {
-        return yield* new PeerLinkError({
-          reason: "not_a_t3_environment",
-          message: `Nothing at ${primary} answered as a T3 Code environment.`,
-        });
-      }
-      const peer = descriptor.value;
-      const self = yield* environment.getDescriptor;
-      if (peer.environmentId === self.environmentId) {
-        return yield* new PeerLinkError({
-          reason: "self",
-          message: "That address is this environment.",
-        });
-      }
-      if (!linkLimitsHold(peer)) {
+  const link: PeerLinks["Service"]["link"] = Effect.fn("PeerLinks.link")(function* (input) {
+    const origins = yield* Effect.forEach([input.url, ...(input.alternateUrls ?? [])], peerOrigin);
+    const primary = origins[0]!;
+    const descriptor = yield* describe(primary);
+    if (Option.isNone(descriptor)) {
+      return yield* new PeerLinkError({
+        reason: "not_a_t3_environment",
+        message: `Nothing at ${primary} answered as a T3 Code environment.`,
+      });
+    }
+    const peer = descriptor.value;
+    const self = yield* environment.getDescriptor;
+    if (peer.environmentId === self.environmentId) {
+      return yield* new PeerLinkError({
+        reason: "self",
+        message: "That address is this environment.",
+      });
+    }
+    if (!linkLimitsHold(peer)) {
+      return yield* new PeerLinkError({
+        reason: "incompatible",
+        message: `${peer.label} runs a T3 Code version that cannot keep a linked agent's limits. Update it, then link again.`,
+      });
+    }
+    const publicKey = yield* prove(primary, peer.environmentId);
+    if (Option.isNone(publicKey)) {
+      return yield* new PeerLinkError({
+        reason: "incompatible",
+        message: `${primary} did not prove its environment identity. Update it, then link again.`,
+      });
+    }
+    for (const alternate of origins.slice(1)) {
+      const found = yield* verifiedDescriptor(alternate, peer.environmentId, publicKey.value);
+      if (Option.isNone(found) || !linkLimitsHold(found.value)) {
         return yield* new PeerLinkError({
           reason: "incompatible",
-          message: `${peer.label} runs a T3 Code version that cannot keep a linked agent's limits. Update it, then link again.`,
+          message: `${alternate} did not prove the same environment identity and link limits as ${primary}.`,
         });
       }
-      const publicKey = yield* prove(primary, peer.environmentId);
-      if (Option.isNone(publicKey)) {
-        return yield* new PeerLinkError({
-          reason: "incompatible",
-          message: `${primary} did not prove its environment identity. Update it, then link again.`,
-        });
-      }
-      for (const alternate of origins.slice(1)) {
-        const found = yield* verifiedDescriptor(alternate, peer.environmentId, publicKey.value);
-        if (Option.isNone(found) || !linkLimitsHold(found.value)) {
-          return yield* new PeerLinkError({
-            reason: "incompatible",
-            message: `${alternate} did not prove the same environment identity and link limits as ${primary}.`,
-          });
-        }
-      }
-      const issued = yield* signIn(primary, input, `T3 Code · ${self.label}`);
-      const now = yield* DateTime.now;
-      const linked: PeerLink = {
-        environmentId: peer.environmentId,
-        label: peer.label,
-        urls: origins,
-        access: input.access,
-        linkedAt: now,
-        expiresAt: DateTime.add(now, { seconds: issued.expires_in }),
-        lastReachedAt: now,
-        lastError: null,
-      };
-      // The token goes under a name of its own before the row points at it,
-      // so the row and its token are replaced together.
-      const secretName = yield* newSecretName;
-      yield* secrets
-        .set(secretName, new TextEncoder().encode(issued.access_token))
-        .pipe(Effect.catch(failStorage));
-      const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
-      const previous = yield* readRow(peer.environmentId);
-      yield* sql`
-        INSERT INTO peer_environment_links (
-          environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
-          last_reached_at, last_error, fenced, peer_public_key
-        ) VALUES (
-          ${linked.environmentId}, ${secretName}, ${linked.label}, ${urlsJson}, ${linked.access},
-          ${DateTime.formatIso(linked.linkedAt)}, ${DateTime.formatIso(linked.expiresAt)},
-          ${DateTime.formatIso(now)}, NULL, 1, ${publicKey.value}
-        )
-        ON CONFLICT (environment_id) DO UPDATE SET
-          secret_name = excluded.secret_name,
-          fenced = excluded.fenced,
-          peer_public_key = excluded.peer_public_key,
-          label = excluded.label,
-          urls_json = excluded.urls_json,
-          access = excluded.access,
-          linked_at = excluded.linked_at,
-          expires_at = excluded.expires_at,
-          last_reached_at = excluded.last_reached_at,
-          last_error = NULL
-      `.pipe(Effect.catch(failStorage));
-      // Linking again replaces the old token. A racing link may leave its own
-      // behind; it is unused either way.
-      if (Option.isSome(previous) && previous.value.secret_name !== secretName) {
-        yield* secrets.remove(previous.value.secret_name).pipe(Effect.ignore);
-      }
-      return linked;
-    });
+    }
+    const issued = yield* signIn(primary, input, `T3 Code · ${self.label}`);
+    const now = yield* DateTime.now;
+    const linked: PeerLink = {
+      environmentId: peer.environmentId,
+      label: peer.label,
+      urls: origins,
+      access: input.access,
+      linkedAt: now,
+      expiresAt: DateTime.add(now, { seconds: issued.expires_in }),
+      lastReachedAt: now,
+      lastError: null,
+    };
+    // The token goes under a name of its own before the row points at it,
+    // so the row and its token are replaced together.
+    const secretName = yield* newSecretName;
+    yield* secrets
+      .set(secretName, new TextEncoder().encode(issued.access_token))
+      .pipe(Effect.catch(failStorage));
+    const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
+    const previous = yield* readRow(peer.environmentId);
+    yield* sql`
+      INSERT INTO peer_environment_links (
+        environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
+        last_reached_at, last_error, fenced, peer_public_key
+      ) VALUES (
+        ${linked.environmentId}, ${secretName}, ${linked.label}, ${urlsJson}, ${linked.access},
+        ${DateTime.formatIso(linked.linkedAt)}, ${DateTime.formatIso(linked.expiresAt)},
+        ${DateTime.formatIso(now)}, NULL, 1, ${publicKey.value}
+      )
+      ON CONFLICT (environment_id) DO UPDATE SET
+        secret_name = excluded.secret_name,
+        fenced = excluded.fenced,
+        peer_public_key = excluded.peer_public_key,
+        label = excluded.label,
+        urls_json = excluded.urls_json,
+        access = excluded.access,
+        linked_at = excluded.linked_at,
+        expires_at = excluded.expires_at,
+        last_reached_at = excluded.last_reached_at,
+        last_error = NULL
+    `.pipe(Effect.catch(failStorage));
+    // Linking again replaces the old token. A racing link may leave its own
+    // behind; it is unused either way.
+    if (Option.isSome(previous) && previous.value.secret_name !== secretName) {
+      yield* secrets.remove(previous.value.secret_name).pipe(Effect.ignore);
+    }
+    return linked;
+  });
 
   const statusOf = (link: PeerLink, row: PeerLinkRow, now: DateTime.Utc) =>
     DateTime.isLessThanOrEqualTo(link.expiresAt, now)
@@ -488,26 +485,27 @@ const make = Effect.gen(function* () {
     readRow(environmentId).pipe(
       Effect.flatMap(
         Option.match({
-          onNone: () => Effect.succeed(Option.none()),
-          onSome: (row) => Effect.map(toLink(row), Option.some),
+          onNone: () => Effect.succeedNone,
+          onSome: (row) => Effect.asSome(toLink(row)),
         }),
       ),
     );
 
-  const unlink: PeerLinks["Service"]["unlink"] = (environmentId) =>
-    Effect.gen(function* () {
+  const unlink: PeerLinks["Service"]["unlink"] = Effect.fn("PeerLinks.unlink")(
+    function* (environmentId) {
       const deleted = yield* sql<{ secret_name: string }>`
-        DELETE FROM peer_environment_links WHERE environment_id = ${environmentId}
-        RETURNING secret_name
-      `.pipe(Effect.catch(failStorage));
+      DELETE FROM peer_environment_links WHERE environment_id = ${environmentId}
+      RETURNING secret_name
+    `.pipe(Effect.catch(failStorage));
       for (const row of deleted) {
         yield* secrets.remove(row.secret_name).pipe(Effect.catch(failStorage));
       }
       return deleted.length > 0;
-    });
+    },
+  );
 
-  const resolve: PeerLinks["Service"]["resolve"] = (environmentId) =>
-    Effect.gen(function* () {
+  const resolve: PeerLinks["Service"]["resolve"] = Effect.fn("PeerLinks.resolve")(
+    function* (environmentId) {
       const row = yield* readRow(environmentId);
       if (Option.isNone(row)) {
         return yield* new PeerLinkError({
@@ -564,7 +562,8 @@ const make = Effect.gen(function* () {
         });
       }
       return { link, url: url.value, token: new TextDecoder().decode(stored.value) };
-    });
+    },
+  );
 
   const recordOutcome: PeerLinks["Service"]["recordOutcome"] = (environmentId, outcome) =>
     DateTime.now.pipe(

@@ -1,23 +1,27 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { HttpClient } from "effect/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import { afterEach, vi } from "vite-plus/test";
 import * as BootService from "../cloud/bootService.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 import {
   repointLauncher,
   resolveLauncherPath,
+  resolveNewestVersion,
   runUpdate,
   isForkBootServiceCgroup,
   formatUpdatedLauncherCommand,
   readLauncherTarget,
 } from "./update.ts";
 import { windowsForwarderShim } from "./windowsForwarderShim.ts";
+
+afterEach(() => vi.restoreAllMocks());
 
 it("recognizes only exact fork boot service cgroup components", () => {
   for (const unit of ["s2code-v2", "s2code-v2-nightly", "s2code-v2-preview"]) {
@@ -27,6 +31,28 @@ it("recognizes only exact fork boot service cgroup components", () => {
   for (const unit of ["t3code.service", "s2code-v2.service-other", "not-s2code-v2.service"])
     assert.isFalse(isForkBootServiceCgroup(`0::/user.slice/${unit}`));
 });
+it.effect("authenticates each release page until the requested channel is found", () =>
+  Effect.gen(function* () {
+    const pages: string[] = [];
+    const httpClient = HttpClient.make((request) => {
+      const url = new URL(request.url);
+      assert.equal(url.origin, "https://api.github.com");
+      assert.equal(url.pathname, "/repos/shuv1337/s2code/releases");
+      assert.equal(request.headers.accept, "application/vnd.github+json");
+      assert.equal(request.headers.authorization, "Bearer gh-token");
+      const page = url.searchParams.get("page") ?? "";
+      pages.push(page);
+      const tag_name = page === "1" ? "v1.2.4-preview.20260101.1" : "v1.2.3";
+      return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json([{ tag_name }])));
+    });
+    const version = yield* resolveNewestVersion("stable").pipe(
+      Effect.provideService(HostProcess.Environment, { GH_TOKEN: "gh-token" }),
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+    );
+    assert.equal(version, "1.2.3");
+    assert.deepStrictEqual(pages, ["1", "2"]);
+  }),
+);
 
 it.layer(NodeServices.layer)("t3 update launcher", (it) => {
   it.effect.each(["linux", "win32"] as const)(

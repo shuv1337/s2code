@@ -1,8 +1,13 @@
-import type { DesktopCliCommandState } from "@t3tools/contracts";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { APP_VERSION } from "~/branding";
 
+import {
+  desktopCliCommandStateAtom,
+  getDesktopCliCommandBridge,
+  refreshDesktopCliCommandState,
+} from "~/state/desktopCliCommand";
+import { useEnvironmentQuery } from "~/state/query";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { SettingsRow } from "./settingsLayout";
@@ -10,29 +15,16 @@ import { searchableSetting } from "./settingsSearch";
 
 export function CliCommandSettingsRow() {
   const commandName = resolveChannelIdentity(APP_VERSION).executableName;
-  const bridge = typeof window === "undefined" ? undefined : window.desktopBridge?.cliCommand;
-  const [state, setState] = useState<DesktopCliCommandState | null>(null);
+  const bridge = getDesktopCliCommandBridge();
+  const query = useEnvironmentQuery(bridge ? desktopCliCommandStateAtom : null);
+  const state = query.data;
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (!bridge) return;
-    let cancelled = false;
-    void bridge
-      .getState()
-      .then((next) => {
-        if (!cancelled) setState(next);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [bridge]);
 
   const change = (action: "install" | "uninstall") => {
     if (!bridge || pending) return;
     setPending(true);
     void bridge[action]()
-      .then(setState)
+      .then(refreshDesktopCliCommandState)
       .catch((error: unknown) => {
         toastManager.add(
           stackedThreadToast({
@@ -67,7 +59,7 @@ export function CliCommandSettingsRow() {
         <Button
           size="sm"
           variant="outline"
-          disabled={pending}
+          disabled={pending || query.isPending}
           onClick={() => change(installed ? "uninstall" : "install")}
         >
           {installed ? "Remove" : "Install"}

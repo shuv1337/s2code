@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { StackActions, useIsFocused, useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { summarizeSubagentStatuses } from "@t3tools/client-runtime/state/subagent-display";
 import { isActiveSubagentStatus } from "@t3tools/client-runtime/state/subagentRuntime";
@@ -8,8 +8,7 @@ import type {
   OrchestrationV2Subagent,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
-import { AppState, Pressable, View, type ColorValue } from "react-native";
+import { Pressable, View, type ColorValue } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -23,27 +22,17 @@ import { useEnvironments } from "../../state/environments";
 import { useServerConfigs } from "../../state/entities";
 import { SubagentRow } from "./SubagentRow";
 import { subagentThreadTarget } from "./threadAgentsPresentation";
+import { useVisibleSecondClock } from "./use-visible-second-clock";
 import { WorkLogBlock } from "./work-log-layout";
+
+import { useOpenThreadInspector } from "./thread-inspector-navigation";
 
 type SubagentItem = Extract<OrchestrationV2TurnItem, { type: "subagent" }>;
 type AgentTiming = Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt">;
 
 function SubagentElapsed({ agents }: { readonly agents: ReadonlyArray<AgentTiming> }) {
-  const focused = useIsFocused();
   const live = agents.some((agent) => isActiveSubagentStatus(agent.status));
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const [appActive, setAppActive] = useState(() => AppState.currentState === "active");
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) =>
-      setAppActive(state === "active"),
-    );
-    return () => subscription.remove();
-  }, []);
-  useEffect(() => {
-    if (!live || !focused || !appActive) return;
-    const intervalId = setInterval(() => setNowMs(Date.now()), 1_000);
-    return () => clearInterval(intervalId);
-  }, [appActive, focused, live]);
+  const nowMs = useVisibleSecondClock(live);
   const elapsed = subagentCardElapsed(agents, nowMs);
   return elapsed ? (
     <Text className="shrink-0 text-xs tabular-nums text-foreground-muted">{elapsed}</Text>
@@ -74,6 +63,7 @@ export function ThreadSubagentGroup(props: {
 }) {
   const config = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
   const navigation = useNavigation();
+  const openInspector = useOpenThreadInspector();
   const members = props.activities.flatMap(({ projectedItem }) =>
     projectedItem.item.type === "subagent" ? [projectedItem.item] : [],
   );
@@ -174,15 +164,24 @@ export function ThreadSubagentGroup(props: {
                 }
                 disabled={target === null}
                 onPress={() => {
-                  // Push, not navigate: navigate reuses this Thread route, so back
-                  // would skip the parent thread.
-                  if (target !== null)
-                    navigation.dispatch(
-                      StackActions.push("Thread", {
-                        environmentId: String(target.environmentId),
-                        threadId: String(target.threadId),
-                      }),
-                    );
+                  if (target === null) return;
+                  if (
+                    openInspector(
+                      { environmentId: props.environmentId, threadId: members[0]!.threadId },
+                      {
+                        type: "thread",
+                        environmentId: target.environmentId,
+                        threadId: target.threadId,
+                      },
+                    )
+                  )
+                    return;
+                  navigation.dispatch(
+                    StackActions.push("Thread", {
+                      environmentId: String(target.environmentId),
+                      threadId: String(target.threadId),
+                    }),
+                  );
                 }}
                 className="rounded-lg px-3 py-3 active:bg-subtle"
               >

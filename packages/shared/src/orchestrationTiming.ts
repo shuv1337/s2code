@@ -38,8 +38,9 @@ export function formatDuration(durationMs: number): string {
     const tenths = Math.round(durationMs / 100) / 10;
     return tenths >= 10 ? "10s" : `${tenths.toFixed(1)}s`;
   }
-  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`;
   const totalSeconds = Math.round(durationMs / 1_000);
+  // Choose the unit after rounding so 59.5 seconds never renders as "60s".
+  if (totalSeconds < 60) return `${totalSeconds}s`;
   const hours = Math.floor(totalSeconds / 3_600);
   const minutes = Math.floor((totalSeconds % 3_600) / 60);
   const seconds = totalSeconds % 60;
@@ -61,12 +62,7 @@ function isLatestRunSettled(
   return true;
 }
 
-/**
- * The projector only stamps `startedAt` in the same update that moves the
- * session to "running", so while the provider spins up (session "starting") a
- * requested turn has no `startedAt` at all — and returning null there blinks
- * the indicator out for the whole spin-up.
- */
+/** Fall back during provider startup; the projector stamps startedAt only when the session becomes running. */
 export function deriveActiveWorkStartedAt(
   latestRun: LatestRunTiming | null,
   runtime: RuntimeActivityState | null,

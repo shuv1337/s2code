@@ -42,7 +42,7 @@ import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { isCommandAvailable } from "@t3tools/shared/shell";
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { windowsSystemTar } from "./build-cli-archive.ts";
+import { windowsSystemTar } from "./lib/windows-tar.ts";
 
 export const NPM_PLATFORM_PACKAGE_SCOPE = "@s2code";
 export const NPM_LAUNCHER_PACKAGE_NAME = NPM_PACKAGE_NAME;

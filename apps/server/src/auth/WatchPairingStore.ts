@@ -431,7 +431,9 @@ const make = Effect.gen(function* () {
     approve,
     deny,
     listPending,
-    expireStale: () => DateTime.now.pipe(Effect.flatMap(expireStaleAt)),
+    expireStale: Effect.fn("WatchPairingStore.expireStale")(function* () {
+      return yield* expireStaleAt(yield* DateTime.now);
+    }),
   });
 });
 

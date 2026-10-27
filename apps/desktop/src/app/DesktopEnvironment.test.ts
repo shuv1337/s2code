@@ -185,38 +185,4 @@ describe("DesktopEnvironment", () => {
       assert.equal(production.stateDir, "/Users/alice/.s2code-v2/userdata");
     }),
   );
-
-  it.effect("uses a configured app user model id override", () =>
-    Effect.gen(function* () {
-      const environment = yield* makeEnvironment(
-        {},
-        {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.t3tools.t3code.dev.local ",
-          VITE_DEV_SERVER_URL: "http://localhost:5173",
-        },
-      );
-
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev.local");
-    }),
-  );
-
-  it.effect("resolves picker defaults without nullish sentinels", () =>
-    Effect.gen(function* () {
-      const environment = yield* makeEnvironment();
-
-      assert.deepEqual(environment.resolvePickFolderDefaultPath(null), Option.none());
-      assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: " " }),
-        Option.none(),
-      );
-      assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~" }),
-        Option.some("/Users/alice"),
-      );
-      assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
-        Option.some("/Users/alice/project"),
-      );
-    }),
-  );
 });

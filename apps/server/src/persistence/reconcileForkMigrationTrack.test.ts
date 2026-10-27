@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { forkMigrationManifest } from "./ForkMigrations.ts";
-import { migrationEntries, runMigrations } from "./Migrations.ts";
+import { migrationManifest, runMigrations } from "./Migrations.ts";
 import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
 
@@ -12,7 +12,7 @@ const it = makeMethods(test);
 
 const database = NodeSqliteClient.layer({ filename: ":memory:" });
 
-const lastUpstreamId = migrationEntries[migrationEntries.length - 1]![0];
+const lastUpstreamId = migrationManifest[migrationManifest.length - 1]![0];
 
 it.effect("runs fork migrations on their own ledger after upstream's", () =>
   Effect.gen(function* () {
@@ -45,7 +45,7 @@ it.effect("moves fork migrations out of upstream's ledger, keeping when they ran
     // Upstream migrations after 61 now run instead of being skipped.
     assert.deepStrictEqual(
       yield* runMigrations(),
-      migrationEntries.filter(([id]) => id > 61).map(([id, name]) => [id, name]),
+      migrationManifest.filter(([id]) => id > 61).map(([id, name]) => [id, name]),
     );
     assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name FROM effect_sql_migrations
@@ -80,13 +80,13 @@ it.effect("boots a database with fork rows at upstream's 62 and 63 under the V2 
       (device_code_hash, user_code, status, created_at, expires_at)
       VALUES ('live-hash', 'LIVE01', 'pending', '2026-10-12', '2026-10-13')`;
 
-    assert.deepStrictEqual(yield* runMigrations(), [
-      [62, "ThreadFailureLookupIndex"],
-      [63, "DropUnusedV1Projections"],
-    ]);
+    assert.deepStrictEqual(
+      yield* runMigrations(),
+      migrationManifest.filter(([id]) => id > 61).map(([id, name]) => [id, name]),
+    );
     assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
-      migrationEntries.map(([migration_id, name]) => ({ migration_id, name })),
+      migrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
     );
     assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,

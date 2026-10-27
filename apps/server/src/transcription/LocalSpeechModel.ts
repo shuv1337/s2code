@@ -87,18 +87,14 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             bytes += chunk.byteLength;
             if (bytes > file.size)
-              return yield* Effect.fail(
-                new SpeechModelError({ cause: { file: file.name, reason: "size" } }),
-              );
+              return yield* new SpeechModelError({ cause: { file: file.name, reason: "size" } });
             hash.update(chunk);
           }),
         ),
         Stream.run(fs.sink(partial)),
       );
       if (bytes !== file.size || hash.digest("hex") !== file.sha256) {
-        return yield* Effect.fail(
-          new SpeechModelError({ cause: { file: file.name, reason: "integrity" } }),
-        );
+        return yield* new SpeechModelError({ cause: { file: file.name, reason: "integrity" } });
       }
       yield* fs.rename(partial, destination);
     }

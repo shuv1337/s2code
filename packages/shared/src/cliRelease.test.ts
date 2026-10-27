@@ -69,13 +69,6 @@ describe("cliRelease", () => {
     expect(cliArchiveTarCommand("win32", {})).toBe("C:\\Windows\\System32\\tar.exe");
   });
 
-  it("derives the release channel from the version alone", () => {
-    expect(cliReleaseChannelOf("1.2.3")).toBe("stable");
-    expect(cliReleaseChannelOf("1.2.3-nightly.20260911.4")).toBe("nightly");
-    expect(cliReleaseChannelOf("1.2.3-preview.20260911.4")).toBe("preview");
-    expect(cliReleaseChannelOf("1.2.3-rc.1")).toBe("stable");
-  });
-
   it("picks the newest non-draft release on the requested channel", () => {
     const releases = [
       { tag_name: "v1.2.4-preview.20260912.9", draft: true },

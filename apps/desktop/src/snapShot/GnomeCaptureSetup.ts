@@ -13,7 +13,6 @@ import {
 } from "./captureHelperFiles.ts";
 
 import { GNOME_CAPTURE_FILES, GNOME_CAPTURE_UUID } from "./gnomeCaptureBundle.ts";
-export { isGnomeCaptureSession } from "./linuxCaptureSession.ts";
 
 const SHELL = "org.gnome.Shell";
 const SHELL_PATH = "/org/gnome/Shell";
