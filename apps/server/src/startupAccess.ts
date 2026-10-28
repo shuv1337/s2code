@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 
+import packageJson from "../package.json" with { type: "json" };
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 
@@ -187,7 +188,7 @@ export const formatHeadlessServeOutput = (accessInfo: HeadlessServeAccessInfo): 
     `Connection string: ${accessInfo.connectionString}`,
     `Token: ${accessInfo.token}`,
     `Pairing URL: ${accessInfo.pairingUrl}`,
-    `App link: ${buildPairingAppLink(accessInfo.pairingUrl)}`,
+    `App link: ${buildPairingAppLink(accessInfo.pairingUrl, packageJson.version)}`,
     "",
     renderTerminalQrCode(accessInfo.pairingUrl),
     "",

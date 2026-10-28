@@ -201,8 +201,7 @@ function RootRouteBranch() {
         hostedStatic={authGateState.status === "hosted-static"}
       >
         {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-        {(shouldMountDesktopWebLinkCoordinator(authGateState.status) ||
-          localEnvironmentDisabled) ? (
+        {shouldMountDesktopWebLinkCoordinator(authGateState.status) || localEnvironmentDisabled ? (
           <DesktopWebLinkCoordinator />
         ) : null}
         {isElectron ? <RunningThreadKeepAlive /> : null}

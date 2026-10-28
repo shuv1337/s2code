@@ -401,9 +401,20 @@ export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors
 }
 
 // index.css paints the light bubble a step darker than the shared palette mobile uses.
+// s2code fork: index.css paints the fork palette over the standard theme.
 const STANDARD_WEB_PAINTED_COLORS: Record<ThemeAppearance, Partial<ThemeColors>> = {
-  light: { messageSurface: "#ebebed" },
-  dark: { canvas: "#000000", messageSurface: "#1e1e1e" },
+  light: {
+    canvas: "#faf8f5",
+    surface: "#ffffff",
+    surfaceRaised: "#fbf9f7",
+    messageSurface: "#ebebed",
+  },
+  dark: {
+    canvas: "#0c1119",
+    surface: "#161d28",
+    surfaceRaised: "#1f2835",
+    messageSurface: "#1e1e1e",
+  },
 };
 
 /** The standard theme as index.css paints it, for solves that measure the page. */

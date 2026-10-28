@@ -30,6 +30,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag } from "effect/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as PairingGrantStore from "../auth/PairingGrantStore.ts";
 import { WatchRestriction } from "../auth/WatchAuth.ts";
@@ -257,7 +258,7 @@ const formatPairOutput = (input: {
     renderTerminalQrCode(input.pairingUrl),
     "",
     `Pairing URL: ${input.pairingUrl}`,
-    `App link: ${buildPairingAppLink(input.pairingUrl)}`,
+    `App link: ${buildPairingAppLink(input.pairingUrl, packageJson.version)}`,
     `Token: ${input.token}`,
     `Expires: ${DateTime.formatIso(input.expiresAt)}`,
     ...input.notes.flatMap((note) => ["", `Note: ${note}`]),

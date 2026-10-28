@@ -245,6 +245,7 @@ describe("fork mobile release preflight", () => {
       expect(app.extra.clerk.publishableKey).toBeNull();
       expect(app.updates.enabled).toBe(false);
       expect(app.extra.eas).toBeUndefined();
+      expect(app.plugins).toContain("./plugins/withoutAndroidExpoObserve.cjs");
       const serialized = JSON.stringify(app);
       expect(serialized).toContain(`group.${app.ios.bundleIdentifier}`);
       expect(serialized).toContain(`${app.ios.bundleIdentifier}.widgets`);
@@ -262,6 +263,44 @@ describe("fork mobile release preflight", () => {
       id: "appMajorVersion",
       contents: "2",
     });
+  });
+  it("points Observe at the fork relay and keeps it linked when an Expo project is configured", () => {
+    const cwd = NodeURL.fileURLToPath(new URL("../apps/mobile", import.meta.url));
+    const evaluate = (relay: Record<string, string>) =>
+      JSON.parse(
+        NodeChildProcess.execFileSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            'import config from "./app.config.ts"; console.log(JSON.stringify(config));',
+          ],
+          {
+            cwd,
+            encoding: "utf8",
+            env: {
+              PATH: process.env.PATH,
+              APP_VARIANT: "production",
+              EXPO_OWNER: "fork-owner",
+              EXPO_PROJECT_ID: "00000000-0000-4000-8000-000000000000",
+              MOBILE_AUTH_ENABLED: "0",
+              MOBILE_PUSH_ENABLED: "0",
+              MOBILE_UPDATES_ENABLED: "0",
+              ...relay,
+            },
+          },
+        ),
+      );
+    const app = evaluate({
+      MOBILE_RELAY_URL: "https://relay.fork.example",
+      T3CODE_RELAY_URL: "https://relay.t3.codes",
+    });
+    expect(app.extra.relay.url).toBe("https://relay.fork.example");
+    expect(app.extra.eas.observe.endpointUrl).toBe("https://relay.fork.example/v1/mobile/observe");
+    expect(app.plugins).not.toContain("./plugins/withoutAndroidExpoObserve.cjs");
+    const relayless = evaluate({ T3CODE_RELAY_URL: "https://relay.fork.example" });
+    expect(relayless.extra.relay.url).toBeNull();
+    expect(relayless.extra.eas.observe.endpointUrl).toBe("https://observe.invalid");
   });
   it("leaves local/direct config independent of Expo accounts", () => {
     expect(resolveExpoIdentity({})).toEqual({ owner: undefined, projectId: undefined });

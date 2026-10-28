@@ -2,6 +2,7 @@ import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaGetter from "effect/SchemaGetter";
@@ -844,6 +845,32 @@ export const OrchestrationV2RemoteTaskChild = Schema.Struct({
 export type OrchestrationV2RemoteTaskChild = typeof OrchestrationV2RemoteTaskChild.Type;
 
 /**
+ * S2Code once recorded a remote task before its launch there was accepted, so stored tasks and
+ * events can lack `threadId`. Such a record never names a thread there; it decodes as no
+ * `remoteChild`, the same as a task that never reached a linked environment.
+ */
+const StoredRemoteTaskChild = Schema.Struct({
+  ...OrchestrationV2RemoteTaskChild.fields,
+  threadId: Schema.optional(ThreadId),
+});
+const OrchestrationV2RemoteTaskChildField = Schema.optional(StoredRemoteTaskChild).pipe(
+  Schema.decodeTo(
+    Schema.optional(Schema.toType(OrchestrationV2RemoteTaskChild)),
+    SchemaTransformation.transformOptional<
+      OrchestrationV2RemoteTaskChild | undefined,
+      typeof StoredRemoteTaskChild.Type | undefined
+    >({
+      decode: Option.flatMap((child) =>
+        child?.threadId === undefined
+          ? Option.none()
+          : Option.some({ ...child, threadId: child.threadId }),
+      ),
+      encode: (child) => child,
+    }),
+  ),
+);
+
+/**
  * Wire-only, for clients that opted in with `acceptDedupedBodies` or `dedupeBodies=1`: the field
  * was blanked because an earlier record on the same response or stream holds the same value.
  * Restore with `@t3tools/shared/orchestrationV2DedupedBodies`; never store or forward a marked
@@ -862,7 +889,7 @@ export const OrchestrationV2Subagent = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   providerThreadId: Schema.NullOr(ProviderThreadId),
   childThreadId: Schema.NullOr(ThreadId),
-  remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
+  remoteChild: OrchestrationV2RemoteTaskChildField,
   nativeTaskRef: Schema.NullOr(OrchestrationV2ProviderRef),
   prompt: Schema.String,
   title: Schema.NullOr(Schema.String),
@@ -1739,7 +1766,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     driver: ProviderDriverKind,
     providerInstanceId: ProviderInstanceId,
     childThreadId: Schema.NullOr(ThreadId),
-    remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
+    remoteChild: OrchestrationV2RemoteTaskChildField,
     prompt: Schema.String,
     progress: Schema.optional(Schema.String),
     result: Schema.NullOr(Schema.String),
@@ -2563,7 +2590,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     driver: ProviderDriverKind,
     providerInstanceId: ProviderInstanceId,
     childThreadId: Schema.NullOr(ThreadId),
-    remoteChild: Schema.optional(OrchestrationV2RemoteTaskChild),
+    remoteChild: OrchestrationV2RemoteTaskChildField,
     prompt: Schema.String,
     progress: Schema.optional(Schema.String),
     result: Schema.NullOr(Schema.String),

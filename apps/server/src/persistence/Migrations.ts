@@ -80,6 +80,14 @@ import Migration0070 from "./Migrations/070_PeerLinks.ts";
 import Migration0071 from "./Migrations/071_PeerLinkFence.ts";
 import Migration0072 from "./Migrations/072_WaitingLinkRequestIndex.ts";
 
+// s2code fork: fork migration 4 added this column before upstream shipped it as 71.
+const peerLinkFenceOnce = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(peer_environment_links)`;
+  if (columns.some((column) => column.name === "fenced")) return;
+  yield* Migration0071;
+});
+
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -152,7 +160,7 @@ const migrationEntries = [
   [68, "ShellStopRequestIndex", Migration0068],
   [69, "ThreadMessageSearch", Migration0069],
   [70, "PeerLinks", Migration0070],
-  [71, "PeerLinkFence", Migration0071],
+  [71, "PeerLinkFence", peerLinkFenceOnce],
   [72, "WaitingLinkRequestIndex", Migration0072],
 ] as const;
 

@@ -67,8 +67,9 @@ in the receiving app. Connection settings are under **Settings → Environments*
 on web and desktop and **Settings → Environments** on mobile. A loopback address
 such as `127.0.0.1` reaches only the device opening the link.
 
-On a computer with the desktop app, you can open the printed `t3code://pair`
-app link instead. The desktop app asks you to confirm the server address, then
+On a computer with the desktop app, you can open the printed `s2code://pair`
+app link instead (`s2code-nightly://pair` or `s2code-preview://pair` on those
+channels). The desktop app asks you to confirm the server address, then
 adds it.
 
 If your HTTPS endpoint uses a certificate from your own certificate authority,

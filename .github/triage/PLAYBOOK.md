@@ -1,4 +1,4 @@
-# T3 Code triage playbook
+# S2Code triage playbook
 
 You are a support engineer for S2Code (https://github.com/shuv1337/s2code), working
 inside a coding-agent session on the machine of a user whose install is misbehaving:
@@ -109,7 +109,7 @@ Present what you found and let the user choose: fix it now, file an issue, both,
 neither. For fixes: propose the exact commands, explain what they do, and run them
 only with the user's approval. Prefer configuration and service-level fixes.
 
-Do not patch the T3 Code source as a fix. A good issue with strong repro steps
+Do not patch the S2Code source as a fix. A good issue with strong repro steps
 helps every user; an ad-hoc local patch helps one machine until the next update.
 If the user explicitly insists on preparing a fix PR, use a separate clean clone
 of `main` for that work, never the tag-pinned diagnosis clone.

@@ -1,11 +1,24 @@
+import { requireOptionalNativeModule } from "expo";
 import Constants from "expo-constants";
-import { Observe } from "expo-observe";
 
+const extra = Constants.expoConfig?.extra;
+const relayUrl: unknown = extra?.relay?.url;
+const appVariant: unknown = extra?.appVariant;
+const projectId: unknown = extra?.eas?.projectId;
+
+// Without an Expo project ID, app.config.ts unlinks Observe on Android, so importing it would throw.
 // Importing expo-observe installs its global JS error handler; reports leave only through the relay.
-const relayUrl: unknown = Constants.expoConfig?.extra?.relay?.url;
-const appVariant: unknown = Constants.expoConfig?.extra?.appVariant;
+const Observe =
+  typeof projectId === "string" && requireOptionalNativeModule("ExpoObserve")
+    ? (require("expo-observe") as typeof import("expo-observe")).Observe
+    : null;
 
-export const crashReportingAvailable = typeof relayUrl === "string" && relayUrl.trim() !== "";
+export const crashReportingAvailable =
+  Observe !== null && typeof relayUrl === "string" && relayUrl.trim() !== "";
+
+export function reportError(error: unknown) {
+  Observe?.reportError(error);
+}
 
 interface PromiseRejectionTracker {
   readonly enablePromiseRejectionTracker?: (options: {
@@ -15,11 +28,11 @@ interface PromiseRejectionTracker {
 }
 
 // React Native tracks unhandled rejections only in development, for LogBox; Observe has no hook.
-if (!__DEV__) {
+if (!__DEV__ && Observe) {
   const hermes: PromiseRejectionTracker | undefined = Reflect.get(globalThis, "HermesInternal");
   hermes?.enablePromiseRejectionTracker?.({
     allRejections: true,
-    onUnhandled: (_id, rejection) => Observe.reportError(rejection),
+    onUnhandled: (_id, rejection) => reportError(rejection),
   });
 }
 
@@ -28,6 +41,7 @@ let latestConfiguration = 0;
 // While sending is off, a dispatch pass drops what it finds, so one runs before turning it back on.
 // Best effort: Observe skips the pass while it is backing off from a failed send.
 export async function setCrashReportsEnabled(enabled: boolean) {
+  if (!Observe) return;
   const configuration = ++latestConfiguration;
   const dispatchingEnabled = crashReportingAvailable && enabled;
   if (dispatchingEnabled) {

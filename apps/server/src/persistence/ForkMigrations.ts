@@ -10,10 +10,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import ForkMigration0001 from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import ForkMigration0002 from "./ForkMigrations/0002_WatchPairingRequests.ts";
-// Upstream peer links, unmerged upstream as 063/064.
+// Superseded by upstream 70 and 71; kept as no-ops so recorded ledgers stay valid.
 import ForkMigration0003 from "./ForkMigrations/0003_PeerLinks.ts";
 import ForkMigration0004 from "./ForkMigrations/0004_PeerLinkFence.ts";
-
 import ForkMigration0005 from "./ForkMigrations/0005_PeerLinkPublicKey.ts";
 
 export const FORK_MIGRATIONS_TABLE = "shuv_fork_sql_migrations";

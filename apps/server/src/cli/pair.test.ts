@@ -220,7 +220,10 @@ describe("t3 pair", () => {
 
         const token = /#token=([A-Z2-9]+)/.exec(output)?.[1];
         assert.isString(token);
-        assert.include(output, `App link: ${buildPairingAppLink(`${origin}/pair#token=${token}`)}`);
+        assert.include(
+          output,
+          `App link: ${buildPairingAppLink(`${origin}/pair#token=${token}`, packageJson.version)}`,
+        );
 
         const listed = yield* captureStdout(
           runCli(["auth", "pairing", "list", "--base-dir", baseDir, "--json"]),
@@ -506,7 +509,7 @@ describe("auth scope options", () => {
       if (!CliError.isCliError(error) || error._tag !== "ShowHelp") {
         assert.fail(`Expected ShowHelp, got ${String(error)}`);
       }
-      assert.deepEqual(error.commandPath, ["shuv2code", ...command]);
+      assert.deepEqual(error.commandPath, ["s2code", ...command]);
       const scopeError = error.errors[0];
       if (scopeError?._tag !== "InvalidValue") {
         assert.fail(`Expected InvalidValue, got ${String(scopeError?._tag)}`);

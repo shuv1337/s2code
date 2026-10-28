@@ -57,6 +57,7 @@ function stubWebLinks(startup: string[] = []) {
     deliver: undefined as ((url: string) => void) | undefined,
     stub: stubGlobal("desktopBridge", {
       getClientSettings: async () => null,
+      getLocalEnvironmentEnabled: () => true,
       webLinks: {
         onOpen: (listener: (url: string) => void) => {
           bridge.deliver = listener;
