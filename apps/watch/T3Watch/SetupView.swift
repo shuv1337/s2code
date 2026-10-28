@@ -80,7 +80,7 @@ struct SetupView: View {
         .disabled(isExchangingManually || origin.isEmpty || credential.isEmpty)
       }
     } footer: {
-      if showsManualEntry { Text("From `t3 pair --watch` on the environment.") }
+      if showsManualEntry { Text("From `s2code pair --watch` on the environment.") }
     }
   }
 
@@ -101,7 +101,7 @@ struct SetupView: View {
     } footer: {
       VStack(alignment: .leading, spacing: 2) {
         Text("Approve on your server:")
-        Text("t3 pair --watch --approve \(pending.userCode)").font(.caption2.monospaced())
+        Text("s2code pair --watch --approve \(pending.userCode)").font(.caption2.monospaced())
       }
     }
     Button("Cancel", role: .cancel) { model.cancelDevicePairing() }
