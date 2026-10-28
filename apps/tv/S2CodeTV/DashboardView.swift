@@ -127,11 +127,17 @@ struct DashboardView: View {
 private struct ServersView: View {
   let model: TVModel
   @State private var forgetting: WatchEnvironmentAccount?
+  @State private var forgetError: String?
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     NavigationStack {
       List {
+        if let forgetError {
+          Section {
+            Text(forgetError).foregroundStyle(.red)
+          }
+        }
         Section("Servers on this TV") {
           ForEach(model.servers) { server in
             Button {
@@ -158,11 +164,21 @@ private struct ServersView: View {
       presenting: forgetting
     ) { server in
       Button("Forget", role: .destructive) {
-        model.forget(server.id)
-        if model.servers.isEmpty { dismiss() }
+        if let message = model.forget(server.id) {
+          forgetError = message
+          // The confirmation button dismisses the dialog. Put it back so the failure stays
+          // in front of the row that is still paired.
+          let server = server
+          Task { @MainActor in forgetting = server }
+        } else {
+          forgetError = nil
+          if model.servers.isEmpty { dismiss() }
+        }
       }
     } message: { _ in
-      Text("This TV stops showing its threads. Revoke the session on the server to end it there.")
+      Text(
+        forgetError
+          ?? "This TV stops showing its threads. Revoke the session on the server to end it there.")
     }
   }
 }

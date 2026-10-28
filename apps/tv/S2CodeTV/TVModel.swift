@@ -183,18 +183,19 @@ final class TVModel {
   }
 
   /// Forgets a server on this TV. Its session stays valid on the server until revoked there.
-  func forget(_ id: String) {
+  /// Returns the keychain error and leaves the server in place when the save fails.
+  func forget(_ id: String) -> String? {
     var next = accounts
     next.remove(id)
     do {
       try accountStore.save(next)
     } catch {
-      startupError = "Could not forget the server: \(error.localizedDescription)"
-      return
+      return "Could not forget the server: \(error.localizedDescription)"
     }
     accounts = next
     feeds[id] = nil
     if accounts.accounts.isEmpty { cancelPairing() }
+    return nil
   }
 
   // MARK: Refresh
