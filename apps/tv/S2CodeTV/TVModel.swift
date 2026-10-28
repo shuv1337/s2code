@@ -409,7 +409,7 @@ struct PendingPairingStore {
   func load() throws -> PairingSession.Pending? {
     guard let data = defaults.data(forKey: Self.key) else { return nil }
     do {
-      return try JSONDecoder.watch.decode(PairingSession.Pending.self, from: data)
+      return try JSONDecoder().decode(PairingSession.Pending.self, from: data)
     } catch {
       defaults.removeObject(forKey: Self.key)
       throw error
@@ -417,7 +417,7 @@ struct PendingPairingStore {
   }
 
   func save(_ pending: PairingSession.Pending) throws {
-    let data = try JSONEncoder.watch.encode(pending)
+    let data = try JSONEncoder().encode(pending)
     defaults.set(data, forKey: Self.key)
     guard defaults.data(forKey: Self.key) == data else { throw PendingPairingError.notSaved }
   }
