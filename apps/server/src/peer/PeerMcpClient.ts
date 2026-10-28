@@ -12,7 +12,6 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
-import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
@@ -42,8 +41,6 @@ export class PeerMcpClient extends Context.Service<
       readonly arguments: Record<string, unknown>;
       readonly limits: PeerCallLimits;
       readonly success: S;
-      /** Refuse a launch replay through a replacement OAuth grant. */
-      readonly expectedLinkIdentity?: string;
     }) => Effect.Effect<S["Type"], OrchestratorMcpFailure>;
   }
 >()("t3/peer/PeerMcpClient") {}
@@ -79,6 +76,13 @@ const fromLinkError = (error: PeerLinkError) =>
     message: error.message,
   });
 
+/** Not final, so a task already running there resumes once the beta is on there again. */
+const linkedEnvironmentsOffThere = new OrchestratorMcpFailure({
+  code: "orchestration_error",
+  message:
+    "The linked environment has Linked environments turned off. Turn it on in its Settings → Labs.",
+});
+
 /** The body of an MCP response: JSON, or a single server-sent event carrying JSON. */
 const responseJson = (contentType: string | undefined, text: string) =>
   contentType?.includes("text/event-stream") === true
@@ -91,11 +95,7 @@ const responseJson = (contentType: string | undefined, text: string) =>
 
 const make = Effect.gen(function* () {
   const links = yield* PeerLinks.PeerLinks;
-  const httpClient = (yield* HttpClient.HttpClient).pipe(
-    HttpClient.transform((response) =>
-      response.pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" })),
-    ),
-  );
+  const httpClient = yield* HttpClient.HttpClient;
   // One MCP session per peer and address, reused across calls. The peer keeps
   // sessions in memory, so a restart there answers 404 and we start a new one.
   const sessions = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
@@ -133,6 +133,7 @@ const make = Effect.gen(function* () {
       limitHeader,
     );
     const sessionId = initialized.headers["mcp-session-id"];
+    if (initialized.status === 403) return yield* linkedEnvironmentsOffThere;
     if (initialized.status !== 200 || sessionId === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: initialized.status === 401 ? "capability_denied" : "orchestration_error",
@@ -142,18 +143,12 @@ const make = Effect.gen(function* () {
             : `The linked environment refused to start an MCP session (HTTP ${initialized.status}).`,
       });
     }
-    const notified = yield* post(
+    yield* post(
       url,
       token,
       { jsonrpc: "2.0", method: "notifications/initialized" },
       { ...limitHeader, "mcp-session-id": sessionId, "mcp-protocol-version": PROTOCOL_VERSION },
     );
-    if (notified.status >= 300 && notified.status < 400) {
-      return yield* new OrchestratorMcpFailure({
-        code: "orchestration_error",
-        message: "The linked environment redirected MCP initialization.",
-      });
-    }
     return sessionId;
   });
 
@@ -162,16 +157,6 @@ const make = Effect.gen(function* () {
       const resolved = yield* links
         .resolve(input.environmentId)
         .pipe(Effect.mapError(fromLinkError));
-      if (
-        input.expectedLinkIdentity !== undefined &&
-        resolved.link.launchIdentity !== input.expectedLinkIdentity
-      ) {
-        return yield* new OrchestratorMcpFailure({
-          code: "capability_denied",
-          message:
-            "The destination was linked again. Its original launch identity cannot be replayed through the replacement link.",
-        });
-      }
       const limitHeader = {
         [McpInvocationContext.MODE_LIMIT_HEADER]: `${input.limits.runtimeMode}/${input.limits.interactionMode}`,
       };
@@ -205,6 +190,7 @@ const make = Effect.gen(function* () {
             "The linked environment no longer accepts this link. It may have been revoked there; link it again.",
         });
       }
+      if (response.status === 403) return yield* linkedEnvironmentsOffThere;
       if (response.status !== 200) {
         return yield* new OrchestratorMcpFailure({
           code: "orchestration_error",

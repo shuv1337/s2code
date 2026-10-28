@@ -195,6 +195,7 @@ describe("DesktopClerk", () => {
         `setPath:userData:${userData}`,
         "requestSingleInstanceLock",
         "on:second-instance",
+        "on:open-url",
         "createClerkBridge",
       ]);
     },
@@ -239,7 +240,7 @@ describe("DesktopClerk", () => {
     },
   );
 
-  it.effect("delivers queued startup links and later links once in arrival order", () => {
+  it.effect("delivers each queued startup link once, before later links", () => {
     storageMock.mockReturnValue(storageAdapter);
     createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
     const listeners = new Map<string, (...args: unknown[]) => void>();
@@ -247,6 +248,7 @@ describe("DesktopClerk", () => {
     const first = "shuv2code-dev://new?prompt=first";
     const second = "s2code-dev://threads/env-1/thread-1";
     const later = "shuv2code-dev://new?prompt=later";
+    const launchPair = "t3code://pair?pairingUrl=https%3A%2F%2Fvps.example.com%2F%23token%3Dabc";
     const delivered = Promise.withResolvers<void>();
     const electronApp = {
       on: (name: string, listener: (...args: unknown[]) => void) =>
@@ -259,13 +261,14 @@ describe("DesktopClerk", () => {
       const clerk = yield* DesktopClerk.DesktopClerk;
       listeners.get("second-instance")?.({}, ["t3", first]);
       listeners.get("second-instance")?.({}, ["t3", second]);
+      listeners.get("open-url")?.({ preventDefault: () => undefined }, launchPair);
       assert.deepEqual(received, []);
 
       yield* clerk.configure;
       listeners.get("second-instance")!({}, ["t3", later]);
       yield* Effect.promise(() => delivered.promise);
 
-      assert.deepEqual(received, [first, second, later]);
+      assert.deepEqual(received, [launchPair, first, second, later]);
     }).pipe(
       Effect.scoped,
       Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, undefined, listeners)),
@@ -464,6 +467,7 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
         }),
     } as unknown as ElectronApp.ElectronApp["Service"];
     const received: Array<string> = [];
+    const pairLink = "t3code://pair?pairingUrl=https%3A%2F%2Fvps.example.com%2F%23token%3Dabc";
     yield* Effect.gen(function* () {
       const clerk = yield* DesktopClerk.DesktopClerk;
       yield* clerk.configure;
@@ -477,6 +481,8 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.strictEqual(open("shuv2code-dev://new?prompt=hi"), 1);
       assert.strictEqual(open("shuv2code-dev://threads/env-1/thread-1"), 1);
       assert.strictEqual(open("s2code-dev://threads/env-1/thread-1"), 1);
+      assert.strictEqual(open(pairLink), 1);
+      assert.strictEqual(open("t3code://pair"), 0);
       assert.strictEqual(open("t3code://new?prompt=hi"), 0);
       assert.strictEqual(open("shuv2code-nightly://new?prompt=hi"), 0);
       assert.strictEqual(open("shuv2code://new?prompt=hi"), 0);
@@ -489,6 +495,7 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
         "shuv2code-dev://new?prompt=hi",
         "shuv2code-dev://threads/env-1/thread-1",
         "s2code-dev://threads/env-1/thread-1",
+        pairLink,
       ]);
     }).pipe(
       Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, undefined, listeners)),

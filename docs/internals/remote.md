@@ -76,21 +76,27 @@ token in its own secret store. The other environment needs nothing new: it
 sees one more OAuth client, lists it in Connections, and revokes it there.
 Unlinking on the linking side only forgets the token.
 
+- **The Linked environments beta (`linkedEnvironmentsEnabled`) gates both
+  sides.** Off on the linking side, `PeerLinks.link`, link requests and
+  `PeerForwarding.call`/`links` refuse; `readThread`, `waitForThread` and
+  `interruptThread` do not, so a remote task already running still completes
+  and can still be cancelled. Off on the receiving side, link registrations are
+  refused and link sessions get a 403, which the linking side reports as
+  retryable so the task's follower waits rather than failing it.
+- **A tool runs in a linked environment when its parameters take
+  `OrchestratorMcpEnvironmentTarget`** as `environmentId`.
+  [`McpToolAccess.toLayer`](../../apps/server/src/mcp/McpToolAccess.ts) sends
+  such a call there once the tool's access declaration has checked the caller,
+  so a read-only or ended caller is refused before anything is sent. The
+  thread or project the call names is checked where it lives. A tool that acts
+  as the calling thread itself cannot take a linked environment.
 - **Every forwarded call carries the calling agent's modes** in
   `T3-Mode-Limit`, which the receiving `/mcp` only ever narrows the client's
   approved access with. A plan-mode agent therefore cannot start full-access
-  work through a full-access link. The tool's own access declaration also
-  runs on the linking side first, so a read-only or ended caller is refused
-  before anything is sent.
+  work through a full-access link.
 - **The token goes only to an address that proves it is the linked
-  environment.** The environment id is public, so a matching descriptor is not
-  enough: linking pins the peer's Ed25519 environment key, every address must
-  sign a fresh nonce with it ([PeerProof](../../apps/server/src/peer/PeerProof.ts)),
-  and no peer request follows a redirect. A copied descriptor, a replayed
-  proof, or an address that moved to another machine never receives the
-  token. A live relay that forwards the nonce to the real peer still passes;
-  only the transport (https or the tailnet) stands between it and the token.
-  Links made before the pin must be linked again.
+  environment**: its descriptor must report the linked environment id. A LAN
+  address that now belongs to another machine never receives it.
 - **All callers on one side share the link's single session on the other**,
   so idempotency keys are hashed with the caller's namespace before they
   leave. Without that, two agents reusing a key would collide on the far side.
@@ -98,17 +104,19 @@ Unlinking on the linking side only forgets the token.
   receiving `/mcp` sends nothing while a wait is open and T3 Connect's edge
   drops idle requests after about 100 s.
 
-**Work a link starts stays within that link.** The receiving environment knows a
-session is a peer link because the linking side registers its OAuth client with
-the `t3code-peer-link` software id, and the marker is signed into the session.
-Threads that session launches carry it as an immutable `linkOrigin`, and so do
-the subagents, forks and `create_threads` they derive. The rules live in
+**Work a link paired below full access starts stays within that link.** The
+receiving environment knows a session is a peer link because the linking side
+registers its OAuth client with the `t3code-peer-link` software id, and the
+marker is signed into the session. Threads that session launches carry it, with
+the access it was paired with, as an immutable `linkOrigin`, and so do the
+subagents, forks and `create_threads` they derive. The rules live in
 [`mcp/linkOrigin.ts`](../../apps/server/src/mcp/linkOrigin.ts) and run in the
 shared access declarations, not tool by tool:
 
 - linked work may change only threads with the same origin, not the user's own
   threads and not another link's;
-- it cannot change projects, settings or scheduled tasks;
+- it cannot change projects, settings or scheduled tasks, nor use the receiving
+  environment's own links;
 - its project setup scripts are skipped
   ([`ProjectSetupScriptRunner`](../../apps/server/src/project/ProjectSetupScriptRunner.ts)
   checks every path that runs them).
@@ -126,7 +134,10 @@ wakes the same way. Open remote tasks are followed again at startup, which is
 also what keeps restart recovery from treating them as abandoned provider work.
 
 The link is routing, not isolation: an agent the link starts runs as the
-receiving environment's user, inside the limits above.
+receiving environment's user. **A full-access link is therefore not fenced**:
+its agents can already do anything that user can, so the fence would only stop
+T3's own tools. Its work still carries `linkOrigin`, so clients show where it
+came from. A stamp without the access, from before it was recorded, is fenced.
 
 ## Hosted web is a client
 

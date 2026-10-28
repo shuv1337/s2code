@@ -1,23 +1,34 @@
 import { useAtomValue } from "@effect/atom-react";
-import { AuthMcpClientAccess, type EnvironmentId, type PeerLinkSummary } from "@t3tools/contracts";
+import { linkRequestFailureMessage } from "@t3tools/client-runtime/link-request";
+import {
+  AuthAccessWriteScope,
+  type AuthMcpClientAccess,
+  type EnvironmentId,
+  type PeerLinkSummary,
+} from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { peerLinkHealth } from "@t3tools/client-runtime/state/peerLinks";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import { PlusIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
-import { peerLinkEnvironment } from "~/state/peerLinks";
+import { mintPairingCodeOn } from "~/state/peerPairingCode";
+import { peerLinkEnvironment, useLinkableMachines } from "~/state/peerLinks";
 import { useEnvironmentQuery } from "~/state/query";
+import { useEnvironmentScope, usePreparedConnection } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { AccessOption, accessConfig } from "../auth/ConnectAgentSurface";
+import { accessConfig } from "../auth/ConnectAgentSurface";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
 import { Button } from "../ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -27,21 +38,17 @@ import {
   DialogTrigger,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { RadioGroup } from "../ui/radio-group";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
-import { useNowMinute } from "../../hooks/useNowMinute";
+import { LinkAccessPicker } from "./LinkAccessPicker";
+import { ANOTHER_ADDRESS, LinkMachineSelect } from "./LinkMachineSelect";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { searchableSetting } from "./settingsSearch";
 
 const failureToast = (title: string, description: string) =>
   toastManager.add(stackedThreadToast({ type: "error", title, description }));
 
-/**
- * Environments this one links to so its agents can work there; each link is an outside agent
- * session revoked from that environment's Connections. `environmentLabel` names the linking
- * environment when several are listed; only the first section is the search target.
- */
 export function LinkedEnvironmentsSettings({
   environmentId,
   environmentLabel,
@@ -90,13 +97,13 @@ function LinkedEnvironmentRow({
   readonly link: PeerLinkSummary;
 }) {
   const nowMinute = useNowMinute();
-  const health = peerLinkHealth(link, DateTime.makeUnsafe(`${nowMinute}:00.000Z`));
+  const health = peerLinkHealth(link, DateTime.makeUnsafe(nowMinute));
   const unlink = useAtomCommand(peerLinkEnvironment.unlink, { label: "unlink environment" });
   const canUnlink = useAtomValue(peerLinkEnvironment.unlink.permissionAtom(environmentId));
   const [busy, setBusy] = useState(false);
   const forget = async () => {
     const confirmed = await (requestConfirmDialog(
-      `Forget ${link.label}? Agents here stop working there. Revoke "T3 Code · …" in ${link.label}'s Connections to end the session there too.`,
+      `Forget ${link.label}? Agents here stop working there. Revoke "S2Code · …" in ${link.label}'s Connections to end the session there too.`,
       { variant: "destructive" },
     ) ?? Promise.resolve(false));
     if (!confirmed) return;
@@ -161,29 +168,80 @@ function LinkedEnvironmentRow({
 
 function LinkEnvironmentAction({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const [open, setOpen] = useState(false);
-  const [url, setUrl] = useState("");
+  const machines = useLinkableMachines(environmentId, open);
+  // Null until the user picks; with no other machines known, only an address is left.
+  const [choice, setChoice] = useState<string | null>(null);
+  const [address, setAddress] = useState("");
   const [pairingCode, setPairingCode] = useState("");
   const [access, setAccess] = useState<AuthMcpClientAccess>("approval-required");
   const [busy, setBusy] = useState(false);
+  // Machines whose minting already failed, so the dialog asks for a code instead.
+  const [mintFailed, setMintFailed] = useState<ReadonlySet<EnvironmentId>>(new Set());
+  // Enter then a click can both run before a re-render; this guard is synchronous.
+  const inFlight = useRef(false);
   const formId = useId();
-  const accessLabelId = `${formId}-access`;
   const link = useAtomCommand(peerLinkEnvironment.link, { label: "link environment" });
-  const reset = () => {
-    setUrl("");
-    setPairingCode("");
-    setAccess("approval-required");
+  const selected = choice ?? (machines.length === 0 ? ANOTHER_ADDRESS : null);
+  const machine = machines.find((candidate) => candidate.environmentId === selected) ?? null;
+  // This client can mint a code there when it is connected to that
+  // environment with a session that may create pairing links.
+  const targetId = machine?.environmentId ?? null;
+  const connected = usePreparedConnection(targetId);
+  const mayMint = useEnvironmentScope(targetId, AuthAccessWriteScope);
+  const canMint =
+    targetId !== null && Option.isSome(connected) && mayMint && !mintFailed.has(targetId);
+  const needsAddress = selected === ANOTHER_ADDRESS || machine?.urls.length === 0;
+  const ready =
+    selected !== null &&
+    (!needsAddress || address.trim().length > 0) &&
+    (canMint || pairingCode.trim().length > 0);
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) {
+      setChoice(null);
+      setAddress("");
+      setPairingCode("");
+      setAccess("approval-required");
+      setMintFailed(new Set());
+    }
+  };
+  // Settles to the code to link with, or null after reporting why there is none.
+  const resolvePairingCode = async () => {
+    if (!canMint || targetId === null) return pairingCode.trim();
+    const minted = await mintPairingCodeOn(targetId, access);
+    if (Result.isSuccess(minted)) return minted.success;
+    setMintFailed((failed) => new Set(failed).add(targetId));
+    failureToast("Could not link the environment", linkRequestFailureMessage(minted.failure));
+    return null;
   };
   const submit = async () => {
+    const [url, ...alternateUrls] =
+      machine === null || needsAddress ? [address.trim()] : machine.urls;
+    if (inFlight.current || !ready || url === undefined) return;
+    inFlight.current = true;
     setBusy(true);
-    const result = await link({
-      environmentId,
-      input: { url: url.trim(), pairingCode: pairingCode.trim(), access },
-    });
+    const code = await resolvePairingCode();
+    const result =
+      code === null
+        ? null
+        : await link({
+            environmentId,
+            input: {
+              url,
+              ...(alternateUrls.length > 0 ? { alternateUrls } : {}),
+              ...(machine === null
+                ? {}
+                : { expectedEnvironmentId: machine.environmentId, expectedLabel: machine.label }),
+              pairingCode: code,
+              access,
+            },
+          });
+    inFlight.current = false;
     setBusy(false);
+    if (result === null) return;
     if (result._tag === "Success") {
       toastManager.add({ type: "success", title: `Linked ${result.value.label}` });
-      reset();
-      setOpen(false);
+      handleOpenChange(false);
     } else if (!isAtomCommandInterrupted(result)) {
       failureToast("Could not link the environment", String(squashAtomCommandFailure(result)));
     }
@@ -192,10 +250,8 @@ function LinkEnvironmentAction({ environmentId }: { readonly environmentId: Envi
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        // A link that finishes after a close would still be made, and would close a reopened form.
         if (!next && busy) return;
-        setOpen(next);
-        if (!next) reset();
+        handleOpenChange(next);
       }}
     >
       <DialogTrigger
@@ -218,64 +274,81 @@ function LinkEnvironmentAction({ environmentId }: { readonly environmentId: Envi
           <form
             id={formId}
             className="space-y-4"
+            autoComplete="off"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
             }}
           >
-            <label className="block space-y-1.5">
-              <span className="block text-xs font-medium text-foreground">Address</span>
-              <Input
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://box.example.ts.net"
+            {machines.length > 0 ? (
+              <LinkMachineSelect
+                machines={machines}
+                value={selected}
                 disabled={busy}
-                autoFocus
-                nativeInput
-                spellCheck={false}
+                onChange={setChoice}
               />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="block text-xs font-medium text-foreground">Pairing code</span>
-              <Input
-                value={pairingCode}
-                onChange={(event) => setPairingCode(event.target.value)}
-                placeholder="From that environment's Connections, or t3 pair there"
-                disabled={busy}
-                autoComplete="one-time-code"
-                nativeInput
-                spellCheck={false}
-              />
-            </label>
-            <div className="space-y-2">
-              <span id={accessLabelId} className="block text-xs font-medium">
-                What agents here may do there
-              </span>
-              <RadioGroup
-                aria-labelledby={accessLabelId}
-                value={access}
-                onValueChange={(value) => setAccess(value as AuthMcpClientAccess)}
-              >
-                {AuthMcpClientAccess.literals.map((option) => (
-                  <AccessOption key={option} access={option} selected={option === access} />
-                ))}
-              </RadioGroup>
+            ) : null}
+            {machine?.linked ? (
               <p className="text-xs text-muted-foreground">
-                An agent here never gets more there than its own mode here either. Threads it starts
-                there cannot change that environment's own threads, projects or settings.
+                Already linked. Linking again renews it with the access you pick.
               </p>
-            </div>
+            ) : null}
+            {needsAddress ? (
+              <label className="block space-y-1.5">
+                <span className="block text-xs font-medium text-foreground">Address</span>
+                <Input
+                  value={address}
+                  onChange={(event) => {
+                    setAddress(event.target.value);
+                    // Machines found after typing began must not hide the address being typed.
+                    if (choice === null) setChoice(ANOTHER_ADDRESS);
+                  }}
+                  placeholder="https://box.example.ts.net"
+                  disabled={busy}
+                  autoFocus={machines.length === 0}
+                  nativeInput
+                  spellCheck={false}
+                />
+                {machine !== null ? (
+                  <span className="block text-xs text-muted-foreground">
+                    This app has no address for {machine.label} that another machine can reach.
+                    Enter its https or Tailscale address.
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
+            {selected === null || canMint ? null : (
+              <label className="block space-y-1.5">
+                <span className="block text-xs font-medium text-foreground">Pairing code</span>
+                <Input
+                  value={pairingCode}
+                  onChange={(event) => setPairingCode(event.target.value)}
+                  placeholder={
+                    machine === null
+                      ? "From that environment's Connections, or t3 pair there"
+                      : "Paste the code"
+                  }
+                  disabled={busy}
+                  autoComplete="one-time-code"
+                  nativeInput
+                  spellCheck={false}
+                />
+                {machine !== null ? (
+                  <span className="block text-xs text-muted-foreground">
+                    Create a link on {machine.label}: Settings → Connections → Create link, then
+                    paste its code here.
+                  </span>
+                ) : null}
+              </label>
+            )}
+            <LinkAccessPicker value={access} onChange={setAccess} disabled={busy} />
           </form>
         </DialogPanel>
         <DialogFooter variant="bare">
-          <Button variant="outline" type="button" disabled={busy} onClick={() => setOpen(false)}>
+          <DialogClose disabled={busy} render={<Button variant="outline" type="button" />}>
             Cancel
-          </Button>
-          <Button
-            form={formId}
-            type="submit"
-            disabled={busy || url.trim().length === 0 || pairingCode.trim().length === 0}
-          >
+          </DialogClose>
+          <Button form={formId} type="submit" disabled={busy || !ready}>
             {busy ? "Linking…" : "Link"}
           </Button>
         </DialogFooter>

@@ -13,6 +13,7 @@ import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 
@@ -62,7 +63,7 @@ const makeHarness = Effect.fn(function* (options: {
         terminals,
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadShell: options.getThreadShell ?? (() => Effect.succeed(null)),
+          getThreadShell: () => Effect.succeed(null),
         }),
         ServerSettings.layerTest(),
         NodeCrypto.layer,

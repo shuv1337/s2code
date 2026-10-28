@@ -973,9 +973,10 @@ const make = Effect.gen(function* () {
               creationSource: input.creationSource,
             })
             .pipe(
-              // An agent's launch may land on a thread a replay or concurrent same-key launch
-              // created with broader modes; the orchestrator refuses it under the thread's lock.
-              // The user's own clients launch into their own drafts, whatever modes those hold.
+              // An agent's launch can land on a thread that a replay, or a concurrent
+              // launch with the same key, created with broader modes. The orchestrator
+              // refuses the message under the thread's lock; the user's own clients
+              // launch into their own drafts, whatever modes those hold.
               input.createdBy === "agent"
                 ? Effect.provideService(DispatchModeLimit, {
                     runtimeMode: input.runtimeMode,

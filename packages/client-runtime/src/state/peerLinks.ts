@@ -7,7 +7,6 @@ import { Atom } from "effect/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
-/** Links to other environments, kept by one environment's server. */
 export function createPeerLinkEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
@@ -34,7 +33,6 @@ export function createPeerLinkEnvironmentAtoms<R, E>(
   };
 }
 
-/** Links expire after 30 days and cannot be renewed yet, so warn this long before. */
 const EXPIRY_WARNING_DAYS = 5;
 
 export type PeerLinkHealth =
@@ -44,9 +42,9 @@ export type PeerLinkHealth =
   | { readonly kind: "expired" };
 
 /**
- * `expiresInDays` is set only inside the renewal warning window. Listing only checks the peer
- * answers, so a link whose last call failed (e.g. revoked by the peer) is `failing` with the
- * recorded reason until the next successful call clears it.
+ * Listing only checks that the peer answers, so a link whose last call failed
+ * (the peer revoked it, say) is `failing` with the recorded reason; the next
+ * successful call clears it.
  */
 export function peerLinkHealth(link: PeerLinkSummary, now: DateTime.Utc): PeerLinkHealth {
   if (link.status === "expired" || DateTime.isLessThanOrEqualTo(link.expiresAt, now)) {

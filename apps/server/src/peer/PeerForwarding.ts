@@ -45,24 +45,16 @@ type Scope = McpInvocationContext.McpInvocationScope;
 export class PeerForwarding extends Context.Service<
   PeerForwarding,
   {
-    /** Runs `tool` in the linked environment `environmentId` with `params`. */
+    /**
+     * Runs `tool` in the linked environment `environmentId` with `params`. A
+     * `t3_thread_wait` goes in pieces short enough to survive any route.
+     */
     readonly call: <T extends Tool.Any>(
       scope: Scope,
       tool: T,
       environmentId: EnvironmentId,
       params: Tool.Parameters<T>,
-      options?: { readonly expectedLinkIdentity: string },
     ) => Effect.Effect<Tool.Success<T>, OrchestratorMcpFailure>;
-    /**
-     * Runs `here` unless `params.environmentId` names a linked environment, in
-     * which case `tool` runs there with the same parameters.
-     */
-    readonly route: <T extends Tool.Any, A, E, R>(
-      scope: Scope,
-      tool: T,
-      params: Tool.Parameters<T> & { readonly environmentId?: EnvironmentId | undefined },
-      here: Effect.Effect<A, E, R>,
-    ) => Effect.Effect<A | Tool.Success<T>, E | OrchestratorMcpFailure, R>;
     /** `t3_thread_read` there. */
     readonly readThread: (
       scope: Scope,
@@ -88,6 +80,13 @@ export class PeerForwarding extends Context.Service<
   }
 >()("t3/peer/PeerForwarding") {}
 
+/** What an agent hears when it names another machine while the beta is off here. */
+export const linkedEnvironmentsOff = new OrchestratorMcpFailure({
+  code: "capability_denied",
+  message:
+    "Linked environments is off on this machine, so no tool can act on another machine. Leave out environmentId to work here; the user can turn it on in Settings → Labs.",
+});
+
 /** The linked environment a call names, or nothing when it names this one. */
 export const remoteTarget = (scope: Scope, environmentId: EnvironmentId | undefined) =>
   environmentId === scope.environmentId ? undefined : environmentId;
@@ -99,9 +98,10 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
 
   /**
-   * The caller's own limits, sent with every forwarded call: the peer sees only the link's
-   * credential, so limits are enforced here. Link-started work never uses this environment's own
-   * links, since the peer would see this session rather than the originating link, breaking its fence.
+   * The caller's own limits, which travel with every forwarded call: the peer sees only the
+   * link's credential, so a caller that may not control threads here is refused here. Work a
+   * link started never uses this environment's links, since the peer would see this
+   * environment's session instead of that link, and its fence could not hold.
    */
   const callerLimits = (scope: Scope) =>
     readCaller().pipe(
@@ -130,7 +130,6 @@ const make = Effect.gen(function* () {
     success: Schema.Top,
     environmentId: EnvironmentId,
     params: unknown,
-    options?: { readonly expectedLinkIdentity: string },
   ) {
     const limits = yield* callerLimits(scope);
     const encoded = (yield* Schema.encodeUnknownEffect(parameters as Schema.Encoder<unknown>)(
@@ -153,25 +152,8 @@ const make = Effect.gen(function* () {
       arguments: args,
       limits,
       success: success as Schema.Decoder<A>,
-      ...(options === undefined ? {} : options),
     });
   });
-
-  const call: PeerForwarding["Service"]["call"] = (scope, tool, environmentId, params, options) =>
-    forward(
-      scope,
-      tool.name,
-      tool.parametersSchema,
-      tool.successSchema,
-      environmentId,
-      params,
-      options,
-    );
-
-  const route: PeerForwarding["Service"]["route"] = (scope, tool, params, here) => {
-    const target = remoteTarget(scope, params.environmentId);
-    return target === undefined ? here : call(scope, tool, target, params);
-  };
 
   const readThread: PeerForwarding["Service"]["readThread"] = (scope, environmentId, input) =>
     forward<OrchestratorMcpThreadReadResult>(
@@ -229,9 +211,37 @@ const make = Effect.gen(function* () {
     }
   });
 
+  // While the beta is off, agents start nothing over links. Tasks already running there keep
+  // following through readThread, waitForThread and interruptThread, so they still finish.
+  const requireEnabled = links.enabled.pipe(
+    Effect.flatMap((enabled) => (enabled ? Effect.void : Effect.fail(linkedEnvironmentsOff))),
+  );
+
+  const call: PeerForwarding["Service"]["call"] = (scope, tool, environmentId, params) => {
+    const forwarded: Effect.Effect<
+      Tool.Success<typeof tool>,
+      OrchestratorMcpFailure
+    > = tool.name === "t3_thread_wait"
+      ? (waitForThread(
+          scope,
+          environmentId,
+          params as OrchestratorMcpThreadWaitInput,
+        ) as Effect.Effect<Tool.Success<typeof tool>, OrchestratorMcpFailure>)
+      : forward(scope, tool.name, tool.parametersSchema, tool.successSchema, environmentId, params);
+    return Effect.andThen(requireEnabled, forwarded);
+  };
+
+  /**
+   * The next step for an agent whose machine is not linked: without it, an
+   * empty list reads as a dead end and agents go looking elsewhere.
+   */
+  const NOT_LISTED =
+    "Not listed: not linked yet. Call t3_environment_link with a hint from the user's words.";
+
   const listLinks: PeerForwarding["Service"]["links"] = Effect.fn("PeerForwarding.listLinks")(
     function* (scope) {
       yield* callerLimits(scope);
+      yield* requireEnabled;
       const listed = yield* links.list.pipe(
         Effect.mapError(
           (error) =>
@@ -248,13 +258,13 @@ const make = Effect.gen(function* () {
           expiresAt: DateTime.formatIso(link.expiresAt),
           lastError: link.lastError,
         })),
+        notListed: NOT_LISTED,
       };
     },
   );
 
   return PeerForwarding.of({
     call,
-    route,
     readThread,
     interruptThread,
     waitForThread,

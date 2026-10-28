@@ -1,6 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ServerSelfUpdateError, ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import * as Cause from "effect/Cause";

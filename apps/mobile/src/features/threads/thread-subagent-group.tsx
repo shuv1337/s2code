@@ -23,6 +23,7 @@ import { useServerConfigs } from "../../state/entities";
 import { SubagentRow } from "./SubagentRow";
 import { subagentThreadTarget } from "./threadAgentsPresentation";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
+import { subagentThreadTarget } from "./threadAgentsPresentation";
 import { WorkLogBlock } from "./work-log-layout";
 
 import { useOpenThreadInspector } from "./thread-inspector-navigation";

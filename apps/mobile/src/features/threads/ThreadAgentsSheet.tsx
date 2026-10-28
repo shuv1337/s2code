@@ -21,6 +21,7 @@ import { environmentThreadDetails } from "../../state/threads";
 import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { useEnvironments } from "../../state/environments";
 import { NativeHeader, NativeScreen } from "../../native/ThemedScreenStack";
+import { useEnvironments } from "../../state/environments";
 import { SubagentRow } from "./SubagentRow";
 import { useVisibleSecondClock } from "./use-visible-second-clock";
 import { ScreenContent } from "../../components/ui/ScreenContent";
