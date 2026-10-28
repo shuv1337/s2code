@@ -27,6 +27,13 @@ struct ThreadRef: Hashable {
   var threadId: String
 }
 
+/// Result of `GET /threads/:id`. That response is still the 280-character excerpt.
+enum ThreadDetailLoad {
+  case current(WatchThreadSummary)
+  case gone
+  case unavailable
+}
+
 /// Read-only viewer for paired environments. It reuses the Watch HTTP API and pairing, and never
 /// submits commands.
 @MainActor @Observable
@@ -76,6 +83,23 @@ final class TVModel {
 
   func thread(_ ref: ThreadRef) -> WatchThreadSummary? {
     feeds[ref.serverId]?.threads.first { $0.threadId == ref.threadId }
+  }
+
+  /// The open thread's own fetch. A row that leaves the loaded page would otherwise freeze
+  /// on the last list excerpt. A transport failure leaves the screen unchanged.
+  func loadThread(_ ref: ThreadRef) async -> ThreadDetailLoad {
+    guard let feed = feeds[ref.serverId], !feed.authRejected else { return .unavailable }
+    let generation = feed.generation
+    let client = feed.client
+    do throws(WatchClientError) {
+      let thread = try await client.thread(id: ref.threadId)
+      guard feeds[ref.serverId]?.generation == generation, !Task.isCancelled else { return .unavailable }
+      return .current(thread)
+    } catch {
+      guard feeds[ref.serverId]?.generation == generation, !Task.isCancelled else { return .unavailable }
+      if case .request(let code, _) = error, code == .threadNotFound { return .gone }
+      return .unavailable
+    }
   }
 
   // MARK: Pairing
