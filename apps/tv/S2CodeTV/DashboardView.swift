@@ -80,6 +80,17 @@ struct DashboardView: View {
               .buttonStyle(.card)
               .frame(width: 520)
             }
+            if feed.nextCursor != nil {
+              if feed.pageCount < TVModel.maxShelfPages {
+                Button("More threads") { Task { await model.loadMore(server.id) } }
+                  .buttonStyle(.card)
+                  .frame(width: 520, height: 340)
+              } else {
+                Text("Showing the latest \(feed.threads.count) threads")
+                  .foregroundStyle(.secondary)
+                  .frame(width: 520, height: 340)
+              }
+            }
           }
           .padding(.vertical, 40)
         }
@@ -105,6 +116,7 @@ struct DashboardView: View {
     guard let fetchedAt = feed.fetchedAt else { return "Loading" }
     let running = feed.threads.filter { $0.activity == .running }.count
     var parts = ["\(running) running"]
+    if feed.nextCursor != nil { parts.append("latest \(feed.threads.count)") }
     if isStale(fetchedAt: fetchedAt, now: now) {
       parts.append("updated \(ageLabel(since: fetchedAt, now: now))")
     }
@@ -115,6 +127,10 @@ struct DashboardView: View {
 private struct ServersView: View {
   let model: TVModel
   @State private var forgetting: WatchEnvironmentAccount?
+  @State private var forgetError: String?
+  /// The Forget button dismisses the dialog before we can show the failure. This puts it back
+  /// without treating that dismiss as the user closing it.
+  @State private var restoringForgetDialog = false
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
@@ -142,15 +158,35 @@ private struct ServersView: View {
     }
     .confirmationDialog(
       "Forget \(forgetting?.label ?? "this server")?",
-      isPresented: Binding(get: { forgetting != nil }, set: { if !$0 { forgetting = nil } }),
+      isPresented: Binding(
+        get: { forgetting != nil },
+        set: { presented in
+          if !presented {
+            forgetting = nil
+            if !restoringForgetDialog { forgetError = nil }
+          }
+        }
+      ),
       presenting: forgetting
     ) { server in
       Button("Forget", role: .destructive) {
-        model.forget(server.id)
-        if model.servers.isEmpty { dismiss() }
+        if let message = model.forget(server.id) {
+          forgetError = message
+          restoringForgetDialog = true
+          let server = server
+          Task { @MainActor in
+            forgetting = server
+            restoringForgetDialog = false
+          }
+        } else {
+          forgetError = nil
+          if model.servers.isEmpty { dismiss() }
+        }
       }
     } message: { _ in
-      Text("This TV stops showing its threads. Revoke the session on the server to end it there.")
+      Text(
+        forgetError
+          ?? "This TV stops showing its threads. Revoke the session on the server to end it there.")
     }
   }
 }

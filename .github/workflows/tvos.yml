@@ -1,0 +1,96 @@
+# Compiles the Apple TV app and the shared watch package. Path-filtered so an
+# unrelated PR does not take a macOS runner; packages/watch-native is included
+# because the tvOS target links that package and would otherwise break quietly.
+name: tvOS
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - apps/tv/**
+      - packages/watch-native/**
+      - .github/workflows/tvos.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/tv/**
+      - packages/watch-native/**
+      - .github/workflows/tvos.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tvos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tvos:
+    name: tvOS
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Select Xcode 26 and the tvOS 26 SDK
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          candidates=(/Applications/Xcode_26*.app)
+          if ((${#candidates[@]} == 0)); then
+            echo "Xcode 26 is not installed" >&2
+            ls /Applications | grep -i xcode >&2 || true
+            exit 1
+          fi
+          selected="${candidates[0]}"
+          for app in "${candidates[@]}"; do
+            if [[ "$(basename "$app")" > "$(basename "$selected")" ]]; then
+              selected="$app"
+            fi
+          done
+          sudo xcode-select -s "$selected"
+          version="$(xcodebuild -version)"
+          echo "$version"
+          first="${version%%$'\n'*}"
+          case "$first" in
+            "Xcode 26"*) ;;
+            *)
+              echo "Expected Xcode 26, selected $version at $selected" >&2
+              exit 1
+              ;;
+          esac
+          xcodebuild -showsdks | tee "${RUNNER_TEMP}/sdks.txt"
+          grep -E -- '-sdk appletvsimulator26(\.|$)' "${RUNNER_TEMP}/sdks.txt"
+
+      - name: Install XcodeGen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ENV_HINTS: 1
+        run: brew install xcodegen
+
+      - name: Test T3WatchKit
+        run: swift test --package-path packages/watch-native
+
+      - name: Generate the tvOS project
+        run: xcodegen generate --spec apps/tv/project.yml
+
+      - name: Build S2CodeTV for the tvOS simulator
+        run: |
+          set -euo pipefail
+          # Unsigned on purpose: this is a compile check. A simulator launch needs a
+          # signing identity for the keychain, and GitHub-hosted runners have none.
+          xcodebuild build \
+            -project apps/tv/S2CodeTV.xcodeproj \
+            -scheme S2CodeTV \
+            -destination 'generic/platform=tvOS Simulator' \
+            -derivedDataPath "${RUNNER_TEMP}/tvos-dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM=
