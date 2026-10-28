@@ -1,8 +1,12 @@
 import * as Schema from "effect/Schema";
 
+import { resolveChannelIdentity } from "./channelIdentity.ts";
+
 const PAIRING_TOKEN_PARAM = "token";
 const HOSTED_PAIRING_HOST_PARAM = "host";
 const HOSTED_PAIRING_LABEL_PARAM = "label";
+const PAIRING_APP_LINK_PARAM = "pairingUrl";
+const APP_LINK_PROTOCOL = /^(?:t3code|shuv2code|s2code)(?:-[a-z]+)?:$/;
 const SUPPORTED_REMOTE_BACKEND_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
 export const readHashParams = (url: URL): URLSearchParams =>
@@ -183,6 +187,19 @@ export const readHostedPairingRequest = (url: URL): HostedPairingRequest | null 
     token,
     label,
   };
+};
+
+/** Wraps a pairing URL in the `<scheme>://pair` link the desktop app of `version`'s channel opens. */
+export const buildPairingAppLink = (pairingUrl: string, version: string): string =>
+  `${resolveChannelIdentity(version).scheme}://pair?${new URLSearchParams([[PAIRING_APP_LINK_PARAM, pairingUrl]])}`;
+
+/** Reads the pairing URL from a `<scheme>://pair` link on any app or channel scheme. */
+export const readPairingAppLink = (value: string): string | null => {
+  if (!URL.canParse(value)) return null;
+  const url = new URL(value);
+  if (!APP_LINK_PROTOCOL.test(url.protocol) || url.host !== "pair") return null;
+  if (url.pathname !== "" && url.pathname !== "/") return null;
+  return url.searchParams.get(PAIRING_APP_LINK_PARAM)?.trim() || null;
 };
 
 export const resolveRemotePairingTarget = (input: {

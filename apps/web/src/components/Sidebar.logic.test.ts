@@ -1,5 +1,5 @@
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
-import { threadKey } from "@t3tools/client-runtime/state/entities";
+import { isThreadWorking as isSidebarThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -8,17 +8,14 @@ import { AsyncResult } from "effect/reactivity";
 import {
   archiveSelectedThreadEntries,
   deleteSelectedThreadEntries,
-  filterSidebarV2VisibleThreads,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
-  isSidebarThreadWorking,
   orderItemsByPreferredIds,
   pinOrderKeyBetween,
   resolveProjectStatusIndicator,
   resolveSidebarSweepKeys,
   resolveSidebarThreadStatus,
-  resolveSidebarV2TopStatus,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreads,
@@ -207,35 +204,6 @@ describe("sidebar thread lineage helpers", () => {
     const loopB = subagentOf("thread-loop-b", loopA.id);
     expect(resolveSidebarRowThreadId(loopA.id, environmentId, [loopA, loopB])).toBe(loopA.id);
   });
-
-  it("hides a task a linked environment runs under a listed parent, as it hides subagents", () => {
-    const environmentId = EnvironmentId.make("environment-visible");
-    const projectId = ProjectId.make("project-visible");
-    const root = makeThreadFixture({ id: ThreadId.make("thread-root"), environmentId, projectId });
-    const subagent = makeThreadFixture({
-      id: ThreadId.make("thread-subagent"),
-      environmentId,
-      projectId,
-      lineage: {
-        rootThreadId: root.id,
-        parentThreadId: root.id,
-        relationshipToParent: "subagent",
-      },
-    });
-    const delegated = makeThreadFixture({
-      id: ThreadId.make("thread-delegated-here"),
-      environmentId,
-      projectId,
-    });
-
-    expect(
-      filterSidebarV2VisibleThreads(
-        [root, subagent, delegated],
-        new Set([`${environmentId}:${projectId}`]),
-        new Set([threadKey({ environmentId, threadId: delegated.id })]),
-      ).map((thread) => thread.id),
-    ).toEqual([root.id]);
-  });
 });
 
 function makeLatestRun(overrides?: {
@@ -334,9 +302,6 @@ describe("resolveSidebarThreadStatus", () => {
     expect(
       resolveSidebarThreadStatus({ ...idle, runtime: { ...limited, status: "completed" } }),
     ).toBe("ready");
-    expect(resolveSidebarV2TopStatus({ status: "limited", isUnread: false, isWoke: false })).toBe(
-      "limited",
-    );
     expect(
       shouldRecedeSidebarThread({
         status: "limited",
@@ -1015,7 +980,6 @@ describe("unseen completion with background work", () => {
       roster: "dev server",
       task: { kind: "command" },
       status: "ready",
-      topStatus: "done",
       receded: false,
       pill: "Completed",
     },
@@ -1023,7 +987,6 @@ describe("unseen completion with background work", () => {
       roster: "dev server watchdog",
       task: { kind: "monitor" },
       status: "ready",
-      topStatus: "done",
       receded: false,
       pill: "Completed",
     },
@@ -1031,7 +994,6 @@ describe("unseen completion with background work", () => {
       roster: "awaited command",
       task: { kind: "command", awaited: true },
       status: "waiting",
-      topStatus: "waiting",
       receded: true,
       pill: "Waiting",
     },
@@ -1049,7 +1011,6 @@ describe("unseen completion with background work", () => {
 
     expect(isUnread).toBe(true);
     expect(status).toBe(expected.status);
-    expect(resolveSidebarV2TopStatus({ status, isUnread, isWoke: false })).toBe(expected.topStatus);
     expect(
       shouldRecedeSidebarThread({
         status,
@@ -1337,6 +1298,7 @@ describe("resolveSidebarRouteReveal", () => {
         routeKey: hiddenKey,
         isSearching: false,
         scopedProjectKeys,
+        delegatedUnderParent: new Set(),
         findThread,
       }),
     ).toEqual({ pendingKey: hiddenKey, widensScope: true });
@@ -1350,6 +1312,7 @@ describe("resolveSidebarRouteReveal", () => {
         routeKey: hiddenKey,
         isSearching: false,
         scopedProjectKeys,
+        delegatedUnderParent: new Set(),
         findThread,
       }),
     ).toEqual({ pendingKey: null, widensScope: false });
@@ -1365,6 +1328,7 @@ describe("resolveSidebarRouteReveal", () => {
         routeKey,
         isSearching: false,
         scopedProjectKeys,
+        delegatedUnderParent: new Set(),
         findThread,
       });
     resolve("environment-test:unlisted");
@@ -1378,6 +1342,7 @@ describe("resolveSidebarRouteReveal", () => {
         routeKey: hiddenKey,
         isSearching: true,
         scopedProjectKeys,
+        delegatedUnderParent: new Set(),
         findThread,
       }),
     ).toEqual({ pendingKey: hiddenKey, widensScope: false });

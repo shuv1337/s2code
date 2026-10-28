@@ -7,6 +7,9 @@ import { forkMigrationManifest } from "./ForkMigrations.ts";
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 import Identity from "./ForkMigrations/0001_CommandReceiptIdentity.ts";
 import Pairing from "./ForkMigrations/0002_WatchPairingRequests.ts";
+import PeerLinkPublicKey from "./ForkMigrations/0005_PeerLinkPublicKey.ts";
+import UpstreamPeerLinks from "./Migrations/070_PeerLinks.ts";
+import UpstreamPeerLinkFence from "./Migrations/071_PeerLinkFence.ts";
 
 const it = makeMethods(test);
 
@@ -111,5 +114,48 @@ it.effect("refuses to move fork migrations with upstream ones recorded after the
     const result = yield* runMigrations().pipe(Effect.result);
     assert.equal(result._tag, "Failure");
     assert.deepStrictEqual(yield* sql`SELECT * FROM effect_sql_migrations`, before);
+  }).pipe(Effect.provide(database)),
+);
+
+// Before upstream shipped peer links as 70 and 71, the fork ran the same schema
+// as its own migrations 3 and 4.
+it.effect("upgrades a database whose fork track already added peer links", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations({ toMigrationInclusive: 69 });
+    yield* Identity;
+    yield* Pairing;
+    yield* UpstreamPeerLinks;
+    yield* UpstreamPeerLinkFence;
+    yield* PeerLinkPublicKey;
+    yield* sql`CREATE TABLE shuv_fork_sql_migrations (
+      migration_id integer PRIMARY KEY NOT NULL,
+      created_at datetime NOT NULL DEFAULT current_timestamp,
+      name VARCHAR(255) NOT NULL
+    )`;
+    for (const [migration_id, name] of forkMigrationManifest) {
+      yield* sql`INSERT INTO shuv_fork_sql_migrations (migration_id, name)
+        VALUES (${migration_id}, ${name})`;
+    }
+    yield* sql`INSERT INTO peer_environment_links
+      (environment_id, secret_name, label, urls_json, access, linked_at, expires_at, fenced)
+      VALUES ('env-1', 'secret-1', 'Laptop', '[]', 'full', '2026-10-20', '2026-11-20', 1)`;
+
+    assert.deepStrictEqual(
+      yield* runMigrations(),
+      migrationManifest.filter(([id]) => id > 69).map(([id, name]) => [id, name]),
+    );
+    assert.deepStrictEqual(yield* sql`SELECT environment_id, fenced FROM peer_environment_links`, [
+      { environment_id: "env-1", fenced: 1 },
+    ]);
+    assert.deepStrictEqual(yield* runMigrations(), []);
+  }).pipe(Effect.provide(database)),
+);
+
+it.effect("restarts after upstream's own peer link migrations ran", () =>
+  Effect.gen(function* () {
+    yield* runMigrations({ toMigrationInclusive: lastUpstreamId });
+    yield* runMigrations();
+    assert.deepStrictEqual(yield* runMigrations(), []);
   }).pipe(Effect.provide(database)),
 );

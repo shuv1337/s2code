@@ -44,24 +44,26 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
-import * as PeerForwarding from "../peer/PeerForwarding.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as PeerForwarding from "../peer/PeerForwarding.ts";
+import * as PeerLinkRequests from "../peer/PeerLinkRequests.ts";
+import * as PeerLinks from "../peer/PeerLinks.ts";
 
 const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
 
-// Effect returns a declared tool failure as `isError` with its encoded payload
-// as JSON text, never as `structuredContent`.
-
 /** A task delegated here always has a local child thread. */
 const localChild = (childThreadId: ThreadId | null): ThreadId => {
   if (childThreadId === null) throw new Error("expected a local delegated child");
   return childThreadId;
 };
+
+// Effect returns a declared tool failure as `isError` with its encoded payload
+// as JSON text, never as `structuredContent`.
 
 const parentThreadId = ThreadId.make("thread:mcp-orchestrator-parent");
 const projectId = ProjectId.make("project:mcp-orchestrator");
@@ -97,7 +99,16 @@ const readDelegatedTaskStatusTranscript = Effect.fn("readDelegatedTaskStatusTran
   const text = yield* fs.readFileString(
     decodeURIComponent(delegatedTaskStatusTranscriptFile.pathname),
   );
-  return yield* decodeProviderReplayNdjson(text.replaceAll(queuedFollowupResult, followupResult));
+  const transcript = yield* decodeProviderReplayNdjson(
+    text.replaceAll(queuedFollowupResult, followupResult),
+  );
+  // The recording ends when the recorder closes the app-server while the parent
+  // turn is still open. This test keeps acting as that parent afterwards, and
+  // replaying the exit would kill the shared process and fail the parent run.
+  return {
+    ...transcript,
+    entries: transcript.entries.filter((entry) => entry.type !== "runtime_exit"),
+  };
 }, Effect.provide(NodeServices.layer));
 
 function makeProviderSnapshot(input: {
@@ -229,6 +240,8 @@ describe("orchestrator MCP toolkit", () => {
           Layer.provide(ServerSettings.layerTest()),
           Layer.provide(layerUnusedScheduledTaskStub),
           Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
+          Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
+          Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
           Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
           Layer.provideMerge(
             SecretRequests.layer.pipe(
@@ -583,7 +596,7 @@ describe("orchestrator MCP toolkit", () => {
             delegated.resultContextTransferId,
           );
           const read = yield* invoke("t3_thread_read", {
-            threadId: localChild(delegated.childThreadId),
+            threadId: delegated.childThreadId,
             limit: 100,
           });
           expect(read.isError).not.toBe(true);

@@ -42,7 +42,6 @@ import {
   ArrowRightIcon,
   GitForkIcon,
   MessageSquareIcon,
-  MinusIcon,
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
@@ -61,71 +60,19 @@ import { subagentResumedSince } from "./V2LifecycleRow.logic";
 import { Button, InlineButton } from "../ui/button";
 import { T3Wordmark } from "../T3Wordmark";
 
-const LIFECYCLE_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
-  "run_interrupt_request",
-  "run_interrupt_result",
-  "compaction",
-  "handoff",
-  "fork",
-  "subagent",
-  "thread_created",
-]);
-
-export function isV2LifecycleItem(item: OrchestrationV2TurnItem): boolean {
-  return LIFECYCLE_TYPES.has(item.type);
-}
-
 export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 
 export function V2LifecycleRow(props: {
   readonly item: OrchestrationV2TurnItem;
   readonly environmentId: EnvironmentId;
   readonly resourceSummary?: boolean | undefined;
-  readonly createdAt: string;
-  readonly timestampFormat: TimestampFormat;
   readonly runs: ReadonlyArray<HandoffTimelineRun>;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { item } = props;
-  if (item.type === "run_interrupt_request") {
-    return (
-      <div className="flex justify-end px-1 py-1" data-v2-item-type={item.type}>
-        <div className="flex max-w-[80%] items-center gap-2 text-xs text-muted-foreground">
-          <span aria-hidden="true" className="font-mono">
-            ■
-          </span>
-          <span className="font-medium">Interrupt requested</span>
-          <span aria-hidden="true" className="opacity-50">
-            ·
-          </span>
-          <span className="font-medium">{item.message}</span>
-          <span className="text-3xs text-muted-foreground">
-            {formatShortTimestamp(props.createdAt, props.timestampFormat)}
-          </span>
-        </div>
-      </div>
-    );
-  }
   if (item.type === "run_interrupt_result") {
     return (
       <TimelineSystemDivider label="Run interrupted" detail={item.message} icon={CircleStopIcon} />
-    );
-  }
-  if (item.type === "compaction") {
-    const tokenDetail =
-      item.beforeTokenCount === undefined && item.afterTokenCount === undefined
-        ? null
-        : `${item.beforeTokenCount ?? "?"} → ${item.afterTokenCount ?? "?"} tokens`;
-    const label =
-      item.status === "failed"
-        ? "Context compaction failed"
-        : item.status === "cancelled" || item.status === "interrupted"
-          ? "Context compaction stopped"
-          : item.status === "pending" || item.status === "running" || item.status === "waiting"
-            ? "Compacting context"
-            : "Context compacted";
-    return (
-      <TimelineSystemDivider label={label} detail={item.summary ?? tokenDetail} icon={MinusIcon} />
     );
   }
   if (item.type === "handoff") {
@@ -417,7 +364,6 @@ function SubagentTimelineLink(props: {
     (thread) => thread?.projection.subagents.find((agent) => agent.id === props.subagentId) ?? null,
   );
   const remote = props.remote ?? agent?.remoteChild;
-  const remoteThreadId = remote?.threadId;
   const remoteEnvironment = useEnvironment(remote?.environmentId ?? null);
   const navigate = useNavigate();
   const threadId = props.threadId;
@@ -425,26 +371,20 @@ function SubagentTimelineLink(props: {
   const open =
     threadId !== null
       ? () => props.onOpenThread(threadId)
-      : remote !== undefined && remoteThreadId !== undefined && remoteEnvironment !== null
+      : remote !== undefined && remoteEnvironment !== null
         ? () =>
             void navigate({
               to: "/$environmentId/$threadId",
-              params: buildThreadRouteParams(scopeThreadRef(remote.environmentId, remoteThreadId)),
+              params: buildThreadRouteParams(scopeThreadRef(remote.environmentId, remote.threadId)),
             })
         : null;
   const liveStatus = agent?.status ?? props.status;
   const status = props.event ? props.event.status : liveStatus;
-  const statusLabel =
-    props.event?.label ??
-    (remote !== undefined &&
-    remoteThreadId === undefined &&
-    !SETTLED_SUBAGENT_STATUSES.has(liveStatus)
-      ? "Launching"
-      : subagentStatusVisual(liveStatus).label);
+  const statusLabel = props.event?.label ?? subagentStatusVisual(liveStatus).label;
   const result = (agent?.result ?? props.result)?.trim();
   const progress = (agent?.progress ?? props.progress)?.trim();
   const settled = SETTLED_SUBAGENT_STATUSES.has(status ?? liveStatus);
-  const rawDetail = remote?.launchError ?? (settled ? result || progress : progress || result);
+  const rawDetail = settled ? result || progress : progress || result;
   const detail =
     rawDetail && !GENERIC_CHILD_END.test(rawDetail) ? plainDetail(rawDetail) || null : null;
   const failed = status === "failed";
@@ -467,7 +407,7 @@ function SubagentTimelineLink(props: {
             {props.title}
           </span>
           {remote !== undefined ? (
-            <span className="shrink-0 text-3xs text-muted-foreground">on {remote.label}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">on {remote.label}</span>
           ) : null}
         </span>
         <span

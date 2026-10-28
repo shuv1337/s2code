@@ -1,4 +1,4 @@
-import { ProjectId, type ProjectScript, ThreadId } from "@t3tools/contracts";
+import { linkOriginIsFenced, ProjectId, type ProjectScript, ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   projectScriptRuntimeEnv,
@@ -48,8 +48,8 @@ export interface ProjectSetupScriptOutputLine {
 }
 
 /**
- * A thread a linked environment started does not run this project's setup
- * script: the script is the user's own code, and the link only grants T3's
+ * A thread a link below full access started does not run this project's setup
+ * script: the script is the user's own code, and such a link only grants T3's
  * tools (see `mcp/linkOrigin.ts`).
  */
 export interface ProjectSetupScriptRunnerResultSkippedForLink {
@@ -66,7 +66,6 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectId?: string;
   readonly projectCwd?: string;
   readonly worktreePath: string;
-  readonly preferredTerminalId?: string;
   readonly trigger?: "setup" | "settle";
   readonly project?: {
     readonly id: ProjectId;
@@ -368,7 +367,8 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    if (thread?.linkOrigin !== undefined) return { status: "skipped-for-link" } as const;
+    if (thread?.linkOrigin !== undefined && linkOriginIsFenced(thread.linkOrigin))
+      return { status: "skipped-for-link" } as const;
     const suppliedProject = input.project;
     const projectById =
       suppliedProject ??
@@ -428,10 +428,9 @@ export const make = Effect.gen(function* () {
 
     // Earlier settle shells may still run foreground programs; do not type resumed settles into them.
     const terminalId =
-      input.preferredTerminalId ??
-      (trigger === "settle"
+      trigger === "settle"
         ? `settle-${script.id}-${(yield* crypto.randomUUIDv4().pipe(Effect.orDie)).slice(0, 8)}`
-        : `setup-${script.id}`);
+        : `setup-${script.id}`;
     const cwd = input.worktreePath;
     const env = {
       ...projectScriptRuntimeEnv({

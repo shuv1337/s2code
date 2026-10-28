@@ -292,6 +292,56 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
     }),
   );
 
+  it.effect("owes a stop there for a Stop here that loses the race to its result", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parent = yield* seedLiveParent("stop-after-result");
+      yield* orchestrator.dispatch({
+        type: "delegated_task.remote.request",
+        commandId: CommandId.make("command:remote-delegate:stop-after-result"),
+        parentThreadId: parent.threadId,
+        parentRunId: parent.runId,
+        parentNodeId: parent.rootNodeId,
+        task: "Run a check.",
+        driver: ProviderDriverKind.make("remote"),
+        modelSelection,
+        remoteChild,
+      });
+      const task = (yield* orchestrator.getThreadProjection(parent.threadId)).subagents[0]!;
+      const complete = {
+        type: "delegated_task.remote.complete" as const,
+        parentThreadId: parent.threadId,
+        taskId: task.id,
+      };
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:result:stop-after-result"),
+        status: "completed",
+        result: "Done there.",
+        stoppedThere: "ran-out",
+      });
+      // The parent's Stop read the task before its result landed.
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:parent-stop:stop-after-result"),
+        status: "interrupted",
+        result: "Stopped with its parent.",
+      });
+
+      const stopped = (yield* orchestrator.getThreadProjection(parent.threadId)).subagents[0]!;
+      assert.equal(stopped.status, "completed");
+      assert.equal(stopped.result, "Done there.");
+      assert.equal(stopped.remoteChild?.stoppedThere, false);
+      assert.equal(stopped.remoteChild?.stopCount, 1);
+      const open = yield* projections.getOpenRemoteDelegatedTasks;
+      assert.deepEqual(
+        open.filter((entry) => entry.parentThreadId === parent.threadId),
+        [{ parentThreadId: parent.threadId, taskId: task.id }],
+      );
+    }),
+  );
+
   it.effect("wakes its parent with the result when it completes there", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -330,6 +380,7 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
           taskId: taskId!,
           status: "completed",
           result,
+          stoppedThere: "ran-out",
         });
       yield* complete("All 412 tests pass on the box.");
       // A second report is refused, so the first result stands.
@@ -356,117 +407,5 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       assert.equal(offered.length, 1);
       assert.equal(offered[0]?.threadId, parent.threadId);
     }),
-  );
-  it.effect.each([null, RunId.make("run:accepted")])(
-    "attaches an uncertain launch after cancellation once, and rejects another destination (run=%s)",
-    (acceptedRunId) =>
-      Effect.gen(function* () {
-        const orchestrator = yield* Orchestrator.OrchestratorV2;
-        const parent = yield* seedLiveParent(`pending-attach:${acceptedRunId ?? "none"}`);
-        const commandId = (name: string) =>
-          CommandId.make(`command:pending-attach:${acceptedRunId ?? "none"}:${name}`);
-        const pending = {
-          environmentId: remoteChild.environmentId,
-          label: remoteChild.label,
-          launch: {
-            requestNamespace: "original-session",
-            clientRequestId: "original-key",
-            linkIdentity: "original-grant",
-            projectId: ProjectId.make("project:remote"),
-            title: "Remote task",
-            modelSelection,
-            delegatedFrom: {
-              environmentId: EnvironmentId.make("environment:source"),
-              threadId: parent.threadId,
-              title: "Parent",
-            },
-          },
-        };
-        const recorded = yield* orchestrator.dispatch({
-          type: "delegated_task.remote.request",
-          commandId: commandId("request"),
-          parentThreadId: parent.threadId,
-          parentRunId: parent.runId,
-          parentNodeId: parent.rootNodeId,
-          task: "Run there.",
-          driver: ProviderDriverKind.make("remote"),
-          modelSelection,
-          remoteChild: pending,
-        });
-        const taskEvent = recorded.storedEvents.find(
-          (stored) => stored.event.type === "subagent.updated",
-        );
-        assert.isTrue(taskEvent?.event.type === "subagent.updated");
-        if (taskEvent?.event.type !== "subagent.updated") return;
-        const taskId = taskEvent.event.payload.id;
-        const attach = {
-          type: "delegated_task.remote.attach" as const,
-          commandId: commandId("attach"),
-          parentThreadId: parent.threadId,
-          taskId,
-          environmentId: pending.environmentId,
-          threadId: remoteChild.threadId,
-          runId: acceptedRunId,
-          modelSelection,
-        };
-        assert.equal(
-          (yield* orchestrator
-            .dispatch({ ...attach, commandId: commandId("too-early") })
-            .pipe(Effect.flip))._tag,
-          "OrchestratorDispatchError",
-        );
-        yield* orchestrator.dispatch({
-          type: "delegated_task.remote.launch",
-          commandId: commandId("launch"),
-          parentThreadId: parent.threadId,
-          taskId,
-        });
-        yield* orchestrator.dispatch({
-          type: "delegated_task.remote.complete",
-          commandId: commandId("cancel"),
-          parentThreadId: parent.threadId,
-          taskId,
-          status: "cancelled",
-          result: "Cancelled.",
-        });
-        const offers = yield* Offers;
-        const offersBefore = yield* Ref.get(offers);
-        yield* orchestrator.dispatch(attach);
-        const repeated = yield* orchestrator.dispatch({
-          ...attach,
-          commandId: commandId("repeat"),
-        });
-        assert.equal(repeated.storedEvents.length, 0);
-        for (const changed of [
-          { environmentId: EnvironmentId.make("environment:wrong") },
-          { threadId: ThreadId.make("thread:wrong") },
-          { runId: RunId.make("run:wrong") },
-        ]) {
-          assert.equal(
-            (yield* orchestrator
-              .dispatch({
-                ...attach,
-                ...changed,
-                commandId: commandId(`wrong:${JSON.stringify(changed)}`),
-              })
-              .pipe(Effect.flip))._tag,
-            "OrchestratorDispatchError",
-          );
-        }
-        const projection = yield* orchestrator.getThreadProjection(parent.threadId);
-        const task = projection.subagents.find((candidate) => candidate.id === taskId);
-        assert.equal(task?.result, "Cancelled.");
-        assert.equal(task?.status, "cancelled");
-        assert.equal(task?.remoteChild?.threadId, remoteChild.threadId);
-        assert.equal(task?.remoteChild?.runId, attach.runId ?? undefined);
-        assert.deepEqual(task?.remoteChild?.launch, pending.launch);
-        assert.equal(
-          projection.turnItems.find(
-            (item) => item.type === "subagent" && item.subagentId === taskId,
-          )?.status,
-          "cancelled",
-        );
-        assert.deepEqual(yield* Ref.get(offers), offersBefore);
-      }),
   );
 });

@@ -22,13 +22,15 @@ import { ProviderAdapterRegistryV2 } from "../orchestration-v2/ProviderAdapterRe
 import { ThreadLaunchService } from "../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import { ThreadSearch } from "../orchestration-v2/ThreadSearch.ts";
+import { PeerForwarding } from "../peer/PeerForwarding.ts";
+import { PeerLinkRequests } from "../peer/PeerLinkRequests.ts";
+import { PeerLinks } from "../peer/PeerLinks.ts";
+import { RemoteDelegation } from "../peer/RemoteDelegation.ts";
 import { PreviewManager } from "../preview/Manager.ts";
 import { PreviewBrowser } from "../preview/PreviewBrowser.ts";
 import { ManagedProjectFolders } from "../project/ManagedProjectFolders.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { ProjectSetupScriptRunner } from "../project/ProjectSetupScriptRunner.ts";
-import { PeerForwarding } from "../peer/PeerForwarding.ts";
-import { RemoteDelegation } from "../peer/RemoteDelegation.ts";
 import { PullRequestReviewGuideService } from "../pullRequest/PullRequestReviewGuideService.ts";
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import { SecretRequests } from "../secrets/SecretRequests.ts";
@@ -51,6 +53,8 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(McpProviderSessions)({}),
   Layer.mock(OrchestratorV2)({}),
   Layer.mock(PeerForwarding)({}),
+  Layer.mock(PeerLinkRequests)({}),
+  Layer.mock(PeerLinks)({}),
   Layer.mock(PreviewAutomationBroker)({}),
   Layer.mock(PreviewBrowser)({}),
   Layer.mock(PreviewManager)({}),

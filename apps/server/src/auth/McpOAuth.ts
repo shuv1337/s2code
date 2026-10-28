@@ -14,6 +14,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   MCP_PEER_LINK_SOFTWARE_ID,
+  mcpClientScopes,
 } from "@t3tools/contracts";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
 import * as Clock from "effect/Clock";
@@ -27,6 +28,7 @@ import * as Schema from "effect/Schema";
 import { HttpServerRequest } from "effect/http";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
@@ -238,6 +240,11 @@ const make = Effect.gen(function* () {
   const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const linksEnabled = serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.linkedEnvironmentsEnabled),
+    Effect.orElseSucceed(() => false),
+  );
   const signingKey = yield* secretStore
     .getOrCreateRandom(SIGNING_SECRET_NAME, 32)
     .pipe(Effect.orDie);
@@ -316,6 +323,13 @@ const make = Effect.gen(function* () {
       }
       // RFC 7591 allows ignoring unsupported registration options; all clients use public PKCE.
       const peerLink = metadata.software_id === MCP_PEER_LINK_SOFTWARE_ID;
+      if (peerLink && !(yield* linksEnabled)) {
+        return yield* new AuthMcpRegistrationError({
+          error: "invalid_client_metadata",
+          error_description:
+            "Linked environments is off on that machine. Turn it on in its Settings → Labs.",
+        });
+      }
       return {
         clientId: signClientId(name, redirectUris, peerLink),
         name,
@@ -436,9 +450,7 @@ const make = Effect.gen(function* () {
       if (
         session === undefined ||
         !timingSafeEqualBase64Url(decision.csrfToken, session.csrfToken) ||
-        !EnvironmentAuth.mcpClientScopes(decision.access).every((scope) =>
-          session.scopes.includes(scope),
-        )
+        !mcpClientScopes(decision.access).every((scope) => session.scopes.includes(scope))
       ) {
         return yield* new McpOAuthPageError({
           description: "Your session cannot approve this request. Enter a pairing code instead.",
@@ -523,7 +535,7 @@ const make = Effect.gen(function* () {
         access_token: issued.token,
         token_type: "Bearer",
         expires_in: Math.max(0, Math.floor((issued.expiresAt.epochMilliseconds - now) / 1000)),
-        scope: encodeOAuthScope(EnvironmentAuth.mcpClientScopes(pending.access)),
+        scope: encodeOAuthScope(mcpClientScopes(pending.access)),
       };
     },
   );

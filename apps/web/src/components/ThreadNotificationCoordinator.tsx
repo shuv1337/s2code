@@ -47,8 +47,6 @@ interface NotificationState extends ThreadNotificationObservation {
 interface WatchedEnvironment {
   unsubscribe: () => void;
   previous: Map<ThreadId, NotificationState>;
-  /** The live snapshot's threads, so request and delegation changes can re-run the diff. */
-  threads: ReadonlyArray<OrchestrationV2ThreadShell> | null;
   readonly gate: ReturnType<typeof createThreadNotificationGate<ThreadId>>;
 }
 
@@ -158,7 +156,7 @@ export function startThreadNotifications(
       notification.addEventListener("click", () => {
         notification.close();
         window.focus();
-        void window.desktopBridge?.revealWindow?.().catch(() => undefined);
+        void window.desktopBridge?.revealWindow().catch(() => undefined);
         void router.navigate({
           to: "/$environmentId/$threadId",
           params: { environmentId, threadId: thread.id },
@@ -236,33 +234,20 @@ export function startThreadNotifications(
   const watchEnvironment = (environmentId: EnvironmentId): WatchedEnvironment => {
     const entry: WatchedEnvironment = {
       previous: new Map(),
-      threads: null,
       unsubscribe: () => {},
       gate: createThreadNotificationGate<ThreadId>((threadId, kind) => {
         const state = entry.previous.get(threadId);
         if (state) present(environmentId, state, kind);
       }),
     };
-    const reobserve = () => {
-      if (entry.threads !== null) observeThreads(environmentId, entry, entry.threads);
-    };
-    // Tasks on linked environments change these without touching this environment's snapshot.
-    const unsubscribeRequests = registry.subscribe(
-      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
-      reobserve,
-    );
-    const unsubscribeDelegated = registry.subscribe(
-      environmentThreadShells.delegatedUnderParentAtom,
-      reobserve,
-    );
+    let threads: ReadonlyArray<OrchestrationV2ThreadShell> | null = null;
     const unsubscribeShell = registry.subscribe(
       environmentShell.stateValueAtom(environmentId),
       (shell) => {
-        const threads =
+        threads =
           shell.status === "live" && Option.isSome(shell.snapshot)
             ? shell.snapshot.value.threads
             : null;
-        entry.threads = threads;
         if (threads !== null) {
           observeThreads(environmentId, entry, threads);
           return;
@@ -271,6 +256,17 @@ export function startThreadNotifications(
         entry.previous = new Map();
       },
       { immediate: true },
+    );
+    const reobserve = () => {
+      if (threads !== null) observeThreads(environmentId, entry, threads);
+    };
+    const unsubscribeRequests = registry.subscribe(
+      environmentThreadShells.pendingSubagentRequestsAtom(environmentId),
+      reobserve,
+    );
+    const unsubscribeDelegated = registry.subscribe(
+      environmentThreadShells.delegatedUnderParentAtom,
+      reobserve,
     );
     entry.unsubscribe = () => {
       unsubscribeShell();
@@ -318,7 +314,7 @@ export function startThreadNotifications(
     clearPending();
     const stops: Array<() => void> = [];
     if (hasDesktopNotifications(nextMode)) {
-      const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear?.(clearPending);
+      const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear(clearPending);
       window.addEventListener("focus", clearPending);
       stops.push(() => {
         unsubscribeBadgeClear?.();

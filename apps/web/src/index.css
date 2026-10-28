@@ -1,3 +1,5 @@
+/* Clerk injects its component styles into the clerk layer (clerkAppearance.cssLayerName). */
+@layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark, .dark *));
@@ -2651,4 +2653,10 @@ code {
       );
     }
   }
+}
+
+/* A workspace area with no control of its own takes F6 focus itself; keep that visible. */
+[data-workspace-area]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }

@@ -2,11 +2,11 @@ import type { ProjectionRecordField } from "../orchestration-v2/ProjectionStore.
 import {
   CommandId,
   OrchestratorMcpFailure,
-  ThreadId,
   type ProjectId,
   type ProviderInstanceId,
   type ProviderInteractionMode,
   type RuntimeMode,
+  ThreadId,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -17,18 +17,12 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import { resolveInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 
-export const unavailable = () =>
-  new OrchestratorMcpFailure({
-    code: "orchestration_error",
-    message: "The operation could not be completed.",
-  });
-
 /**
  * Threads an agent starts over MCP are `mcp:<uuid>`, and agents often paste the
  * bare uuid. The id is never rewritten, so permission checks keyed on it still
  * hold; the miss only names a live thread the caller could read by its full id.
  */
-export const threadNotFound = Effect.fn("mcp.threadNotFound")(function* (
+export const threadNotFound = Effect.fn("OrchestratorMcpService.threadNotFound")(function* (
   threads: Pick<ThreadManagement.ThreadManagementService["Service"], "getThreadShell">,
   threadId: ThreadId,
   message: string,
@@ -43,6 +37,12 @@ export const threadNotFound = Effect.fn("mcp.threadNotFound")(function* (
         : `${message} Did you mean \`${prefixed}\`?`,
   });
 });
+
+export const unavailable = () =>
+  new OrchestratorMcpFailure({
+    code: "orchestration_error",
+    message: "The operation could not be completed.",
+  });
 
 export const dispatchFailure = (
   error: OrchestratorV2Error | ThreadManagement.ThreadManagementProviderInstanceDisabledError,
@@ -119,11 +119,7 @@ export const assertTargetWithinLimits = (
     Effect.asVoid,
   );
 
-/**
- * Live: not archived, on the caller's provider instance, with an active run or a background
- * subagent that instance started. A background subagent outlives its run and calls tools with
- * its thread's credential, revoked when the provider process goes away.
- */
+/** Background subagents retain credentials until provider exit; archived threads and other instances cannot act. */
 export const isLiveCallerShell = (
   shell: Pick<
     OrchestrationV2ThreadShell,
@@ -140,12 +136,7 @@ export const isLiveCallerShell = (
     ) ??
       false));
 
-/**
- * A thread caller acts only while it owns a live run, or a background
- * subagent that run started, of a thread that is not archived, so a provider
- * token that outlived its session cannot act. An OAuth client has no run; its
- * session and ceiling are its authority.
- */
+/** Thread callers need a live run or its background subagent in an unarchived thread. OAuth clients rely on their session and ceiling. */
 export function assertLiveCaller({ caller, scope }: Caller) {
   if (caller === undefined) return Effect.void;
   return isLiveCallerShell(caller, scope.thread?.providerInstanceId)

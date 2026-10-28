@@ -3,6 +3,10 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 import { FORK_MIGRATIONS_TABLE, forkMigrationEntries } from "./ForkMigrations.ts";
 
+// Only these fork migrations were ever recorded in upstream's ledger; upstream
+// now has its own migrations named like later fork ones.
+const LEGACY_FORK_MIGRATION_IDS = new Set([1, 2]);
+
 // Fork migrations were once recorded in upstream's ledger, at 62 and 63. Move
 // them to the fork ledger, keeping when they ran, so upstream's own 62 and 63
 // run instead of being skipped. Returns the fork migrations it moved.
@@ -14,7 +18,11 @@ export const reconcileForkMigrationTrack = Effect.fn("reconcileForkMigrationTrac
         SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
       `;
       if (tables.length === 0) return [];
-      const forkIds = new Map<string, number>(forkMigrationEntries.map(([id, name]) => [name, id]));
+      const forkIds = new Map<string, number>(
+        forkMigrationEntries
+          .filter(([id]) => LEGACY_FORK_MIGRATION_IDS.has(id))
+          .map(([id, name]) => [name, id]),
+      );
       const history = yield* sql<{
         readonly migration_id: number;
         readonly name: string;

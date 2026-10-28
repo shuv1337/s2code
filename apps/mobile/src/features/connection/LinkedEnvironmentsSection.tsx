@@ -1,7 +1,10 @@
+import { offersLinkedEnvironments } from "@t3tools/client-runtime/link-request";
 import { peerLinkHealth } from "@t3tools/client-runtime/state/peerLinks";
+import { useFocusEffect } from "@react-navigation/native";
 import { AuthAccessReadScope, type EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { View } from "react-native";
+import { useCallback, useState } from "react";
+import { AppState, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { useEnvironmentServerConfig } from "../../state/entities";
@@ -10,24 +13,35 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentScope } from "../../state/session";
 import { SettingsSection } from "../settings/components/SettingsSection";
 
-/**
- * The environments one connected environment links to. Listing them needs
- * access:read, which a phone usually lacks, so this shows only for a session
- * granted it; links are made from a desktop or `t3 environment link`, and
- * revoked from the linked environment's Connections.
- */
 export function LinkedEnvironmentsSection(props: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
 }) {
   const config = useEnvironmentServerConfig(props.environmentId);
   const canRead = useEnvironmentScope(props.environmentId, AuthAccessReadScope);
-  const supported = canRead && config?.environment.capabilities.peerLinks === true;
+  const supported = canRead && offersLinkedEnvironments(config);
   const links = useEnvironmentQuery(
     supported ? peerLinkEnvironment.list({ environmentId: props.environmentId, input: {} }) : null,
   );
+  const [nowMs, setNowMs] = useState(Date.now);
+  const hasLinks = supported && (links.data?.links.length ?? 0) > 0;
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasLinks) return;
+      const updateNow = () => setNowMs(Date.now());
+      updateNow();
+      const timer = setInterval(updateNow, 60_000);
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") updateNow();
+      });
+      return () => {
+        clearInterval(timer);
+        subscription.remove();
+      };
+    }, [hasLinks]),
+  );
   if (!supported || links.error || !links.data || links.data.links.length === 0) return null;
-  const now = DateTime.nowUnsafe();
+  const now = DateTime.makeUnsafe(nowMs);
   return (
     <View className="mt-5 gap-3">
       <SettingsSection title={`Linked from ${props.environmentLabel}`}>

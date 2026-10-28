@@ -1,16 +1,17 @@
 import {
   ServerSelfUpdateError,
+  ThreadId,
   type ServerSelfUpdateCapability,
   type ServerSelfUpdateInput,
   type ServerSelfUpdateProgressEvent,
   type ServerSelfUpdateProgressStage,
   type ServerSelfUpdateResult,
-  type ThreadId,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveCliCommand } from "../cli/invocation.ts";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
+import * as HashSet from "effect/HashSet";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import {
@@ -19,7 +20,6 @@ import {
 } from "@t3tools/shared/channelIdentity";
 import packageJson from "../../package.json" with { type: "json" };
 import * as Effect from "effect/Effect";
-import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as FileSystem from "effect/FileSystem";

@@ -4,7 +4,7 @@ import { WorkspaceExtraTab } from "./WorkspaceExtraTab";
 import { SettingsRouteScreen } from "../settings/SettingsRouteScreen";
 import { WorkspaceSectionToolbar } from "./WorkspaceSectionToolbar";
 import { useNavigation } from "@react-navigation/native";
-import { use, useCallback, useMemo } from "react";
+import { use } from "react";
 import { Platform, View, useWindowDimensions } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -62,7 +62,7 @@ function WorkspaceRootTitle(props: {
   return (
     <View style={{ width: props.maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
-        brand={<CompactBrandTitle accessibilityLabel={`S2Code, ${tabTitle}`} />}
+        brand={<CompactBrandTitle accessibilityLabel={`S2Code, ${tabTitle}`} fit />}
         maxWidth={props.maxWidth}
         onPress={props.onOpenEnvironments}
       />
@@ -95,17 +95,15 @@ function WorkspaceRootContent() {
   const keyboardHeight = useKeyboardState((keyboard) => keyboard.height);
   const workspace = useWorkspaceTabs()!;
   const { state } = workspace;
-  const renderHeaderTitle = useCallback(
-    () => (
-      <WorkspaceRootTitle
-        maxWidth={Math.max(0, width - 160)}
-        onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
-      />
-    ),
-    [width, navigation],
-  );
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
+  const renderHeaderTitle = () => (
+    <WorkspaceRootTitle
+      // Settings adds its scope filter beside search.
+      maxWidth={Math.max(0, width - 160 - (settingsOpen ? 44 : 0))}
+      onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
+    />
+  );
   const tab = state.tabs[settingsOpen ? "settings" : state.selectedTab];
   const bottomClearance =
     layout.primarySidebarOverlaysContent && state.selectedTab === "usage"
@@ -125,7 +123,7 @@ function WorkspaceRootContent() {
             : keyboardHeight > 0 && tab.searchMode !== "resting"
               ? keyboardHeight + 64
               : Math.max(insets.bottom, 12) + workspaceToolbarHeight(tab.searchMode) + 16;
-  const context = useMemo(() => ({ ...workspace, bottomClearance }), [workspace, bottomClearance]);
+  const context = { ...workspace, bottomClearance };
 
   return (
     <WorkspaceTabsContext value={context}>

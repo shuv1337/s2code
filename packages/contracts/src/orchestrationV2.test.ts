@@ -8,6 +8,7 @@ import {
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
+  OrchestrationV2DomainEventJson,
   OrchestrationV2RpcSchemas,
   OrchestrationV2Subagent,
   OrchestrationV2ThreadShellJson,
@@ -22,6 +23,10 @@ const now = DateTime.makeUnsafe("2026-04-20T00:00:00.000Z");
 const decodeOrchestrationV2TurnItemJson = Schema.decodeUnknownSync(OrchestrationV2TurnItemJson);
 const encodeOrchestrationV2TurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
 const decodeOrchestrationV2Subagent = Schema.decodeUnknownSync(OrchestrationV2Subagent);
+const decodeOrchestrationV2SubagentJson = Schema.decodeUnknownSync(OrchestrationV2SubagentJson);
+const decodeOrchestrationV2DomainEventJson = Schema.decodeUnknownSync(
+  OrchestrationV2DomainEventJson,
+);
 const encodeOrchestrationV2SubagentJson = Schema.encodeSync(OrchestrationV2SubagentJson);
 const decodeOrchestrationV2ProviderThreadJson = Schema.decodeUnknownSync(
   OrchestrationV2ProviderThreadJson,
@@ -435,6 +440,56 @@ describe("orchestration V2 contracts", () => {
     expect(runtimeThread.pendingBackgroundTasks).toEqual([]);
     expect(runtimeThread.contextUsage).toBeNull();
     expect(runtimeThread.nativeMetadata).toBeNull();
+  });
+});
+
+describe("remote delegated tasks", () => {
+  const storedTask = (remoteChild: Record<string, unknown>) => ({
+    id: "task-1",
+    threadId: "thread-1",
+    runId: "run-1",
+    parentNodeId: "node-root-1",
+    origin: "app_owned",
+    createdBy: "agent",
+    driver: "codex",
+    providerInstanceId: "codex",
+    providerThreadId: null,
+    childThreadId: null,
+    remoteChild,
+    nativeTaskRef: null,
+    prompt: "Do it there",
+    title: null,
+    model: null,
+    status: "running",
+    result: null,
+    startedAt: "2026-04-20T00:00:00.000Z",
+    completedAt: null,
+    updatedAt: "2026-04-20T00:00:00.000Z",
+  });
+  const unlaunched = { environmentId: "env-remote", label: "Laptop", launchStarted: true };
+
+  it("reads tasks and events recorded before their launch there named a thread as never started", () => {
+    const decodeTask = decodeOrchestrationV2SubagentJson;
+    expect(decodeTask(storedTask(unlaunched)).remoteChild).toBeUndefined();
+    expect(
+      decodeTask(storedTask({ ...unlaunched, launchError: "refused" })).remoteChild,
+    ).toBeUndefined();
+
+    const event = decodeOrchestrationV2DomainEventJson({
+      id: "event-1",
+      threadId: "thread-1",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      type: "subagent.updated",
+      payload: storedTask(unlaunched),
+    });
+    expect(event.type === "subagent.updated" && event.payload.remoteChild).toBeUndefined();
+
+    const launched = decodeTask(storedTask({ ...unlaunched, threadId: "thread-remote" }));
+    expect(launched.remoteChild).toMatchObject({
+      environmentId: "env-remote",
+      threadId: "thread-remote",
+      label: "Laptop",
+    });
   });
 });
 
