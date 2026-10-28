@@ -80,6 +80,17 @@ struct DashboardView: View {
               .buttonStyle(.card)
               .frame(width: 520)
             }
+            if feed.nextCursor != nil {
+              if feed.pageCount < TVModel.maxShelfPages {
+                Button("More threads") { Task { await model.loadMore(server.id) } }
+                  .buttonStyle(.card)
+                  .frame(width: 520, height: 340)
+              } else {
+                Text("Showing the latest \(feed.threads.count) threads")
+                  .foregroundStyle(.secondary)
+                  .frame(width: 520, height: 340)
+              }
+            }
           }
           .padding(.vertical, 40)
         }
@@ -105,6 +116,7 @@ struct DashboardView: View {
     guard let fetchedAt = feed.fetchedAt else { return "Loading" }
     let running = feed.threads.filter { $0.activity == .running }.count
     var parts = ["\(running) running"]
+    if feed.nextCursor != nil { parts.append("latest \(feed.threads.count)") }
     if isStale(fetchedAt: fetchedAt, now: now) {
       parts.append("updated \(ageLabel(since: fetchedAt, now: now))")
     }

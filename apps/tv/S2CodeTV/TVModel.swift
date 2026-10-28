@@ -10,6 +10,10 @@ struct ServerFeed {
   var attempt: Int = 0
   var client: WatchClient
   var threads: [WatchThreadSummary] = []
+  /// Set when another page exists, so the shelf does not look complete.
+  var nextCursor: String?
+  /// Pages kept across polls. More raises this; a short tail lowers it.
+  var pageCount = 1
   var fetchedAt: Date?
   var refreshError: String?
   /// Transport failure only. HTTP, decode, and environment errors keep `refreshError` instead.
@@ -38,6 +42,8 @@ final class TVModel {
 
   /// The Watch API is request/response only, so the dashboard polls while it is on screen.
   static let refreshInterval: Duration = .seconds(5)
+  /// More walks forward, and every poll refetches those pages. Stop at four (200 threads).
+  static let maxShelfPages = 4
 
   private let accountStore: any EnvironmentAccountStore
   private var pairingTask: Task<Void, Never>?
@@ -193,11 +199,24 @@ final class TVModel {
     let generation = current.generation
     current.attempt += 1
     let attempt = current.attempt
+    let pageCount = min(max(current.pageCount, 1), Self.maxShelfPages)
     let client = current.client
     feeds[id] = current
-    let page: WatchThreadPage
+    var items: [WatchThreadSummary] = []
+    var seen = Set<String>()
+    var cursor: String?
+    var fetched = 0
     do throws(WatchClientError) {
-      page = try await client.threads(limit: WatchLimits.maxThreadPageSize)
+      while fetched < pageCount {
+        let page = try await client.threads(cursor: cursor, limit: WatchLimits.maxThreadPageSize)
+        guard isCurrent(id, generation: generation, attempt: attempt) else { return }
+        fetched += 1
+        for thread in page.items where seen.insert(thread.threadId).inserted {
+          items.append(thread)
+        }
+        cursor = page.nextCursor
+        if cursor == nil { break }
+      }
     } catch {
       guard isCurrent(id, generation: generation, attempt: attempt) else { return }
       if isCancelledRequest(error) { return }
@@ -211,10 +230,23 @@ final class TVModel {
       return
     }
     guard isCurrent(id, generation: generation, attempt: attempt) else { return }
-    feeds[id]?.threads = page.items
+    feeds[id]?.threads = items
+    feeds[id]?.nextCursor = cursor
+    feeds[id]?.pageCount = max(fetched, 1)
     feeds[id]?.fetchedAt = Date()
     feeds[id]?.refreshError = nil
     feeds[id]?.unreachable = false
+  }
+
+  /// Keeps the extra page on the next poll. The shelf refetches from the start, so raising
+  /// `pageCount` is what stops the following refresh from collapsing back to the first page.
+  func loadMore(_ id: String) async {
+    guard var current = feeds[id], current.nextCursor != nil, !current.authRejected,
+      current.pageCount < Self.maxShelfPages
+    else { return }
+    current.pageCount += 1
+    feeds[id] = current
+    await refresh(id)
   }
 
   private func isCurrent(_ id: String, generation: Int, attempt: Int) -> Bool {
