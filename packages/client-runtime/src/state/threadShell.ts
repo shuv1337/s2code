@@ -502,32 +502,6 @@ export function createEnvironmentThreadShellAtoms(input: {
     return previousThreadShells;
   }).pipe(Atom.withLabel("environment-thread-shell-list"));
 
-  let previousDelegatedUnderParent: ReadonlySet<string> = new Set();
-  const delegatedUnderParentAtom = Atom.make((get) => {
-    const environmentIds = new Set(enabledEnvironmentIds(get(input.catalogValueAtom)));
-    const next = new Set<string>();
-    for (const environmentId of environmentIds) {
-      for (const thread of get(environmentThreadsAtom(environmentId))) {
-        const parent = thread.delegatedFrom;
-        if (
-          parent !== undefined &&
-          environmentIds.has(parent.environmentId) &&
-          get(environmentThreadIndexAtom(parent.environmentId)).has(parent.threadId)
-        ) {
-          next.add(threadKey({ environmentId, threadId: thread.id }));
-        }
-      }
-    }
-    if (
-      next.size === previousDelegatedUnderParent.size &&
-      [...next].every((key) => previousDelegatedUnderParent.has(key))
-    ) {
-      return previousDelegatedUnderParent;
-    }
-    previousDelegatedUnderParent = next;
-    return next;
-  }).pipe(Atom.withLabel("environment-delegated-under-parent"));
-
   // Lists that arrange threads read this, so a running thread's streaming
   // ticks reach only what reads its live shell.
   let previousQuietThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];

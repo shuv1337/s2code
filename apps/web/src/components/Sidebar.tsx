@@ -401,7 +401,6 @@ function useSidebarThreads(input: {
     delegatedUnderParent,
     routeRowThreadKey,
   } = input;
-  const delegatedUnderParent = useDelegatedUnderParent();
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const inboxReturnsVersion = useSyncExternalStore(
     inboxReturns.subscribe,

@@ -309,7 +309,6 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ComposerSurface } from "./chat/ComposerSurface";
-import { buildThreadRouteParams } from "../threadRoutes";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
   hasAvailableCompactionProvider,

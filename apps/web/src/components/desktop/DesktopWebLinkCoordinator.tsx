@@ -96,6 +96,7 @@ export function DesktopWebLinkCoordinator() {
   const httpBaseUrl = useEnvironmentHttpBaseUrl(primaryEnvironment?.environmentId ?? null);
   const queueRef = useRef(Promise.resolve());
   const pairedUrlsRef = useRef(new Set<string>());
+  const pendingPrimaryLinksRef = useRef<string[]>([]);
   const webLinks = window.desktopBridge?.webLinks;
   // A sync IPC read; the setting only changes across a relaunch.
   const [localEnvironmentDisabled] = useState(isLocalEnvironmentDisabled);
@@ -236,7 +237,7 @@ export function DesktopWebLinkCoordinator() {
     });
   });
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to desktop web link opens over the bridge and marks the renderer ready
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases links held until the primary environment is connected
   useEffect(() => {
     if (!ready) return;
     for (const url of pendingPrimaryLinksRef.current.splice(0)) {
@@ -244,6 +245,7 @@ export function DesktopWebLinkCoordinator() {
     }
   }, [ready]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to desktop web link opens over the bridge and marks the renderer ready
   useEffect(() => {
     if (webLinks === undefined) return;
     let subscribed = true;

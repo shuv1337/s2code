@@ -13,7 +13,6 @@ import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
-import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 

@@ -2499,11 +2499,6 @@ export const layerWsRpc = (
           }),
         [WS_METHODS.serverRunStorageCleanup]: () => storageCleanup.runNow,
         [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
-        [WS_METHODS.peerLinksList]: (_input) =>
-          peerLinks.list.pipe(Effect.map((links) => ({ links }))),
-        [WS_METHODS.peerLinksLink]: (input) => peerLinks.link(input),
-        [WS_METHODS.peerLinksUnlink]: ({ environmentId }) =>
-          peerLinks.unlink(environmentId).pipe(Effect.map((removed) => ({ removed }))),
         [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
         [WS_METHODS.peerLinksList]: (_input) =>
           peerLinks.list.pipe(Effect.map((links) => ({ links }))),

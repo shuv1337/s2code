@@ -537,8 +537,6 @@ export const OrchestratorMcpThreadWaitResult = Schema.Struct({
   /** With untilDelegatedWorkSettled, once settled: the run whose reply is the thread's result. */
   resultRun: Schema.optional(Schema.Struct({ runId: RunId, status: OrchestrationV2RunStatus })),
   next: Schema.optional(OrchestratorMcpRunningTaskNext),
-  /** With untilDelegatedWorkSettled, once settled: the run whose reply is the thread's result. */
-  resultRun: Schema.optional(Schema.Struct({ runId: RunId, status: OrchestrationV2RunStatus })),
 });
 export type OrchestratorMcpThreadWaitResult = typeof OrchestratorMcpThreadWaitResult.Type;
 

@@ -492,7 +492,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         addPushTokenListener: vi.fn(),
       };
       widgetMocks.getInstances.mockReturnValue([activity] as never);
-      registerAgentAwarenessConnection(savedConnection());
       setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
       return Effect.gen(function* () {
         yield* runBackgroundOperations();

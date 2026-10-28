@@ -771,21 +771,6 @@ export const OrchestrationV2ExecutionNode = Schema.Struct({
 });
 export type OrchestrationV2ExecutionNode = typeof OrchestrationV2ExecutionNode.Type;
 
-/** Durable launch inputs and the original retry identity. No credentials. */
-export const OrchestrationV2RemoteTaskLaunch = Schema.Struct({
-  requestNamespace: Schema.String,
-  clientRequestId: Schema.String,
-  /** Nonsecret grant-generation identity; relinking must not create a replacement child. */
-  linkIdentity: Schema.String,
-  projectId: ProjectId,
-  title: Schema.String,
-  modelSelection: ModelSelection,
-  runtimeMode: Schema.optional(RuntimeMode),
-  interactionMode: Schema.optional(ProviderInteractionMode),
-  delegatedFrom: OrchestrationV2DelegatedFrom,
-});
-export type OrchestrationV2RemoteTaskLaunch = typeof OrchestrationV2RemoteTaskLaunch.Type;
-
 /** Append-only: phases discovered at runtime join when they start. */
 export const OrchestrationV2WorkflowPhase = Schema.Struct({
   index: NonNegativeInt,
@@ -840,14 +825,8 @@ export type OrchestrationV2SubagentWorkflow = typeof OrchestrationV2SubagentWork
  */
 export const OrchestrationV2RemoteTaskChild = Schema.Struct({
   environmentId: EnvironmentId,
-  /** Unset until the accepted launch is attached to the durable source task. */
-  threadId: Schema.optional(ThreadId),
+  threadId: ThreadId,
   label: Schema.String,
-  launch: Schema.optional(OrchestrationV2RemoteTaskLaunch),
-  /** Committed before network I/O: an absent receipt may now mean acceptance is unknown. */
-  launchStarted: Schema.optional(Schema.Boolean),
-  /** Recovery was refused; already-accepted work may still be running there. */
-  launchError: Schema.optional(Schema.String),
   /** The run there that carries the task; absent on tasks recorded before it was kept. */
   runId: Schema.optional(RunId),
   /**
@@ -871,32 +850,6 @@ export type OrchestrationV2RemoteTaskChild = typeof OrchestrationV2RemoteTaskChi
  * value. Clients restore only these fields, so blanking another field needs a new opt-in.
  */
 const DedupedBodyMarker = Schema.optionalKey(Schema.Literal(true));
-
-/**
- * Where an app-owned task runs when it runs in a linked environment instead
- * of in a child thread here: that environment and the ordinary thread it runs
- * as there. Such a task has no `childThreadId`.
- */
-export const OrchestrationV2RemoteTaskChild = Schema.Struct({
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-  label: Schema.String,
-  /** The run there that carries the task; absent on tasks recorded before it was kept. */
-  runId: Schema.optional(RunId),
-  /**
-   * Nothing is left to stop there: a stop reached it, was refused for good, or the thread
-   * or link is gone. A run ending there by itself sets it too, unless the task here was
-   * cancelled or stopped and still owes a stop, which its follower keeps sending across
-   * restarts. `false`: a Stop here owes one to a task that already had its result.
-   */
-  stoppedThere: Schema.optional(Schema.Boolean),
-  /**
-   * Stops asked for here once the task had its result. The count names the
-   * one owed, so each reaches the thread there once however often it is sent.
-   */
-  stopCount: Schema.optional(NonNegativeInt),
-});
-export type OrchestrationV2RemoteTaskChild = typeof OrchestrationV2RemoteTaskChild.Type;
 
 export const OrchestrationV2Subagent = Schema.Struct({
   id: NodeId,

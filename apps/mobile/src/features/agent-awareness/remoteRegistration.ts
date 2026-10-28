@@ -925,7 +925,7 @@ function scheduleActiveLiveActivityRegistrationRetry(): void {
   }, REMOTE_ACTIVITY_REGISTRATION_RETRY_MS);
 }
 
-const refreshActiveLiveActivityRemoteRegistration = Effect.fn(
+export const refreshActiveLiveActivityRemoteRegistration = Effect.fn(
   "remoteRegistration.refreshActiveLiveActivityRemoteRegistration",
 )(function* (): Effect.fn.Return<void, never, ManagedRelay.ManagedRelayClient> {
   if (!canRegisterRemoteLiveActivities() || !relayTokenProvider) {
