@@ -37,12 +37,35 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
-      - name: Require the tvOS simulator SDK
+      - name: Select Xcode 26 and the tvOS 26 SDK
         run: |
           set -euo pipefail
-          xcodebuild -version
+          shopt -s nullglob
+          candidates=(/Applications/Xcode_26*.app)
+          if ((${#candidates[@]} == 0)); then
+            echo "Xcode 26 is not installed" >&2
+            ls /Applications | grep -i xcode >&2 || true
+            exit 1
+          fi
+          selected="${candidates[0]}"
+          for app in "${candidates[@]}"; do
+            if [[ "$(basename "$app")" > "$(basename "$selected")" ]]; then
+              selected="$app"
+            fi
+          done
+          sudo xcode-select -s "$selected"
+          version="$(xcodebuild -version)"
+          echo "$version"
+          first="${version%%$'\n'*}"
+          case "$first" in
+            "Xcode 26"*) ;;
+            *)
+              echo "Expected Xcode 26, selected $version at $selected" >&2
+              exit 1
+              ;;
+          esac
           xcodebuild -showsdks | tee "${RUNNER_TEMP}/sdks.txt"
-          grep -E 'Simulator - tvOS' "${RUNNER_TEMP}/sdks.txt"
+          grep -E -- '-sdk appletvsimulator26(\.|$)' "${RUNNER_TEMP}/sdks.txt"
 
       - name: Install XcodeGen
         env:
