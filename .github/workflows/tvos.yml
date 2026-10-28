@@ -4,6 +4,7 @@
 name: tvOS
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - apps/tv/**
