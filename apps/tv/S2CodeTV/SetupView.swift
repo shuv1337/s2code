@@ -23,11 +23,7 @@ struct SetupView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     #if DEBUG
       // Simulators cannot drive the tvOS keyboard: `-S2CodeTVPairOrigin http://host:port`.
-      .task {
-        if let origin = UserDefaults.standard.string(forKey: "S2CodeTVPairOrigin") {
-          try? model.startPairing(origin: origin)
-        }
-      }
+      .task { model.consumeLaunchPairOrigin() }
     #endif
   }
 
@@ -72,7 +68,7 @@ struct SetupView: View {
         .font(.title2)
       Text(pending.userCode)
         .font(.system(size: 120, weight: .bold, design: .monospaced))
-      Text("shuv2code pair --watch --approve \(pending.userCode)")
+      Text("s2code pair --watch --approve \(pending.userCode)")
         .font(.body.monospaced())
         .foregroundStyle(.secondary)
       Button("Cancel") { model.cancelPairing() }

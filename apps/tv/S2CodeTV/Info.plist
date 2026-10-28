@@ -2,10 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Servers are often `npx t3` on the LAN or tailnet over plain HTTP, as for the iPhone and Watch. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>S2Code connects to a server on your local network to show your agents.</string>
+  <!-- Plain HTTP only for local hosts. Public and tailnet names need HTTPS. -->
   <key>NSAppTransportSecurity</key>
   <dict>
-    <key>NSAllowsArbitraryLoads</key>
+    <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
 </dict>

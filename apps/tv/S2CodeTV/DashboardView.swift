@@ -98,9 +98,10 @@ struct DashboardView: View {
 
   private func status(_ feed: ServerFeed, now: Date) -> String {
     if feed.authRejected { return "Session rejected · pair again" }
-    if let error = feed.refreshError {
-      return feed.fetchedAt == nil ? error : "Offline · last known state"
+    if feed.unreachable {
+      return feed.fetchedAt == nil ? (feed.refreshError ?? "Offline") : "Offline · last known state"
     }
+    if let error = feed.refreshError { return error }
     guard let fetchedAt = feed.fetchedAt else { return "Loading" }
     let running = feed.threads.filter { $0.activity == .running }.count
     var parts = ["\(running) running"]

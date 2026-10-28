@@ -23,7 +23,8 @@ targets:
         # Merged with the generated keys; carries the ATS exception INFOPLIST_KEY_* cannot express.
         INFOPLIST_FILE: S2CodeTV/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: S2Code
-        DEVELOPMENT_TEAM: 7H54B326YZ
+        # Per developer. Export S2CODE_DEVELOPMENT_TEAM, or pass DEVELOPMENT_TEAM to xcodebuild.
+        DEVELOPMENT_TEAM: "$(S2CODE_DEVELOPMENT_TEAM)"
         SWIFT_VERSION: "6.0"
         CODE_SIGN_STYLE: Automatic
 schemes:
