@@ -1,6 +1,9 @@
 import Foundation
 import Observation
+import os
 import T3WatchKit
+
+private let pairingLog = Logger(subsystem: "dev.shuv.s2code.tv", category: "pairing")
 
 /// One paired server's last fetched page. Each server refreshes independently, so an offline one
 /// shows its last known state without holding up the others.
@@ -14,6 +17,8 @@ struct ServerFeed {
   var nextCursor: String?
   /// Pages kept across polls. More raises this; a short tail lowers it.
   var pageCount = 1
+  /// Last time pages after the first were fetched. The 5s poll does not refresh them.
+  var deepFetchedAt: Date?
   var fetchedAt: Date?
   var refreshError: String?
   /// Transport failure only. HTTP, decode, and environment errors keep `refreshError` instead.
@@ -49,21 +54,25 @@ final class TVModel {
 
   /// The Watch API is request/response only, so the dashboard polls while it is on screen.
   static let refreshInterval: Duration = .seconds(5)
-  /// More walks forward, and every poll refetches those pages. Stop at four (200 threads).
+  /// Pages after the first change slowly. Refetching them on the 5s poll would restamp every card.
+  static let deepRefreshInterval: TimeInterval = 30
+  /// More walks forward. Stop at four pages (200 threads).
   static let maxShelfPages = 4
 
   private let accountStore: any EnvironmentAccountStore
-  private let pairingStore: PairingStore?
+  /// tvOS purges application-support files. This code has to survive that, and it is tiny.
+  private let pendingCodes = PendingPairingStore()
+  private var savedPending: PairingSession.Pending?
   private var pairingTask: Task<Void, Never>?
   private var pairingGeneration = 0
   private var feedGeneration = 0
+  private(set) var pairingPersistError: String?
   #if DEBUG
     private var didConsumeLaunchPairOrigin = false
   #endif
 
   init(accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
     self.accountStore = accountStore
-    self.pairingStore = try? PairingStore.applicationSupport()
     do {
       accounts = try accountStore.load() ?? WatchEnvironmentAccounts()
     } catch {
@@ -115,7 +124,16 @@ final class TVModel {
   /// A relaunch while the code is on screen keeps polling it. The bootstrap credential is
   /// single-use, so a kill after approval learns from the server that it was consumed.
   func resumePairing() async {
-    guard !pairing.isActive, let pending = await pairingStore?.pending else { return }
+    guard !pairing.isActive else { return }
+    let pending: PairingSession.Pending
+    do {
+      guard let stored = try pendingCodes.load() else { return }
+      pending = stored
+    } catch {
+      reportPairingStoreFailure(error)
+      return
+    }
+    savedPending = pending
     addingServer = true
     begin(PairingSession(resuming: pending))
   }
@@ -130,7 +148,8 @@ final class TVModel {
       pairingLabel = pending.environment.label
     }
     pairing = session.state
-    let runner = PairingRunner(store: pairingStore, clientLabel: "S2Code Apple TV")
+    // No file store: its cancellation clears whatever is on disk, including a newer code.
+    let runner = PairingRunner(store: nil, clientLabel: "S2Code Apple TV")
     pairingTask = Task { [weak self] in
       await previous?.value
       guard let self, generation == self.pairingGeneration else { return }
@@ -147,18 +166,12 @@ final class TVModel {
 
   func cancelPairing() {
     pairingGeneration += 1
-    let generation = pairingGeneration
     pairingTask?.cancel()
-    pairingTask = nil
+    // Keep the task. The next begin() waits for this cancellation; dropping the handle let
+    // it finish later and erase a code the new attempt had already saved.
     pairing = .idle
     pairingLabel = nil
-    // The runner clears the code when it observes cancellation. This also covers a cancel
-    // that lands before the runner starts, and it bails if a newer pairing has begun.
-    let store = pairingStore
-    Task {
-      guard generation == pairingGeneration else { return }
-      try? await store?.clear()
-    }
+    clearStoredPairing()
   }
 
   #if DEBUG
@@ -179,7 +192,42 @@ final class TVModel {
   private func setPairing(_ state: PairingSession.State, generation: Int) {
     guard generation == pairingGeneration, !Task.isCancelled else { return }
     pairing = state
-    if case .waitingForApproval(let pending, _) = state { pairingLabel = pending.environment.label }
+    switch state {
+    case .waitingForApproval(let pending, _):
+      pairingLabel = pending.environment.label
+      storePending(pending)
+    case .idle, .paired, .denied, .expired, .failed:
+      clearStoredPairing()
+    case .starting, .approved, .exchanging:
+      break
+    }
+  }
+
+  private func storePending(_ pending: PairingSession.Pending) {
+    guard pending != savedPending else { return }
+    do {
+      try pendingCodes.save(pending)
+      savedPending = pending
+      pairingPersistError = nil
+    } catch {
+      reportPairingStoreFailure(error)
+    }
+  }
+
+  /// Deletes only the code this attempt stored. A newer code under the same key is left alone.
+  private func clearStoredPairing() {
+    guard let saved = savedPending else { return }
+    do {
+      try pendingCodes.clear(matching: saved.deviceCode)
+      savedPending = nil
+    } catch {
+      reportPairingStoreFailure(error)
+    }
+  }
+
+  private func reportPairingStoreFailure(_ error: Error) {
+    pairingLog.error("Pending pairing store failed: \(error.localizedDescription, privacy: .public)")
+    pairingPersistError = error.localizedDescription
   }
 
   /// The bootstrap credential is single-use: a failure after the exchange means pairing again.
@@ -245,20 +293,26 @@ final class TVModel {
     }
   }
 
-  func refresh(_ id: String) async {
+  func refresh(_ id: String, deep: Bool = false) async {
     guard var current = feeds[id], !current.authRejected else { return }
     let generation = current.generation
     current.attempt += 1
     let attempt = current.attempt
-    let pageCount = min(max(current.pageCount, 1), Self.maxShelfPages)
+    let keptPageCount = min(max(current.pageCount, 1), Self.maxShelfPages)
+    let deepDue = current.deepFetchedAt.map {
+      Date().timeIntervalSince($0) >= Self.deepRefreshInterval
+    } ?? (keptPageCount > 1)
+    let pages = (deep || deepDue) ? keptPageCount : 1
     let client = current.client
+    let previousThreads = current.threads
+    let previousCursor = current.nextCursor
     feeds[id] = current
     var items: [WatchThreadSummary] = []
     var seen = Set<String>()
     var cursor: String?
     var fetched = 0
     do throws(WatchClientError) {
-      while fetched < pageCount {
+      while fetched < pages {
         let page = try await client.threads(cursor: cursor, limit: WatchLimits.maxThreadPageSize)
         guard isCurrent(id, generation: generation, attempt: attempt) else { return }
         fetched += 1
@@ -281,23 +335,31 @@ final class TVModel {
       return
     }
     guard isCurrent(id, generation: generation, attempt: attempt) else { return }
-    feeds[id]?.threads = items
-    feeds[id]?.nextCursor = cursor
-    feeds[id]?.pageCount = max(fetched, 1)
+    // A 5s poll rewrites page 1 only. Deeper cards stay until the slow pass, unless the
+    // server now fits on the first page.
+    if pages > 1 || cursor == nil || keptPageCount <= 1 {
+      feeds[id]?.threads = items
+      feeds[id]?.nextCursor = cursor
+      feeds[id]?.pageCount = max(fetched, 1)
+      if pages > 1 { feeds[id]?.deepFetchedAt = Date() }
+    } else {
+      let extra = previousThreads.filter { !seen.contains($0.threadId) }
+      feeds[id]?.threads = items + extra
+      feeds[id]?.nextCursor = previousCursor
+    }
     feeds[id]?.fetchedAt = Date()
     feeds[id]?.refreshError = nil
     feeds[id]?.unreachable = false
   }
 
-  /// Keeps the extra page on the next poll. The shelf refetches from the start, so raising
-  /// `pageCount` is what stops the following refresh from collapsing back to the first page.
+  /// Asks the next refresh to keep one more page, and fetches that page now.
   func loadMore(_ id: String) async {
     guard var current = feeds[id], current.nextCursor != nil, !current.authRejected,
       current.pageCount < Self.maxShelfPages
     else { return }
     current.pageCount += 1
     feeds[id] = current
-    await refresh(id)
+    await refresh(id, deep: true)
   }
 
   private func isCurrent(_ id: String, generation: Int, attempt: Int) -> Bool {
@@ -337,4 +399,42 @@ final class TVModel {
 
 struct OriginError: LocalizedError {
   var errorDescription: String? { "Enter the server URL, for example http://host:13773." }
+}
+
+/// In-progress device code. UserDefaults is one of the few stores tvOS does not purge.
+struct PendingPairingStore {
+  static let key = "S2CodeTV.pendingPairing"
+  var defaults: UserDefaults = .standard
+
+  func load() throws -> PairingSession.Pending? {
+    guard let data = defaults.data(forKey: Self.key) else { return nil }
+    do {
+      return try JSONDecoder.watch.decode(PairingSession.Pending.self, from: data)
+    } catch {
+      defaults.removeObject(forKey: Self.key)
+      throw error
+    }
+  }
+
+  func save(_ pending: PairingSession.Pending) throws {
+    let data = try JSONEncoder.watch.encode(pending)
+    defaults.set(data, forKey: Self.key)
+    guard defaults.data(forKey: Self.key) == data else { throw PendingPairingError.notSaved }
+  }
+
+  /// Removes `deviceCode` only. A code saved by a later attempt stays put.
+  func clear(matching deviceCode: String) throws {
+    guard let stored = try load() else { return }
+    guard stored.deviceCode == deviceCode else { return }
+    defaults.removeObject(forKey: Self.key)
+    if defaults.data(forKey: Self.key) != nil { throw PendingPairingError.notCleared }
+  }
+}
+
+struct PendingPairingError: LocalizedError {
+  static let notSaved = PendingPairingError("The pairing code could not be saved on this Apple TV.")
+  static let notCleared = PendingPairingError("The pairing code could not be removed on this Apple TV.")
+
+  var errorDescription: String?
+  init(_ errorDescription: String) { self.errorDescription = errorDescription }
 }

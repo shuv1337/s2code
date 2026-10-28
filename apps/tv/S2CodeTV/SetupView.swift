@@ -52,7 +52,7 @@ struct SetupView: View {
           model.addingServer = false
         }
       }
-      if let message = error ?? outcome ?? model.startupError {
+      if let message = error ?? outcome ?? model.pairingPersistError ?? model.startupError {
         Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
       }
     }
@@ -67,6 +67,9 @@ struct SetupView: View {
       Text("s2code pair --watch --approve \(pending.userCode)")
         .font(.body.monospaced())
         .foregroundStyle(.secondary)
+      if let message = model.pairingPersistError {
+        Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      }
       Button("Cancel") { model.cancelPairing() }
     }
   }

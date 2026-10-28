@@ -128,16 +128,14 @@ private struct ServersView: View {
   let model: TVModel
   @State private var forgetting: WatchEnvironmentAccount?
   @State private var forgetError: String?
+  /// The Forget button dismisses the dialog before we can show the failure. This puts it back
+  /// without treating that dismiss as the user closing it.
+  @State private var restoringForgetDialog = false
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     NavigationStack {
       List {
-        if let forgetError {
-          Section {
-            Text(forgetError).foregroundStyle(.red)
-          }
-        }
         Section("Servers on this TV") {
           ForEach(model.servers) { server in
             Button {
@@ -160,16 +158,26 @@ private struct ServersView: View {
     }
     .confirmationDialog(
       "Forget \(forgetting?.label ?? "this server")?",
-      isPresented: Binding(get: { forgetting != nil }, set: { if !$0 { forgetting = nil } }),
+      isPresented: Binding(
+        get: { forgetting != nil },
+        set: { presented in
+          if !presented {
+            forgetting = nil
+            if !restoringForgetDialog { forgetError = nil }
+          }
+        }
+      ),
       presenting: forgetting
     ) { server in
       Button("Forget", role: .destructive) {
         if let message = model.forget(server.id) {
           forgetError = message
-          // The confirmation button dismisses the dialog. Put it back so the failure stays
-          // in front of the row that is still paired.
+          restoringForgetDialog = true
           let server = server
-          Task { @MainActor in forgetting = server }
+          Task { @MainActor in
+            forgetting = server
+            restoringForgetDialog = false
+          }
         } else {
           forgetError = nil
           if model.servers.isEmpty { dismiss() }
