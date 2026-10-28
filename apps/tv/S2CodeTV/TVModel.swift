@@ -53,6 +53,7 @@ final class TVModel {
   static let maxShelfPages = 4
 
   private let accountStore: any EnvironmentAccountStore
+  private let pairingStore: PairingStore?
   private var pairingTask: Task<Void, Never>?
   private var pairingGeneration = 0
   private var feedGeneration = 0
@@ -62,6 +63,7 @@ final class TVModel {
 
   init(accountStore: any EnvironmentAccountStore = KeychainEnvironmentAccountStore()) {
     self.accountStore = accountStore
+    self.pairingStore = try? PairingStore.applicationSupport()
     do {
       accounts = try accountStore.load() ?? WatchEnvironmentAccounts()
     } catch {
@@ -69,7 +71,7 @@ final class TVModel {
     }
     for account in accounts.accounts { feeds[account.id] = feed(for: account) }
     #if DEBUG
-      // See SetupView: `-S2CodeTVPairOrigin` pairs that origin when it is not paired yet.
+      // `-S2CodeTVPairOrigin` opens setup when that origin is not paired yet.
       if let origin = UserDefaults.standard.string(forKey: "S2CodeTVPairOrigin"),
         let url = try? Self.parseOrigin(origin),
         !accounts.accounts.contains(where: { $0.credentials.origin == url })
@@ -107,14 +109,28 @@ final class TVModel {
   /// Shows a code on the TV to approve on the server with `s2code pair --watch --approve CODE`.
   func startPairing(origin: String) throws {
     let url = try Self.parseOrigin(origin)
+    begin(PairingSession().applying(.start(origin: url), now: Date()))
+  }
+
+  /// A relaunch while the code is on screen keeps polling it. The bootstrap credential is
+  /// single-use, so a kill after approval learns from the server that it was consumed.
+  func resumePairing() async {
+    guard !pairing.isActive, let pending = await pairingStore?.pending else { return }
+    addingServer = true
+    begin(PairingSession(resuming: pending))
+  }
+
+  private func begin(_ session: PairingSession) {
     pairingGeneration += 1
     let generation = pairingGeneration
     pairingTask?.cancel()
     let previous = pairingTask
     pairingLabel = nil
-    let session = PairingSession().applying(.start(origin: url), now: Date())
+    if case .waitingForApproval(let pending, _) = session.state {
+      pairingLabel = pending.environment.label
+    }
     pairing = session.state
-    let runner = PairingRunner(store: nil, clientLabel: "S2Code Apple TV")
+    let runner = PairingRunner(store: pairingStore, clientLabel: "S2Code Apple TV")
     pairingTask = Task { [weak self] in
       await previous?.value
       guard let self, generation == self.pairingGeneration else { return }
@@ -131,17 +147,27 @@ final class TVModel {
 
   func cancelPairing() {
     pairingGeneration += 1
+    let generation = pairingGeneration
     pairingTask?.cancel()
     pairingTask = nil
     pairing = .idle
     pairingLabel = nil
+    // The runner clears the code when it observes cancellation. This also covers a cancel
+    // that lands before the runner starts, and it bails if a newer pairing has begun.
+    let store = pairingStore
+    Task {
+      guard generation == pairingGeneration else { return }
+      try? await store?.clear()
+    }
   }
 
   #if DEBUG
     /// Launch argument `-S2CodeTVPairOrigin`. Once per process, and only if that origin is not paired.
+    /// Skips a code already resumed from disk, so the launch argument does not replace it.
     func consumeLaunchPairOrigin() {
       guard !didConsumeLaunchPairOrigin else { return }
       didConsumeLaunchPairOrigin = true
+      guard !pairing.isActive else { return }
       guard let origin = UserDefaults.standard.string(forKey: "S2CodeTVPairOrigin"),
         let url = try? Self.parseOrigin(origin),
         !accounts.accounts.contains(where: { $0.credentials.origin == url })

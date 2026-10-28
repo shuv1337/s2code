@@ -21,10 +21,6 @@ struct SetupView: View {
     }
     .frame(maxWidth: 1100)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    #if DEBUG
-      // Simulators cannot drive the tvOS keyboard: `-S2CodeTVPairOrigin http://host:port`.
-      .task { model.consumeLaunchPairOrigin() }
-    #endif
   }
 
   private var entry: some View {
