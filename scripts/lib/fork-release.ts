@@ -39,7 +39,7 @@ export const FORK_DESKTOP_MATRIX = [
     label: "macOS arm64",
     platform: "mac",
     arch: "arm64",
-    runner: "macos-15",
+    runner: "macos-26",
     target: "dmg",
     rust_target: "aarch64-apple-darwin",
     resource_key: "darwin-arm64",

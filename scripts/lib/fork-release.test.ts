@@ -88,7 +88,7 @@ describe("fork release contract", () => {
   it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
     expect(FORK_DESKTOP_MATRIX).toHaveLength(6);
     expect(FORK_DESKTOP_MATRIX.map((target) => target.runner)).toEqual([
-      "macos-15",
+      "macos-26",
       "macos-15-intel",
       "ubuntu-24.04",
       "ubuntu-24.04-arm",
