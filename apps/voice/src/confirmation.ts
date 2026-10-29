@@ -1,14 +1,9 @@
 /**
- * Spoken confirmation policy for the voice orchestrator.
- *
- * Cap decision: voice acts from day one; spoken confirmation ONLY for
- * destructive tools. Destructive tools are also kept OFF the allowlist, so
- * the runtime path is: reject + speak that Cap must use the UI (no MCP call).
- * Side-effecting allowlisted tools do NOT wait for "yes" — they announce the
- * environment name, then run.
+ * Voice acts immediately. Guarded tools wait for a spoken yes. Delete is
+ * refused. Other side effects announce the environment, then run.
  */
 
-import { isDestructiveVoiceTool, isSideEffectVoiceTool } from "./allowlist.ts";
+import { isConfirmVoiceTool, isDestructiveVoiceTool, isSideEffectVoiceTool } from "./allowlist.ts";
 
 export type SpeakFn = (text: string) => void | Promise<void>;
 
@@ -20,32 +15,35 @@ export type ConfirmationDecision =
 export interface ConfirmationContext {
   readonly tool: string;
   readonly environmentLabel: string | null;
-  /** When true, a prior spoken "yes" for this destructive request was heard. */
-  readonly destructiveConfirmed?: boolean;
+  readonly args?: Readonly<Record<string, unknown>>;
 }
 
-/**
- * Decide whether to proceed, reject, or (if ever allowlisted) await confirm.
- * Destructive tools always reject at the gate unless somehow allowlisted AND
- * `destructiveConfirmed` — still never auto-run.
- */
+const YES = /\b(yes|yeah|yep|approve|approved|allow|accept|confirm|confirmed|go ahead|do it)\b/iu;
+const NO = /\b(no|nope|deny|denied|decline|declined|cancel|stop|don't|do not)\b/iu;
+
+/** No wins when both appear. */
+export const parseSpokenAnswer = (utterance: string): "yes" | "no" | undefined => {
+  if (NO.test(utterance)) return "no";
+  if (YES.test(utterance)) return "yes";
+  return undefined;
+};
+
 export const decideConfirmation = (ctx: ConfirmationContext): ConfirmationDecision => {
+  const label = ctx.environmentLabel?.trim() || "the hub";
+  if (isConfirmVoiceTool(ctx.tool)) {
+    return {
+      action: "await_confirm",
+      speak: `Say yes to ${ctx.tool} on ${label}.`,
+    };
+  }
   if (isDestructiveVoiceTool(ctx.tool)) {
-    if (ctx.destructiveConfirmed) {
-      // Still refuse: destructive tools stay off the allowlist by policy.
-      return {
-        action: "reject",
-        speak: `I cannot run ${ctx.tool} from voice. Use the desktop UI.`,
-      };
-    }
     return {
       action: "reject",
       speak: `${ctx.tool} is blocked for voice. Cap must run it from the UI.`,
     };
   }
 
-  if (isSideEffectVoiceTool(ctx.tool)) {
-    const label = ctx.environmentLabel?.trim() || "the hub";
+  if (isSideEffectVoiceTool(ctx.tool, ctx.args)) {
     return {
       action: "proceed",
       announce: `On ${label}.`,

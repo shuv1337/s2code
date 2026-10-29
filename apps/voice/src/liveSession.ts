@@ -1,10 +1,7 @@
 /**
- * GPT-Live session client (WebSocket) with Responses delegation.
- * Tool calls from nested response.output_item.done → ToolBridge →
- * response.item.create(function_call_output) + response.create.
- *
- * Shape follows OpenAI GPT-Live docs (model gpt-live-1, delegation.responses).
- * Audio I/O is optional; text-dry-run drives the same tool path without a socket.
+ * GPT-Live WebSocket. Function calls from response.output_item.done go through
+ * the tool bridge, then response.item.create and response.create.
+ * session.start targets wss://api.openai.com/v1/live/sessions.
  */
 import WebSocket from "ws";
 
@@ -14,6 +11,7 @@ import type { ToolBridge, ToolBridgeResult } from "./toolBridge.ts";
 
 export interface LiveSessionHandlers {
   readonly onSpeakText?: (text: string) => void;
+  readonly onUserText?: (text: string) => void;
   readonly onEvent?: (event: Record<string, unknown>) => void;
   readonly onToolResult?: (result: ToolBridgeResult) => void;
 }
@@ -21,6 +19,7 @@ export interface LiveSessionHandlers {
 export interface LiveSession {
   readonly close: () => void;
   readonly send: (event: Record<string, unknown>) => void;
+  readonly appendAudio: (pcm: Uint8Array) => void;
   readonly waitOpen: () => Promise<void>;
 }
 
@@ -59,7 +58,7 @@ export const handleLiveOutputItem = async (
   const result = await bridge.handleFunctionCall({
     name,
     arguments: args,
-    callId,
+    ...(callId === undefined ? {} : { callId }),
   });
   handlers?.onToolResult?.(result);
   send({
@@ -74,7 +73,7 @@ export const handleLiveOutputItem = async (
 };
 
 export const buildSessionCreatePayload = (config: VoiceConfig) => ({
-  type: "session.create",
+  type: "session.start",
   session: {
     model: config.liveModel,
     instructions: LIVE_SYSTEM_INSTRUCTIONS,
@@ -154,12 +153,23 @@ export const connectLiveSession = (
       if (event.type === "session.output_transcript.delta" && typeof event.delta === "string") {
         handlers.onSpeakText?.(event.delta);
       }
+      if (event.type === "session.input_transcript.delta" && typeof event.delta === "string") {
+        handlers.onUserText?.(event.delta);
+      }
     })();
   });
 
   return {
     close: () => ws.close(),
     send,
+    appendAudio: (pcm) => {
+      const even = pcm.byteLength - (pcm.byteLength % 2);
+      if (even === 0) return;
+      send({
+        type: "session.input_audio.append",
+        audio: Buffer.from(pcm.subarray(0, even)).toString("base64"),
+      });
+    },
     waitOpen: () => openPromise,
   };
 };

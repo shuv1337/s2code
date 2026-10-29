@@ -27,9 +27,10 @@ it("decideVoiceTool hard-rejects destructive even if somehow listed", () => {
   expect(denied.ok).toBe(false);
   if (!denied.ok) expect(denied.reason).toBe("destructive");
 
-  const unknown = decideVoiceTool("t3_project_create");
-  expect(unknown.ok).toBe(false);
-  if (!unknown.ok) expect(unknown.reason).toBe("destructive");
+  const guarded = decideVoiceTool("t3_project_create");
+  expect(guarded.ok).toBe(false);
+  if (!guarded.ok) expect(guarded.reason).toBe("needs_confirmation");
+  expect(isAllowedVoiceTool("t3_queue")).toBe(true);
 
   const ok = decideVoiceTool("t3_thread_read");
   expect(ok.ok).toBe(true);

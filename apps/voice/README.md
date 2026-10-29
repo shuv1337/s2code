@@ -1,9 +1,37 @@
 # s2 voice orchestrator (FM-S2-SPIKE-1 / #337)
 
-Thin GPT-Live client on the hub. Speech (or text dry-run) → allowlisted `t3_*`
-tools on the local s2code HTTP MCP. Destructive tools are never on the
-allowlist. Side-effecting allowlisted calls announce the target environment
-name before running. Every tool call is audited to ndjson (no args/secrets).
+Thin GPT-Live client on the hub. Speech (or a text dry-run) calls allowlisted
+`t3_*` tools on the hub s2code MCP. Peers such as shuvbot are reached with
+`environmentId` from `t3_environment_links`; this process holds one hub
+credential. Side effects say `On <environment>.` first. Guarded tools
+(workflow stop, transfer, handoff, project create/clone, environment
+link/unlink, preview list/close) run only after a spoken yes. `t3_project_delete`
+stays blocked. Every tool call is audited to ndjson with no args or secrets.
+
+`t3_thread_send` and `t3_thread_launch` return immediately. A second poll of
+`t3_thread_wait` speaks a one-line summary when the run settles.
+`t3_pending_request` answers user questions. It cannot approve a permission
+request; those still resolve in the s2code UI.
+
+## Accepted risks (spike only)
+
+Recorded on issue 337. Do not treat them as blockers for this branch, and
+re-pair shuvbot to `approval-required` before any longer-lived use.
+
+- Full-access shuvdev → shuvbot means a voice session can steer shuvbot,
+  including through allowlisted unconfirmed `t3_thread_launch` /
+  `t3_thread_send` if a thread is prompt-injected.
+- `t3_thread_read` content is sent to OpenAI so the model can speak it.
+
+## Cost
+
+GPT-Live voice time is published at $0.05 per minute, billed per second
+($3.00 per hour) before backend tokens. At $200 of monthly credits the
+voice-only ceiling is about 66.7 hours. Tool use spends that faster; plan on
+roughly 30–60 hours. Credits expire monthly. `session.closed` carries
+`usage.seconds` for a measured session. A local Parakeet (speech-to-text) plus
+Kokoro (text-to-speech) path is the later always-on option: same tool bridge,
+audio stays on the machine, API cost is text tokens only.
 
 ## Config (outside the repo)
 
@@ -22,10 +50,18 @@ Env overrides: `OPENAI_API_KEY`, `S2_VOICE_MCP_URL`, `S2_VOICE_MCP_TOKEN`,
 
 ## Modes
 
-- `live` — GPT-Live WebSocket (`gpt-live-1`) with Responses delegation; tools
-  execute locally against the hub MCP.
-- `text-dry-run` — no audio; inject a canned function_call and exercise the
-  tool bridge (mock MCP by default).
+- `live` — GPT-Live WebSocket at `wss://api.openai.com/v1/live/sessions`
+  (`session.start`, model `gpt-live-1`, Responses delegation). Tools run
+  against the hub MCP. Announcements also go out as
+  `session.commentary.append`. Spoken yes/no for a guarded tool is read from
+  `session.input_transcript.delta`. Microphone capture is not wired;
+  `appendAudio` accepts 24 kHz PCM16 when a capture process is attached.
+- `text-dry-run` — no audio. Requires `S2_VOICE_MCP_URL` or `--mock-mcp`.
+  `--mock-mcp` is only for offline checks.
+
+```bash
+pnpm --filter @t3tools/voice dry-run
+```
 
 ## Cap: run on shuvdev (separate install step)
 

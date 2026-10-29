@@ -3,7 +3,7 @@
  * s2-voice CLI. Config from S2_VOICE_CONFIG / env. OpenAI key from env only
  * (inject via `2password run`). Never prints tokens or keys.
  */
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -12,10 +12,14 @@ import { connectLiveSession, runTextDryRun } from "./liveSession.ts";
 import { createVoiceMcpBridge } from "./mcpBridge.ts";
 import { createToolBridge } from "./toolBridge.ts";
 
+let liveSend: ((event: Record<string, unknown>) => void) | undefined;
 const speak = async (text: string) => {
-  // Spoken path will hook TTS / Live commentary later; for now log to stderr
-  // without secrets (tool bridge never passes args here).
   process.stderr.write(`[voice] ${text}\n`);
+  liveSend?.({
+    type: "session.commentary.append",
+    delegation_id: null,
+    content: text,
+  });
 };
 
 const main = async () => {
@@ -27,7 +31,7 @@ const main = async () => {
   const effectiveMode = modeFlag === "live" || modeFlag === "text-dry-run" ? modeFlag : config.mode;
 
   const auditDir = config.auditDir || NodePath.join(NodeOS.tmpdir(), "s2-voice-audit");
-  await NodeFS.mkdir(auditDir, { recursive: true });
+  await NodeFSP.mkdir(auditDir, { recursive: true });
 
   const resolved = {
     ...config,
@@ -88,9 +92,11 @@ const main = async () => {
     onSpeakText: (t) => {
       process.stderr.write(`[transcript] ${t}`);
     },
+    onUserText: (t) => bridge.hear(t),
   });
+  liveSend = session.send;
   await session.waitOpen();
-  process.stderr.write("[voice] session open — speak into the Live client path\n");
+  process.stderr.write("[voice] session open. Speak into the Live client path.\n");
 
   const shutdown = () => {
     session.close();

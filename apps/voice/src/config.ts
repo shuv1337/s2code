@@ -2,7 +2,7 @@
  * Load voice orchestrator config from env and/or an external JSON file.
  * Hostnames, tokens, and API keys must never be committed to the repo.
  */
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 
 export type VoiceMode = "live" | "text-dry-run";
 
@@ -19,7 +19,7 @@ export interface VoiceConfig {
   readonly liveWsUrl: string;
 }
 
-const DEFAULT_LIVE_WS = "wss://api.openai.com/v1/live";
+const DEFAULT_LIVE_WS = "wss://api.openai.com/v1/live/sessions";
 
 export interface RawVoiceConfigFile {
   readonly mcpUrl?: string;
@@ -46,7 +46,7 @@ export const loadVoiceConfig = async (options?: {
   const path = options?.configPath ?? env.S2_VOICE_CONFIG;
   let file: RawVoiceConfigFile = {};
   if (path) {
-    const text = await NodeFS.readFile(path, "utf8");
+    const text = await NodeFSP.readFile(path, "utf8");
     file = JSON.parse(text) as RawVoiceConfigFile;
   }
 
@@ -59,7 +59,7 @@ export const loadVoiceConfig = async (options?: {
     auditDir: (env.S2_VOICE_AUDIT_DIR ?? file.auditDir ?? "").trim(),
     mode,
     liveModel: (env.S2_VOICE_LIVE_MODEL ?? file.liveModel ?? "gpt-live-1").trim(),
-    backendModel: (env.S2_VOICE_BACKEND_MODEL ?? file.backendModel ?? "gpt-5.1").trim(),
+    backendModel: (env.S2_VOICE_BACKEND_MODEL ?? file.backendModel ?? "gpt-5.6-luna").trim(),
     environmentLabels: file.environmentLabels ?? {},
     defaultEnvironmentId: file.defaultEnvironmentId?.trim() || null,
     openaiApiKey,

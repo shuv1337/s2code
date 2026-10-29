@@ -4,7 +4,7 @@
   "auditDir": "/path/to/userdata/logs",
   "mode": "text-dry-run",
   "liveModel": "gpt-live-1",
-  "backendModel": "gpt-5.1",
+  "backendModel": "gpt-5.6-luna",
   "environmentLabels": {
     "ENV_ID_HUB": "shuvdev",
     "ENV_ID_PEER": "shuvbot"

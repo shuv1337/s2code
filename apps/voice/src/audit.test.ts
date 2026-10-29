@@ -1,4 +1,4 @@
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { expect, it } from "vite-plus/test";
@@ -38,7 +38,7 @@ it("extracts env/thread ids and ignores other keys", () => {
 });
 
 it("appends voice-tool.ndjson under audit dir", async () => {
-  const root = await NodeFS.mkdtemp(NodePath.join(NodeOS.tmpdir(), "voice-audit-"));
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "voice-audit-"));
   await Audit.appendVoiceToolAudit(root, {
     ts: "2026-10-29T05:00:01.000Z",
     tool: "t3_thread_launch",
@@ -53,10 +53,10 @@ it("appends voice-tool.ndjson under audit dir", async () => {
     threadId: null,
     status: "rejected_destructive",
   });
-  const text = await NodeFS.readFile(Audit.voiceToolAuditPath(root), "utf8");
+  const text = await NodeFSP.readFile(Audit.voiceToolAuditPath(root), "utf8");
   const lines = text.trimEnd().split("\n");
   expect(lines).toHaveLength(2);
   expect(JSON.parse(lines[1]!).status).toBe("rejected_destructive");
   expect(text).not.toContain("secret");
-  await NodeFS.rm(root, { recursive: true, force: true });
+  await NodeFSP.rm(root, { recursive: true, force: true });
 });

@@ -3,7 +3,7 @@
  * Allowlisted fields only: tool, env, thread, ts, status. Never args/secrets.
  * Complements hub PeerForwardAudit (peer-forward.ndjson) for remote fan-out.
  */
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 export const VOICE_TOOL_AUDIT_FILENAME = "voice-tool.ndjson";
@@ -33,8 +33,8 @@ export const appendVoiceToolAudit = async (
   auditDir: string,
   entry: VoiceToolAuditEntry,
 ): Promise<void> => {
-  await NodeFS.mkdir(auditDir, { recursive: true });
-  await NodeFS.appendFile(
+  await NodeFSP.mkdir(auditDir, { recursive: true });
+  await NodeFSP.appendFile(
     voiceToolAuditPath(auditDir),
     `${formatVoiceToolAuditLine(entry)}\n`,
     "utf8",

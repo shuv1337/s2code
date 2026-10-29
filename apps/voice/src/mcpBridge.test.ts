@@ -30,7 +30,7 @@ const createFakeMcpServer = (options?: {
   let toolsCalls = 0;
   const recorded: Recorded[] = [];
 
-  const fetchImpl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+  const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
     const headersIn = new Headers(init?.headers);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     const method = typeof body.method === "string" ? body.method : String(init?.method ?? "POST");

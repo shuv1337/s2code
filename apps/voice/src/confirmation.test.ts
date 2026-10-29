@@ -2,15 +2,20 @@ import { expect, it } from "vite-plus/test";
 
 import { applyConfirmation, decideConfirmation } from "./confirmation.ts";
 
-it("rejects destructive tools with spoken message (no await confirm path that runs them)", () => {
-  const d = decideConfirmation({
+it("asks for a spoken yes before a guarded tool and blocks delete", () => {
+  const guarded = decideConfirmation({
     tool: "t3_environment_unlink",
     environmentLabel: "shuvbot",
   });
-  expect(d.action).toBe("reject");
-  if (d.action === "reject") {
-    expect(d.speak.toLowerCase()).toContain("blocked");
+  expect(guarded.action).toBe("await_confirm");
+  if (guarded.action === "await_confirm") {
+    expect(guarded.speak).toBe("Say yes to t3_environment_unlink on shuvbot.");
   }
+  const blocked = decideConfirmation({
+    tool: "t3_project_delete",
+    environmentLabel: "shuvbot",
+  });
+  expect(blocked.action).toBe("reject");
 });
 
 it("announces environment name before side-effecting allowlisted tools", async () => {
@@ -37,6 +42,8 @@ it("read-only tools proceed silently", async () => {
     environmentLabel: "shuvdev",
   });
   expect(d.action).toBe("proceed");
-  await applyConfirmation(d, (t) => spoken.push(t));
+  await applyConfirmation(d, (t) => {
+    spoken.push(t);
+  });
   expect(spoken).toEqual([]);
 });

@@ -1,8 +1,6 @@
 /**
- * Voice MCP allowlist. Destructive / link / create tools stay OFF this set
- * entirely (Cap decision: confirm-destructive-only, and keep them off the
- * allowlist regardless). Enforcement is hard reject in the tool bridge —
- * never rely on the model prompt alone.
+ * Voice MCP allowlist. Guarded tools stay off this set and run only after a
+ * spoken yes. Delete stays blocked. Enforcement is in the tool bridge.
  */
 
 /** Tools the voice client may call on the hub MCP. */
@@ -22,25 +20,30 @@ export const VOICE_TOOL_ALLOWLIST = [
   "t3_thread_wait",
   "t3_background_wait",
   "t3_pending_request",
+  "t3_queue",
   "t3_worktree_list",
   "t3_worktree_status",
 ] as const;
 
 export type VoiceAllowedTool = (typeof VOICE_TOOL_ALLOWLIST)[number];
 
+/** Hard-blocked. Not on the confirm list, so voice never calls them. */
+export const VOICE_DESTRUCTIVE_TOOLS = ["t3_project_delete"] as const;
+
 /**
- * Explicitly denied tools. Kept as a separate set so tests and the bridge can
- * reject by name even if someone later widens the allowlist by mistake.
+ * Off the default allowlist. The model may ask; the bridge runs them only
+ * after an explicit spoken yes for that call.
  */
-export const VOICE_DESTRUCTIVE_TOOLS = [
-  "t3_project_delete",
-  "t3_thread_transfer",
+export const VOICE_CONFIRM_TOOLS = [
   "t3_workflow_stop",
-  "t3_environment_unlink",
+  "t3_thread_transfer",
   "t3_worktree_handoff",
   "t3_project_create",
   "t3_project_clone",
   "t3_environment_link",
+  "t3_environment_unlink",
+  "t3_preview_list",
+  "t3_preview_close",
 ] as const;
 
 export type VoiceDestructiveTool = (typeof VOICE_DESTRUCTIVE_TOOLS)[number];
@@ -52,21 +55,31 @@ export const VOICE_SIDE_EFFECT_TOOLS = new Set<string>([
   "t3_thread_interrupt",
   "t3_thread_update",
   "t3_thread_configure",
-  "t3_pending_request",
 ]);
 
-/** Long-running tools: fire, then wait, then speak a short summary. */
-export const VOICE_LONG_RUNNING_TOOLS = new Set<string>(["t3_thread_launch"]);
+/** Long-running tools: return immediately, then wait and speak a short summary. */
+export const VOICE_LONG_RUNNING_TOOLS = new Set<string>(["t3_thread_launch", "t3_thread_send"]);
 
 const allowSet = new Set<string>(VOICE_TOOL_ALLOWLIST);
 const destructiveSet = new Set<string>(VOICE_DESTRUCTIVE_TOOLS);
+const confirmSet = new Set<string>(VOICE_CONFIRM_TOOLS);
 
 export const isAllowedVoiceTool = (tool: string): tool is VoiceAllowedTool => allowSet.has(tool);
 
 export const isDestructiveVoiceTool = (tool: string): tool is VoiceDestructiveTool =>
   destructiveSet.has(tool);
 
-export const isSideEffectVoiceTool = (tool: string): boolean => VOICE_SIDE_EFFECT_TOOLS.has(tool);
+export const isConfirmVoiceTool = (tool: string): boolean => confirmSet.has(tool);
+
+export const isSideEffectVoiceTool = (
+  tool: string,
+  args?: Readonly<Record<string, unknown>>,
+): boolean => {
+  if (isConfirmVoiceTool(tool)) return true;
+  if (tool === "t3_queue") return args?.action !== "list" && args?.action !== "read";
+  if (tool === "t3_pending_request") return args?.action === "respond";
+  return VOICE_SIDE_EFFECT_TOOLS.has(tool);
+};
 
 export const isLongRunningVoiceTool = (tool: string): boolean => VOICE_LONG_RUNNING_TOOLS.has(tool);
 
@@ -75,11 +88,14 @@ export type AllowlistDecision =
   | {
       readonly ok: false;
       readonly tool: string;
-      readonly reason: "destructive" | "not_allowlisted";
+      readonly reason: "destructive" | "not_allowlisted" | "needs_confirmation";
     };
 
 /** Single gate used by the tool bridge before any MCP call. */
 export const decideVoiceTool = (tool: string): AllowlistDecision => {
+  if (isConfirmVoiceTool(tool)) {
+    return { ok: false, tool, reason: "needs_confirmation" };
+  }
   if (isDestructiveVoiceTool(tool)) {
     return { ok: false, tool, reason: "destructive" };
   }

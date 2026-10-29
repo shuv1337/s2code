@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vp test run --config ../../vite.config.ts --dir .",
     "start": "node --experimental-strip-types ./src/cli.ts",
-    "dry-run": "node --experimental-strip-types ./src/cli.ts --mode text-dry-run"
+    "dry-run": "node --experimental-strip-types ./src/cli.ts --mode text-dry-run --mock-mcp"
   },
   "dependencies": {
     "ws": "catalog:"

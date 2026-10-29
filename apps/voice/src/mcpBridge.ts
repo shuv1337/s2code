@@ -248,6 +248,6 @@ export const createVoiceMcpBridge = (options: ResolveVoiceMcpOptions): McpBridge
   return createHttpMcpBridge({
     mcpUrl: url,
     mcpToken: options.mcpToken,
-    fetchImpl: options.fetchImpl,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
 };
