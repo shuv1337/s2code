@@ -210,6 +210,52 @@ it("http mcp bridge maps auth failures after handshake", async () => {
   expect(n).toBe(3);
 });
 
+it("http mcp bridge lists tool input schemas", async () => {
+  const mcp = createHttpMcpBridge({
+    mcpUrl: "http://127.0.0.1:9/mcp",
+    mcpToken: "tok",
+    fetchImpl: (async (_url, init) => {
+      const body = init?.body ? (JSON.parse(String(init.body)) as { method?: string }) : {};
+      if (body.method === "initialize") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json", "mcp-session-id": "s" },
+        });
+      }
+      if (body.method === "notifications/initialized") {
+        return new Response(null, { status: 202 });
+      }
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          result: {
+            tools: [
+              {
+                name: "t3_environment_links",
+                inputSchema: { type: "object", properties: {}, additionalProperties: false },
+              },
+              {
+                name: "t3_thread_list",
+                inputSchema: { properties: { projectId: { type: "string" } } },
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch,
+  });
+  const tools = await mcp.listTools();
+  expect(tools.find((tool) => tool.name === "t3_environment_links")?.inputSchema).toEqual({
+    properties: {},
+    additionalProperties: false,
+  });
+  expect(
+    tools.find((tool) => tool.name === "t3_thread_list")?.inputSchema?.properties,
+  ).toHaveProperty("projectId");
+});
+
 it("createVoiceMcpBridge fails loudly when mcpUrl is empty without --mock-mcp", () => {
   expect(() =>
     createVoiceMcpBridge({

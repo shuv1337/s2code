@@ -1,7 +1,9 @@
 import { expect, it } from "vite-plus/test";
 
 import {
+  clientRequestIdPolicyFor,
   decideVoiceTool,
+  environmentPolicyFor,
   isAllowedVoiceTool,
   isDestructiveVoiceTool,
   VOICE_DESTRUCTIVE_TOOLS,
@@ -45,4 +47,26 @@ it("decideVoiceTool hard-rejects destructive even if somehow listed", () => {
 
   const queueRead = decideVoiceTool("t3_queue", { action: "list" });
   expect(queueRead.ok).toBe(true);
+});
+
+it("environment policy follows the hub schema over allowlist metadata", () => {
+  expect(environmentPolicyFor("t3_environment_links")).toBe("strip");
+  expect(environmentPolicyFor("t3_environment_read")).toBe("keep");
+  expect(environmentPolicyFor("t3_thread_list")).toBe("keep");
+  expect(environmentPolicyFor("t3_thread_read")).toBe("fill");
+  expect(environmentPolicyFor("t3_thread_wait")).toBe("fill");
+  expect(environmentPolicyFor("t3_worktree_list")).toBe("fill");
+  expect(environmentPolicyFor("t3_thread_send")).toBe("fill");
+  expect(
+    environmentPolicyFor("t3_thread_send", { properties: { threadId: { type: "string" } } }),
+  ).toBe("strip");
+  expect(environmentPolicyFor("t3_environment_links", { properties: {} })).toBe("strip");
+  expect(clientRequestIdPolicyFor("t3_pending_request")).toBe("strip");
+  expect(clientRequestIdPolicyFor("t3_thread_send")).toBe("overwrite");
+  expect(
+    clientRequestIdPolicyFor("t3_pending_request", {
+      properties: { action: { type: "string" } },
+      additionalProperties: false,
+    }),
+  ).toBe("strip");
 });

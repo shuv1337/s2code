@@ -4,6 +4,8 @@
  */
 import * as NodeFSP from "node:fs/promises";
 
+import { DEFAULT_TOOL_RESULT_MAX_CHARS } from "./resultSummary.ts";
+
 export type VoiceMode = "live" | "text-dry-run";
 
 export interface VoiceConfig {
@@ -15,6 +17,8 @@ export interface VoiceConfig {
   readonly backendModel: string;
   readonly environmentLabels: Readonly<Record<string, string>>;
   readonly defaultEnvironmentId: string | null;
+  /** Max chars of a tool result given to the model. Discovery tools are summarized first. */
+  readonly toolResultMaxChars: number;
   readonly openaiApiKey: string | null;
   readonly liveWsUrl: string;
 }
@@ -30,8 +34,16 @@ export interface RawVoiceConfigFile {
   readonly backendModel?: string;
   readonly environmentLabels?: Record<string, string>;
   readonly defaultEnvironmentId?: string;
+  readonly toolResultMaxChars?: number;
   readonly liveWsUrl?: string;
 }
+
+const parseToolResultMaxChars = (value: unknown): number => {
+  const parsed =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_TOOL_RESULT_MAX_CHARS;
+  return Math.min(100_000, Math.max(200, Math.floor(parsed)));
+};
 
 const asMode = (value: string | undefined, fallback: VoiceMode): VoiceMode => {
   if (value === "live" || value === "text-dry-run") return value;
@@ -62,6 +74,9 @@ export const loadVoiceConfig = async (options?: {
     backendModel: (env.S2_VOICE_BACKEND_MODEL ?? file.backendModel ?? "gpt-5.6-luna").trim(),
     environmentLabels: file.environmentLabels ?? {},
     defaultEnvironmentId: file.defaultEnvironmentId?.trim() || null,
+    toolResultMaxChars: parseToolResultMaxChars(
+      env.S2_VOICE_TOOL_RESULT_MAX_CHARS ?? file.toolResultMaxChars,
+    ),
     openaiApiKey,
     liveWsUrl: (env.S2_VOICE_LIVE_WS_URL ?? file.liveWsUrl ?? DEFAULT_LIVE_WS).trim(),
   };

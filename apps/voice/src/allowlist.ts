@@ -94,6 +94,97 @@ export const isSideEffectVoiceTool = (
 
 export const isLongRunningVoiceTool = (tool: string): boolean => VOICE_LONG_RUNNING_TOOLS.has(tool);
 
+/**
+ * strip: hub schema rejects environmentId.
+ * keep: explicit id only. Fleet discovery stays on the hub.
+ * fill: copy defaultEnvironmentId when omitted, including thread read,
+ * wait, and worktree list so a peer launch can be followed.
+ */
+export type VoiceEnvironmentPolicy = "strip" | "keep" | "fill";
+
+export interface VoiceToolInputSchema {
+  readonly properties?: Readonly<Record<string, unknown>>;
+  readonly additionalProperties?: boolean;
+  readonly required?: readonly string[];
+}
+
+export const VOICE_ENVIRONMENT_POLICY: Readonly<Record<string, VoiceEnvironmentPolicy>> = {
+  t3_environment_links: "strip",
+  t3_environment_read: "keep",
+  t3_project_list: "keep",
+  t3_project_read: "keep",
+  t3_thread_list: "keep",
+  t3_thread_search: "keep",
+  t3_thread_read: "fill",
+  t3_worktree_list: "fill",
+  t3_worktree_status: "strip",
+  t3_background_wait: "strip",
+  t3_preview_list: "strip",
+  t3_preview_close: "strip",
+  t3_worktree_handoff: "strip",
+  t3_environment_link: "keep",
+  t3_environment_unlink: "keep",
+  t3_thread_launch: "fill",
+  t3_thread_send: "fill",
+  t3_thread_interrupt: "fill",
+  t3_thread_update: "fill",
+  t3_thread_configure: "fill",
+  t3_thread_wait: "fill",
+  t3_pending_request: "fill",
+  t3_queue: "fill",
+  t3_workflow_stop: "fill",
+  t3_thread_transfer: "fill",
+  t3_project_create: "fill",
+  t3_project_clone: "fill",
+};
+
+/**
+ * Hub tools that accept clientRequestId. The voice call id always wins.
+ * t3_pending_request is absent: its schema rejects the key.
+ */
+export const VOICE_CLIENT_REQUEST_ID_TOOLS = new Set<string>([
+  "t3_thread_send",
+  "t3_thread_launch",
+  "t3_thread_interrupt",
+  "t3_thread_update",
+  "t3_environment_link",
+]);
+
+const schemaAcceptsProperty = (schema: VoiceToolInputSchema, key: string): boolean | undefined => {
+  const properties = schema.properties;
+  if (properties && Object.prototype.hasOwnProperty.call(properties, key)) return true;
+  if (schema.additionalProperties === true) return true;
+  if (properties || schema.additionalProperties === false) return false;
+  return undefined;
+};
+
+/** MCP input schema wins over allowlist metadata when both are present. */
+export const environmentPolicyFor = (
+  tool: string,
+  schema?: VoiceToolInputSchema,
+): VoiceEnvironmentPolicy => {
+  const fallback = VOICE_ENVIRONMENT_POLICY[tool] ?? "strip";
+  if (!schema) return fallback;
+  const accepts = schemaAcceptsProperty(schema, "environmentId");
+  if (accepts === undefined) return fallback;
+  if (!accepts) return "strip";
+  return fallback === "strip" ? "keep" : fallback;
+};
+
+export type ClientRequestIdPolicy = "overwrite" | "strip";
+
+export const clientRequestIdPolicyFor = (
+  tool: string,
+  schema?: VoiceToolInputSchema,
+): ClientRequestIdPolicy => {
+  if (schema) {
+    const accepts = schemaAcceptsProperty(schema, "clientRequestId");
+    if (accepts === false) return "strip";
+    if (accepts === true) return "overwrite";
+  }
+  return VOICE_CLIENT_REQUEST_ID_TOOLS.has(tool) ? "overwrite" : "strip";
+};
+
 export type AllowlistDecision =
   | { readonly ok: true; readonly tool: VoiceAllowedTool }
   | {

@@ -3,13 +3,14 @@
  * Speaks environment name before side-effecting allowlisted calls.
  * Long-running (launch): fire, then wait, then return a short summary.
  */
-import { decideVoiceTool, isLongRunningVoiceTool } from "./allowlist.ts";
 import {
-  appendVoiceToolAudit,
-  environmentIdFromToolArgs,
-  threadIdFromToolArgs,
-  type VoiceToolAuditEntry,
-} from "./audit.ts";
+  clientRequestIdPolicyFor,
+  decideVoiceTool,
+  environmentPolicyFor,
+  isLongRunningVoiceTool,
+  type VoiceToolInputSchema,
+} from "./allowlist.ts";
+import { appendVoiceToolAudit, threadIdFromToolArgs, type VoiceToolAuditEntry } from "./audit.ts";
 import {
   applyConfirmation,
   decideConfirmation,
@@ -19,6 +20,7 @@ import {
 import type { VoiceConfig } from "./config.ts";
 import { labelForEnvironment } from "./config.ts";
 import type { McpBridge, McpCallResult } from "./mcpBridge.ts";
+import { boundText, redactText, summarizeToolResult, toolPayload } from "./resultSummary.ts";
 
 export interface ToolBridgeRequest {
   readonly name: string;
@@ -52,28 +54,88 @@ export interface CreateToolBridgeOptions {
   /** How long a spoken yes stays valid. Default 20s. */
   readonly confirmTimeoutMs?: number;
   readonly scheduleTimeout?: (ms: number, onFire: () => void) => () => void;
+  /** Hub tools/list input schemas. Allowlist metadata is the fallback. */
+  readonly toolSchemas?: Readonly<Record<string, VoiceToolInputSchema>>;
 }
 
 /**
- * Idempotency key is the GPT-Live call id captured with the arguments.
- * A spoken yes does not replace those arguments.
+ * Idempotency key is the GPT-Live call id. A model-supplied clientRequestId
+ * does not win, and tools whose schema rejects the key never receive it.
  */
-const clientRequestArgs = (
+const applyClientRequestId = (
   name: string,
   args: Record<string, unknown>,
   callId: string | undefined,
+  schema: VoiceToolInputSchema | undefined,
 ): Record<string, unknown> => {
-  if (callId === undefined || callId.length === 0 || args.clientRequestId !== undefined)
-    return args;
-  const respond = name === "t3_pending_request" && args.action === "respond";
-  if (name !== "t3_thread_send" && name !== "t3_thread_launch" && !respond) return args;
+  const policy = clientRequestIdPolicyFor(name, schema);
+  if (policy === "strip") {
+    if (!("clientRequestId" in args)) return args;
+    const { clientRequestId: _ignored, ...rest } = args;
+    return rest;
+  }
+  if (callId === undefined || callId.length === 0) return args;
   return { ...args, clientRequestId: callId };
 };
 
-const truncateSummary = (value: unknown, max = 400): string => {
-  const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}…`;
+const applyEnvironmentArg = (
+  name: string,
+  args: Record<string, unknown>,
+  defaultEnvironmentId: string | null,
+  schema: VoiceToolInputSchema | undefined,
+): {
+  readonly args: Record<string, unknown>;
+  readonly environmentId: string | null;
+  readonly filledDefault: boolean;
+} => {
+  const policy = environmentPolicyFor(name, schema);
+  const explicit =
+    typeof args.environmentId === "string" && args.environmentId.length > 0
+      ? args.environmentId
+      : null;
+  const withoutEnvironment = (): Record<string, unknown> => {
+    if (!("environmentId" in args)) return args;
+    const { environmentId: _ignored, ...rest } = args;
+    return rest;
+  };
+  if (policy === "strip")
+    return { args: withoutEnvironment(), environmentId: null, filledDefault: false };
+  if (policy === "keep" || explicit) {
+    return {
+      args: explicit === null ? withoutEnvironment() : args,
+      environmentId: explicit,
+      filledDefault: false,
+    };
+  }
+  if (!defaultEnvironmentId) {
+    return { args: withoutEnvironment(), environmentId: null, filledDefault: false };
+  }
+  return {
+    args: { ...args, environmentId: defaultEnvironmentId },
+    environmentId: defaultEnvironmentId,
+    filledDefault: true,
+  };
+};
+
+/** Tell the model which environment a filled default actually hit. */
+const noteRoutedEnvironment = (
+  output: string,
+  environmentId: string | null,
+  filledDefault: boolean,
+): string => {
+  if (!filledDefault || environmentId === null) return output;
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (Array.isArray(parsed)) return JSON.stringify({ environmentId, content: parsed });
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.environmentId === "string") return output;
+      return JSON.stringify({ environmentId, ...record });
+    }
+  } catch {
+    return JSON.stringify({ environmentId, result: output });
+  }
+  return JSON.stringify({ environmentId, result: output });
 };
 
 const audit = async (
@@ -93,30 +155,7 @@ const audit = async (
 
 const UNSETTLED = new Set(["preparing", "queued", "starting", "running", "waiting"]);
 
-const payloadFrom = (content: unknown): Record<string, unknown> | undefined => {
-  if (content && typeof content === "object" && !Array.isArray(content)) {
-    return content as Record<string, unknown>;
-  }
-  if (!Array.isArray(content)) return undefined;
-  for (const part of content) {
-    if (
-      part &&
-      typeof part === "object" &&
-      "text" in part &&
-      typeof (part as { text: unknown }).text === "string"
-    ) {
-      try {
-        const parsed = JSON.parse((part as { text: string }).text) as unknown;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          return parsed as Record<string, unknown>;
-        }
-      } catch {
-        /* tool text was not JSON */
-      }
-    }
-  }
-  return undefined;
-};
+const payloadFrom = toolPayload;
 
 export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge => {
   const now = options.now ?? (() => new Date());
@@ -184,7 +223,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
 
   const spokenDetail = (payload: Record<string, unknown> | undefined): string | undefined => {
     if (typeof payload?.summary === "string" && payload.summary.trim().length > 0) {
-      return truncateSummary(payload.summary, 160);
+      return boundText(redactText(payload.summary.trim()), 160);
     }
     const items = payload?.items;
     if (!Array.isArray(items)) return undefined;
@@ -195,8 +234,8 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         typeof item === "object" &&
         typeof (item as { text?: unknown }).text === "string"
       ) {
-        const text = (item as { text: string }).text.trim();
-        if (text.length > 0) return truncateSummary(text, 160);
+        const text = redactText((item as { text: string }).text.trim());
+        if (text.length > 0) return boundText(text, 160);
       }
     }
     return undefined;
@@ -266,7 +305,9 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
       const callId = request.callId;
       const name = request.name;
       const args = request.arguments ?? {};
-      const envId = environmentIdFromToolArgs(args) ?? options.config.defaultEnvironmentId;
+      const schema = options.toolSchemas?.[name];
+      const routed = applyEnvironmentArg(name, args, options.config.defaultEnvironmentId, schema);
+      const envId = routed.environmentId;
       const threadId = threadIdFromToolArgs(args);
       const envLabel = labelFor(envId);
 
@@ -277,7 +318,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         const confirm = decideConfirmation({
           tool: name,
           environmentLabel: envLabel,
-          args,
+          args: routed.args,
         });
         await applyConfirmation(confirm, options.speak);
         await audit(
@@ -327,7 +368,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         const confirm = decideConfirmation({
           tool: name,
           environmentLabel: envLabel,
-          args,
+          args: routed.args,
         });
         const answerPromise = challenge();
         await applyConfirmation(confirm, options.speak);
@@ -357,7 +398,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         const confirm = decideConfirmation({
           tool: name,
           environmentLabel: envLabel,
-          args,
+          args: routed.args,
         });
         const gate = await applyConfirmation(confirm, options.speak);
         if (gate !== "proceed") {
@@ -383,9 +424,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         await options.speak(`On ${envLabel}.`);
       }
 
-      const captured =
-        envId && !("environmentId" in args) ? { ...args, environmentId: envId } : { ...args };
-      const callArgs = clientRequestArgs(name, captured, callId);
+      const callArgs = applyClientRequestId(name, routed.args, callId, schema);
 
       let result: McpCallResult;
       try {
@@ -422,12 +461,24 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         now,
       );
 
+      const modelOutput = (ok: boolean) =>
+        noteRoutedEnvironment(
+          summarizeToolResult({
+            tool: name,
+            content: result.content,
+            maxChars: options.config.toolResultMaxChars,
+            ...(ok ? {} : { ok: false }),
+          }),
+          envId,
+          routed.filledDefault,
+        );
+
       if (!result.ok) {
         return {
           callId,
           name,
           status: result.status,
-          output: truncateSummary(result.content),
+          output: modelOutput(false),
           rejected: false,
         };
       }
@@ -453,7 +504,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         callId,
         name,
         status: result.status,
-        output: truncateSummary(result.content),
+        output: modelOutput(true),
         rejected: false,
       };
     },

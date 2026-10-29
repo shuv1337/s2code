@@ -7,8 +7,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import type { VoiceToolInputSchema } from "./allowlist.ts";
 import { loadVoiceConfig } from "./config.ts";
-import { connectLiveSession, runTextDryRun } from "./liveSession.ts";
+import { cliFlag, runScriptedTextDryRun } from "./dryRun.ts";
+import { connectLiveSession } from "./liveSession.ts";
 import { createVoiceMcpBridge } from "./mcpBridge.ts";
 import { createToolBridge } from "./toolBridge.ts";
 
@@ -45,37 +47,45 @@ const main = async () => {
     useMockMcp,
   });
 
+  let toolSchemas: Record<string, VoiceToolInputSchema> | undefined;
+  try {
+    const listed = await mcp.listTools();
+    const schemas: Record<string, VoiceToolInputSchema> = {};
+    for (const tool of listed) {
+      if (tool.inputSchema) schemas[tool.name] = tool.inputSchema;
+    }
+    if (Object.keys(schemas).length > 0) toolSchemas = schemas;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "tools_list_failed";
+    process.stderr.write(
+      `[voice] tools/list failed (${message}); using allowlist argument metadata\n`,
+    );
+  }
+
   const bridge = createToolBridge({
     config: resolved,
     mcp,
     speak,
+    ...(toolSchemas === undefined ? {} : { toolSchemas }),
   });
 
   if (effectiveMode === "text-dry-run") {
     process.stderr.write("[voice] text-dry-run starting\n");
-    const results = await runTextDryRun(bridge, [
-      {
-        name: "t3_environment_links",
-        arguments: {},
-        callId: "dry_links",
-      },
-      {
-        name: "t3_project_delete",
-        arguments: { projectId: "should-reject" },
-        callId: "dry_delete",
-      },
-      {
-        name: "t3_thread_list",
-        arguments: {},
-        callId: "dry_list",
-      },
-    ]);
-    const summary = results.map((r) => ({
+    const flaggedProject = cliFlag(args, "--project-id");
+    const projectId = flaggedProject ?? (useMockMcp ? "project-dry-run" : undefined);
+    const results = await runScriptedTextDryRun(
+      bridge,
+      projectId === undefined ? {} : { projectId },
+    );
+    const summary = results.results.map((r) => ({
       name: r.name,
       status: r.status,
       rejected: r.rejected,
     }));
-    process.stdout.write(`${JSON.stringify({ ok: true, results: summary })}\n`);
+    process.stderr.write(`[voice] dry-run projectId ${results.projectId ?? "none"}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, projectId: results.projectId, results: summary })}\n`,
+    );
     return;
   }
 
