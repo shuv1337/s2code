@@ -168,20 +168,33 @@ it.effect("adopts upstream migrations recorded after fork rows", () =>
 );
 
 // Peer links shipped on the upstream track at 63/64, then upstream took those
-// ids and shipped its own peer links at 70/71. The rows move to the fork
-// ledger; upstream's 63 and 64 run, and the link row stays.
+// ids and shipped its own peer links at 70/71. Receipt identity and watch
+// pairing were already on the fork ledger. The link row stays.
 it.effect("adopts upstream ids that fork peer links occupied", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* runMigrations({ toMigrationInclusive: 62 });
+    yield* Identity;
+    yield* Pairing;
     yield* UpstreamPeerLinks;
     yield* UpstreamPeerLinkFence;
+    yield* sql`CREATE TABLE shuv_fork_sql_migrations (
+      migration_id integer PRIMARY KEY NOT NULL,
+      created_at datetime NOT NULL DEFAULT current_timestamp,
+      name VARCHAR(255) NOT NULL
+    )`;
+    yield* sql`INSERT INTO shuv_fork_sql_migrations (migration_id, name, created_at) VALUES
+      (1, 'CommandReceiptIdentity', '2026-10-10 10:00:00'),
+      (2, 'WatchPairingRequests', '2026-10-12 12:00:00')`;
     yield* sql`INSERT INTO effect_sql_migrations (migration_id, name, created_at) VALUES
       (63, 'PeerLinks', '2026-10-17 21:00:00'),
       (64, 'PeerLinkFence', '2026-10-17 21:03:00')`;
     yield* sql`INSERT INTO peer_environment_links
       (environment_id, secret_name, label, urls_json, access, linked_at, expires_at, fenced)
       VALUES ('env-1', 'secret-1', 'Laptop', '[]', 'full', '2026-10-17', '2026-11-17', 1)`;
+    yield* sql`INSERT INTO auth_watch_pairing_requests
+      (device_code_hash, user_code, status, created_at, expires_at)
+      VALUES ('kept-hash', 'KEPT02', 'pending', '2026-10-12', '2026-10-13')`;
 
     assert.deepStrictEqual(
       yield* runMigrations(),
@@ -192,6 +205,10 @@ it.effect("adopts upstream ids that fork peer links occupied", () =>
       migrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
     );
     assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name FROM shuv_fork_sql_migrations ORDER BY migration_id`,
+      forkMigrationManifest.map(([migration_id, name]) => ({ migration_id, name })),
+    );
+    assert.deepStrictEqual(
       yield* sql`SELECT migration_id, name, created_at FROM shuv_fork_sql_migrations
         WHERE migration_id IN (3, 4) ORDER BY migration_id`,
       [
@@ -200,10 +217,44 @@ it.effect("adopts upstream ids that fork peer links occupied", () =>
       ],
     );
     assert.deepStrictEqual(
+      yield* sql`SELECT name FROM sqlite_master WHERE name = 'auth_watch_pairing_requests'`,
+      [{ name: "auth_watch_pairing_requests" }],
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT device_code_hash, user_code FROM auth_watch_pairing_requests`,
+      [{ device_code_hash: "kept-hash", user_code: "KEPT02" }],
+    );
+    assert.deepStrictEqual(
       yield* sql`SELECT environment_id, fenced, peer_public_key FROM peer_environment_links`,
       [{ environment_id: "env-1", fenced: 1, peer_public_key: null }],
     );
     assert.deepStrictEqual(yield* runMigrations(), []);
+  }).pipe(Effect.provide(database)),
+);
+
+// Recording fork ids 3 and 4 while 1 and 2 are absent would make the fork
+// migrator skip them. The move rolls back instead.
+it.effect("refuses to record later fork rows when earlier fork migrations are missing", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations({ toMigrationInclusive: 62 });
+    yield* UpstreamPeerLinks;
+    yield* UpstreamPeerLinkFence;
+    yield* sql`INSERT INTO effect_sql_migrations (migration_id, name, created_at) VALUES
+      (63, 'PeerLinks', '2026-10-17 21:00:00'),
+      (64, 'PeerLinkFence', '2026-10-17 21:03:00')`;
+    const before = yield* sql`SELECT migration_id, name, created_at FROM effect_sql_migrations
+      ORDER BY migration_id`;
+    const result = yield* runMigrations().pipe(Effect.result);
+    assert.equal(result._tag, "Failure");
+    assert.deepStrictEqual(
+      yield* sql`SELECT migration_id, name, created_at FROM effect_sql_migrations ORDER BY migration_id`,
+      before,
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT name FROM sqlite_master WHERE name = 'shuv_fork_sql_migrations'`,
+      [],
+    );
   }).pipe(Effect.provide(database)),
 );
 

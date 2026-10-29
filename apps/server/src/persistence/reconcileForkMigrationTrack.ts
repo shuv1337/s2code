@@ -89,6 +89,23 @@ export const reconcileForkMigrationTrack = Effect.fn("reconcileForkMigrationTrac
         `;
       }
 
+      // The fork migrator skips every id at or below its highest. Recording a
+      // later fork id without the earlier ones would skip those migrations.
+      const highestMovedForkId = Math.max(...misplaced.map((row) => row.forkId));
+      const forkLedger = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+        SELECT migration_id, name FROM ${sql(FORK_MIGRATIONS_TABLE)}
+      `;
+      const recordedForkNames = new Map(forkLedger.map((row) => [row.migration_id, row.name]));
+      const missingLower = forkMigrationEntries.flatMap(([id, name]) =>
+        id < highestMovedForkId && recordedForkNames.get(id) !== name ? [`${id}_${name}`] : [],
+      );
+      if (missingLower.length > 0) {
+        return yield* new Migrator.MigrationError({
+          kind: "BadState",
+          message: `Cannot move fork migrations while earlier fork migrations are missing from the fork ledger: ${missingLower.join(", ")}.`,
+        });
+      }
+
       const [maxRow] = yield* sql<{ readonly id: number | null }>`
         SELECT MAX(migration_id) AS id FROM effect_sql_migrations
       `;
