@@ -9,7 +9,7 @@ import * as NodePath from "node:path";
 
 import { loadVoiceConfig } from "./config.ts";
 import { connectLiveSession, runTextDryRun } from "./liveSession.ts";
-import { createHttpMcpBridge, createMockMcpBridge } from "./mcpBridge.ts";
+import { createVoiceMcpBridge } from "./mcpBridge.ts";
 import { createToolBridge } from "./toolBridge.ts";
 
 const speak = async (text: string) => {
@@ -35,13 +35,11 @@ const main = async () => {
     mode: effectiveMode,
   };
 
-  const mcp =
-    useMockMcp || !resolved.mcpUrl
-      ? createMockMcpBridge()
-      : createHttpMcpBridge({
-          mcpUrl: resolved.mcpUrl,
-          mcpToken: resolved.mcpToken,
-        });
+  const mcp = createVoiceMcpBridge({
+    mcpUrl: resolved.mcpUrl,
+    mcpToken: resolved.mcpToken,
+    useMockMcp,
+  });
 
   const bridge = createToolBridge({
     config: resolved,

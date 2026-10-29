@@ -100,3 +100,38 @@ export const createMockMcpBridge = (
     },
   };
 };
+
+export class MissingMcpUrlError extends Error {
+  constructor() {
+    super(
+      "[voice] S2_VOICE_MCP_URL / config mcpUrl is required. Refusing silent mock fallback. Pass a real hub MCP URL, or use --mock-mcp only for offline tests.",
+    );
+    this.name = "MissingMcpUrlError";
+  }
+}
+
+export interface ResolveVoiceMcpOptions {
+  readonly mcpUrl: string;
+  readonly mcpToken: string;
+  /** Explicit offline test flag — only then may mock be used. */
+  readonly useMockMcp: boolean;
+  readonly fetchImpl?: typeof fetch;
+}
+
+/**
+ * Resolve the MCP bridge. Empty/missing URL fails loudly unless `--mock-mcp`.
+ */
+export const createVoiceMcpBridge = (options: ResolveVoiceMcpOptions): McpBridge => {
+  if (options.useMockMcp) {
+    return createMockMcpBridge();
+  }
+  const url = options.mcpUrl.trim();
+  if (!url) {
+    throw new MissingMcpUrlError();
+  }
+  return createHttpMcpBridge({
+    mcpUrl: url,
+    mcpToken: options.mcpToken,
+    fetchImpl: options.fetchImpl,
+  });
+};

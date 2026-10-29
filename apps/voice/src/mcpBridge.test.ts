@@ -1,6 +1,11 @@
 import { expect, it } from "vite-plus/test";
 
-import { createHttpMcpBridge, createMockMcpBridge } from "./mcpBridge.ts";
+import {
+  createHttpMcpBridge,
+  createMockMcpBridge,
+  createVoiceMcpBridge,
+  MissingMcpUrlError,
+} from "./mcpBridge.ts";
 
 it("mock mcp records calls", async () => {
   const mcp = createMockMcpBridge();
@@ -31,4 +36,32 @@ it("http mcp bridge posts tools/call and maps http errors", async () => {
   };
   expect(body.method).toBe("tools/call");
   expect(body.params.name).toBe("t3_thread_list");
+});
+
+it("createVoiceMcpBridge fails loudly when mcpUrl is empty without --mock-mcp", () => {
+  expect(() =>
+    createVoiceMcpBridge({
+      mcpUrl: "",
+      mcpToken: "tok",
+      useMockMcp: false,
+    }),
+  ).toThrow(MissingMcpUrlError);
+  expect(() =>
+    createVoiceMcpBridge({
+      mcpUrl: "   ",
+      mcpToken: "tok",
+      useMockMcp: false,
+    }),
+  ).toThrow(/Refusing silent mock fallback/);
+});
+
+it("createVoiceMcpBridge uses mock only when useMockMcp is true", async () => {
+  const mcp = createVoiceMcpBridge({
+    mcpUrl: "",
+    mcpToken: "",
+    useMockMcp: true,
+  });
+  const r = await mcp.callTool("t3_project_list", {});
+  expect(r.ok).toBe(true);
+  expect(typeof createMockMcpBridge().callTool).toBe("function");
 });
