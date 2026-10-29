@@ -475,7 +475,6 @@ const config: ExpoConfig = {
         iconProject: variant.assets.iosIcon,
       },
     ],
-    "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidNetworkSecurityConfig.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",
