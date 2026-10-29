@@ -1,0 +1,5 @@
+# Local runtime artifacts — never commit keys or resolved env
+.env
+.env.*
+!.env.example
+*.local.json
