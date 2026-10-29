@@ -224,13 +224,15 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
   // s2code fork: reconcile fork-track history, then run fork migrations after upstream's;
   // a partial run (`toMigrationInclusive` names an upstream id) leaves the fork track alone.
-  // Reconciles precede the V2 check because fork rows hold upstream ids 62 and 63 until moved.
+  // Reconciles precede the V2 check because fork rows can still occupy upstream ids.
   const fullRun = toMigrationInclusive === undefined;
   const watchPreviewMigrations = fullRun ? yield* reconcileWatchPreviewMigration() : [];
-  const movedForkMigrations = fullRun ? yield* reconcileForkMigrationTrack() : [];
-  if (movedForkMigrations.length > 0) {
+  const reconciled = fullRun
+    ? yield* reconcileForkMigrationTrack(migrationEntries)
+    : { moved: [], backfilled: [] };
+  if (reconciled.moved.length > 0) {
     yield* Effect.log("Moved fork migrations to their own ledger").pipe(
-      Effect.annotateLogs({ moved: movedForkMigrations.map(([id, name]) => `${id}_${name}`) }),
+      Effect.annotateLogs({ moved: reconciled.moved.map(([id, name]) => `${id}_${name}`) }),
     );
   }
   if (includesV2) {
@@ -239,6 +241,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   const executedMigrations = [
     ...previewMigrations,
     ...watchPreviewMigrations,
+    ...reconciled.backfilled,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
   if (fullRun) yield* runForkMigrations();
