@@ -42,10 +42,10 @@ function readJobsJsonl(path) {
 }
 
 const NOT_ACQUIRED_ANNOTATION = "not acquired by Runner of type hosted";
-// Shown when a later attempt saved the release. Re-run failed jobs would queue
-// macos-26 again and republish.
+// The run stays red: GitHub cannot ignore a cancelled reusable-workflow job.
+// Re-run failed jobs would queue macos-26 again. Publication guards refuse a second copy.
 const SUCCESS_AFTER_MISS_NOTICE =
-  "A later macOS arm64 attempt acquired a runner and succeeded. Do not use Re-run failed jobs: that queues macos-26 again and can publish this release twice.";
+  "A later macOS arm64 attempt acquired a runner and succeeded. This run stays red. Do not use Re-run failed jobs: that queues macos-26 again.";
 
 function annotationMessages(job) {
   if (!Array.isArray(job.annotations)) return null;

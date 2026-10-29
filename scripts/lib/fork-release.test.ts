@@ -1,7 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Reads checked-in release recipes as contract fixtures.
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
-import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 import { CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
 import {
@@ -104,34 +103,6 @@ describe("fork release contract", () => {
           (linux) => linux.platform === "linux" && linux.arch === target.arch && linux.cli_archive,
         ),
       ).toBe(true);
-    const { splitDesktopMatrix, classifyAttempts, buildJobName, MAC_ARM64_CALLERS } =
-      NodeModule.createRequire(import.meta.url)(
-        "../../.github/scripts/macos-arm64-runner-retry.cjs",
-      );
-    const releaseWorkflow = NodeFS.readFileSync(
-      NodePath.join(import.meta.dirname, "../../.github/workflows/release.yml"),
-      "utf8",
-    );
-    const split = splitDesktopMatrix({ include: FORK_DESKTOP_MATRIX });
-    expect(split.rest.include.map((target: { runner: string }) => target.runner)).toEqual([
-      "macos-15-intel",
-      "ubuntu-24.04",
-      "ubuntu-24.04-arm",
-      "windows-2025",
-      "windows-11-arm",
-    ]);
-    expect(releaseWorkflow).toContain("matrix_rest");
-    for (const caller of MAC_ARM64_CALLERS) expect(releaseWorkflow).toContain(`name: ${caller}\n`);
-    expect(
-      classifyAttempts([
-        {
-          name: buildJobName("Desktop (macOS arm64)"),
-          conclusion: "cancelled",
-          runner_id: 0,
-          steps: [],
-        },
-      ]).reason,
-    ).toBe("not-acquired");
   });
   it("fails closed without stable credentials, regardless of unsigned opt-in", () => {
     expect(() => releaseSigningPolicy("stable", false, {})).toThrow("Missing fork signing");

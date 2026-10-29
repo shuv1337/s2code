@@ -182,13 +182,12 @@ jobs:
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
   # macos-26 cancels an unassigned job after ~15 minutes (runner_id 0). That
-  # is not timeout-minutes (already 30). continue-on-error keeps the miss from
-  # failing the run once a later attempt succeeds. The gate notice says not to
-  # re-run failed jobs. `with` and the check steps are anchored.
+  # is not timeout-minutes (already 30). A missed attempt stays cancelled, so
+  # the run stays red even when a later attempt succeeds. The gate notice says
+  # not to re-run failed jobs. `with` and the check steps are anchored.
   desktop_mac_arm64:
     name: Desktop (macOS arm64)
     needs: [preflight, build_bundle]
-    continue-on-error: true
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with: &mac_arm64_build
@@ -236,7 +235,6 @@ jobs:
     name: Desktop (macOS arm64 retry 2)
     needs: [preflight, build_bundle, mac_arm64_after_1]
     if: always() && !cancelled() && needs.mac_arm64_after_1.outputs.retry == 'true'
-    continue-on-error: true
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with: *mac_arm64_build
@@ -257,7 +255,6 @@ jobs:
     name: Desktop (macOS arm64 retry 3)
     needs: [preflight, build_bundle, mac_arm64_after_2]
     if: always() && !cancelled() && needs.mac_arm64_after_2.outputs.retry == 'true'
-    continue-on-error: true
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with: *mac_arm64_build
@@ -278,7 +275,6 @@ jobs:
     name: Desktop (macOS arm64 retry 4)
     needs: [preflight, build_bundle, mac_arm64_after_3]
     if: always() && !cancelled() && needs.mac_arm64_after_3.outputs.retry == 'true'
-    continue-on-error: true
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with: *mac_arm64_build
@@ -299,7 +295,6 @@ jobs:
     name: Desktop (macOS arm64 retry 5)
     needs: [preflight, build_bundle, mac_arm64_after_4]
     if: always() && !cancelled() && needs.mac_arm64_after_4.outputs.retry == 'true'
-    continue-on-error: true
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with: *mac_arm64_build
@@ -320,7 +315,6 @@ jobs:
     name: Desktop (macOS arm64 retry 6)
     needs: [preflight, build_bundle, mac_arm64_after_5]
     if: always() && !cancelled() && needs.mac_arm64_after_5.outputs.retry == 'true'
-    continue-on-error: true
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with: *mac_arm64_build

@@ -5,10 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeModule from "node:module";
 import * as NodeChildProcess from "node:child_process";
-import { FORK_DESKTOP_MATRIX } from "./lib/fork-release.ts";
 
-const { MAC_ARM64_CALLERS, buildJobName, classifyAttempts, splitDesktopMatrix } =
-  NodeModule.createRequire(import.meta.url)("../.github/scripts/macos-arm64-runner-retry.cjs");
 const workflow = NodeFS.readFileSync(
   new URL("../.github/workflows/release.yml", import.meta.url),
   "utf8",
@@ -83,61 +80,6 @@ describe("fork workflow gates", () => {
     expect(publish).toContain("github.event.repository.default_branch");
     expect(publish).not.toContain("refs/tags/");
     expect(publish).toContain("needs.prepare.result == 'success'");
-  });
-  it("requests another macos-26 runner after GitHub gives up, without raising the build timeout", () => {
-    expect(desktop).toContain("timeout-minutes: ${{ inputs.platform == 'win' && 70 || 30 }}");
-    expect(workflow).toContain("matrix: ${{ fromJSON(needs.preflight.outputs.matrix_rest) }}");
-    expect(workflow).toContain("runner_id 0");
-    expect(workflow).toContain("needs.mac_arm64_ready.result == 'success'");
-    for (const caller of MAC_ARM64_CALLERS) expect(workflow).toContain(`name: ${caller}\n`);
-    const split = splitDesktopMatrix({ include: FORK_DESKTOP_MATRIX });
-    expect(split.mac).toMatchObject({ label: "macOS arm64", runner: "macos-26", arch: "arm64" });
-    expect(split.rest.include).toHaveLength(FORK_DESKTOP_MATRIX.length - 1);
-    expect(
-      split.rest.include.some((target) => target.platform === "mac" && target.arch === "arm64"),
-    ).toBe(false);
-    const missed = {
-      name: buildJobName("Desktop (macOS arm64)"),
-      conclusion: "cancelled",
-      runner_id: 0,
-      steps: [],
-    };
-    expect(classifyAttempts([missed]).attempts[0]).toMatchObject({
-      retry: true,
-      reason: "not-acquired",
-    });
-    expect(classifyAttempts([missed]).ok).toBe(false);
-    expect(
-      classifyAttempts([
-        missed,
-        {
-          name: buildJobName("Desktop (macOS arm64 retry 2)"),
-          conclusion: "success",
-          runner_id: 42,
-          steps: [{ name: "Checkout", conclusion: "success" }],
-        },
-      ]).ok,
-    ).toBe(true);
-    expect(
-      classifyAttempts([
-        {
-          name: buildJobName("Desktop (macOS arm64)"),
-          conclusion: "failure",
-          runner_id: 42,
-          steps: [{ name: "Build desktop artifact", conclusion: "failure" }],
-        },
-      ]),
-    ).toMatchObject({ ok: false, reason: "failure" });
-    expect(
-      classifyAttempts([
-        {
-          ...missed,
-          conclusion: "cancelled",
-          runner_id: 42,
-          steps: [{ name: "Checkout", conclusion: "cancelled" }],
-        },
-      ]).attempts[0].retry,
-    ).toBe(false);
   });
   it("leaves preview signing outside the release environment and supplies the packager's existing config names", () => {
     expect(desktop).not.toContain("environment: fork-release");

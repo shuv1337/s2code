@@ -95,7 +95,7 @@ test("the release workflow asks for six macos-26 acquisitions and leaves the bui
   assert.match(workflow, /fromJSON\(needs\.preflight\.outputs\.matrix_rest\)/);
   assert.match(workflow, /runner_id 0/);
   assert.match(workflow, /needs\.mac_arm64_ready\.result == 'success'/);
-  assert.ok(workflow.includes("continue-on-error: true"));
+  assert.equal(/continue-on-error: true\n {4}uses:/.test(workflow), false);
   assert.ok(workflow.includes("with: *mac_arm64_build"));
   assert.ok(workflow.includes("steps: *mac_arm64_check_steps"));
   for (const caller of MAC_ARM64_CALLERS) assert.ok(workflow.includes(`name: ${caller}\n`));
