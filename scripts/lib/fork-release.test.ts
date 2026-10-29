@@ -105,7 +105,9 @@ describe("fork release contract", () => {
         ),
       ).toBe(true);
     const { splitDesktopMatrix, classifyAttempts, buildJobName, MAC_ARM64_CALLERS } =
-      NodeModule.createRequire(import.meta.url)("../../.github/scripts/macos-arm64-runner-retry.cjs");
+      NodeModule.createRequire(import.meta.url)(
+        "../../.github/scripts/macos-arm64-runner-retry.cjs",
+      );
     const releaseWorkflow = NodeFS.readFileSync(
       NodePath.join(import.meta.dirname, "../../.github/workflows/release.yml"),
       "utf8",
