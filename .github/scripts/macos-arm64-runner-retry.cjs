@@ -41,15 +41,31 @@ function readJobsJsonl(path) {
   return jobs;
 }
 
+const NOT_ACQUIRED_ANNOTATION = "not acquired by Runner of type hosted";
+// Shown when a later attempt saved the release. Re-run failed jobs would queue
+// macos-26 again and republish.
+const SUCCESS_AFTER_MISS_NOTICE =
+  "A later macOS arm64 attempt acquired a runner and succeeded. Do not use Re-run failed jobs: that queues macos-26 again and can publish this release twice.";
+
+function annotationMessages(job) {
+  if (!Array.isArray(job.annotations)) return null;
+  return job.annotations.map((note) => String(note?.message ?? note));
+}
+
+// Only a job GitHub cancelled before assigning a hosted runner. A build that
+// started, a plain failure, or a missing steps array is not retried.
+function neverAssignedHostedRunner(job) {
+  if (!job || job.conclusion !== "cancelled" || job.runner_id !== 0) return false;
+  if (!Array.isArray(job.steps) || job.steps.length !== 0) return false;
+  const messages = annotationMessages(job);
+  if (messages === null) return true;
+  return messages.some((message) => message.includes(NOT_ACQUIRED_ANNOTATION));
+}
+
 function classifyAttempt(job) {
   if (!job) return { retry: false, ok: false, reason: "missing" };
   if (job.conclusion === "success") return { retry: false, ok: true, reason: "success" };
-  const steps = Array.isArray(job.steps) ? job.steps : [];
-  const neverAcquired =
-    steps.length === 0 &&
-    (job.runner_id === 0 || job.runner_id == null) &&
-    (job.conclusion === "cancelled" || job.conclusion === "failure");
-  if (neverAcquired) return { retry: true, ok: false, reason: "not-acquired" };
+  if (neverAssignedHostedRunner(job)) return { retry: true, ok: false, reason: "not-acquired" };
   return { retry: false, ok: false, reason: job.conclusion || "failed" };
 }
 
@@ -106,7 +122,11 @@ function main() {
     const decision = classifyAttempts(jobs);
     for (const attempt of decision.attempts)
       console.log(`${attempt.callerName}: ${attempt.reason}`);
-    if (decision.ok) return;
+    if (decision.ok) {
+      if (decision.attempts.some((attempt) => attempt.reason === "not-acquired"))
+        console.log(`::notice::${SUCCESS_AFTER_MISS_NOTICE}`);
+      return;
+    }
     const acquired = decision.reason === "not-acquired";
     console.error(
       acquired
@@ -121,10 +141,13 @@ function main() {
 
 module.exports = {
   MAC_ARM64_CALLERS,
+  NOT_ACQUIRED_ANNOTATION,
+  SUCCESS_AFTER_MISS_NOTICE,
   buildJobName,
   classifyAttempt,
   classifyAttempts,
   classifyCaller,
+  neverAssignedHostedRunner,
   readJobsJsonl,
   splitDesktopMatrix,
 };

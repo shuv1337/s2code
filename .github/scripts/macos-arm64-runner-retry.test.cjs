@@ -6,6 +6,8 @@ const path = require("node:path");
 const test = require("node:test");
 const {
   MAC_ARM64_CALLERS,
+  NOT_ACQUIRED_ANNOTATION,
+  SUCCESS_AFTER_MISS_NOTICE,
   buildJobName,
   classifyAttempts,
   splitDesktopMatrix,
@@ -68,6 +70,24 @@ test("retries only a hosted runner that was never assigned", () => {
     ]).attempts[0].retry,
     false,
   );
+  assert.equal(classifyAttempts([{ ...missed, conclusion: "failure" }]).attempts[0].retry, false);
+  assert.equal(classifyAttempts([{ ...missed, runner_id: null }]).attempts[0].retry, false);
+  assert.equal(classifyAttempts([{ ...missed, steps: undefined }]).attempts[0].retry, false);
+  assert.equal(
+    classifyAttempts([{ ...missed, annotations: [{ message: "other" }] }]).attempts[0].retry,
+    false,
+  );
+  assert.equal(
+    classifyAttempts([
+      {
+        ...missed,
+        annotations: [
+          { message: `The job was ${NOT_ACQUIRED_ANNOTATION} even after multiple attempts` },
+        ],
+      },
+    ]).attempts[0].retry,
+    true,
+  );
 });
 
 test("the release workflow asks for six macos-26 acquisitions and leaves the build timeout at 30", () => {
@@ -75,6 +95,9 @@ test("the release workflow asks for six macos-26 acquisitions and leaves the bui
   assert.match(workflow, /fromJSON\(needs\.preflight\.outputs\.matrix_rest\)/);
   assert.match(workflow, /runner_id 0/);
   assert.match(workflow, /needs\.mac_arm64_ready\.result == 'success'/);
+  assert.ok(workflow.includes("continue-on-error: true"));
+  assert.ok(workflow.includes("with: *mac_arm64_build"));
+  assert.ok(workflow.includes("steps: *mac_arm64_check_steps"));
   for (const caller of MAC_ARM64_CALLERS) assert.ok(workflow.includes(`name: ${caller}\n`));
 });
 
@@ -101,5 +124,37 @@ test("gate command fails closed when every attempt missed the runner", () => {
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /timeout-minutes does not extend that wait/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("gate notice tells operators not to re-run after a later attempt succeeds", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "macos-arm64-retry-"));
+  const jobs = path.join(root, "jobs.jsonl");
+  fs.writeFileSync(
+    jobs,
+    [
+      {
+        name: buildJobName(MAC_ARM64_CALLERS[0]),
+        conclusion: "cancelled",
+        runner_id: 0,
+        steps: [],
+      },
+      {
+        name: buildJobName(MAC_ARM64_CALLERS[1]),
+        conclusion: "success",
+        runner_id: 42,
+        steps: [{ name: "Checkout" }],
+      },
+    ]
+      .map((job) => JSON.stringify(job))
+      .join("\n"),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [path.join(__dirname, "macos-arm64-runner-retry.cjs"), "gate", jobs],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0);
+  assert.ok(result.stdout.includes(`::notice::${SUCCESS_AFTER_MISS_NOTICE}`));
   fs.rmSync(root, { recursive: true, force: true });
 });
