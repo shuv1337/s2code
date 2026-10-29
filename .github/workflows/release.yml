@@ -70,6 +70,8 @@ jobs:
       win_signed: ${{ steps.plan.outputs.win_signed }}
       apple_team_id: ${{ steps.plan.outputs.apple_team_id }}
       matrix: ${{ steps.plan.outputs.matrix }}
+      matrix_rest: ${{ steps.split_matrix.outputs.matrix_rest }}
+      matrix_mac_arm64: ${{ steps.split_matrix.outputs.matrix_mac_arm64 }}
       due: ${{ needs.due.outputs.due }}
     steps:
       - uses: actions/checkout@v6
@@ -107,8 +109,15 @@ jobs:
           RELEASE_DATE="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)"
           export RELEASE_DATE
           node scripts/fork-release.ts preflight
+      - id: split_matrix
+        name: Keep macOS arm64 out of the shared desktop matrix
+        env:
+          MATRIX: ${{ steps.plan.outputs.matrix }}
+        run: node .github/scripts/macos-arm64-runner-retry.cjs split-matrix
       - name: Verify release logic
-        run: vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/merge-update-manifests.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
+        run: |
+          node --test .github/scripts/macos-arm64-runner-retry.test.cjs
+          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/merge-update-manifests.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@v7
         with:
           name: release-plan
@@ -147,7 +156,7 @@ jobs:
     needs: [preflight, build_bundle]
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.preflight.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.preflight.outputs.matrix_rest) }}
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
     with:
@@ -172,8 +181,293 @@ jobs:
       # environment, so the team id comes from preflight rather than `vars`.
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
+  # Hosted macos-26 gives up after about 15 minutes when no runner is assigned
+  # (runner_id 0). timeout-minutes does not cover that wait. The build job's
+  # timeout is already 30 minutes, so each retry is a new acquisition. Six
+  # attempts is about 90 minutes, and a runner may still never arrive.
+  desktop_mac_arm64:
+    name: Desktop (macOS arm64)
+    needs: [preflight, build_bundle]
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  mac_arm64_after_1:
+    name: macOS arm64 runner check 1
+    needs: [preflight, desktop_mac_arm64]
+    if: always() && !cancelled() && needs.desktop_mac_arm64.result != 'success' && needs.desktop_mac_arm64.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.decide.outputs.retry }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALLER_NAME: Desktop (macOS arm64)
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
+
+  desktop_mac_arm64_retry_2:
+    name: Desktop (macOS arm64 retry 2)
+    needs: [preflight, build_bundle, mac_arm64_after_1]
+    if: always() && !cancelled() && needs.mac_arm64_after_1.outputs.retry == 'true'
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  mac_arm64_after_2:
+    name: macOS arm64 runner check 2
+    needs: [preflight, desktop_mac_arm64_retry_2]
+    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_2.result != 'success' && needs.desktop_mac_arm64_retry_2.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.decide.outputs.retry }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALLER_NAME: Desktop (macOS arm64 retry 2)
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
+
+  desktop_mac_arm64_retry_3:
+    name: Desktop (macOS arm64 retry 3)
+    needs: [preflight, build_bundle, mac_arm64_after_2]
+    if: always() && !cancelled() && needs.mac_arm64_after_2.outputs.retry == 'true'
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  mac_arm64_after_3:
+    name: macOS arm64 runner check 3
+    needs: [preflight, desktop_mac_arm64_retry_3]
+    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_3.result != 'success' && needs.desktop_mac_arm64_retry_3.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.decide.outputs.retry }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALLER_NAME: Desktop (macOS arm64 retry 3)
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
+
+  desktop_mac_arm64_retry_4:
+    name: Desktop (macOS arm64 retry 4)
+    needs: [preflight, build_bundle, mac_arm64_after_3]
+    if: always() && !cancelled() && needs.mac_arm64_after_3.outputs.retry == 'true'
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  mac_arm64_after_4:
+    name: macOS arm64 runner check 4
+    needs: [preflight, desktop_mac_arm64_retry_4]
+    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_4.result != 'success' && needs.desktop_mac_arm64_retry_4.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.decide.outputs.retry }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALLER_NAME: Desktop (macOS arm64 retry 4)
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
+
+  desktop_mac_arm64_retry_5:
+    name: Desktop (macOS arm64 retry 5)
+    needs: [preflight, build_bundle, mac_arm64_after_4]
+    if: always() && !cancelled() && needs.mac_arm64_after_4.outputs.retry == 'true'
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  mac_arm64_after_5:
+    name: macOS arm64 runner check 5
+    needs: [preflight, desktop_mac_arm64_retry_5]
+    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_5.result != 'success' && needs.desktop_mac_arm64_retry_5.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      retry: ${{ steps.decide.outputs.retry }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALLER_NAME: Desktop (macOS arm64 retry 5)
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
+
+  desktop_mac_arm64_retry_6:
+    name: Desktop (macOS arm64 retry 6)
+    needs: [preflight, build_bundle, mac_arm64_after_5]
+    if: always() && !cancelled() && needs.mac_arm64_after_5.outputs.retry == 'true'
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  mac_arm64_ready:
+    name: macOS arm64 runner acquired
+    needs:
+      [
+        preflight,
+        desktop_mac_arm64,
+        desktop_mac_arm64_retry_2,
+        desktop_mac_arm64_retry_3,
+        desktop_mac_arm64_retry_4,
+        desktop_mac_arm64_retry_5,
+        desktop_mac_arm64_retry_6,
+      ]
+    if: always() && !cancelled() && needs.preflight.outputs.due == 'true' && needs.desktop_mac_arm64.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - name: Require one macOS arm64 build that acquired a runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs gate "$RUNNER_TEMP/jobs.jsonl"
+
   prepare:
-    needs: [preflight, desktop]
+    needs: [preflight, desktop, mac_arm64_ready]
+    if: >-
+      always() &&
+      !cancelled() &&
+      needs.preflight.result == 'success' &&
+      needs.desktop.result == 'success' &&
+      needs.mac_arm64_ready.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -212,6 +506,11 @@ jobs:
   publish:
     needs: [due, preflight, prepare]
     if: >-
+      always() &&
+      !cancelled() &&
+      needs.due.result == 'success' &&
+      needs.preflight.result == 'success' &&
+      needs.prepare.result == 'success' &&
       needs.due.outputs.allowed_ref == 'true' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04 # npm trusted publishing requires GitHub-hosted runners.
