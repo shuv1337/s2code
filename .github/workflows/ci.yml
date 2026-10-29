@@ -27,6 +27,16 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
+      # actionlint 1.7.12 does not know concurrency.queue, which GitHub accepts.
+      - name: Validate GitHub Actions workflows
+        run: |
+          curl -fsSL -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint -color -shellcheck= -pyflakes= -ignore 'unexpected key "queue" for "concurrency"'
+
+      - name: Test macOS arm64 runner retry
+        run: node --test .github/scripts/macos-arm64-runner-retry.test.cjs
+
       - name: Setup Vite+ and pinned dependencies
         uses: voidzero-dev/setup-vp@v1
         with:

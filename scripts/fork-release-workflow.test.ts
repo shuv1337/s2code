@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeModule from "node:module";
 import * as NodeChildProcess from "node:child_process";
+
 const workflow = NodeFS.readFileSync(
   new URL("../.github/workflows/release.yml", import.meta.url),
   "utf8",
@@ -78,6 +79,7 @@ describe("fork workflow gates", () => {
     expect(publish).toContain("needs.due.outputs.allowed_ref == 'true'");
     expect(publish).toContain("github.event.repository.default_branch");
     expect(publish).not.toContain("refs/tags/");
+    expect(publish).toContain("needs.prepare.result == 'success'");
   });
   it("leaves preview signing outside the release environment and supplies the packager's existing config names", () => {
     expect(desktop).not.toContain("environment: fork-release");
