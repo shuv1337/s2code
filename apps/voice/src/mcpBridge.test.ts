@@ -152,6 +152,38 @@ it("http mcp bridge re-initializes once after session 404", async () => {
   ]);
 });
 
+it("does not replay a tools/call when the error text mentions a session", async () => {
+  let toolCalls = 0;
+  const mcp = createHttpMcpBridge({
+    mcpUrl: "http://127.0.0.1:9/mcp",
+    mcpToken: "tok",
+    fetchImpl: (async (_url, init) => {
+      const body = init?.body ? (JSON.parse(String(init.body)) as { method?: string }) : {};
+      if (body.method === "initialize") {
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json", "mcp-session-id": "s" },
+        });
+      }
+      if (body.method === "notifications/initialized") {
+        return new Response(null, { status: 202 });
+      }
+      toolCalls += 1;
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          error: { code: -32000, message: "Session expired" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch,
+  });
+  const result = await mcp.callTool("t3_thread_list", {});
+  expect(result.ok).toBe(false);
+  expect(toolCalls).toBe(1);
+});
+
 it("http mcp bridge maps auth failures after handshake", async () => {
   let n = 0;
   const mcp = createHttpMcpBridge({

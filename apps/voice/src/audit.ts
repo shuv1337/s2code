@@ -1,7 +1,7 @@
 /**
  * Client-side audit of every tool call the voice model makes.
  * Allowlisted fields only: tool, env, thread, ts, status. Never args/secrets.
- * Complements hub PeerForwardAudit (peer-forward.ndjson) for remote fan-out.
+ * Client log only. The hub peer-forward path is unchanged in this spike.
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";

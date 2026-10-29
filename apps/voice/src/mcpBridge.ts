@@ -55,14 +55,7 @@ const parseJsonRpcBody = async (response: Response): Promise<unknown> => {
   }
 };
 
-const isSessionLost = (response: Response, payload: unknown): boolean => {
-  if (response.status === 404) return true;
-  if (!payload || typeof payload !== "object") return false;
-  const error = (payload as { error?: { message?: unknown } }).error;
-  const message = typeof error?.message === "string" ? error.message : "";
-  if (!message) return false;
-  return /session/i.test(message) && /(expired|not found|unknown|invalid)/i.test(message);
-};
+const isSessionLost = (response: Response): boolean => response.status === 404;
 
 type JsonRpcPayload = {
   readonly result?: {
@@ -177,7 +170,7 @@ export const createHttpMcpBridge = (options: HttpMcpBridgeOptions): McpBridge =>
 
       let { response, payload } = await postToolsCall(name, args);
 
-      if (isSessionLost(response, payload)) {
+      if (isSessionLost(response)) {
         sessionId = null;
         const reinitError = await ensureSession();
         if (reinitError) return reinitError;

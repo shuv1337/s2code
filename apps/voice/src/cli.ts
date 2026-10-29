@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * s2-voice CLI. Config from S2_VOICE_CONFIG / env. OpenAI key from env only
- * (inject via `2password run`). Never prints tokens or keys.
+ * (inject via `op run`). Never prints tokens or keys.
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -81,7 +81,7 @@ const main = async () => {
 
   if (!resolved.openaiApiKey) {
     process.stderr.write(
-      "[voice] blocked: need OpenAI key via masked field (OPENAI_API_KEY / 2password)\n",
+      "[voice] blocked: need OpenAI key via masked field (OPENAI_API_KEY / op run)\n",
     );
     process.exitCode = 2;
     return;

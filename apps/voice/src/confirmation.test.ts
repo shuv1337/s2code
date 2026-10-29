@@ -6,10 +6,13 @@ it("asks for a spoken yes before a guarded tool and blocks delete", () => {
   const guarded = decideConfirmation({
     tool: "t3_environment_unlink",
     environmentLabel: "shuvbot",
+    args: { environmentId: "env-shuvbot" },
   });
   expect(guarded.action).toBe("await_confirm");
   if (guarded.action === "await_confirm") {
-    expect(guarded.speak).toBe("Say yes to t3_environment_unlink on shuvbot.");
+    expect(guarded.speak).toBe(
+      "Say yes to t3_environment_unlink on shuvbot, environment env-shuvbot.",
+    );
   }
   const blocked = decideConfirmation({
     tool: "t3_project_delete",

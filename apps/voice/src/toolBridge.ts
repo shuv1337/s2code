@@ -49,7 +49,26 @@ export interface CreateToolBridgeOptions {
   readonly now?: () => Date;
   /** Override wait tool used after long-running fire. */
   readonly waitToolName?: string;
+  /** How long a spoken yes stays valid. Default 20s. */
+  readonly confirmTimeoutMs?: number;
+  readonly scheduleTimeout?: (ms: number, onFire: () => void) => () => void;
 }
+
+/**
+ * Idempotency key is the GPT-Live call id captured with the arguments.
+ * A spoken yes does not replace those arguments.
+ */
+const clientRequestArgs = (
+  name: string,
+  args: Record<string, unknown>,
+  callId: string | undefined,
+): Record<string, unknown> => {
+  if (callId === undefined || callId.length === 0 || args.clientRequestId !== undefined)
+    return args;
+  const respond = name === "t3_pending_request" && args.action === "respond";
+  if (name !== "t3_thread_send" && name !== "t3_thread_launch" && !respond) return args;
+  return { ...args, clientRequestId: callId };
+};
 
 const truncateSummary = (value: unknown, max = 400): string => {
   const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
@@ -102,9 +121,17 @@ const payloadFrom = (content: unknown): Record<string, unknown> | undefined => {
 export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge => {
   const now = options.now ?? (() => new Date());
   const waitToolName = options.waitToolName ?? "t3_thread_wait";
+  const confirmTimeoutMs = options.confirmTimeoutMs ?? 20_000;
+  const scheduleTimeout =
+    options.scheduleTimeout ??
+    ((ms, onFire) => {
+      const timer = setTimeout(onFire, ms);
+      return () => clearTimeout(timer);
+    });
   const labels = new Map<string, string>(Object.entries(options.config.environmentLabels));
   const watches: Promise<void>[] = [];
-  let waiting: ((answer: "yes" | "no") => void) | undefined;
+  let waiting: ((answer: "yes" | "no" | "timeout") => void) | undefined;
+  let cancelTimer: (() => void) | undefined;
   let heard = "";
 
   const labelFor = (environmentId: string | null): string =>
@@ -138,11 +165,41 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
     }
   };
 
-  const challenge = (): Promise<"yes" | "no"> => {
+  const challenge = (): Promise<"yes" | "no" | "timeout" | "busy"> => {
+    if (waiting !== undefined) return Promise.resolve("busy");
     heard = "";
     return new Promise((resolve) => {
-      waiting = resolve;
+      const finish = (answer: "yes" | "no" | "timeout") => {
+        if (waiting !== finish) return;
+        waiting = undefined;
+        heard = "";
+        cancelTimer?.();
+        cancelTimer = undefined;
+        resolve(answer);
+      };
+      waiting = finish;
+      cancelTimer = scheduleTimeout(confirmTimeoutMs, () => finish("timeout"));
     });
+  };
+
+  const spokenDetail = (payload: Record<string, unknown> | undefined): string | undefined => {
+    if (typeof payload?.summary === "string" && payload.summary.trim().length > 0) {
+      return truncateSummary(payload.summary, 160);
+    }
+    const items = payload?.items;
+    if (!Array.isArray(items)) return undefined;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (
+        item &&
+        typeof item === "object" &&
+        typeof (item as { text?: unknown }).text === "string"
+      ) {
+        const text = (item as { text: string }).text.trim();
+        if (text.length > 0) return truncateSummary(text, 160);
+      }
+    }
+    return undefined;
   };
 
   const watchThread = (input: {
@@ -151,10 +208,11 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
     readonly label: string;
   }): Promise<void> =>
     (async () => {
-      for (let poll = 0; poll < 4; poll += 1) {
+      let saidRunning = false;
+      for (let poll = 0; poll < 12; poll += 1) {
         const waited = await options.mcp.callTool(waitToolName, {
           threadId: input.threadId,
-          timeoutMs: 5_000,
+          timeoutMs: 15_000,
           ...(input.environmentId ? { environmentId: input.environmentId } : {}),
         });
         await audit(
@@ -170,29 +228,38 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         const payload = payloadFrom(waited.content);
         const status = typeof payload?.status === "string" ? payload.status : undefined;
         const timedOut = payload?.timedOut === true;
-        if (waited.ok && !timedOut && (status === undefined || !UNSETTLED.has(status))) {
-          const detail =
-            typeof payload?.summary === "string"
-              ? payload.summary
-              : truncateSummary(waited.content, 160);
-          await options.speak(`Done on ${input.label}: ${status ?? "settled"}. ${detail}`);
+        const settled = waited.ok && !timedOut && (status === undefined || !UNSETTLED.has(status));
+        if (settled) {
+          const detail = spokenDetail(payload);
+          const statusText = status ?? "settled";
+          await options.speak(
+            detail === undefined
+              ? `Done on ${input.label}: ${statusText}.`
+              : `Done on ${input.label}: ${statusText}. ${detail}`,
+          );
           return;
         }
+        if (!saidRunning && poll >= 1) {
+          saidRunning = true;
+          await options.speak(
+            `${input.label}: thread ${input.threadId} is still running. I will check again.`,
+          );
+        }
       }
-      await options.speak(`${input.label}: the thread is still running.`);
+      await options.speak(
+        `${input.label}: thread ${input.threadId} is still running. Ask me to check again.`,
+      );
     })().catch(async () => {
-      await options.speak(`${input.label}: I lost track of the thread.`);
+      await options.speak(`${input.label}: I lost track of thread ${input.threadId}.`);
     });
 
   return {
     hear: (utterance) => {
+      if (waiting === undefined) return;
       heard = `${heard} ${utterance}`.slice(-400);
       const answer = parseSpokenAnswer(heard);
-      if (answer === undefined || waiting === undefined) return;
-      const resolve = waiting;
-      waiting = undefined;
-      heard = "";
-      resolve(answer);
+      if (answer === undefined) return;
+      waiting(answer);
     },
     drain: () => Promise.all(watches).then(() => undefined),
     handleFunctionCall: async (request) => {
@@ -203,7 +270,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
       const threadId = threadIdFromToolArgs(args);
       const envLabel = labelFor(envId);
 
-      const decision = decideVoiceTool(name);
+      const decision = decideVoiceTool(name, args);
       if (!decision.ok && decision.reason !== "needs_confirmation") {
         const status =
           decision.reason === "destructive" ? "rejected_destructive" : "rejected_not_allowlisted";
@@ -237,6 +304,26 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
       }
 
       if (!decision.ok) {
+        if (waiting !== undefined) {
+          await options.speak("Another confirmation is already waiting.");
+          await audit(
+            options.config.auditDir,
+            {
+              tool: name,
+              environmentId: envId,
+              threadId,
+              status: "rejected_confirmation",
+            },
+            now,
+          );
+          return {
+            callId,
+            name,
+            status: "rejected_confirmation",
+            output: JSON.stringify({ error: "rejected_confirmation", reason: "busy" }),
+            rejected: true,
+          };
+        }
         const confirm = decideConfirmation({
           tool: name,
           environmentLabel: envLabel,
@@ -296,8 +383,9 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         await options.speak(`On ${envLabel}.`);
       }
 
-      const callArgs =
-        envId && !("environmentId" in args) ? { ...args, environmentId: envId } : args;
+      const captured =
+        envId && !("environmentId" in args) ? { ...args, environmentId: envId } : { ...args };
+      const callArgs = clientRequestArgs(name, captured, callId);
 
       let result: McpCallResult;
       try {

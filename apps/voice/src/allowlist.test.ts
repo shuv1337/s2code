@@ -34,4 +34,15 @@ it("decideVoiceTool hard-rejects destructive even if somehow listed", () => {
 
   const ok = decideVoiceTool("t3_thread_read");
   expect(ok.ok).toBe(true);
+
+  const restart = decideVoiceTool("t3_thread_send", { mode: "restart" });
+  expect(restart.ok).toBe(false);
+  if (!restart.ok) expect(restart.reason).toBe("needs_confirmation");
+
+  const cancel = decideVoiceTool("t3_queue", { action: "cancel" });
+  expect(cancel.ok).toBe(false);
+  if (!cancel.ok) expect(cancel.reason).toBe("needs_confirmation");
+
+  const queueRead = decideVoiceTool("t3_queue", { action: "list" });
+  expect(queueRead.ok).toBe(true);
 });

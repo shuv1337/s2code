@@ -3,10 +3,17 @@
 Thin GPT-Live client on the hub. Speech (or a text dry-run) calls allowlisted
 `t3_*` tools on the hub s2code MCP. Peers such as shuvbot are reached with
 `environmentId` from `t3_environment_links`; this process holds one hub
-credential. Side effects say `On <environment>.` first. Guarded tools
-(workflow stop, transfer, handoff, project create/clone, environment
-link/unlink, preview list/close) run only after a spoken yes. `t3_project_delete`
-stays blocked. Every tool call is audited to ndjson with no args or secrets.
+credential. Side effects say `On <environment>.` first. Guarded tools (workflow stop, transfer, handoff, project create/clone,
+environment link/unlink, preview list/close) run only after a spoken yes
+that names the target ids. The prompt stays open for 20 seconds. A second
+guarded call is rejected while one is waiting, and a yes after that window
+does not apply. `t3_project_delete` stays blocked. `t3_thread_send` with `mode: restart` and
+`t3_queue` with `action: cancel` also wait for a spoken yes. The yes applies
+only to the arguments captured when the model called the tool. A later yes
+cannot change the thread, message, or mode. Every tool call is audited to
+ndjson with no args or secrets. The voice client retries a lost MCP session
+only on HTTP 404, and send, launch, and pending respond reuse the GPT-Live
+`call_id` as `clientRequestId`.
 
 `t3_thread_send` and `t3_thread_launch` return immediately. A second poll of
 `t3_thread_wait` speaks a one-line summary when the run settles.
@@ -40,8 +47,8 @@ Copy `config.example/config.json` to e.g. `~/.config/s2-voice/config.json`
 
 ```bash
 export S2_VOICE_CONFIG="$HOME/.config/s2-voice/config.json"
-# OpenAI key via 2password — never plain on disk if you can avoid it:
-2password run --env "OPENAI_API_KEY=op://…/credential" -- \
+# OpenAI key via 1Password. Never print or commit it.
+op run --env-file .env.op -- \
   pnpm --filter @t3tools/voice start
 ```
 
@@ -65,11 +72,14 @@ pnpm --filter @t3tools/voice dry-run
 
 ## Cap: run on shuvdev (separate install step)
 
-1. Put OpenAI API key in 1Password Shared vault; wire via `2password run`.
-2. Write `~/.config/s2-voice/config.json` with hub MCP URL + token (private
-   path only; no public origin).
-3. Checkout `spike/s2-voice-orchestrator` (or install a built artifact) on
-   shuvdev only — do not install the audit patch onto nightly until Cap says.
+1. Put the OpenAI API key in 1Password and inject it with `op run`. Do not
+   print the key.
+2. Write `~/.config/s2-voice/config.json` with the hub MCP URL and token
+   (private path only; no public origin). Use the narrowest hub credential
+   that can call the exact tool names in the voice allowlist and the guarded
+   list. The client denies every other name. This spike does not add a
+   server-side deny list for that credential.
+3. Checkout `spike/s2-voice-orchestrator` on shuvdev only.
 4. `pnpm --filter @t3tools/voice start` under the config + key env.
 5. Confirm spoken env announcement + `voice-tool.ndjson` lines before any
    peer side effects.

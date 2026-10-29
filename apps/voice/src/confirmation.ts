@@ -1,9 +1,13 @@
 /**
- * Voice acts immediately. Guarded tools wait for a spoken yes. Delete is
- * refused. Other side effects announce the environment, then run.
+ * Voice acts immediately. Guarded calls wait for a spoken yes. The yes applies
+ * only to the arguments captured on that call. Delete is refused.
  */
 
-import { isConfirmVoiceTool, isDestructiveVoiceTool, isSideEffectVoiceTool } from "./allowlist.ts";
+import {
+  isDestructiveVoiceTool,
+  isSideEffectVoiceTool,
+  needsSpokenConfirmation,
+} from "./allowlist.ts";
 
 export type SpeakFn = (text: string) => void | Promise<void>;
 
@@ -28,12 +32,38 @@ export const parseSpokenAnswer = (utterance: string): "yes" | "no" | undefined =
   return undefined;
 };
 
+const named = (
+  args: Readonly<Record<string, unknown>> | undefined,
+  key: string,
+): string | undefined => {
+  const value = args?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
+/** Ids and modes captured on the tool call. A later yes cannot change them. */
+export const confirmationTarget = (ctx: ConfirmationContext): string => {
+  const label = ctx.environmentLabel?.trim() || "the hub";
+  const environmentId = named(ctx.args, "environmentId");
+  const threadId = named(ctx.args, "threadId");
+  const projectId = named(ctx.args, "projectId");
+  const action = named(ctx.args, "action");
+  const mode = named(ctx.args, "mode");
+  return [
+    `on ${label}`,
+    ...(environmentId === undefined ? [] : [`environment ${environmentId}`]),
+    ...(threadId === undefined ? [] : [`thread ${threadId}`]),
+    ...(projectId === undefined ? [] : [`project ${projectId}`]),
+    ...(action === undefined ? [] : [`action ${action}`]),
+    ...(mode === undefined ? [] : [`mode ${mode}`]),
+  ].join(", ");
+};
+
 export const decideConfirmation = (ctx: ConfirmationContext): ConfirmationDecision => {
   const label = ctx.environmentLabel?.trim() || "the hub";
-  if (isConfirmVoiceTool(ctx.tool)) {
+  if (needsSpokenConfirmation(ctx.tool, ctx.args)) {
     return {
       action: "await_confirm",
-      speak: `Say yes to ${ctx.tool} on ${label}.`,
+      speak: `Say yes to ${ctx.tool} ${confirmationTarget(ctx)}.`,
     };
   }
   if (isDestructiveVoiceTool(ctx.tool)) {

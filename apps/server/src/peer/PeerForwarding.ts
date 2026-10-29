@@ -13,7 +13,6 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -22,9 +21,7 @@ import type * as Tool from "effect/ai/Tool";
 import { assertNotLinked } from "../mcp/linkOrigin.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { readCaller, unavailable } from "../mcp/threadAccess.ts";
-import * as ServerConfig from "../config.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import * as PeerForwardAudit from "./PeerForwardAudit.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 import * as PeerMcpClient from "./PeerMcpClient.ts";
 
@@ -99,7 +96,6 @@ const make = Effect.gen(function* () {
   const links = yield* PeerLinks.PeerLinks;
   const crypto = yield* Crypto.Crypto;
   const threads = yield* ThreadManagement.ThreadManagementService;
-  const config = yield* ServerConfig.ServerConfig;
 
   /**
    * The caller's own limits, which travel with every forwarded call: the peer sees only the
@@ -150,49 +146,13 @@ const make = Effect.gen(function* () {
     if (typeof args.clientRequestId === "string") {
       args.clientRequestId = yield* scopedRequestId(scope.requestNamespace, args.clientRequestId);
     }
-    const threadId = PeerForwardAudit.threadIdFromForwardParams(args);
-    const startedMs = Date.now();
-    const exit = yield* Effect.exit(
-      peers.call({
-        environmentId,
-        tool: toolName,
-        arguments: args,
-        limits,
-        success: success as Schema.Decoder<A>,
-      }),
-    );
-    const resultStatus = Exit.match(exit, {
-      onSuccess: () => "ok",
-      onFailure: (cause) => {
-        const codes: Array<string> = [];
-        const walk = (c: unknown): void => {
-          if (c === null || typeof c !== "object") return;
-          const o = c as Record<string, unknown>;
-          if (o._tag === "Fail" && o.error !== null && typeof o.error === "object") {
-            const code = (o.error as { code?: unknown }).code;
-            if (typeof code === "string") codes.push(code);
-          }
-          if ("left" in o) walk(o.left);
-          if ("right" in o) walk(o.right);
-          if ("cause" in o) walk(o.cause);
-        };
-        walk(cause);
-        return codes[0] ?? "error";
-      },
+    return yield* peers.call({
+      environmentId,
+      tool: toolName,
+      arguments: args,
+      limits,
+      success: success as Schema.Decoder<A>,
     });
-    yield* Effect.tryPromise({
-      try: () =>
-        PeerForwardAudit.appendPeerForwardAudit(config.logsDir, {
-          ts: new Date().toISOString(),
-          tool: toolName,
-          environmentId,
-          threadId,
-          status: resultStatus,
-          durationMs: Date.now() - startedMs,
-        }),
-      catch: (e) => e,
-    }).pipe(Effect.ignore);
-    return yield* exit;
   });
 
   const readThread: PeerForwarding["Service"]["readThread"] = (scope, environmentId, input) =>

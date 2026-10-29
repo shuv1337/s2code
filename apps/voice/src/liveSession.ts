@@ -14,6 +14,7 @@ export interface LiveSessionHandlers {
   readonly onUserText?: (text: string) => void;
   readonly onEvent?: (event: Record<string, unknown>) => void;
   readonly onToolResult?: (result: ToolBridgeResult) => void;
+  readonly onClose?: () => void;
 }
 
 export interface LiveSession {
@@ -52,13 +53,14 @@ export const handleLiveOutputItem = async (
   handlers?: LiveSessionHandlers,
 ): Promise<boolean> => {
   if (item.type !== "function_call") return false;
+  if (typeof item.call_id !== "string" || item.call_id.length === 0) return false;
   const name = typeof item.name === "string" ? item.name : "";
-  const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+  const callId = item.call_id;
   const args = parseArgs(item.arguments);
   const result = await bridge.handleFunctionCall({
     name,
     arguments: args,
-    ...(callId === undefined ? {} : { callId }),
+    callId,
   });
   handlers?.onToolResult?.(result);
   send({
@@ -106,6 +108,7 @@ export const connectLiveSession = (
     },
   });
 
+  let opened = false;
   let openResolve: (() => void) | undefined;
   let openReject: ((err: Error) => void) | undefined;
   const openPromise = new Promise<void>((resolve, reject) => {
@@ -120,12 +123,20 @@ export const connectLiveSession = (
   };
 
   ws.on("open", () => {
+    opened = true;
     send(buildSessionCreatePayload(config));
     openResolve?.();
   });
 
   ws.on("error", (err) => {
     openReject?.(err instanceof Error ? err : new Error(String(err)));
+  });
+
+  ws.on("close", () => {
+    if (!opened) {
+      openReject?.(new Error("GPT-Live socket closed before the session started."));
+    }
+    handlers.onClose?.();
   });
 
   ws.on("message", (data) => {

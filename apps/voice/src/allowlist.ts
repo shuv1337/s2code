@@ -71,6 +71,17 @@ export const isDestructiveVoiceTool = (tool: string): tool is VoiceDestructiveTo
 
 export const isConfirmVoiceTool = (tool: string): boolean => confirmSet.has(tool);
 
+/** Restart and queue cancel are side effects that still need a spoken yes. */
+export const needsSpokenConfirmation = (
+  tool: string,
+  args?: Readonly<Record<string, unknown>>,
+): boolean => {
+  if (isConfirmVoiceTool(tool)) return true;
+  if (tool === "t3_thread_send" && args?.mode === "restart") return true;
+  if (tool === "t3_queue" && args?.action === "cancel") return true;
+  return false;
+};
+
 export const isSideEffectVoiceTool = (
   tool: string,
   args?: Readonly<Record<string, unknown>>,
@@ -92,8 +103,11 @@ export type AllowlistDecision =
     };
 
 /** Single gate used by the tool bridge before any MCP call. */
-export const decideVoiceTool = (tool: string): AllowlistDecision => {
-  if (isConfirmVoiceTool(tool)) {
+export const decideVoiceTool = (
+  tool: string,
+  args?: Readonly<Record<string, unknown>>,
+): AllowlistDecision => {
+  if (needsSpokenConfirmation(tool, args)) {
     return { ok: false, tool, reason: "needs_confirmation" };
   }
   if (isDestructiveVoiceTool(tool)) {

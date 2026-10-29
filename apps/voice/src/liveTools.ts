@@ -63,15 +63,58 @@ const descriptions: Record<string, string> = {
   t3_worktree_status: "Read worktree status.",
 };
 
+const stringProp = (description: string) => ({ type: "string", description });
+
 const propsFor = (name: string): Record<string, unknown> => {
-  if (name.startsWith("t3_thread_") || name === "t3_pending_request") {
+  const common = { ...baseProps, clientRequestId: stringProp("Retry key. The client fills this.") };
+  if (name === "t3_thread_send") {
+    return {
+      ...threadProps,
+      message: stringProp("Message text."),
+      mode: { type: "string", enum: ["auto", "queue", "steer", "restart"] },
+      clientRequestId: stringProp("Retry key. The client fills this from the voice call id."),
+    };
+  }
+  if (name === "t3_thread_launch") {
+    return {
+      ...common,
+      projectId: stringProp("Project id."),
+      title: stringProp("Thread title."),
+      message: stringProp("First prompt."),
+    };
+  }
+  if (name === "t3_pending_request") {
+    return {
+      ...threadProps,
+      action: { type: "string", enum: ["list", "read", "respond"] },
+      requestId: stringProp("Pending request id."),
+      answers: { type: "object", additionalProperties: true },
+      clientRequestId: stringProp("Retry key. The client fills this on respond."),
+    };
+  }
+  if (name === "t3_queue") {
+    return {
+      ...threadProps,
+      action: {
+        type: "string",
+        enum: ["list", "read", "edit", "cancel", "reorder", "promote_to_steer"],
+      },
+      queuedRunId: stringProp("Queued run id."),
+      text: stringProp("Replacement text."),
+    };
+  }
+  if (name === "t3_thread_read" || name === "t3_thread_wait" || name === "t3_thread_interrupt") {
+    return { ...threadProps, runId: stringProp("Run id.") };
+  }
+  if (
+    name.startsWith("t3_thread_") ||
+    name === "t3_worktree_handoff" ||
+    name === "t3_workflow_stop"
+  ) {
     return { ...threadProps };
   }
-  if (name.startsWith("t3_project_")) {
-    return {
-      ...baseProps,
-      projectId: { type: "string", description: "Project id." },
-    };
+  if (name.startsWith("t3_project_") || name.startsWith("t3_worktree_")) {
+    return { ...baseProps, projectId: stringProp("Project id.") };
   }
   return { ...baseProps };
 };
@@ -84,7 +127,7 @@ export const buildLiveFunctionTools = (): LiveFunctionTool[] =>
     parameters: {
       type: "object" as const,
       properties: propsFor(name),
-      additionalProperties: true,
+      additionalProperties: false,
     },
   }));
 
