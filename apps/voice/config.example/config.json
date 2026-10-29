@@ -9,5 +9,6 @@
     "ENV_ID_HUB": "shuvdev",
     "ENV_ID_PEER": "shuvbot"
   },
-  "defaultEnvironmentId": "ENV_ID_HUB"
+  "defaultEnvironmentId": "ENV_ID_HUB",
+  "toolResultMaxChars": 4000
 }

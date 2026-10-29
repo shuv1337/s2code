@@ -26,6 +26,7 @@ it("steers hub and peer, then speaks when the waited thread settles", async () =
     backendModel: "gpt-5.6-luna",
     environmentLabels: {},
     defaultEnvironmentId: null,
+    toolResultMaxChars: 4_000,
     openaiApiKey: null,
     liveWsUrl: "wss://api.openai.com/v1/live/sessions",
   };
@@ -93,10 +94,13 @@ it("steers hub and peer, then speaks when the waited thread settles", async () =
   });
 
   await bridge.handleFunctionCall({ name: "t3_environment_links", arguments: {} });
-  await bridge.handleFunctionCall({ name: "t3_thread_list", arguments: {} });
   await bridge.handleFunctionCall({
     name: "t3_thread_list",
-    arguments: { environmentId: "env-shuvbot" },
+    arguments: { projectId: "project-s2" },
+  });
+  await bridge.handleFunctionCall({
+    name: "t3_thread_list",
+    arguments: { environmentId: "env-shuvbot", projectId: "project-peer" },
   });
   await bridge.handleFunctionCall({
     name: "t3_thread_read",
@@ -140,7 +144,13 @@ it("steers hub and peer, then speaks when the waited thread settles", async () =
 
   const names = mcp.calls.map((call) => call.name);
   expect(names).toContain("t3_environment_links");
-  expect(names.filter((name) => name === "t3_thread_list")).toHaveLength(2);
+  expect(mcp.calls.find((call) => call.name === "t3_environment_links")?.args).toEqual({});
+  expect(
+    mcp.calls.filter((call) => call.name === "t3_thread_list").map((call) => call.args),
+  ).toEqual([
+    { projectId: "project-s2" },
+    { environmentId: "env-shuvbot", projectId: "project-peer" },
+  ]);
   expect(names).toContain("t3_thread_send");
   expect(names).toContain("t3_thread_launch");
   expect(names).toContain("t3_thread_interrupt");

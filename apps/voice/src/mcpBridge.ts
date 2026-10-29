@@ -4,6 +4,7 @@
  * notifications/initialized) and re-initializes once on 404 / expired session.
  * Token comes from config/env only — never logged.
  */
+import type { VoiceToolInputSchema } from "./allowlist.ts";
 
 export interface McpCallResult {
   readonly ok: boolean;
@@ -12,8 +13,14 @@ export interface McpCallResult {
   readonly isError?: boolean;
 }
 
+export interface McpListedTool {
+  readonly name: string;
+  readonly inputSchema?: VoiceToolInputSchema;
+}
+
 export interface McpBridge {
   readonly callTool: (name: string, args: Record<string, unknown>) => Promise<McpCallResult>;
+  readonly listTools: () => Promise<readonly McpListedTool[]>;
 }
 
 export interface HttpMcpBridgeOptions {
@@ -63,6 +70,28 @@ type JsonRpcPayload = {
     readonly isError?: boolean;
   };
   readonly error?: { readonly code?: number; readonly message?: string };
+};
+
+const inputSchemaFrom = (value: unknown): VoiceToolInputSchema | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const properties =
+    record.properties && typeof record.properties === "object" && !Array.isArray(record.properties)
+      ? (record.properties as Readonly<Record<string, unknown>>)
+      : undefined;
+  const additionalProperties =
+    typeof record.additionalProperties === "boolean" ? record.additionalProperties : undefined;
+  const required = Array.isArray(record.required)
+    ? record.required.filter((item): item is string => typeof item === "string")
+    : undefined;
+  if (properties === undefined && additionalProperties === undefined && required === undefined) {
+    return undefined;
+  }
+  return {
+    ...(properties === undefined ? {} : { properties }),
+    ...(additionalProperties === undefined ? {} : { additionalProperties }),
+    ...(required === undefined || required.length === 0 ? {} : { required }),
+  };
 };
 
 const mapPayload = (payload: JsonRpcPayload | null): McpCallResult => {
@@ -150,20 +179,53 @@ export const createHttpMcpBridge = (options: HttpMcpBridgeOptions): McpBridge =>
     return null;
   };
 
+  const postRpc = async (
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<{ response: Response; payload: unknown }> => {
+    const response = await fetchImpl(options.mcpUrl, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify(jsonRpc(method, params, nextId++)),
+    });
+    const payload = await parseJsonRpcBody(response);
+    return { response, payload };
+  };
+
   const postToolsCall = async (
     name: string,
     args: Record<string, unknown>,
   ): Promise<{ response: Response; payload: JsonRpcPayload | null }> => {
-    const response = await fetchImpl(options.mcpUrl, {
-      method: "POST",
-      headers: buildHeaders(),
-      body: JSON.stringify(jsonRpc("tools/call", { name, arguments: args }, nextId++)),
-    });
-    const payload = (await parseJsonRpcBody(response)) as JsonRpcPayload | null;
-    return { response, payload };
+    const posted = await postRpc("tools/call", { name, arguments: args });
+    return { response: posted.response, payload: posted.payload as JsonRpcPayload | null };
   };
 
   return {
+    listTools: async () => {
+      const initError = await ensureSession();
+      if (initError) {
+        throw new Error(initError.status);
+      }
+      let posted = await postRpc("tools/list", {});
+      if (isSessionLost(posted.response)) {
+        sessionId = null;
+        const reinitError = await ensureSession();
+        if (reinitError) throw new Error(reinitError.status);
+        posted = await postRpc("tools/list", {});
+      }
+      if (!posted.response.ok) {
+        throw new Error(`http_${posted.response.status}`);
+      }
+      const result = (posted.payload as { result?: { tools?: unknown } } | null)?.result;
+      const tools = Array.isArray(result?.tools) ? result.tools : [];
+      return tools.flatMap((tool): McpListedTool[] => {
+        if (!tool || typeof tool !== "object") return [];
+        const name = (tool as { name?: unknown }).name;
+        if (typeof name !== "string" || name.length === 0) return [];
+        const inputSchema = inputSchemaFrom((tool as { inputSchema?: unknown }).inputSchema);
+        return inputSchema === undefined ? [{ name }] : [{ name, inputSchema }];
+      });
+    },
     callTool: async (name, args) => {
       const initError = await ensureSession();
       if (initError) return initError;
@@ -198,6 +260,7 @@ export const createMockMcpBridge = (
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   return {
     calls,
+    listTools: async () => [],
     callTool: async (name, args) => {
       calls.push({ name, args });
       if (handler) return handler(name, args);
