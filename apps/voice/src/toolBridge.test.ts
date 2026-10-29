@@ -177,6 +177,9 @@ it("text dry-run path rejects delete and allows links via liveSession helper", a
   const handoff = tools.find((tool) => tool.name === "t3_worktree_handoff");
   expect(handoff?.parameters.properties).not.toHaveProperty("environmentId");
   expect(handoff?.parameters.required).toEqual(["branch"]);
+  const threadRead = tools.find((tool) => tool.name === "t3_thread_read");
+  expect(threadRead?.parameters.properties).not.toHaveProperty("runId");
+  expect(threadRead?.parameters.properties).toHaveProperty("afterPosition");
   await NodeFSP.rm(root, { recursive: true, force: true });
 });
 
@@ -335,6 +338,58 @@ it("keeps discovery on the hub when the default environment is a peer", async ()
   await NodeFSP.rm(root, { recursive: true, force: true });
 });
 
+it("follows a peer default from launch into read and wait", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "voice-bridge-"));
+  const mcp = createMockMcpBridge(async (name) => ({
+    ok: true,
+    status: "ok",
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          name === "t3_thread_launch" ? { threadId: "thread-launched" } : { ok: true },
+        ),
+      },
+    ],
+  }));
+  const bridge = createToolBridge({
+    config: { ...baseConfig(root), defaultEnvironmentId: "env-peer" },
+    mcp,
+    speak: () => undefined,
+  });
+
+  const launched = await bridge.handleFunctionCall({
+    name: "t3_thread_launch",
+    arguments: { title: "smoke", projectId: "project-s2" },
+  });
+  await bridge.handleFunctionCall({
+    name: "t3_thread_read",
+    arguments: { threadId: "thread-launched" },
+  });
+  await bridge.handleFunctionCall({
+    name: "t3_thread_wait",
+    arguments: { threadId: "thread-launched" },
+  });
+  await bridge.handleFunctionCall({ name: "t3_worktree_list", arguments: {} });
+
+  expect(launched.output).toContain('"environmentId":"env-peer"');
+  expect(mcp.calls.find((call) => call.name === "t3_thread_launch")?.args.environmentId).toBe(
+    "env-peer",
+  );
+  expect(mcp.calls.find((call) => call.name === "t3_thread_read")?.args).toEqual({
+    environmentId: "env-peer",
+    threadId: "thread-launched",
+  });
+  expect(mcp.calls.find((call) => call.name === "t3_thread_wait")?.args.environmentId).toBe(
+    "env-peer",
+  );
+  expect(mcp.calls.find((call) => call.name === "t3_worktree_list")?.args).toEqual({
+    environmentId: "env-peer",
+  });
+  await bridge.drain();
+  await NodeFSP.rm(root, { recursive: true, force: true });
+});
+
 it("summarizes discovery results and redacts secrets before the model sees them", async () => {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "voice-bridge-"));
   const secret = "sekret-token-value";
@@ -362,7 +417,17 @@ it("summarizes discovery results and redacts secrets before the model sees them"
     return {
       ok: true,
       status: "ok",
-      content: [{ type: "text", text: JSON.stringify({ note: blob, token: secret }) }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            token: secret,
+            nested: JSON.stringify({ clientSecret: secret, authToken: secret }),
+            leak: `https://example.test/a?token=${secret}#token=${secret} sk-proj-abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz`,
+            note: blob,
+          }),
+        },
+      ],
     };
   });
   const bridge = createToolBridge({
@@ -382,8 +447,12 @@ it("summarizes discovery results and redacts secrets before the model sees them"
     arguments: { threadId: "thread-1", message: "hello", environmentId: "env-hub" },
   });
   expect(send.output).not.toContain(secret);
+  expect(send.output).toContain("[redacted]");
+  expect(send.output).not.toContain("sk-proj-abcdefghijklmnop");
+  expect(send.output).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz");
+  expect(send.output.indexOf("[redacted]")).toBeLessThan(send.output.indexOf("xxxx"));
   expect(send.output.length).toBeGreaterThan(400);
-  expect(send.output.length).toBeLessThanOrEqual(1_001);
+  expect(send.output.length).toBeLessThanOrEqual(1_200);
   await bridge.drain();
   await NodeFSP.rm(root, { recursive: true, force: true });
 });

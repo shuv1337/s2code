@@ -83,34 +83,59 @@ const applyEnvironmentArg = (
   args: Record<string, unknown>,
   defaultEnvironmentId: string | null,
   schema: VoiceToolInputSchema | undefined,
-): { readonly args: Record<string, unknown>; readonly environmentId: string | null } => {
+): {
+  readonly args: Record<string, unknown>;
+  readonly environmentId: string | null;
+  readonly filledDefault: boolean;
+} => {
   const policy = environmentPolicyFor(name, schema);
   const explicit =
     typeof args.environmentId === "string" && args.environmentId.length > 0
       ? args.environmentId
       : null;
-  if (policy === "strip") {
-    if (!("environmentId" in args)) return { args, environmentId: null };
+  const withoutEnvironment = (): Record<string, unknown> => {
+    if (!("environmentId" in args)) return args;
     const { environmentId: _ignored, ...rest } = args;
-    return { args: rest, environmentId: null };
+    return rest;
+  };
+  if (policy === "strip")
+    return { args: withoutEnvironment(), environmentId: null, filledDefault: false };
+  if (policy === "keep" || explicit) {
+    return {
+      args: explicit === null ? withoutEnvironment() : args,
+      environmentId: explicit,
+      filledDefault: false,
+    };
   }
-  if (policy === "keep") {
-    if (explicit === null && "environmentId" in args) {
-      const { environmentId: _ignored, ...rest } = args;
-      return { args: rest, environmentId: null };
-    }
-    return { args, environmentId: explicit };
-  }
-  if (explicit) return { args, environmentId: explicit };
   if (!defaultEnvironmentId) {
-    if (!("environmentId" in args)) return { args, environmentId: null };
-    const { environmentId: _ignored, ...rest } = args;
-    return { args: rest, environmentId: null };
+    return { args: withoutEnvironment(), environmentId: null, filledDefault: false };
   }
   return {
     args: { ...args, environmentId: defaultEnvironmentId },
     environmentId: defaultEnvironmentId,
+    filledDefault: true,
   };
+};
+
+/** Tell the model which environment a filled default actually hit. */
+const noteRoutedEnvironment = (
+  output: string,
+  environmentId: string | null,
+  filledDefault: boolean,
+): string => {
+  if (!filledDefault || environmentId === null) return output;
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (Array.isArray(parsed)) return JSON.stringify({ environmentId, content: parsed });
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.environmentId === "string") return output;
+      return JSON.stringify({ environmentId, ...record });
+    }
+  } catch {
+    return JSON.stringify({ environmentId, result: output });
+  }
+  return JSON.stringify({ environmentId, result: output });
 };
 
 const audit = async (
@@ -436,17 +461,24 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         now,
       );
 
+      const modelOutput = (ok: boolean) =>
+        noteRoutedEnvironment(
+          summarizeToolResult({
+            tool: name,
+            content: result.content,
+            maxChars: options.config.toolResultMaxChars,
+            ...(ok ? {} : { ok: false }),
+          }),
+          envId,
+          routed.filledDefault,
+        );
+
       if (!result.ok) {
         return {
           callId,
           name,
           status: result.status,
-          output: summarizeToolResult({
-            tool: name,
-            content: result.content,
-            maxChars: options.config.toolResultMaxChars,
-            ok: false,
-          }),
+          output: modelOutput(false),
           rejected: false,
         };
       }
@@ -472,11 +504,7 @@ export const createToolBridge = (options: CreateToolBridgeOptions): ToolBridge =
         callId,
         name,
         status: result.status,
-        output: summarizeToolResult({
-          tool: name,
-          content: result.content,
-          maxChars: options.config.toolResultMaxChars,
-        }),
+        output: modelOutput(true),
         rejected: false,
       };
     },

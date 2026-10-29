@@ -48,11 +48,15 @@ export const confirmationTarget = (ctx: ConfirmationContext): string => {
   const projectId = named(ctx.args, "projectId");
   const action = named(ctx.args, "action");
   const mode = named(ctx.args, "mode");
+  const hint = named(ctx.args, "hint");
+  const url = named(ctx.args, "url");
   return [
     `on ${label}`,
     ...(environmentId === undefined ? [] : [`environment ${environmentId}`]),
     ...(threadId === undefined ? [] : [`thread ${threadId}`]),
     ...(projectId === undefined ? [] : [`project ${projectId}`]),
+    ...(hint === undefined ? [] : [`hint ${hint}`]),
+    ...(url === undefined ? [] : [`url ${url}`]),
     ...(action === undefined ? [] : [`action ${action}`]),
     ...(mode === undefined ? [] : [`mode ${mode}`]),
   ].join(", ");

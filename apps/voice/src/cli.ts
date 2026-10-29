@@ -77,12 +77,15 @@ const main = async () => {
       bridge,
       projectId === undefined ? {} : { projectId },
     );
-    const summary = results.map((r) => ({
+    const summary = results.results.map((r) => ({
       name: r.name,
       status: r.status,
       rejected: r.rejected,
     }));
-    process.stdout.write(`${JSON.stringify({ ok: true, results: summary })}\n`);
+    process.stderr.write(`[voice] dry-run projectId ${results.projectId ?? "none"}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, projectId: results.projectId, results: summary })}\n`,
+    );
     return;
   }
 

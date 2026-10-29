@@ -52,6 +52,10 @@ it("decideVoiceTool hard-rejects destructive even if somehow listed", () => {
 it("environment policy follows the hub schema over allowlist metadata", () => {
   expect(environmentPolicyFor("t3_environment_links")).toBe("strip");
   expect(environmentPolicyFor("t3_environment_read")).toBe("keep");
+  expect(environmentPolicyFor("t3_thread_list")).toBe("keep");
+  expect(environmentPolicyFor("t3_thread_read")).toBe("fill");
+  expect(environmentPolicyFor("t3_thread_wait")).toBe("fill");
+  expect(environmentPolicyFor("t3_worktree_list")).toBe("fill");
   expect(environmentPolicyFor("t3_thread_send")).toBe("fill");
   expect(
     environmentPolicyFor("t3_thread_send", { properties: { threadId: { type: "string" } } }),

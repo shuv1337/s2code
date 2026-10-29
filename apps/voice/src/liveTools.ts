@@ -36,19 +36,21 @@ const descriptions: Record<string, string> = {
   t3_thread_list:
     "List threads in one project. projectId is required: this voice client is not inside a thread, so the hub will not infer one. Omit environmentId for the hub.",
   t3_thread_search: "Search threads. query is required. Omit environmentId for the hub.",
-  t3_thread_read: "Read a thread transcript and status. threadId is required.",
+  t3_thread_read:
+    "Read a thread. threadId is required. Omit environmentId to use the configured default, or the hub when none is set. Page with afterPosition=nextPosition.",
   t3_thread_launch: "Launch a new thread (side effect; announces env). title is required.",
   t3_thread_send: "Send a message to a thread (side effect; announces env).",
   t3_thread_interrupt: "Interrupt a running thread (side effect; announces env).",
   t3_thread_update: "Rename a thread or regenerate its title (side effect; announces env).",
   t3_thread_configure: "Read or set a thread's provider and model (side effect; announces env).",
   t3_thread_wait:
-    "Wait for a thread to settle. threadId is required. Omit environmentId for the hub.",
+    "Wait for a thread to settle. threadId is required. Omit environmentId to use the configured default, or the hub when none is set.",
   t3_background_wait: "Wait on background task ids in this thread. Takes no environmentId.",
   t3_pending_request:
     "List, read, or respond to a pending user question. respond is a side effect. Do not send clientRequestId.",
   t3_queue: "List, read, or edit a thread's queued messages.",
-  t3_worktree_list: "List worktree refs for a thread.",
+  t3_worktree_list:
+    "List worktree refs for a thread. Omit environmentId to use the configured default, or the hub when none is set.",
   t3_worktree_status: "Read this thread's worktree status. Takes no arguments.",
   t3_workflow_stop:
     "Stop a workflow. threadId and subagentId are required. The client asks for a spoken yes first.",
@@ -95,6 +97,15 @@ const propsFor = (name: string): Record<string, unknown> => {
         projectId: stringProp("Limit the search to one project."),
       };
     case "t3_thread_read":
+      return {
+        environmentId: envTarget,
+        threadId: stringProp("Thread id."),
+        afterPosition: {
+          type: "integer",
+          description: "Return items after this position. Use nextPosition from the previous read.",
+        },
+        view: { type: "string", enum: ["messages", "activity"] },
+      };
     case "t3_thread_wait":
     case "t3_thread_interrupt":
       return {
@@ -273,8 +284,9 @@ export const buildLiveFunctionTools = (): LiveFunctionTool[] =>
 
 export const LIVE_SYSTEM_INSTRUCTIONS = `You are the s2code fleet voice assistant on the hub.
 You call only the provided function tools. Never invent tool names.
-Omit environmentId to read or list the hub, the MCP server you are connected to.
-To use a peer, pass its environmentId from t3_environment_links. Never pass environmentId to t3_environment_links, t3_worktree_status, t3_background_wait, t3_worktree_handoff, or preview tools.
+Omit environmentId on environment read, links, project list/read, and thread list/search to stay on the hub.
+Thread read, wait, worktree list, send, and launch use the configured default environment when you omit environmentId. The tool result names that id when a default was filled in.
+To use a peer explicitly, pass its environmentId from t3_environment_links. Never pass environmentId to t3_environment_links, t3_worktree_status, t3_background_wait, t3_worktree_handoff, or preview tools.
 t3_thread_list requires projectId. This client is not inside a thread. Take projectId from t3_project_list.
 Delete is unavailable. Say Cap must use the desktop UI.
 Guarded tools (workflow stop, transfer, handoff, project create/clone, environment link/unlink, preview list/close) are refused until the user says yes out loud. Call one only after they ask, then wait for the tool result.

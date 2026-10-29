@@ -9,6 +9,11 @@ export interface ScriptedDryRunOptions {
   readonly projectId?: string;
 }
 
+export interface ScriptedDryRunReport {
+  readonly projectId: string | null;
+  readonly results: readonly ToolBridgeResult[];
+}
+
 export const cliFlag = (args: readonly string[], name: string): string | undefined => {
   const index = args.indexOf(name);
   if (index < 0) return undefined;
@@ -17,37 +22,44 @@ export const cliFlag = (args: readonly string[], name: string): string | undefin
   return value;
 };
 
+const idString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
 export const projectIdFromListOutput = (output: string): string | undefined => {
   try {
     const parsed = JSON.parse(output) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    const projects = (parsed as { projects?: unknown }).projects;
-    if (!Array.isArray(projects)) return undefined;
-    for (const project of projects) {
-      if (!project || typeof project !== "object") continue;
-      const id =
-        (project as { id?: unknown; projectId?: unknown }).id ??
-        (project as { projectId?: unknown }).projectId;
-      if (typeof id === "string" && id.length > 0) return id;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as { projectId?: unknown; projects?: unknown };
+      const direct = idString(record.projectId);
+      if (direct) return direct;
+      if (Array.isArray(record.projects)) {
+        for (const project of record.projects) {
+          if (!project || typeof project !== "object") continue;
+          const id =
+            idString((project as { id?: unknown }).id) ??
+            idString((project as { projectId?: unknown }).projectId);
+          if (id) return id;
+        }
+      }
     }
-    return undefined;
   } catch {
-    return undefined;
+    /* truncated JSON still may contain the first id */
   }
+  return output.match(/"(?:projectId|id)"\s*:\s*"([^"\\]+)"/u)?.[1];
 };
 
-const skippedList = (message: string): ToolBridgeResult => ({
+const skippedList = (status: string, message: string): ToolBridgeResult => ({
   callId: "dry_list",
   name: "t3_thread_list",
-  status: "skipped_no_project",
-  output: JSON.stringify({ error: "skipped_no_project", message }),
+  status,
+  output: JSON.stringify({ error: status, message }),
   rejected: false,
 });
 
 export const runScriptedTextDryRun = async (
   bridge: ToolBridge,
   options: ScriptedDryRunOptions = {},
-): Promise<ToolBridgeResult[]> => {
+): Promise<ScriptedDryRunReport> => {
   const results: ToolBridgeResult[] = [];
   results.push(
     await bridge.handleFunctionCall({
@@ -75,12 +87,36 @@ export const runScriptedTextDryRun = async (
     results.push(listed);
     if (!listed.rejected && listed.status === "ok") {
       projectId = projectIdFromListOutput(listed.output);
+      if (projectId === undefined) {
+        let readable = false;
+        try {
+          JSON.parse(listed.output);
+          readable = true;
+        } catch {
+          readable = false;
+        }
+        const status = readable ? "skipped_no_project" : "unreadable_project_list";
+        results.push(
+          skippedList(
+            status,
+            readable
+              ? "Pass --project-id, or t3_project_list must return a project."
+              : "t3_project_list result was truncated before a project id. Pass --project-id or raise toolResultMaxChars.",
+          ),
+        );
+        return { projectId: null, results };
+      }
     }
   }
 
   if (projectId === undefined) {
-    results.push(skippedList("Pass --project-id, or t3_project_list must return a project."));
-    return results;
+    results.push(
+      skippedList(
+        "skipped_no_project",
+        "Pass --project-id, or t3_project_list must return a project.",
+      ),
+    );
+    return { projectId: null, results };
   }
 
   results.push(
@@ -90,5 +126,5 @@ export const runScriptedTextDryRun = async (
       callId: "dry_list",
     }),
   );
-  return results;
+  return { projectId, results };
 };

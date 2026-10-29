@@ -96,9 +96,9 @@ export const isLongRunningVoiceTool = (tool: string): boolean => VOICE_LONG_RUNN
 
 /**
  * strip: hub schema rejects environmentId.
- * keep: forward an explicit id only. Omit means the hub, so a peer default
- * cannot replace discovery.
- * fill: action tools copy defaultEnvironmentId when the model omits it.
+ * keep: explicit id only. Fleet discovery stays on the hub.
+ * fill: copy defaultEnvironmentId when omitted, including thread read,
+ * wait, and worktree list so a peer launch can be followed.
  */
 export type VoiceEnvironmentPolicy = "strip" | "keep" | "fill";
 
@@ -115,8 +115,8 @@ export const VOICE_ENVIRONMENT_POLICY: Readonly<Record<string, VoiceEnvironmentP
   t3_project_read: "keep",
   t3_thread_list: "keep",
   t3_thread_search: "keep",
-  t3_thread_read: "keep",
-  t3_worktree_list: "keep",
+  t3_thread_read: "fill",
+  t3_worktree_list: "fill",
   t3_worktree_status: "strip",
   t3_background_wait: "strip",
   t3_preview_list: "strip",
@@ -129,7 +129,7 @@ export const VOICE_ENVIRONMENT_POLICY: Readonly<Record<string, VoiceEnvironmentP
   t3_thread_interrupt: "fill",
   t3_thread_update: "fill",
   t3_thread_configure: "fill",
-  t3_thread_wait: "keep",
+  t3_thread_wait: "fill",
   t3_pending_request: "fill",
   t3_queue: "fill",
   t3_workflow_stop: "fill",

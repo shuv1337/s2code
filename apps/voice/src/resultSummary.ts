@@ -6,7 +6,7 @@
 export const DEFAULT_TOOL_RESULT_MAX_CHARS = 4_000;
 
 const SECRET_KEY =
-  /(?:^|_)(?:token|secret|password|authorization|credential)(?:$|_)|api[-_]?key|mcpToken|accessToken|refreshToken|bearer/i;
+  /(?:^|_)(?:token|secret|password|authorization|credential)(?:$|_)|(?:token|secret|password|credential)$|api[-_]?key|bearer/i;
 
 const DISCOVERY_TOOLS = new Set<string>([
   "t3_environment_read",
@@ -23,16 +23,35 @@ const DISCOVERY_TOOLS = new Set<string>([
 export const redactText = (text: string): string =>
   text
     .replace(/bearer\s+[a-z0-9._~+/-]{8,}/giu, "Bearer [redacted]")
-    .replace(/\bsk-[a-z0-9]{8,}\b/giu, "[redacted]");
+    .replace(/\bsk-[a-z0-9_-]{8,}\b/giu, "[redacted]")
+    .replace(/\bghp_[a-z0-9_]{8,}\b/giu, "[redacted]")
+    .replace(/([?#&])token=[^&#\s]+/giu, "$1token=[redacted]");
 
 export const boundText = (text: string, max: number): string => {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}…`;
 };
 
+/** JSON object or array text. Plain strings stay text so a secret value is not re-parsed. */
+const parseJsonContainer = (text: string): unknown | undefined => {
+  const trimmed = text.trim();
+  if (trimmed.length < 2 || (trimmed[0] !== "{" && trimmed[0] !== "[")) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed !== null && typeof parsed === "object") return parsed;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
 const redactValue = (value: unknown, depth = 0): unknown => {
   if (depth > 8) return "…";
-  if (typeof value === "string") return redactText(value);
+  if (typeof value === "string") {
+    const parsed = parseJsonContainer(value);
+    if (parsed !== undefined) return JSON.stringify(redactValue(parsed, depth + 1));
+    return redactText(value);
+  }
   if (typeof value !== "object" || value === null) return value;
   if (Array.isArray(value)) {
     return value.slice(0, 30).map((item) => redactValue(item, depth + 1));
@@ -88,10 +107,12 @@ const rows = (
   value: unknown,
   keys: readonly string[],
   limit: number,
+  fromEnd = false,
 ): { readonly items: Record<string, unknown>[]; readonly truncated: boolean } => {
   if (!Array.isArray(value)) return { items: [], truncated: false };
+  const slice = fromEnd ? value.slice(-limit) : value.slice(0, limit);
   return {
-    items: value.slice(0, limit).map((item) => pick(item, keys)),
+    items: slice.map((item) => pick(item, keys)),
     truncated: value.length > limit,
   };
 };
@@ -102,8 +123,9 @@ const withTruncation = (
 ): Record<string, unknown> => (truncated ? { ...summary, truncated: true } : summary);
 
 const clipField = (value: unknown, max: number): string | undefined => {
-  if (typeof value !== "string") return undefined;
-  const text = redactText(value).trim();
+  const redacted = redactValue(value);
+  if (typeof redacted !== "string") return undefined;
+  const text = redacted.trim();
   if (text.length === 0) return undefined;
   return boundText(text, max);
 };
@@ -114,11 +136,16 @@ const discoverySummary = (
 ): Record<string, unknown> | undefined => {
   switch (tool) {
     case "t3_environment_links": {
-      const links = rows(payload.links, ["environmentId", "label", "status"], 12);
+      const links = rows(payload.links, ["environmentId", "label", "status", "lastError"], 12);
+      const notListed = clipField(payload.notListed, 200);
       return withTruncation(
         {
           environmentId: payload.environmentId,
-          links: links.items,
+          ...(notListed === undefined ? {} : { notListed }),
+          links: links.items.map((link) => {
+            const lastError = clipField(link.lastError, 160);
+            return lastError === undefined ? link : { ...link, lastError };
+          }),
         },
         links.truncated,
       );
@@ -126,9 +153,18 @@ const discoverySummary = (
     case "t3_environment_read":
       return pick(payload, ["environmentId", "label", "serverVersion", "platform"]);
     case "t3_project_list": {
-      const projects = rows(payload.projects, ["id", "title"], 20);
-      const count = Array.isArray(payload.projects) ? payload.projects.length : 0;
-      return withTruncation({ count, projects: projects.items }, projects.truncated);
+      const all = Array.isArray(payload.projects) ? payload.projects : [];
+      const projects = rows(all, ["id", "title"], 20);
+      const first = asRecord(all[0]);
+      const projectId = typeof first?.id === "string" ? first.id : undefined;
+      return withTruncation(
+        {
+          ...(projectId === undefined ? {} : { projectId }),
+          count: all.length,
+          projects: projects.items,
+        },
+        projects.truncated,
+      );
     }
     case "t3_project_read":
       return pick(payload, ["id", "title", "workspaceRoot"]);
@@ -157,10 +193,12 @@ const discoverySummary = (
     }
     case "t3_thread_read": {
       const thread = asRecord(payload.thread);
-      const items = rows(payload.items, ["type", "title", "text", "status"], 4);
+      const items = rows(payload.items, ["type", "title", "text", "status"], 4, true);
       return withTruncation(
         {
           thread: thread ? pick(thread, ["threadId", "title", "status", "projectId"]) : undefined,
+          ...(payload.hasMore === undefined ? {} : { hasMore: payload.hasMore }),
+          ...(payload.nextPosition === undefined ? {} : { nextPosition: payload.nextPosition }),
           items: items.items.map((item) => {
             const text = clipField(item.text, 240);
             return text === undefined ? item : { ...item, text };

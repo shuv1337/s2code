@@ -11,13 +11,18 @@ preview tools do not accept `environmentId`; the client strips it so the hub
 does not return `Expected never`. A `tools/list` input schema overrides this
 static map when the hub is reachable.
 
-`defaultEnvironmentId` is copied only onto action tools that accept a target
-(`t3_thread_launch`, `t3_thread_send`, interrupt, update, configure, queue,
-pending request, and guarded tools that route). It is not applied to discovery.
-If that default is a peer, an action that omits `environmentId` runs on the
-peer. Set it to the hub id, or leave it unset, to keep those actions on the
-hub too. `t3_environment_link` / `t3_environment_unlink` use `environmentId`
-as the machine to link or forget, so the client never fills it in.
+`defaultEnvironmentId` is copied onto action tools and onto thread follow-ups
+that accept a target (`t3_thread_read`, `t3_thread_wait`, `t3_worktree_list`,
+launch, send, interrupt, update, configure, queue, pending request, and
+guarded tools that route). Fleet discovery (`t3_environment_read`,
+`t3_environment_links`, project list/read, thread list/search) does not
+receive it, so a peer default cannot make environment read return the peer.
+When a default is filled in, the tool result includes that `environmentId`.
+If the default is a peer, those calls run there. Set it to the hub id, or
+leave it unset, to keep them on the hub. `t3_environment_link` /
+`t3_environment_unlink` use `environmentId` as the machine to link or forget,
+so the client never fills it in. A spoken yes names that id, plus `hint` and
+`url` when the call has them.
 
 Side effects say `On <environment>.` first. Guarded tools (workflow stop, transfer, handoff, project create/clone,
 environment link/unlink, preview list/close) run only after a spoken yes
@@ -90,9 +95,10 @@ Env overrides: `OPENAI_API_KEY`, `S2_VOICE_MCP_URL`, `S2_VOICE_MCP_TOKEN`,
 - `text-dry-run` — no audio. Requires `S2_VOICE_MCP_URL` or `--mock-mcp`.
   `--mock-mcp` is only for offline checks. `--project-id <id>` is passed to
   `t3_thread_list`. Without it, the run calls `t3_project_list` and uses the
-  first project. If that list is empty or fails, thread list is skipped and
-  the process still prints a JSON report. `--mock-mcp` with no flag uses
-  `project-dry-run`.
+  first project. The JSON report includes that `projectId`. If the list is
+  empty or fails, thread list is skipped. If the list result is truncated
+  before an id, the status is `unreadable_project_list` instead of looking
+  like there were no projects. `--mock-mcp` with no flag uses `project-dry-run`.
 
 ```bash
 pnpm --filter @t3tools/voice dry-run

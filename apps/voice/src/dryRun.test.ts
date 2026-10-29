@@ -52,19 +52,23 @@ it("dry-run passes projectId and does not inject a peer default into discovery",
   const results = await runScriptedTextDryRun(bridge, {});
   const links = mcp.calls.find((call) => call.name === "t3_environment_links");
   const list = mcp.calls.find((call) => call.name === "t3_thread_list");
+  expect(results.projectId).toBe("project-s2");
   expect(links?.args).toEqual({});
   expect(list?.args).toEqual({ projectId: "project-s2" });
   expect(list?.args).not.toHaveProperty("environmentId");
-  expect(results.find((result) => result.name === "t3_thread_list")?.status).toBe("ok");
-  expect(results.find((result) => result.name === "t3_project_delete")?.rejected).toBe(true);
+  expect(results.results.find((result) => result.name === "t3_thread_list")?.status).toBe("ok");
+  expect(results.results.find((result) => result.name === "t3_project_delete")?.rejected).toBe(
+    true,
+  );
 
   mcp.calls.length = 0;
   const flagged = await runScriptedTextDryRun(bridge, { projectId: "project-flagged" });
+  expect(flagged.projectId).toBe("project-flagged");
   expect(mcp.calls.map((call) => call.name)).not.toContain("t3_project_list");
   expect(mcp.calls.find((call) => call.name === "t3_thread_list")?.args).toEqual({
     projectId: "project-flagged",
   });
-  expect(flagged.find((result) => result.name === "t3_thread_list")?.rejected).toBe(false);
+  expect(flagged.results.find((result) => result.name === "t3_thread_list")?.rejected).toBe(false);
   await NodeFSP.rm(root, { recursive: true, force: true });
 });
 
@@ -77,8 +81,9 @@ it("dry-run skips thread list when no project is available", async () => {
     speak: () => undefined,
   });
   const results = await runScriptedTextDryRun(bridge, {});
+  expect(results.projectId).toBeNull();
   expect(mcp.calls.map((call) => call.name)).not.toContain("t3_thread_list");
-  expect(results.find((result) => result.name === "t3_thread_list")?.status).toBe(
+  expect(results.results.find((result) => result.name === "t3_thread_list")?.status).toBe(
     "skipped_no_project",
   );
   expect(projectIdFromListOutput('{"projects":[{"id":"project-a"}]}')).toBe("project-a");
@@ -87,5 +92,27 @@ it("dry-run skips thread list when no project is available", async () => {
     "project-a",
   );
   expect(cliFlag(["--project-id", "--mode"], "--project-id")).toBeUndefined();
+  await NodeFSP.rm(root, { recursive: true, force: true });
+});
+
+it("dry-run does not treat a truncated project list as an empty project list", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "voice-dry-"));
+  const mcp = createMockMcpBridge(async () =>
+    text({ projects: [{ id: "project-s2", title: "s2code" }] }),
+  );
+  const bridge = createToolBridge({
+    config: { ...config(root, null), toolResultMaxChars: 8 },
+    mcp,
+    speak: () => undefined,
+  });
+  const truncated = await runScriptedTextDryRun(bridge, {});
+  expect(truncated.projectId).toBeNull();
+  expect(truncated.results.find((result) => result.name === "t3_thread_list")?.status).toBe(
+    "unreadable_project_list",
+  );
+  expect(mcp.calls.map((call) => call.name)).not.toContain("t3_thread_list");
+
+  const recovered = projectIdFromListOutput('{"projectId":"p1","projects":[{"id":"p1"');
+  expect(recovered).toBe("p1");
   await NodeFSP.rm(root, { recursive: true, force: true });
 });
