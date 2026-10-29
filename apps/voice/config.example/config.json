@@ -1,0 +1,13 @@
+{
+  "mcpUrl": "http://127.0.0.1:PORT/mcp",
+  "mcpToken": "REPLACE_WITH_LOCAL_TOKEN_NOT_COMMITTED",
+  "auditDir": "/path/to/userdata/logs",
+  "mode": "text-dry-run",
+  "liveModel": "gpt-live-1",
+  "backendModel": "gpt-5.6-luna",
+  "environmentLabels": {
+    "ENV_ID_HUB": "shuvdev",
+    "ENV_ID_PEER": "shuvbot"
+  },
+  "defaultEnvironmentId": "ENV_ID_HUB"
+}
