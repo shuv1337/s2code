@@ -13,9 +13,7 @@ import { getProviderUpdateRunOutcome } from "../ProviderUpdateLaunchNotification
 import { useProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer, type ServerUpdateOutcome, useServerUpdate } from "../ServerUpdateAction";
 import {
-  type ChannelSwitchRelease,
   closeFinishedUpdateRun,
-  collectChannelSwitchTargets,
   collectRestartingMachines,
   collectServerUpdateTargets,
   collectUpdateEverythingResult,
@@ -49,11 +47,7 @@ export function isHostedByThisApp(
 
 export type ReportLocalUpdateError = (title: string, description: string) => void;
 
-/** `channelSwitch` makes the run move the fleet to that release's track instead of updating it. */
-export function useUpdateEverything(
-  localUpdateVersion: string | null,
-  channelSwitch?: ChannelSwitchRelease,
-) {
+export function useUpdateEverything(localUpdateVersion: string | null) {
   const targetVersion = localUpdateVersion ?? APP_VERSION;
   const { environments } = useEnvironments();
   const environmentIds = environmentIdsKey(environments.map(({ environmentId }) => environmentId));
@@ -68,14 +62,11 @@ export function useUpdateEverything(
     canMaintain: canUpdateServer(sessionStates[index]!),
     updateState: updateStates[index]!,
   }));
-  // A track switch's target came from npm already.
   const {
     targets: behindServers,
     skipped: unreachable,
     waitForNpm,
-  } = channelSwitch
-    ? { ...collectChannelSwitchTargets(machines, channelSwitch), waitForNpm: [] }
-    : collectServerUpdateTargets(machines, targetVersion, localUpdateVersion !== null);
+  } = collectServerUpdateTargets(machines, targetVersion, localUpdateVersion !== null);
   const published = useNpmReleasePublished(waitForNpm.length > 0 ? targetVersion : null);
   const servers = published
     ? behindServers
@@ -90,12 +81,9 @@ export function useUpdateEverything(
         reason: `S2Code ${targetVersion} is not on npm yet`,
       })),
   ];
-  // Track-only hosts save a setting and restart nothing, so they are neither listed nor counted.
   const moving = servers.filter((server) => server.trackOnly !== true);
   const restarts = collectRestartingMachines(machines, moving, localUpdateVersion !== null);
-  const providerUpdates = useProviderUpdates();
-  // A track switch moves app and servers only; provider updates stay a separate choice.
-  const providers = channelSwitch ? { machines: [], updateAll: async () => [] } : providerUpdates;
+  const providers = useProviderUpdates();
   const updateServer = useServerUpdate();
 
   const view = describeUpdateEverything({
@@ -158,7 +146,6 @@ export function useUpdateEverything(
       }
       const localVersion = installLocal ? localUpdateVersion : null;
       setUpdateEverythingRun(() => ({
-        ...(channelSwitch ? { trackSwitch: true } : {}),
         localVersion,
         phase: "providers",
         restartAt: null,

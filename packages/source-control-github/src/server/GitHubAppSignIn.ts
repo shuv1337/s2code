@@ -24,7 +24,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as GitHubClient from "../shared/definition.ts";
 
 /**
- * The public client ID of the T3 Code for GitHub app, which the device flow needs (no secret).
+ * The public client ID of the S2Code for GitHub app, which the device flow needs (no secret).
  * Unset turns the app sign-in off: no app tokens, no sign-in, nothing for clients to show.
  */
 export const CLIENT_ID_VARIABLE = "T3CODE_GITHUB_APP_CLIENT_ID";

@@ -221,7 +221,7 @@ export function trackSwitchBlockReason(input: {
   if (!crossesReleaseTrack(input.serverVersion, input.targetVersion)) return null;
   const databaseMigration = input.databaseMigration();
   if (input.targetDatabaseMigration === undefined || databaseMigration === undefined) {
-    return `Cannot confirm this database works with s2code@${input.targetVersion}. Switch tracks from Settings → About → Update track, which checks it first.`;
+    return `Cannot confirm this database works with s2code@${input.targetVersion}. ${SEPARATE_CHANNEL_INSTALL_MESSAGE}`;
   }
   return input.targetDatabaseMigration < databaseMigration
     ? `This database has changes s2code@${input.targetVersion} does not support yet; it stays on this release.`

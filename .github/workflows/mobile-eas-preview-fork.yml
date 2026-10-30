@@ -151,8 +151,17 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
         run: node scripts/mobile-release-preflight.ts prepare --mode preview --profile preview:dev --platform all
 
+      - name: Schedule preview binary when OTA is disabled
+        if: steps.expo-token.outputs.present == 'true' && env.MOBILE_UPDATES_ENABLED != '1'
+        working-directory: apps/mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
+        run: |
+          eas build --profile preview:dev --platform all --non-interactive --no-wait
+          echo '## Preview binary scheduled; OTA explicitly disabled. Scheduling is not device delivery.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy with fingerprint check
-        if: steps.expo-token.outputs.present == 'true'
+        if: steps.expo-token.outputs.present == 'true' && env.MOBILE_UPDATES_ENABLED == '1'
         uses: expo/expo-github-action/continuous-deploy-fingerprint@main
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}

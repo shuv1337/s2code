@@ -406,7 +406,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const channel = input.channel ?? resolveChannelIdentity(currentVersion).channel;
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {
     return yield* new CliUpdateError({
-      reason: `'${input.requestedVersion}' is not an exact t3 version.`,
+      reason: `'${input.requestedVersion}' is not an exact s2code version.`,
     });
   }
   const progress = createUpdateProgress();

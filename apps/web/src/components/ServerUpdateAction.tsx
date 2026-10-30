@@ -29,6 +29,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { manualServerUpdateCommand } from "~/versionSkew";
 import { useNpmReleasePackage } from "~/state/npmRelease";
 import { useServerConfigs } from "~/state/entities";
+import { SEPARATE_CHANNEL_INSTALL_MESSAGE } from "@t3tools/shared/channelIdentity";
 import { crossesReleaseTrack } from "@t3tools/shared/cliRelease";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
@@ -45,9 +46,9 @@ export function serverUpdateStageLabel(stage: ServerUpdateStage): string {
   return UPDATE_STAGE_LABELS[stage];
 }
 
-const CROSS_TRACK_NOTE = "Switch tracks in About → Update track";
+const CROSS_TRACK_NOTE = SEPARATE_CHANNEL_INSTALL_MESSAGE;
 
-/** Hosts refuse a Stable/Nightly crossing outside a track switch, which checks the database first. */
+/** Hosts refuse a Stable/Nightly crossing. Channels are separate installations. */
 function refusedCrossing(
   target: {
     readonly selfUpdate: ServerSelfUpdateCapability | null;
