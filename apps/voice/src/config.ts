@@ -4,7 +4,7 @@
  */
 import * as NodeFSP from "node:fs/promises";
 
-import { DEFAULT_TOOL_RESULT_MAX_CHARS } from "./resultSummary.ts";
+import { DEFAULT_TOOL_RESULT_MAX_CHARS } from "@t3tools/shared/voice/resultSummary";
 
 export type VoiceMode = "live" | "text-dry-run";
 

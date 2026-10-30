@@ -18,6 +18,7 @@
     "dry-run": "node --experimental-strip-types ./src/cli.ts --mode text-dry-run --mock-mcp"
   },
   "dependencies": {
+    "@t3tools/shared": "workspace:*",
     "ws": "catalog:"
   },
   "devDependencies": {

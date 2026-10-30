@@ -1,3 +1,4 @@
+import { useVoice } from "../voice/VoiceProvider";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -403,6 +404,7 @@ function OpenCommandPaletteDialog(props: {
     highlightClearedRef.current = true;
     setHighlightedItemValue(null);
   }
+  const voice = useVoice();
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
@@ -1519,6 +1521,18 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:voice",
+    searchTerms: ["voice", "call", "microphone", "dictation"],
+    title: "Open voice call",
+    shortcutCommand: "voice.open",
+    icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      voice.openForCurrent();
+    },
+  });
 
   actionItems.push({
     kind: "action",

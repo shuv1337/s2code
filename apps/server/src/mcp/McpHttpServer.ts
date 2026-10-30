@@ -42,6 +42,7 @@ import {
 import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
+import * as McpToolCaller from "./McpToolCaller.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
@@ -1160,3 +1161,9 @@ export const layerTools = Layer.mergeAll(
 );
 
 export const layer = layerTools.pipe(Layer.provideMerge(layerMcpTransport));
+
+// In-process callers use the same registered handlers and their McpToolAccess checks.
+export const layerToolCaller = Layer.effect(
+  McpToolCaller.McpToolCaller,
+  Effect.map(McpServer.McpServer, (server) => ({ call: server.callTool })),
+).pipe(Layer.provide(McpServer.McpServer.layer));

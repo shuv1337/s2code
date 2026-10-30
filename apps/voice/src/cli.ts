@@ -7,7 +7,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import type { VoiceToolInputSchema } from "./allowlist.ts";
+import type { VoiceToolInputSchema } from "@t3tools/shared/voice/allowlist";
 import { loadVoiceConfig } from "./config.ts";
 import { cliFlag, runScriptedTextDryRun } from "./dryRun.ts";
 import { connectLiveSession } from "./liveSession.ts";

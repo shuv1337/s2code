@@ -41,7 +41,7 @@ const named = (
 };
 
 /** Ids and modes captured on the tool call. A later yes cannot change them. */
-export const confirmationTarget = (ctx: ConfirmationContext): string => {
+const confirmationTarget = (ctx: ConfirmationContext): string => {
   const label = ctx.environmentLabel?.trim() || "the hub";
   const environmentId = named(ctx.args, "environmentId");
   const threadId = named(ctx.args, "threadId");

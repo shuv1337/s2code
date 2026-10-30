@@ -542,6 +542,22 @@
     "./cloneUrl": {
       "types": "./src/cloneUrl.ts",
       "import": "./src/cloneUrl.ts"
+    },
+    "./voice/allowlist": {
+      "types": "./src/voice/allowlist.ts",
+      "import": "./src/voice/allowlist.ts"
+    },
+    "./voice/confirmation": {
+      "types": "./src/voice/confirmation.ts",
+      "import": "./src/voice/confirmation.ts"
+    },
+    "./voice/resultSummary": {
+      "types": "./src/voice/resultSummary.ts",
+      "import": "./src/voice/resultSummary.ts"
+    },
+    "./voice/liveTools": {
+      "types": "./src/voice/liveTools.ts",
+      "import": "./src/voice/liveTools.ts"
     }
   },
   "scripts": {

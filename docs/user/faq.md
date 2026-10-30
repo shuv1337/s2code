@@ -77,7 +77,7 @@ Open **Settings > Storage** and turn on automatic worktree cleanup. You can also
 
 ## Is there voice input?
 
-On iPhone, yes. You need iOS 26 or later. Tap the mic in the composer, talk, check the text, then send. Web, desktop, and Android do not have it yet. [Voice input on iPhone](./composer.md#voice-input-on-iphone)
+Yes. Use the composer microphone for draft-only dictation, or Call for a two-way voice session. Configure cloud voice in Settings → Voice. Supported iPhones also offer on-device dictation. [Voice calls and dictation](./composer.md#voice-calls-and-dictation)
 
 ## Does it work on Windows, Mac, and Linux?
 

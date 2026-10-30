@@ -1,3 +1,4 @@
+import { useVoice, voiceEnvironment } from "../voice/VoiceProvider";
 import { useSidebarWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
@@ -553,6 +554,16 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     onUsageLimits:
       usageLimitsOffered && draftAttachments.length === 0 ? openUsageLimits : undefined,
   });
+  const liveVoice = useVoice();
+  const canUseVoice = useAtomValue(voiceEnvironment.start.permissionAtom(props.environmentId));
+  const liveVoiceActive = ["connecting", "live", "finishing"].includes(liveVoice.state.phase);
+  const voiceTarget = {
+    environmentId: props.environmentId,
+    label: props.selectedThread.title || "Untitled thread",
+    environmentLabel: props.environmentLabel ?? "Current environment",
+    threadId: props.selectedThread.id,
+    projectId: props.selectedThread.projectId,
+  };
   const voiceInput = useVoiceInputController({
     ownerKey: composerDraftKey,
     label: props.selectedThread.title || "Untitled thread",
@@ -563,7 +574,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     onChangeSelection: composerMenu.onSelectionChange,
   });
   const isSubmissionLocked =
-    props.interactionLocked === true || queuedEdit?.saving === true || voiceInput.blocksSubmission;
+    props.interactionLocked === true ||
+    queuedEdit?.saving === true ||
+    voiceInput.blocksSubmission ||
+    (liveVoiceActive && liveVoice.state.mode === "dictation");
   const voicePresentation = resolveVoiceComposerPresentation(
     voiceInput.state,
     voiceInput.elapsedSeconds,
@@ -939,10 +953,35 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 <ComposerDictationStartAction
                   size={usesLargeControls ? "large" : "regular"}
                   state={voiceInput.state}
-                  isAvailable={voiceInput.isAvailable}
-                  disabled={isSubmissionLocked}
-                  onStart={voiceInput.start}
+                  isAvailable={voiceInput.isAvailable || canUseVoice}
+                  disabled={isSubmissionLocked || liveVoiceActive}
+                  onStart={() => {
+                    if (voiceInput.isAvailable) {
+                      voiceInput.start();
+                      return;
+                    }
+                    const captured = getComposerDraftSnapshot(composerDraftKey).text;
+                    liveVoice.startDictation(voiceTarget, (text) => {
+                      if (
+                        getComposerDraftSnapshot(composerDraftKey).text !== captured ||
+                        !text.trim()
+                      )
+                        return false;
+                      setComposerDraftText(
+                        composerDraftKey,
+                        [captured, text.trim()].filter(Boolean).join("\n"),
+                      );
+                      return true;
+                    });
+                  }}
                   onCancel={voiceInput.cancel}
+                />
+                <ComposerActionButton
+                  size={usesLargeControls ? "large" : "regular"}
+                  accessibilityLabel="Call voice assistant"
+                  icon="headphones"
+                  disabled={!canUseVoice || voiceInput.blocksSubmission}
+                  onPress={() => liveVoice.startCall(voiceTarget)}
                 />
                 {showStopAction ? (
                   <ComposerActionButton

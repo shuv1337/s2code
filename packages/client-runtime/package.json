@@ -514,6 +514,14 @@
     "./provider-clients": {
       "types": "./src/providerClients.ts",
       "default": "./src/providerClients.ts"
+    },
+    "./voice/controller": {
+      "types": "./src/voice/controller.ts",
+      "default": "./src/voice/controller.ts"
+    },
+    "./state/voice": {
+      "types": "./src/state/voice.ts",
+      "default": "./src/state/voice.ts"
     }
   },
   "scripts": {
