@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { DESKTOP_UPDATE_RESTART_MARKER_FILE } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -746,6 +747,26 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("ignores a finished download from a track it no longer follows", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        // A backed-out switch's download keeps reporting progress until it finishes.
+        harness.emit("download-progress", { percent: 40 });
+        yield* flushCallbacks;
+        harness.emit("update-downloaded", { version: "1.2.4-nightly.20261027.1" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.downloadedVersion, null);
+        assert.notEqual(state.status, "downloading");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("does not persist an unchanged update channel as a user preference", () => {
     const harness = makeHarness();
 
@@ -765,7 +786,7 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("reserves unpackaged channel changes while preferences are persisted", () =>
+  it.effect("rejects checks while an update channel change is being persisted", () =>
     Effect.gen(function* () {
       const channelChangeStarted = yield* Deferred.make<void>();
       const releaseChannelChange = yield* Deferred.make<void>();

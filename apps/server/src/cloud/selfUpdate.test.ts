@@ -343,7 +343,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       const web = yield* makeHarness();
       expect(
         (yield* web.selfUpdate.update({ targetVersion: "latest" }).pipe(Effect.flip)).reason,
-      ).toBe("'latest' is not an exact t3 version.");
+      ).toBe("'latest' is not an exact s2code version.");
       const desktop = yield* makeHarness({ mode: "desktop" });
       expect(
         (yield* desktop.selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason,
@@ -521,4 +521,37 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
       expect(remaining).toEqual([staleVersion, packageJson.version].toSorted());
     }),
   );
+});
+
+it("a host crosses tracks only to a release that knows its whole database", () => {
+  const cross = (
+    serverVersion: string,
+    targetVersion: string,
+    targetDatabaseMigration: number | undefined,
+    databaseMigration = 72,
+  ) =>
+    ServerSelfUpdate.trackSwitchBlockReason({
+      serverVersion,
+      targetVersion,
+      targetDatabaseMigration,
+      databaseMigration: () => databaseMigration,
+    });
+  const nightly = "0.1.4-nightly.20261027.3796";
+
+  expect(cross(nightly, "0.1.4", 72)).toBeNull();
+  // Another client moved this host to a newer Nightly after the switch was planned.
+  expect(cross(nightly, "0.1.4", 72, 73)).toContain("does not support yet");
+  expect(cross(nightly, "0.1.4", undefined)).toContain("Cannot confirm");
+  // A Stable tag can carry a migration the latest Nightly lacks.
+  expect(cross("0.1.4", nightly, 72, 73)).toContain("does not support yet");
+  expect(cross("0.1.3", "0.1.4", undefined)).toBeNull();
+  // A database that exists but cannot be read proves nothing.
+  expect(
+    ServerSelfUpdate.trackSwitchBlockReason({
+      serverVersion: nightly,
+      targetVersion: "0.1.4",
+      targetDatabaseMigration: 72,
+      databaseMigration: () => undefined,
+    }),
+  ).toContain("Cannot confirm");
 });
