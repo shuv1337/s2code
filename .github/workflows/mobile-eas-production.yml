@@ -89,7 +89,7 @@ jobs:
     env:
       APP_VARIANT: production
       NODE_OPTIONS: --max-old-space-size=8192
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
       EXPO_OWNER: ${{ vars.EXPO_OWNER }}
       EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
@@ -128,7 +128,7 @@ jobs:
           if [ -n "$EXPO_TOKEN" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::EXPO_TOKEN is required for release-intent workflows; no build or OTA was delivered."
+            echo "::error::EXPO_PRODUCTION_TOKEN is required for release-intent workflows; no build or OTA was delivered."
             exit 1
           fi
 
@@ -315,7 +315,7 @@ jobs:
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'update'
         working-directory: apps/mobile
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
         run: |
           # Publishing into an unmatched runtime is not delivery. Require a finished fork binary.
           for platform in $( [ "${{ inputs.platform }}" = all ] && echo 'ios android' || echo '${{ inputs.platform }}' ); do

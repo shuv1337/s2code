@@ -693,7 +693,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "update-track",
     title: "Installed channel",
     to: "/settings/about",
-    searchTerms: ["release channel installed separate stable latest nightly preview prerelease"],
+    searchTerms: [
+      "release channel installed separate installations stable latest nightly preview prerelease",
+    ],
     releaseChannelOnly: true,
   },
   {

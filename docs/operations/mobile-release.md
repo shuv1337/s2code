@@ -1,12 +1,12 @@
 # Fork mobile release configuration
 
-Mobile release jobs fail without fork configuration. PR previews without `EXPO_TOKEN` explicitly report a dry run, not delivery. Local/direct connections require no Expo or hosted account. Never reuse upstream destinations or signing credentials.
+Mobile release jobs fail without fork configuration. PR previews without `EXPO_PREVIEW_TOKEN` explicitly report a dry run, not delivery. Production builds and OTAs require `EXPO_PRODUCTION_TOKEN`. Steps pass that secret to the tools as `EXPO_TOKEN`, which is the environment name Expo and the preflight script read. Local/direct connections require no Expo or hosted account. Never reuse upstream destinations or signing credentials.
 
 ## GitHub configuration (names only)
 
 Variables: `EXPO_OWNER`, `EXPO_PROJECT_ID`, `APPLE_TEAM_ID`, `ASC_APP_ID`, `GOOGLE_PLAY_PROJECT_ID`, `GOOGLE_PLAY_TRACK`, `GOOGLE_PLAY_PREVIEW_TRACK`, `GOOGLE_PLAY_SIGNING_CERT_SHA256`.
 
-Secrets: `EXPO_TOKEN`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_API_PRIVATE_KEY`, `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
+Secrets: `EXPO_PREVIEW_TOKEN` (preview workflow), `EXPO_PRODUCTION_TOKEN` (production workflow), `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_API_PRIVATE_KEY`, `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`. There is no shared `EXPO_TOKEN` secret.
 
 Opt-in variables: `MOBILE_UPDATES_ENABLED`, `MOBILE_PUSH_ENABLED`, `MOBILE_AUTH_ENABLED`. All default off. For enabled hosted auth: variables `MOBILE_AUTH_DOMAIN`, `MOBILE_RELAY_URL`; fork EAS environment `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`, `EXPO_PUBLIC_CLERK_JWT_TEMPLATE`, and any enabled `EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID`, `EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID`, `EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME`. Known upstream hosted domains are rejected, including during ordinary Expo config evaluation. Domain associations and relay deployment coordinate with #276; they are not prerequisites for direct mobile.
 

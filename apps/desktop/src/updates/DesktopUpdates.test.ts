@@ -786,6 +786,39 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("waits out a background check instead of refusing a channel change", () =>
+    Effect.gen(function* () {
+      const checkStarted = yield* Deferred.make<void>();
+      const releaseCheck = yield* Deferred.make<void>();
+      // Packaged so the updater is configured and a check can hold it. Same channel, so the
+      // installation-ownership guard does not refuse before the retry.
+      const harness = makeHarness({
+        isPackaged: true,
+        beforeSetUpdateChannel: Effect.void,
+        checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseCheck)),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          yield* updates.check("poll").pipe(Effect.forkScoped);
+          yield* Deferred.await(checkStarted);
+
+          const channelFiber = yield* updates.setChannel("latest").pipe(Effect.forkScoped);
+          yield* Deferred.succeed(releaseCheck, undefined);
+          yield* TestClock.adjust(Duration.seconds(2));
+          const state = yield* Fiber.join(channelFiber);
+
+          assert.equal(state.channel, "latest");
+          assert.isFalse(yield* updates.isActionActive);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
   it.effect("rejects checks while an update channel change is being persisted", () =>
     Effect.gen(function* () {
       const channelChangeStarted = yield* Deferred.make<void>();
