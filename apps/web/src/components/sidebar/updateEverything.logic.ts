@@ -1,6 +1,7 @@
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import { cliReleaseChannelOf } from "@t3tools/shared/cliRelease";
+import { compareSemverVersions } from "@t3tools/shared/semver";
 
 import {
   resolveServerSelfUpdateCapability,
@@ -57,14 +58,25 @@ export interface SkippedMachine {
   readonly reason: string;
 }
 
+/** Boot services before this build installed the server from npm, not from release archives. */
+const RELEASE_ARCHIVE_SELF_UPDATE_SINCE = "0.0.41-nightly.20260914.1700";
+
 /** Skip current and app-hosted servers; the latter update with the app and would relaunch mid-run.
- * Desktop-managed servers use their own feed. */
+ * Desktop-managed servers use their own feed. `waitForNpm` lists targets that need
+ * `t3@<targetVersion>` on npm first. `releaseArchivesPublished` means the version came from the
+ * desktop feed: its GitHub Release goes public with the CLI archives that boot services download. */
 export function collectServerUpdateTargets(
   machines: ReadonlyArray<UpdateEverythingMachine>,
   targetVersion: string,
-): { readonly targets: ServerUpdateTarget[]; readonly skipped: SkippedMachine[] } {
+  releaseArchivesPublished: boolean,
+): {
+  readonly targets: ServerUpdateTarget[];
+  readonly skipped: SkippedMachine[];
+  readonly waitForNpm: ServerUpdateTarget[];
+} {
   const targets: ServerUpdateTarget[] = [];
   const skipped: SkippedMachine[] = [];
+  const waitForNpm: ServerUpdateTarget[] = [];
   for (const machine of machines) {
     const config = machine.serverConfig;
     if (machine.hostedByThisApp) continue;
@@ -76,16 +88,9 @@ export function collectServerUpdateTargets(
     }
     const skip = (reason: string) =>
       skipped.push({ environmentId: machine.environmentId, label: machine.label, reason });
-    if (config === null || !machine.connected) {
-      skip("not connected");
-      continue;
-    }
-    if (!machine.canMaintain) {
-      skip("no permission");
-      continue;
-    }
-    if (machine.updateState.status === "running") {
-      skip("already updating");
+    const unavailable = unavailableReason(machine);
+    if (config === null || unavailable !== null) {
+      skip(unavailable ?? "not connected");
       continue;
     }
     const selfUpdate = resolveServerSelfUpdateCapability(config);
@@ -106,16 +111,32 @@ export function collectServerUpdateTargets(
       skip(`on the ${cliReleaseChannelOf(serverVersion)} channel`);
       continue;
     }
-    targets.push({
+    const target: ServerUpdateTarget = {
       environmentId: machine.environmentId,
       serverLabel: machine.label,
       selfUpdate,
       installation: config.environment.capabilities.serverInstallation,
       desktopAppUpdate,
       targetVersion,
-    });
+    };
+    targets.push(target);
+    if (
+      selfUpdate !== "desktop-managed" &&
+      (!releaseArchivesPublished ||
+        selfUpdate === "respawn" ||
+        compareSemverVersions(serverVersion, RELEASE_ARCHIVE_SELF_UPDATE_SINCE) < 0)
+    ) {
+      waitForNpm.push(target);
+    }
   }
-  return { targets, skipped };
+  return { targets, skipped, waitForNpm };
+}
+
+function unavailableReason(machine: UpdateEverythingMachine): string | null {
+  if (machine.serverConfig === null || !machine.connected) return "not connected";
+  if (!machine.canMaintain) return "no permission";
+  if (machine.updateState.status === "running") return "already updating";
+  return null;
 }
 
 export interface UpdateEverythingSteps<Providers, Servers> {

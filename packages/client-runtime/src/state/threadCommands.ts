@@ -64,6 +64,7 @@ import * as ThreadHistoryController from "./threadHistoryController.ts";
 export type LoadEarlierThreadHistoryInput = {
   readonly threadId: ThreadId;
   readonly throughEntryId?: string;
+  readonly workAnchorId?: string;
 };
 
 export function createThreadEnvironmentAtoms<R, E>(
@@ -90,6 +91,7 @@ export function createThreadEnvironmentAtoms<R, E>(
       supervisor.target.environmentId,
       input.threadId,
       input.throughEntryId,
+      input.workAnchorId,
     );
   });
 
@@ -351,7 +353,8 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency: {
         mode: "serial",
-        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.threadId]),
+        key: ({ environmentId, input }) =>
+          `history:${JSON.stringify([environmentId, input.threadId])}`,
       },
     }),
     uploadFeedback: createEnvironmentRpcCommand(runtime, {

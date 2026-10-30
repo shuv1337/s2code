@@ -339,13 +339,14 @@ export const make = Effect.gen(function* () {
     // Merge events resweep all candidates because unlinked threads settle through branch lookup.
     const candidates = threads.filter((thread) => isAutoSettlementCandidate(thread, nowMs));
 
-    const settleThread = Effect.fn("ThreadSettlementServiceV2.settleThread")(
-      function* (
-        thread: (typeof candidates)[number],
-        pullRequest: SettlementPullRequest | null,
-        serverSettings: typeof settings,
-      ) {
-        const currentSettings = resolveProjectSettings(serverSettings, thread.projectId).settings;
+    // Runs per candidate thread, thousands per sweep on busy servers; the sweep owns the span.
+    const settleThread = Effect.fnUntraced(
+      function* (thread: (typeof candidates)[number], pullRequest: SettlementPullRequest | null) {
+        // thread.auto-settle does not recheck settings, so read them per decision; reads are cached.
+        const currentSettings = resolveProjectSettings(
+          yield* settingsService.getSettings,
+          thread.projectId,
+        ).settings;
         const decisionNow = yield* DateTime.now;
         const settledAt = resolveAutoSettlementAt({
           thread,
@@ -381,7 +382,7 @@ export const make = Effect.gen(function* () {
 
     const lookupCandidates = (yield* Effect.forEach(
       candidates,
-      (thread) => settleThread(thread, null, settings),
+      (thread) => settleThread(thread, null),
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
@@ -433,7 +434,8 @@ export const make = Effect.gen(function* () {
     };
     const groups = Map.groupBy(lookupCandidates, lookupKey);
 
-    const wouldSettle = Effect.fn("ThreadSettlementServiceV2.wouldSettle")(function* (
+    // wouldSettle and pullRequestFor run per lookup group; the git and pull request reads they make carry the spans.
+    const wouldSettle = Effect.fnUntraced(function* (
       group: ReadonlyArray<(typeof lookupCandidates)[number]>,
       pullRequest: SettlementPullRequest,
     ) {
@@ -454,7 +456,7 @@ export const make = Effect.gen(function* () {
       });
     });
 
-    const pullRequestFor = Effect.fn("ThreadSettlementServiceV2.pullRequestFor")(function* (
+    const pullRequestFor = Effect.fnUntraced(function* (
       group: ReadonlyArray<(typeof lookupCandidates)[number]>,
     ) {
       const thread = group[0]!;
@@ -521,14 +523,9 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const pullRequest = yield* pullRequestFor(group);
           if (pullRequest === undefined) return;
-          // Re-read after the lookup's network wait, once per group: reading
-          // settings materializes every stored provider secret.
-          const currentSettings = yield* settingsService.getSettings;
-          yield* Effect.forEach(
-            group,
-            (thread) => settleThread(thread, pullRequest, currentSettings),
-            { discard: true },
-          );
+          yield* Effect.forEach(group, (thread) => settleThread(thread, pullRequest), {
+            discard: true,
+          });
         }).pipe(
           Effect.catchCauseIf(
             (cause) => !Cause.hasInterruptsOnly(cause),

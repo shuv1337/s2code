@@ -1,4 +1,5 @@
 import packageJson from "../../package.json" with { type: "json" };
+import { BUILD_MIGRATION_HEAD, recordedMigrations } from "../persistence/databaseMigrationHead.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
 export type ServicePreflightResult =
@@ -23,18 +24,43 @@ export function runServicePreflight(input: {
     return {
       status: "blocked",
       version,
-      // A stale `t3` earlier on PATH (an old npm/nvm global) makes `t3 service install`
+      // A stale `s2code` earlier on PATH (an old npm/nvm global) makes `s2code service install`
       // reinstall itself and report success, so name the exact install and the path check.
       reason: [
-        `The installed service launcher speaks protocol ${input.launcherProtocol}, but t3@${version} requires protocol ${SERVICE_LAUNCHER_PROTOCOL}.`,
-        `On the server machine, install this exact CLI: \`curl -fsSL https://t3.codes/install.sh | T3CODE_VERSION=${version} sh\`.`,
-        `Check that \`t3 --version\` prints ${version} and that \`which -a t3\` lists no older t3 (such as an npm or nvm install) first, then run \`~/.local/bin/t3 service install\` (the installer's default path).`,
-        "Updating the desktop app does not update this CLI, and `t3 service update` only repairs the service with whichever CLI runs it.",
+        `The installed service launcher speaks protocol ${input.launcherProtocol}, but s2code@${version} requires protocol ${SERVICE_LAUNCHER_PROTOCOL}.`,
+        `On the server machine, install this exact CLI: \`curl -fsSL https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.sh | S2CODE_VERSION=${version} sh\`.`,
+        `Check that \`s2code --version\` prints ${version} and that \`which -a s2code\` lists no older s2code (such as an npm or nvm install) first, then run \`~/.local/bin/s2code service install\` (the installer's default path).`,
+        "Updating the desktop app does not update this CLI, and `s2code service update` only repairs the service with whichever CLI runs it.",
       ].join(" "),
     };
   }
 
+  const newer = newerRecordedMigrations(input.databasePath);
+  if (newer === null) {
+    return {
+      status: "blocked",
+      version,
+      reason: `Could not read this database to confirm s2code@${version} supports it.`,
+    };
+  }
+  if (newer.length > 0) {
+    return {
+      status: "blocked",
+      version,
+      reason: `This database has migrations that s2code@${version} does not know: ${newer.join(", ")}. A newer build wrote them, and running s2code@${version} on this database is not safe. Stay on the newer release, or wait for a release that includes these migrations.`,
+    };
+  }
+
   return { status: "ready", version, launcherProtocol: SERVICE_LAUNCHER_PROTOCOL };
+}
+
+/** Migrations a newer build recorded, or null when the database exists but cannot be read.
+ * Startup already handles renamed ids this build knows. */
+function newerRecordedMigrations(databasePath: string): ReadonlyArray<string> | null {
+  const recorded = recordedMigrations(databasePath);
+  return recorded === null
+    ? null
+    : recorded.filter(({ id }) => id > BUILD_MIGRATION_HEAD).map(({ id, name }) => `${id}_${name}`);
 }
 
 export function decodeServicePreflightResult(value: unknown): ServicePreflightResult | undefined {

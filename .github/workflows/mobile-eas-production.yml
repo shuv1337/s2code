@@ -89,7 +89,7 @@ jobs:
     env:
       APP_VARIANT: production
       NODE_OPTIONS: --max-old-space-size=8192
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
       EXPO_OWNER: ${{ vars.EXPO_OWNER }}
       EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
@@ -123,12 +123,12 @@ jobs:
       - id: expo-token
         name: Require release authorization (missing configuration is a failure)
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
         run: |
           if [ -n "$EXPO_TOKEN" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::EXPO_TOKEN is required for release-intent workflows; no build or OTA was delivered."
+            echo "::error::EXPO_PRODUCTION_TOKEN is required for release-intent workflows; no build or OTA was delivered."
             exit 1
           fi
 
@@ -185,7 +185,7 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+          token: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
           # npm, not pnpm: this only installs eas-cli into the action's own
           # tool dir, and pnpm 11 hard-fails that install on dtrace-provider's
           # ignored build script (no allowBuilds config outside the repo).
@@ -199,8 +199,21 @@ jobs:
         if: steps.expo-token.outputs.present == 'true'
         working-directory: apps/mobile
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas env:pull production --non-interactive
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
+        run: |
+          eas env:pull production --non-interactive
+          # EAS commands skip dotenv, and the Android fingerprint hashes this
+          # file. Without it every merge misses the build's hash and rebuilds.
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from "node:fs";
+          import { parseEnv } from "node:util";
+          const env = parseEnv(readFileSync(".env.local", "utf8"));
+          const googleServicesFile = env.T3CODE_ANDROID_GOOGLE_SERVICES_FILE;
+          if (!googleServicesFile) {
+            throw new Error("T3CODE_ANDROID_GOOGLE_SERVICES_FILE is missing from the production environment");
+          }
+          appendFileSync(process.env.GITHUB_ENV, `T3CODE_ANDROID_GOOGLE_SERVICES_FILE=${googleServicesFile}\n`);
+          NODE
 
       - name: Verify resolved fork identities, store access and enabled capabilities
         if: steps.expo-token.outputs.present == 'true'
@@ -271,7 +284,7 @@ jobs:
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'build'
         working-directory: apps/mobile
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
           MOBILE_BUILD_PROFILE: ${{ inputs.profile || 'production' }}
         run: eas build --platform ${{ inputs.platform }} --profile "$MOBILE_BUILD_PROFILE" --auto-submit --non-interactive --no-wait
 
@@ -282,7 +295,7 @@ jobs:
         if: steps.expo-token.outputs.present == 'true' && (github.event_name == 'push' || inputs.mode == 'update')
         working-directory: apps/mobile
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
           PLATFORM: ${{ inputs.platform || 'all' }}
         run: |
           if [ "$PLATFORM" = "all" ]; then platforms="ios android"; else platforms="$PLATFORM"; fi
@@ -302,7 +315,7 @@ jobs:
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'update'
         working-directory: apps/mobile
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
         run: |
           # Publishing into an unmatched runtime is not delivery. Require a finished fork binary.
           for platform in $( [ "${{ inputs.platform }}" = all ] && echo 'ios android' || echo '${{ inputs.platform }}' ); do
@@ -335,7 +348,7 @@ jobs:
         if: steps.expo-token.outputs.present == 'true' && github.event_name == 'push'
         working-directory: apps/mobile
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
         run: |
           failed=0
           version="$(npx expo config --json --type public | jq -r '.version')"

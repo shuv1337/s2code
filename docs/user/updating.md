@@ -22,10 +22,11 @@ restart from the update button when you are ready. A server still restarting
 finishes on its own, and the button keeps showing it after the desktop app
 restarts.
 
-Server updates appear only after that version is published to npm. Remote
-desktop apps do not wait for npm. The confirmation lists each machine it skips
-and why, such as a machine that is offline or needs a manual update. Use
-**Settings → Environments** for those.
+Remote desktop apps never wait for npm. When the desktop app offers the update,
+background services update right away too. Other servers, including older
+background services, update only after that version is published to npm. The
+confirmation lists each machine it skips and why, such as a machine that is
+offline or needs a manual update. Use **Settings → Environments** for those.
 
 If a desktop app restarts on its old version, S2Code tells you the update did
 not apply. It does not install that version again on its own, even when another
@@ -34,6 +35,10 @@ device asks. Use the update button on that machine to retry.
 The confirmation counts the running threads that the restarts will interrupt,
 and how many can resume afterwards. See **Continue threads after restarts**
 below.
+
+## Release channels
+
+Stable, Nightly, and Preview are separate installations. **Settings → About → Installed channel** names the one this desktop app is running. Install another channel separately. A packaged app does not change its own update feed, and a server update to a different channel is refused.
 
 ## Before you update
 

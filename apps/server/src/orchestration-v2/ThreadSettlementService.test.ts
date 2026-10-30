@@ -847,27 +847,24 @@ describe("ThreadSettlementServiceV2 worker", () => {
     ),
   );
 
-  it.effect("reads settings once per sweep stage rather than once per thread", () =>
+  it.effect("stops settling the rest of a sweep once auto-settlement is turned off", () =>
     Effect.scoped(
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse(NOW));
-        const threads = Array.from({ length: 6 }, (_, index) =>
-          makeThread(`branch-thread-${index}`, {
-            branch: "feature",
-            latestRunCompletedAt: DateTime.makeUnsafe(NOW),
-          }),
-        );
+        // Sweeps settle 8 threads at a time, so the ninth starts after a dispatch turned it off.
+        const threads = Array.from({ length: 9 }, (_, index) => makeThread(`idle-${index}`));
+        let disable: Effect.Effect<unknown> = Effect.void;
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot(threads),
-          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
-          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("open")),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 3 },
+          onDispatch: () => disable,
         });
+        disable = fixture.updateSettings({ sidebarAutoSettleAfterDays: null });
         yield* Effect.gen(function* () {
           const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
           yield* startHarness(service, fixture.activation, fixture.snapshotReads);
-          expect(yield* Ref.get(fixture.branchCalls)).toHaveLength(1);
-          // Reading settings materializes every stored provider secret.
-          expect(yield* Ref.get(fixture.settingsReadCount)).toBeLessThan(threads.length);
+          const settled = (yield* Ref.get(fixture.commands)).map((command) => command.threadId);
+          expect(settled).not.toContain(threads[8]!.id);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),
