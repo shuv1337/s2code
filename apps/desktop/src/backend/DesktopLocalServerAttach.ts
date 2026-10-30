@@ -195,8 +195,7 @@ export const updateServiceToAppVersion = Effect.fn("desktop.localServerAttach.up
       Effect.mapError((error) => failed(error.message)),
     );
     if (exitCode !== 0) {
-      const lastLine = output.trim().split("\n").at(-1)?.trim();
-      return yield* failed(lastLine || `update exited with ${exitCode}`);
+      return yield* failed(output.trim() || `update exited with ${exitCode}`);
     }
   },
 );

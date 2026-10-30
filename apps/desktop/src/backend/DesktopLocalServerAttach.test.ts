@@ -8,10 +8,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
-import { discover } from "./DesktopLocalServerAttach.ts";
+import { discover, updateServiceToAppVersion } from "./DesktopLocalServerAttach.ts";
 import { runBackendProcess } from "./DesktopBackendManager.ts";
 
 const record = {
@@ -49,6 +50,47 @@ const http = HttpClient.make((request) =>
 const layer = Layer.mergeAll(NodeServices.layer, Layer.succeed(HttpClient.HttpClient, http));
 
 describe("local desktop attachment", () => {
+  it.effect("preserves the downgrade refusal instead of showing only its final stack frame", () =>
+    Effect.gen(function* () {
+      const reason =
+        "t3@0.1.0-nightly.20261026.62 is older than the installed 0.1.3-nightly.20261027.66.";
+      const error = yield* Effect.flip(
+        updateServiceToAppVersion({
+          executablePath: "electron",
+          entryArgs: ["bin.mjs"],
+          env: {},
+          appVersion: "0.1.0-nightly.20261026.62",
+        }).pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.succeed(
+                ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(123),
+                  stdout: Stream.empty,
+                  stderr: Stream.make(
+                    new TextEncoder().encode(
+                      `Checking for updates...\nERROR (#1): CliUpdateError: ${reason}\n    at cli.update.run (Nightly)\n    at cli.update.run (definition) (Nightly)\n`,
+                    ),
+                  ),
+                  all: Stream.empty,
+                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  stdin: Sink.drain,
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                  unref: Effect.succeed(Effect.void),
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      assert.include(error.message, reason);
+    }),
+  );
+
   it.effect.each([
     "valid",
     "absent",
