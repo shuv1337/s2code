@@ -44,7 +44,8 @@ const make = Effect.gen(function* () {
       );
     return Option.isSome(stored)
       ? new TextDecoder().decode(stored.value)
-      : (process.env.OPENAI_API_KEY?.trim() ?? "");
+      : // Product call for Lauren: an unset saved voice key falls back to OPENAI_API_KEY.
+        (process.env.OPENAI_API_KEY?.trim() ?? "");
   });
   const configure = Effect.fn("VoiceProvider.configure")(function* (apiKey: string) {
     yield* (

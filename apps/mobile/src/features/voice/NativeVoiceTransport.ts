@@ -18,7 +18,11 @@ export class NativeVoiceTransport implements VoiceTransport {
       const rtc = await import("react-native-webrtc");
       if (this.#closed) return;
       this.#audio = acquireAudioSession("recording", input.onMicrophoneEnded);
-      if (!(await activateAudioSession(this.#audio)) || this.#closed) return;
+      if (this.#closed) return;
+      if (!(await activateAudioSession(this.#audio))) {
+        throw new Error("Could not start the microphone. Check audio permissions and retry.");
+      }
+      if (this.#closed) return;
       const stream = await rtc.mediaDevices.getUserMedia({ audio: true, video: false });
       if (this.#closed) {
         for (const track of stream.getTracks()) track.stop();

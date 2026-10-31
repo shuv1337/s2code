@@ -12,6 +12,8 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -3338,6 +3340,20 @@ export const layer = Layer.unwrap(
         );
         const clientAnalyticsProps = readClientAnalyticsProps(request);
         yield* analytics.recordOwners(readClientOwners(request), "client");
+        // Handshake `Effect.provide` closes before the socket is served, so this scope follows the socket.
+        const voiceScope = yield* Scope.make();
+        const voiceContext = yield* Layer.buildWithScope(
+          VoiceSession.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(VoiceTools.VoiceTools, voiceTools),
+                Layer.succeed(VoiceProvider.VoiceProvider, voiceProvider),
+              ),
+            ),
+          ),
+          voiceScope,
+        ).pipe(Effect.onError(() => Scope.close(voiceScope, Exit.void)));
+        const voiceSession = Context.get(voiceContext, VoiceSession.VoiceSession);
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
@@ -3384,16 +3400,7 @@ export const layer = Layer.unwrap(
                   reviewGuides,
                 ),
               ),
-              Layer.provide(
-                VoiceSession.layer.pipe(
-                  Layer.provide(
-                    Layer.mergeAll(
-                      Layer.succeed(VoiceTools.VoiceTools, voiceTools),
-                      Layer.succeed(VoiceProvider.VoiceProvider, voiceProvider),
-                    ),
-                  ),
-                ),
-              ),
+              Layer.provide(Layer.succeed(VoiceSession.VoiceSession, voiceSession)),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(
@@ -3425,7 +3432,10 @@ export const layer = Layer.unwrap(
                 }),
               ),
             ),
-          () => sessions.markDisconnected(session.sessionId),
+          () =>
+            sessions
+              .markDisconnected(session.sessionId)
+              .pipe(Effect.ensuring(Scope.close(voiceScope, Exit.void))),
         );
       }).pipe(
         Effect.catchTags({

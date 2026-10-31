@@ -1,9 +1,13 @@
 import { assert, it } from "@effect/vitest";
 import { EnvironmentId } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as McpSchema from "effect/ai/McpSchema";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as McpToolCaller from "../mcp/McpToolCaller.ts";
 import * as VoiceTools from "./VoiceTools.ts";
 
@@ -17,6 +21,7 @@ it.effect("requires each tool's grants before invoking it and bounds sensitive r
             getEnvironmentId: Effect.succeed(EnvironmentId.make("test")),
             getDescriptor: Effect.die("unused"),
           }),
+          ServerSettings.layerTest({ linkedEnvironmentsEnabled: false }),
           Layer.succeed(McpToolCaller.McpToolCaller, {
             call: () =>
               Effect.sync(() => {
@@ -58,6 +63,66 @@ it.effect("requires each tool's grants before invoking it and bounds sensitive r
       assert.isFalse(output.includes("fixture-secret"));
       assert.include(output, "[redacted]");
       assert.isAtMost(output.length, 4001);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("strips environmentId when the tool rejects it and reports links as off", () =>
+  Effect.gen(function* () {
+    const seen: Array<{
+      readonly name: string;
+      readonly arguments: unknown;
+      readonly linkedEnvironments: boolean | undefined;
+    }> = [];
+    const layer = VoiceTools.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(ServerEnvironment.ServerEnvironment, {
+            getEnvironmentId: Effect.succeed(EnvironmentId.make("hub")),
+            getDescriptor: Effect.die("unused"),
+          }),
+          ServerSettings.layerTest({ linkedEnvironmentsEnabled: false }),
+          Layer.succeed(McpToolCaller.McpToolCaller, {
+            call: (input) =>
+              Effect.sync(() => {
+                const fiber = Fiber.getCurrent();
+                const scope =
+                  fiber &&
+                  Context.getOrUndefined(fiber.context, McpInvocationContext.McpInvocationContext);
+                seen.push({
+                  name: input.name,
+                  arguments: input.arguments,
+                  linkedEnvironments: scope?.linkedEnvironments,
+                });
+                return new McpSchema.CallToolResult({ content: [{ type: "text", text: "{}" }] });
+              }),
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const voice = yield* VoiceTools.VoiceTools;
+      const caller = {
+        sessionId: "paired",
+        scopes: ["orchestration:read", "orchestration:operate", "access:read"],
+      } as const;
+      yield* voice.execute(caller, "t3_environment_links", { environmentId: "peer" }, "call-1");
+      yield* voice.execute(caller, "t3_thread_read", { threadId: "thread" }, "call-2");
+      yield* voice.execute(
+        caller,
+        "t3_worktree_status",
+        { environmentId: "peer", clientRequestId: "model" },
+        "call-3",
+      );
+      assert.deepEqual(seen, [
+        { name: "t3_environment_links", arguments: {}, linkedEnvironments: false },
+        {
+          name: "t3_thread_read",
+          arguments: { threadId: "thread", environmentId: "hub" },
+          linkedEnvironments: false,
+        },
+        { name: "t3_worktree_status", arguments: {}, linkedEnvironments: false },
+      ]);
     }).pipe(Effect.provide(layer));
   }),
 );

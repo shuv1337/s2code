@@ -1,6 +1,9 @@
 import { assert, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
 import { VoiceError, type VoiceStartInput } from "@t3tools/contracts";
 import * as VoiceSession from "./VoiceSession.ts";
 import * as VoiceProvider from "./VoiceProvider.ts";
@@ -93,5 +96,44 @@ it.effect("binds calls to their owner, deduplicates actions, and refuses tools a
       yield* voice.execute(owner, call).pipe(Effect.flip);
       assert.strictEqual(count, 2);
     }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("ends provider sessions when the connection scope closes", () =>
+  Effect.gen(function* () {
+    const ended: string[] = [];
+    const scope = yield* Scope.make();
+    const context = yield* Layer.buildWithScope(
+      VoiceSession.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(VoiceProvider.VoiceProvider, {
+              status: Effect.succeed({ configured: true }),
+              configure: () => Effect.void,
+              start: () => Effect.succeed({ sessionId: "live-1", sdp: "answer" }),
+              end: (sessionId) =>
+                Effect.sync(() => {
+                  ended.push(sessionId);
+                }),
+            }),
+            Layer.succeed(VoiceTools.VoiceTools, {
+              execute: () => Effect.succeed("{}"),
+            }),
+          ),
+        ),
+      ),
+      scope,
+    );
+    const voice = Context.get(context, VoiceSession.VoiceSession);
+    const owner = {
+      sessionId: "owner",
+      scopes: ["orchestration:operate", "orchestration:read"],
+    } as const;
+    const session = yield* voice.start(owner, { sdp: "offer", mode: "call" });
+    assert.deepEqual(ended, []);
+    yield* Scope.close(scope, Exit.void);
+    assert.deepEqual(ended, [session.sessionId]);
+    const refused = yield* voice.end(owner, session.sessionId).pipe(Effect.flip);
+    assert.strictEqual(refused.reason, "session_closed");
   }),
 );

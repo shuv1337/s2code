@@ -49,11 +49,11 @@ const make = Effect.gen(function* () {
   const provider = yield* VoiceProvider.VoiceProvider;
   const tools = yield* VoiceTools.VoiceTools;
   const sessions = new Map<string, Session>();
-  yield* Effect.addFinalizer(() =>
-    Effect.forEach(sessions.keys(), (id) => provider.end(id), { discard: true }).pipe(
-      Effect.ignore,
-    ),
-  );
+  yield* Effect.addFinalizer(() => {
+    const ids = Array.from(sessions.keys());
+    for (const id of ids) sessions.delete(id);
+    return Effect.forEach(ids, (id) => provider.end(id), { discard: true }).pipe(Effect.ignore);
+  });
   const owned = Effect.fn("VoiceSession.owned")(function* (caller: VoiceCaller, id: string) {
     const session = sessions.get(id);
     if (!session) return yield* new VoiceError({ reason: "session_closed" });
