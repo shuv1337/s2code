@@ -4,6 +4,7 @@ import { page } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { VoiceProvider } from "../voice/VoiceProvider";
 import { CommandPalette } from "./CommandPalette";
 
 function setup() {
@@ -13,7 +14,11 @@ function setup() {
 describe("CommandPalette open intents", () => {
   it("opens New thread in... with focus in the search input, not the Back button", async () => {
     setup();
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({ open: "new-thread-in" });
 
@@ -22,7 +27,11 @@ describe("CommandPalette open intents", () => {
 
   it("opens a search intent with its query in the focused input", async () => {
     setup();
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({ query: "acme" });
 

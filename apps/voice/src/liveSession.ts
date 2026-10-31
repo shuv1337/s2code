@@ -6,7 +6,7 @@
 import WebSocket from "ws";
 
 import type { VoiceConfig } from "./config.ts";
-import { buildLiveFunctionTools, LIVE_SYSTEM_INSTRUCTIONS } from "./liveTools.ts";
+import { buildLiveFunctionTools, LIVE_SYSTEM_INSTRUCTIONS } from "@t3tools/shared/voice/liveTools";
 import type { ToolBridge, ToolBridgeResult } from "./toolBridge.ts";
 
 export interface LiveSessionHandlers {

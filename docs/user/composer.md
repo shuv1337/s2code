@@ -174,6 +174,25 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
+## Voice calls and dictation
+
+Configure an OpenAI API key with GPT-Live access in **Settings → Voice** for the
+environment you want to use. Voice audio is sent to OpenAI and billed to that API
+account. Web browsers need HTTPS or localhost and microphone permission.
+
+Use **Call** beside the web or desktop composer, or the headphones action on
+mobile, to talk with the assistant and hear its replies. On web and desktop,
+**Open voice call** is also in the command palette and keyboard shortcut settings.
+The call stays with its starting environment and thread when you navigate.
+**Mute** stops microphone input; **End** closes voice without stopping work
+already sent to an agent. Mobile calls end when the app backgrounds.
+
+The microphone action dictates into your draft. On supported iPhones it uses the
+on-device transcription described below; other clients use OpenAI transcription.
+Choose **Use transcript** to add cloud dictation to its original draft, then
+review and send it yourself. If the draft changed while you spoke, the transcript
+stays in the voice panel for you to copy. Canceling never submits a message.
+
 ## Voice input on iPhone
 
 On supported iPhones with iOS 26 or later, use the composer's microphone to record,

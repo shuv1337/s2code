@@ -1,3 +1,4 @@
+import { VoiceControls } from "../../voice/VoiceControls";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -3439,6 +3440,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
                 >
+                  <VoiceControls
+                    target={{
+                      environmentId,
+                      label: activeThread?.title ?? "Current draft",
+                      ...(activeThread
+                        ? { threadId: activeThread.id, projectId: activeThread.projectId }
+                        : {}),
+                    }}
+                    commitDictation={() => {
+                      const captured = getComposerDraft(composerDraftTarget)?.prompt ?? "";
+                      return (transcript) => {
+                        if (
+                          (getComposerDraft(composerDraftTarget)?.prompt ?? "") !== captured ||
+                          !transcript.trim()
+                        )
+                          return false;
+                        setComposerDraftPrompt(
+                          composerDraftTarget,
+                          [captured, transcript.trim()].filter(Boolean).join("\n"),
+                        );
+                        return true;
+                      };
+                    }}
+                  />
                   <div
                     ref={attachExpandedComposerControls}
                     data-chat-composer-controls="footer"

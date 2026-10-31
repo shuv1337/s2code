@@ -4,7 +4,7 @@
  * notifications/initialized) and re-initializes once on 404 / expired session.
  * Token comes from config/env only — never logged.
  */
-import type { VoiceToolInputSchema } from "./allowlist.ts";
+import type { VoiceToolInputSchema } from "@t3tools/shared/voice/allowlist";
 
 export interface McpCallResult {
   readonly ok: boolean;

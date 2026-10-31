@@ -1,4 +1,11 @@
 import {
+  VoiceError,
+  VoiceStartInput,
+  VoiceStartResult,
+  VoiceToolInput,
+  VoiceToolResult,
+} from "./voice.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -507,6 +514,12 @@ export const WS_METHODS = {
   serverRunStorageCleanup: "server.runStorageCleanup",
   serverGetStorageCleanupReport: "server.getStorageCleanupReport",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
+  voiceStatus: "voice.status",
+  voiceConfigure: "voice.configure",
+  voiceStart: "voice.start",
+  voiceEnd: "voice.end",
+  voiceExecute: "voice.execute",
+  voiceConfirm: "voice.confirm",
   peerLinksList: "peerLinks.list",
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
@@ -793,6 +806,35 @@ const WsServerGetDatabaseStorageRpc = Rpc.make(WS_METHODS.serverGetDatabaseStora
   success: Schema.NullOr(DatabaseStorageStatus),
   stream: true,
   error: EnvironmentAuthorizationError,
+});
+
+const WsVoiceStatusRpc = Rpc.make(WS_METHODS.voiceStatus, {
+  payload: {},
+  success: Schema.Struct({ configured: Schema.Boolean }),
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceConfigureRpc = Rpc.make(WS_METHODS.voiceConfigure, {
+  payload: { apiKey: Schema.String.check(Schema.isMaxLength(1024)) },
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceStartRpc = Rpc.make(WS_METHODS.voiceStart, {
+  payload: VoiceStartInput,
+  success: VoiceStartResult,
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceEndRpc = Rpc.make(WS_METHODS.voiceEnd, {
+  payload: { sessionId: Schema.String },
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceExecuteRpc = Rpc.make(WS_METHODS.voiceExecute, {
+  payload: VoiceToolInput,
+  success: VoiceToolResult,
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceConfirmRpc = Rpc.make(WS_METHODS.voiceConfirm, {
+  payload: { sessionId: Schema.String, callId: Schema.String, accepted: Schema.Boolean },
+  success: VoiceToolResult,
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
 });
 
 const WsPeerLinksListRpc = Rpc.make(WS_METHODS.peerLinksList, {
@@ -1992,6 +2034,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetStorageCleanupReportRpc,
   WsServerGetDatabaseStorageRpc,
   WsServerUpdateSettingsRpc,
+  WsVoiceStatusRpc,
+  WsVoiceConfigureRpc,
+  WsVoiceStartRpc,
+  WsVoiceEndRpc,
+  WsVoiceExecuteRpc,
+  WsVoiceConfirmRpc,
   WsPeerLinksListRpc,
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,

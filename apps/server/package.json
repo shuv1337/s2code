@@ -72,6 +72,7 @@
     "stream-chain": "^4.2.5",
     "stream-json": "3.6.0",
     "undici": "catalog:",
+    "ws": "catalog:",
     "yaml": "catalog:",
     "yauzl": "^3.4.0",
     "zod": "^4.6.5"
@@ -92,6 +93,7 @@
     "@t3tools/web": "workspace:*",
     "@types/node": "catalog:",
     "@types/proper-lockfile": "^4.1.4",
+    "@types/ws": "catalog:",
     "@types/yauzl": "^3.4.0",
     "effect-acp": "workspace:*",
     "effect-codex-app-server": "workspace:*",

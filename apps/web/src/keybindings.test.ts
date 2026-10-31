@@ -248,6 +248,35 @@ describe("settle thread shortcut", () => {
   });
 });
 
+describe("voice shortcut", () => {
+  it("leaves Paste as Text alone inside text fields", () => {
+    const input = event({ key: "v", metaKey: true, shiftKey: true });
+    assert.strictEqual(
+      resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { editableFocus: false, terminalFocus: false },
+      }),
+      "voice.open",
+    );
+    assert.isNull(
+      resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { editableFocus: true },
+      }),
+    );
+    assert.isNull(
+      resolveShortcutCommand(
+        event({ key: "v", ctrlKey: true, shiftKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        {
+          platform: "Win32",
+          context: { terminalFocus: true },
+        },
+      ),
+    );
+  });
+});
+
 describe("thread undo shortcut", () => {
   it("leaves native undo alone inside text fields and terminals", () => {
     assert.isNull(

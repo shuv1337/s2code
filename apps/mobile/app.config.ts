@@ -337,6 +337,12 @@ const config: ExpoConfig = {
     favicon: variant.assets.appIcon,
   },
   plugins: [
+    [
+      "@config-plugins/react-native-webrtc",
+      {
+        microphonePermission: "Allow $(PRODUCT_NAME) to hear you during voice calls and dictation.",
+      },
+    ],
     "expo-asset",
     "react-native-pdf-jsi",
     [

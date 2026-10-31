@@ -1,3 +1,5 @@
+import { VoiceProvider } from "../voice/VoiceProvider";
+import { VoiceSurface } from "../voice/VoiceSurface";
 import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
@@ -195,34 +197,38 @@ function RootRouteBranch() {
 
   return (
     <>
-      <ChatGptWelcomeCoordinator />
-      <FirstRunGate
-        enabled={primaryEnvironmentAuthenticated}
-        hostedStatic={authGateState.status === "hosted-static"}
-      >
-        {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-        {shouldMountDesktopWebLinkCoordinator(authGateState.status) || localEnvironmentDisabled ? (
-          <DesktopWebLinkCoordinator />
-        ) : null}
-        {isElectron ? <RunningThreadKeepAlive /> : null}
-        <RelayClientInstallDialog />
-        <ConnectOnboardingDialog />
-        <SshPasswordPromptDialog />
-        <SnapShotCoordinator />
-        <ReopenClosedViewShortcut />
-        <ConfirmDialogHost />
-        <CustomSnoozeDialogHost />
-        <GuestShareDialogHost />
-        <ProjectCloneToastCoordinator />
-        <AddProjectToMachineDialogHost />
-        {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
-        {primaryEnvironmentAuthenticated ? (
-          <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
-        ) : null}
-        {appShell}
-        {/* Keep the theme editor above the router so drafts survive navigation. */}
-        <ThemeEditorHost />
-      </FirstRunGate>
+      <VoiceProvider>
+        <ChatGptWelcomeCoordinator />
+        <FirstRunGate
+          enabled={primaryEnvironmentAuthenticated}
+          hostedStatic={authGateState.status === "hosted-static"}
+        >
+          {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
+          {shouldMountDesktopWebLinkCoordinator(authGateState.status) ||
+          localEnvironmentDisabled ? (
+            <DesktopWebLinkCoordinator />
+          ) : null}
+          {isElectron ? <RunningThreadKeepAlive /> : null}
+          <RelayClientInstallDialog />
+          <ConnectOnboardingDialog />
+          <SshPasswordPromptDialog />
+          <SnapShotCoordinator />
+          <ReopenClosedViewShortcut />
+          <ConfirmDialogHost />
+          <CustomSnoozeDialogHost />
+          <GuestShareDialogHost />
+          <ProjectCloneToastCoordinator />
+          <AddProjectToMachineDialogHost />
+          {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
+          {primaryEnvironmentAuthenticated ? (
+            <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
+          ) : null}
+          {appShell}
+          {/* Keep the theme editor above the router so drafts survive navigation. */}
+          <ThemeEditorHost />
+          <VoiceSurface />
+        </FirstRunGate>
+      </VoiceProvider>
     </>
   );
 }

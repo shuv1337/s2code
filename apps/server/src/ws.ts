@@ -1,3 +1,6 @@
+import * as VoiceSession from "./voice/VoiceSession.ts";
+import * as VoiceProvider from "./voice/VoiceProvider.ts";
+import * as VoiceTools from "./voice/VoiceTools.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -9,6 +12,8 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1336,6 +1341,7 @@ export const layerWsRpc = (
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const voice = yield* VoiceSession.VoiceSession;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -2517,6 +2523,12 @@ export const layerWsRpc = (
         [WS_METHODS.serverRunStorageCleanup]: () => storageCleanup.runNow,
         [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
         [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
+        [WS_METHODS.voiceStatus]: () => voice.status,
+        [WS_METHODS.voiceConfigure]: ({ apiKey }) => voice.configure(apiKey),
+        [WS_METHODS.voiceStart]: (input) => voice.start(currentSession, input),
+        [WS_METHODS.voiceEnd]: ({ sessionId }) => voice.end(currentSession, sessionId),
+        [WS_METHODS.voiceExecute]: (input) => voice.execute(currentSession, input),
+        [WS_METHODS.voiceConfirm]: (input) => voice.confirm(currentSession, input),
         [WS_METHODS.peerLinksList]: (_input) =>
           peerLinks.list.pipe(Effect.map((links) => ({ links }))),
         [WS_METHODS.peerLinksLink]: (input) => peerLinks.link(input),
@@ -3291,6 +3303,8 @@ export const layer = Layer.unwrap(
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
+    const voiceTools = yield* VoiceTools.VoiceTools;
+    const voiceProvider = yield* VoiceProvider.VoiceProvider;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
@@ -3326,6 +3340,20 @@ export const layer = Layer.unwrap(
         );
         const clientAnalyticsProps = readClientAnalyticsProps(request);
         yield* analytics.recordOwners(readClientOwners(request), "client");
+        // Handshake `Effect.provide` closes before the socket is served, so this scope follows the socket.
+        const voiceScope = yield* Scope.make();
+        const voiceContext = yield* Layer.buildWithScope(
+          VoiceSession.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(VoiceTools.VoiceTools, voiceTools),
+                Layer.succeed(VoiceProvider.VoiceProvider, voiceProvider),
+              ),
+            ),
+          ),
+          voiceScope,
+        ).pipe(Effect.onError(() => Scope.close(voiceScope, Exit.void)));
+        const voiceSession = Context.get(voiceContext, VoiceSession.VoiceSession);
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
@@ -3372,6 +3400,7 @@ export const layer = Layer.unwrap(
                   reviewGuides,
                 ),
               ),
+              Layer.provide(Layer.succeed(VoiceSession.VoiceSession, voiceSession)),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(
@@ -3403,7 +3432,10 @@ export const layer = Layer.unwrap(
                 }),
               ),
             ),
-          () => sessions.markDisconnected(session.sessionId),
+          () =>
+            sessions
+              .markDisconnected(session.sessionId)
+              .pipe(Effect.ensuring(Scope.close(voiceScope, Exit.void))),
         );
       }).pipe(
         Effect.catchTags({

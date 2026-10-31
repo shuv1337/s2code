@@ -49,7 +49,7 @@ export const VOICE_CONFIRM_TOOLS = [
 export type VoiceDestructiveTool = (typeof VOICE_DESTRUCTIVE_TOOLS)[number];
 
 /** Allowlisted tools that change remote/hub state (announce env before call). */
-export const VOICE_SIDE_EFFECT_TOOLS = new Set<string>([
+const VOICE_SIDE_EFFECT_TOOLS = new Set<string>([
   "t3_thread_launch",
   "t3_thread_send",
   "t3_thread_interrupt",
@@ -58,7 +58,7 @@ export const VOICE_SIDE_EFFECT_TOOLS = new Set<string>([
 ]);
 
 /** Long-running tools: return immediately, then wait and speak a short summary. */
-export const VOICE_LONG_RUNNING_TOOLS = new Set<string>(["t3_thread_launch", "t3_thread_send"]);
+const VOICE_LONG_RUNNING_TOOLS = new Set<string>(["t3_thread_launch", "t3_thread_send"]);
 
 const allowSet = new Set<string>(VOICE_TOOL_ALLOWLIST);
 const destructiveSet = new Set<string>(VOICE_DESTRUCTIVE_TOOLS);
@@ -108,7 +108,7 @@ export interface VoiceToolInputSchema {
   readonly required?: readonly string[];
 }
 
-export const VOICE_ENVIRONMENT_POLICY: Readonly<Record<string, VoiceEnvironmentPolicy>> = {
+const VOICE_ENVIRONMENT_POLICY: Readonly<Record<string, VoiceEnvironmentPolicy>> = {
   t3_environment_links: "strip",
   t3_environment_read: "keep",
   t3_project_list: "keep",
@@ -142,7 +142,7 @@ export const VOICE_ENVIRONMENT_POLICY: Readonly<Record<string, VoiceEnvironmentP
  * Hub tools that accept clientRequestId. The voice call id always wins.
  * t3_pending_request is absent: its schema rejects the key.
  */
-export const VOICE_CLIENT_REQUEST_ID_TOOLS = new Set<string>([
+const VOICE_CLIENT_REQUEST_ID_TOOLS = new Set<string>([
   "t3_thread_send",
   "t3_thread_launch",
   "t3_thread_interrupt",

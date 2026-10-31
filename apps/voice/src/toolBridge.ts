@@ -9,18 +9,23 @@ import {
   environmentPolicyFor,
   isLongRunningVoiceTool,
   type VoiceToolInputSchema,
-} from "./allowlist.ts";
+} from "@t3tools/shared/voice/allowlist";
 import { appendVoiceToolAudit, threadIdFromToolArgs, type VoiceToolAuditEntry } from "./audit.ts";
 import {
   applyConfirmation,
   decideConfirmation,
   parseSpokenAnswer,
   type SpeakFn,
-} from "./confirmation.ts";
+} from "@t3tools/shared/voice/confirmation";
 import type { VoiceConfig } from "./config.ts";
 import { labelForEnvironment } from "./config.ts";
 import type { McpBridge, McpCallResult } from "./mcpBridge.ts";
-import { boundText, redactText, summarizeToolResult, toolPayload } from "./resultSummary.ts";
+import {
+  boundText,
+  redactText,
+  summarizeToolResult,
+  toolPayload,
+} from "@t3tools/shared/voice/resultSummary";
 
 export interface ToolBridgeRequest {
   readonly name: string;

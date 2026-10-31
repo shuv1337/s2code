@@ -120,39 +120,19 @@ pnpm --filter @t3tools/voice dry-run
 5. Confirm spoken env announcement + `voice-tool.ndjson` lines before any
    peer side effects.
 
-## iOS sketch
+## Client integration
 
-Not implemented. This spike stays a Node process on the hub host.
+Use **Call** in the web/desktop composer or the headphones action on mobile for
+microphone capture, speaker playback, captions, and orchestration. Configure the
+OpenAI key in **Settings → Voice** on the connected environment. The native app
+must be rebuilt after adding its WebRTC dependency; a JavaScript update alone
+cannot add native audio support.
 
-**Tool bridge.** `apps/voice` is a Node CLI (`ws`, filesystem audit, `fetch`).
-Do not import it from React Native. The rules worth sharing are pure: the
-allowlist, which tools accept `environmentId`, spoken confirmation, and the
-short discovery summaries. When a second client is real, move those into
-`packages/client-runtime` (or a tiny shared package) so iOS and this CLI
-cannot drift. Until then, an iOS experiment should call the hub MCP itself
-with the same rules, not shell out to `s2-voice`.
+The CLI remains a developer transport and offline test harness. Its `live` mode
+accepts externally supplied PCM audio; the product clients own device capture.
+Pure allowlist, confirmation, tool schema, and result-summary rules now live in
+`packages/shared/src/voice` and are shared by the CLI and server integration.
 
-**Microphone.** Capture with `AVAudioEngine` at 24 kHz mono PCM16, the format
-`appendAudio` already sends as `session.input_audio.append`. Use a
-play-and-record session and voice processing. This spike does not open a
-microphone; iOS would be the first real capture path. Playback of model audio
-is a separate tap on that session. The app's existing dictation path
-([voice input](../../docs/internals/voice-input.md)) edits a composer draft
-and does not talk to GPT-Live.
-
-**Auth.** Use the environment session the mobile app already pairs, or the
-MCP OAuth flow an outside agent uses (Settings → Environments → Copy MCP URL,
-then the environment's existing sign-in). The bearer is that paired
-mcp-client token. Do not add a second token file, and do not ship
-`OPENAI_API_KEY` in the app. `S2_VOICE_MCP_TOKEN` on the desktop spike is the
-host stand-in for that paired client.
-
-**Hub URL.** The user enters the hub the same way they add an environment.
-Voice calls `{origin}/mcp` on that hub only. A peer is an `environmentId`
-argument, not a second socket. Omit `environmentId` on discovery tools to
-stay on the hub; pass an id from `t3_environment_links` to target that peer.
-
-**Stays on the desktop spike.** The GPT-Live WebSocket and the OpenAI key
-(`op run` / `OPENAI_API_KEY`), the text dry-run CLI, `--mock-mcp`, and the
-ndjson audit directory. No server-side tool allowlist. Spoken yes/no can
-wait until capture exists. iOS does not need a port of the CLI flags.
+Client tools run under the paired environment session through the server's
+registered MCP handlers. Clients receive the WebRTC answer, never the saved API
+key. The server closes outstanding voice sessions when their client disconnects.

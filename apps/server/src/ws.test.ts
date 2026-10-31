@@ -1,3 +1,4 @@
+import * as VoiceSession from "./voice/VoiceSession.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -503,6 +504,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(OtlpEndpointCheck.OtlpEndpointCheck)({}),
+  Layer.mock(VoiceSession.VoiceSession)({}),
   Layer.mock(PeerLinks.PeerLinks)({}),
   Layer.mock(PairingGrantStore.PairingGrantStore)({}),
   Layer.mock(PeerLinks.PeerLinks)({}),
