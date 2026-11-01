@@ -115,6 +115,21 @@ export function VoiceSurface() {
             ))}
           </section>
         ) : null}
+        {state.events.length ? (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              Events ({state.events.length})
+            </summary>
+            <ol className="mt-2 space-y-1 font-mono text-xs text-muted-foreground">
+              {state.events.map((entry) => (
+                <li key={entry.id} className="break-words">
+                  +{entry.seconds.toFixed(1)}s {entry.type}
+                  {entry.detail ? `: ${entry.detail}` : ""}
+                </li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={() => setSettings(!settings)}>
           {settings ? "Hide voice settings" : "Voice settings"}
         </Button>

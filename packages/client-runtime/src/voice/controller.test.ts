@@ -215,3 +215,86 @@ it("speaks completion after a launched run settles and expires unanswered confir
     vi.useRealTimers();
   }
 });
+
+it("reports lookups that fail or stall instead of leaving the call silent", async () => {
+  vi.useFakeTimers();
+  try {
+    const { controller, event, sent, execute } = setup();
+    await controller.start(target);
+    event({ type: "session.started" });
+    const lookup = (id: string) => ({
+      type: "session.delegation.created",
+      delegation: { id, type: "delegation", target: "responses" },
+    });
+    const inLookup = (id: string, nested: Record<string, unknown>) => ({
+      type: "response.event",
+      delegation_id: id,
+      event: nested,
+    });
+    const status = (id: string) =>
+      controller.getSnapshot().tools.find((tool) => tool.callId === id)?.status;
+    const commentary = () =>
+      sent
+        .filter((event) => event.type === "session.commentary.append")
+        .map((event) => event.content);
+
+    event(lookup("done"));
+    event(inLookup("done", { type: "response.created" }));
+    event(
+      inLookup("done", {
+        type: "response.output_item.done",
+        item: { type: "function_call", call_id: "list", name: "t3_project_list", arguments: "{}" },
+      }),
+    );
+    event(inLookup("done", { type: "response.completed" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(execute).toHaveBeenCalledOnce();
+    event(inLookup("done", { type: "response.created" }));
+    event(inLookup("done", { type: "response.completed" }));
+    expect(status("done")).toBe("completed");
+
+    event(lookup("failed"));
+    event(
+      inLookup("failed", {
+        type: "response.failed",
+        response: { error: { message: "Backend model unavailable." } },
+      }),
+    );
+    expect(status("failed")).toBe("failed");
+    expect(commentary().at(-1)).toContain("Backend model unavailable.");
+
+    event(lookup("stalled"));
+    event(inLookup("stalled", { type: "response.created" }));
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(status("stalled")).toBe("running");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(status("stalled")).toBe("failed");
+    expect(commentary().at(-1)).toContain("No response from the lookup for 15 seconds.");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(status("done")).toBe("completed");
+    expect(commentary()).toHaveLength(2);
+
+    event({
+      type: "response.event",
+      event: {
+        type: "response.output_item.done",
+        item: { type: "function_call", call_id: "bad", name: "t3_thread_list", arguments: "{" },
+      },
+    });
+    expect(status("bad")).toBe("failed");
+    expect(sent).toContainEqual({
+      type: "response.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "bad",
+        output: '{"error":"The tool arguments were not valid JSON. Retry with a JSON object."}',
+      },
+    });
+    expect(controller.getSnapshot().events.map((entry) => entry.type)).toContain(
+      "response.event/response.failed",
+    );
+    await controller.end();
+  } finally {
+    vi.useRealTimers();
+  }
+});

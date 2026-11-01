@@ -15,6 +15,7 @@ export function VoiceSurface() {
   );
   const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState(false);
+  const [eventsOpen, setEventsOpen] = useState(false);
   const active = ["live", "connecting", "finishing"].includes(state.phase);
   return (
     <>
@@ -97,6 +98,23 @@ export function VoiceSurface() {
                 </Text>
               </View>
             ))}
+            {state.events.length ? (
+              <View className="gap-1">
+                <Button
+                  label={eventsOpen ? "Hide events" : `Events (${state.events.length})`}
+                  tone="text"
+                  onPress={() => setEventsOpen(!eventsOpen)}
+                />
+                {eventsOpen
+                  ? state.events.map((entry) => (
+                      <Text key={entry.id} selectable className="text-xs text-foreground-muted">
+                        +{entry.seconds.toFixed(1)}s {entry.type}
+                        {entry.detail ? `: ${entry.detail}` : ""}
+                      </Text>
+                    ))
+                  : null}
+              </View>
+            ) : null}
             <Button
               label={settings ? "Hide voice settings" : "Voice settings"}
               tone="text"

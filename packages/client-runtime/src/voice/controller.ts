@@ -43,6 +43,8 @@ export interface VoiceState {
     output: string;
   }[];
   readonly confirmation: { callId: string; prompt: string } | null;
+  /** Recent non-streaming provider events, oldest first, for diagnosing a stuck call. */
+  readonly events: readonly { id: number; seconds: number; type: string; detail?: string }[];
 }
 export interface VoiceDependencies {
   readonly transport: () => VoiceTransport;
@@ -70,11 +72,22 @@ const initial: VoiceState = {
   error: null,
   tools: [],
   confirmation: null,
+  events: [],
 };
+const EVENT_LOG_SIZE = 30;
+const LOOKUP_STALL_MS = 15_000;
+const LOOKUP_FAILURES = new Set(["response.failed", "response.incomplete", "error"]);
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+
+function lookupFailureMessage(event: Record<string, unknown>): string | undefined {
+  const response = object(event.response);
+  const error = object(event.error) ?? object(response?.error);
+  const message = error?.message ?? object(response?.incomplete_details)?.reason ?? event.message;
+  return typeof message === "string" && message.trim() ? message.trim().slice(0, 300) : undefined;
+}
 
 export class VoiceController {
   #state: VoiceState = initial;
@@ -87,6 +100,14 @@ export class VoiceController {
   #dictationDone: (() => void) | null = null;
   #startupTimer: ReturnType<typeof setTimeout> | undefined;
   #confirmationTimer: ReturnType<typeof setTimeout> | undefined;
+  #startedAt = 0;
+  #eventCount = 0;
+  // Delegated backend work; a lookup the provider drops otherwise leaves the call silent.
+  #lookups = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout> | undefined; calledTool: boolean }
+  >();
+  #callLookups = new Map<string, string>();
   readonly dependencies: VoiceDependencies;
   constructor(dependencies: VoiceDependencies) {
     this.dependencies = dependencies;
@@ -113,6 +134,9 @@ export class VoiceController {
     this.#transport = transport;
     this.#seen.clear();
     this.#confirmText = "";
+    this.#clearLookups();
+    // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+    this.#startedAt = Date.now();
     this.#update({ ...initial, phase: "connecting", target, mode });
     // @effect-diagnostics-next-line globalTimers:off - this imperative media controller also runs outside an Effect runtime
     this.#startupTimer = setTimeout(() => {
@@ -170,6 +194,7 @@ export class VoiceController {
     ++this.#epoch;
     clearTimeout(this.#startupTimer);
     clearTimeout(this.#confirmationTimer);
+    this.#clearLookups();
     this.#dictationDone?.();
     this.#dictationDone = null;
     const transport = this.#transport;
@@ -217,6 +242,8 @@ export class VoiceController {
       return;
     }
     if (!event) return;
+    this.#log(event);
+    this.#trackLookup(event);
     if (
       event.type === "session.started" ||
       (this.#state.mode === "dictation" && event.type === "session.created")
@@ -281,8 +308,90 @@ export class VoiceController {
       } catch {
         args = undefined;
       }
-      if (args) void this.#tool(item.call_id, item.name, args);
+      if (typeof event.delegation_id === "string")
+        this.#callLookups.set(item.call_id, event.delegation_id);
+      void this.#tool(item.call_id, item.name, args);
     }
+  }
+  #log(event: Record<string, unknown>) {
+    const nested = event.type === "response.event" ? object(event.event) : undefined;
+    const type = String(nested?.type ?? event.type ?? "unknown");
+    if (/delta$|audio|usage\.updated/.test(type)) return;
+    const detail = lookupFailureMessage(nested ?? event);
+    const entry = {
+      id: ++this.#eventCount,
+      // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+      seconds: Math.round((Date.now() - this.#startedAt) / 100) / 10,
+      type: nested ? `response.event/${type}` : type,
+      ...(detail ? { detail } : {}),
+    };
+    this.#update({ events: [...this.#state.events.slice(1 - EVENT_LOG_SIZE), entry] });
+  }
+  #trackLookup(event: Record<string, unknown>) {
+    if (this.#state.mode !== "call") return;
+    if (event.type === "session.delegation.created") {
+      const id = object(event.delegation)?.id;
+      if (typeof id !== "string" || this.#lookups.has(id)) return;
+      this.#lookups.set(id, { timer: undefined, calledTool: false });
+      this.#update({
+        tools: [
+          ...this.#state.tools.slice(-49),
+          { callId: id, name: "lookup", status: "running", output: "" },
+        ],
+      });
+      this.#armLookup(id);
+      return;
+    }
+    const id = event.delegation_id;
+    const lookup = typeof id === "string" ? this.#lookups.get(id) : undefined;
+    if (typeof id !== "string" || !lookup) return;
+    const nested = event.type === "response.event" ? object(event.event) : event;
+    const type = String(nested?.type ?? "");
+    if (LOOKUP_FAILURES.has(type) || /^session\.delegation\..*(failed|cancelled)$/.test(type)) {
+      this.#failLookup(id, lookupFailureMessage(nested ?? event) ?? "The lookup failed.");
+      return;
+    }
+    if (type === "response.created") lookup.calledTool = false;
+    if (object(nested?.item)?.type === "function_call") {
+      // Our own tool run can be slow; the watchdog resumes once its output is sent.
+      lookup.calledTool = true;
+      clearTimeout(lookup.timer);
+      return;
+    }
+    if (type === "response.completed" && !lookup.calledTool) {
+      clearTimeout(lookup.timer);
+      this.#lookups.delete(id);
+      this.#toolState(id, { status: "completed" });
+      return;
+    }
+    if (!lookup.calledTool) this.#armLookup(id);
+  }
+  #armLookup(id: string) {
+    const lookup = this.#lookups.get(id);
+    if (!lookup) return;
+    clearTimeout(lookup.timer);
+    // @effect-diagnostics-next-line globalTimers:off - lookup watchdog in the imperative media controller
+    lookup.timer = setTimeout(
+      () => this.#failLookup(id, "No response from the lookup for 15 seconds."),
+      LOOKUP_STALL_MS,
+    );
+  }
+  #failLookup(id: string, message: string) {
+    const lookup = this.#lookups.get(id);
+    if (!lookup) return;
+    clearTimeout(lookup.timer);
+    this.#lookups.delete(id);
+    this.#toolState(id, { status: "failed", output: message });
+    this.#transport?.send({
+      type: "session.commentary.append",
+      delegation_id: null,
+      content: `The lookup did not finish: ${message} Tell the user it failed and offer to try again.`,
+    });
+  }
+  #clearLookups() {
+    for (const lookup of this.#lookups.values()) clearTimeout(lookup.timer);
+    this.#lookups.clear();
+    this.#callLookups.clear();
   }
   #toolState(callId: string, patch: Partial<VoiceState["tools"][number]>) {
     this.#update({
@@ -310,9 +419,11 @@ export class VoiceController {
         item: { type: "function_call_output", call_id: callId, output: result.output },
       });
       this.#transport?.send({ type: "response.create" });
+      const lookup = this.#callLookups.get(callId);
+      if (lookup !== undefined) this.#armLookup(lookup);
     }
   }
-  async #tool(callId: string, name: string, args: Record<string, unknown>) {
+  async #tool(callId: string, name: string, args: Record<string, unknown> | undefined) {
     if (
       this.#seen.has(callId) ||
       !this.#sessionId ||
@@ -322,6 +433,17 @@ export class VoiceController {
       return;
     this.#seen.add(callId);
     const epoch = this.#epoch;
+    if (args === undefined) {
+      this.#update({
+        tools: [...this.#state.tools.slice(-49), { callId, name, status: "failed", output: "" }],
+      });
+      this.#output(callId, {
+        status: "completed",
+        output: '{"error":"The tool arguments were not valid JSON. Retry with a JSON object."}',
+      });
+      this.#toolState(callId, { status: "failed" });
+      return;
+    }
     if (isSideEffectVoiceTool(name, args))
       this.#transport?.send({
         type: "session.commentary.append",
