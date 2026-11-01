@@ -65,6 +65,7 @@ import {
   useComposerDraft,
 } from "../../state/use-composer-drafts";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { useEnvironmentQuery } from "../../state/query";
 import type { ComposerDocumentAttachment } from "../../lib/composerContext";
 import { useProject, useThreadShells } from "../../state/entities";
 import { useMentionableEnvironments } from "../../state/environments";
@@ -557,6 +558,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const liveVoice = useVoice();
   const canUseVoice = useAtomValue(voiceEnvironment.start.permissionAtom(props.environmentId));
   const liveVoiceActive = ["connecting", "live", "finishing"].includes(liveVoice.state.phase);
+  const voiceConfigured = useEnvironmentQuery(
+    voiceEnvironment.status({ environmentId: props.environmentId, input: {} }),
+  ).data?.configured;
   const voiceTarget = {
     environmentId: props.environmentId,
     label: props.selectedThread.title || "Untitled thread",
@@ -976,13 +980,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   }}
                   onCancel={voiceInput.cancel}
                 />
-                <ComposerActionButton
-                  size={usesLargeControls ? "large" : "regular"}
-                  accessibilityLabel="Call voice assistant"
-                  icon="headphones"
-                  disabled={!canUseVoice || voiceInput.blocksSubmission}
-                  onPress={() => liveVoice.startCall(voiceTarget)}
-                />
+                {voiceConfigured ? (
+                  <ComposerActionButton
+                    size={usesLargeControls ? "large" : "regular"}
+                    accessibilityLabel="Call voice assistant"
+                    icon="headphones"
+                    disabled={!canUseVoice || voiceInput.blocksSubmission}
+                    onPress={() => liveVoice.startCall(voiceTarget)}
+                  />
+                ) : null}
                 {showStopAction ? (
                   <ComposerActionButton
                     size={usesLargeControls ? "large" : "regular"}
