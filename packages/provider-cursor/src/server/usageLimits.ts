@@ -21,6 +21,7 @@ import * as CursorKeychain from "./CursorKeychain.ts";
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });
 const DEFAULT_CURSOR_API_ENDPOINT = "https://api2.cursor.sh";
 const decodeCredentials = Schema.decodeEffect(Schema.fromJsonString(CursorCredentials));
+const CursorApiKeyExchange = Schema.Struct({ accessToken: Schema.String });
 const CursorUsageResponse = Schema.Struct({
   billingCycleEnd: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   planUsage: Schema.optional(
@@ -61,6 +62,13 @@ export function cursorUsageResponseToLimits(
     : makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
 }
 
+const probeFailed = (checkedAt: string) =>
+  makeUnavailableUsageLimits({
+    checkedAt,
+    reason: "probeFailed",
+    message: "Cursor could not read usage limits.",
+  });
+
 export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function* (
   settings: Pick<CursorSettings, "apiEndpoint">,
   environment: NodeJS.ProcessEnv = process.env,
@@ -76,10 +84,24 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
       environment.CURSOR_API_ENDPOINT?.trim() ||
       DEFAULT_CURSOR_API_ENDPOINT
     ).replace(/\/$/, "");
+    const client = yield* HttpClient.HttpClient;
     let token = environment.CURSOR_AUTH_TOKEN?.trim();
-    // An explicit API key can name a different account from the stored login.
-    if (!token && environment.CURSOR_API_KEY?.trim()) {
-      return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
+    const apiKey = environment.CURSOR_API_KEY?.trim();
+    // An API key names its own account, so never fall back to the stored login for it.
+    if (!token && apiKey) {
+      const exchanged = yield* client
+        .execute(
+          HttpClientRequest.post(`${endpoint}/auth/exchange_user_api_key`).pipe(
+            HttpClientRequest.bearerToken(apiKey),
+            HttpClientRequest.bodyJsonUnsafe({}),
+          ),
+        )
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(CursorApiKeyExchange)),
+        );
+      token = exchanged.accessToken.trim();
+      if (!token) return probeFailed(checkedAt);
     }
     const credentialStore = environment.AGENT_CLI_CREDENTIAL_STORE;
     if (!token && credentialStore === "memory") {
@@ -126,7 +148,6 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
       token = credentials.accessToken?.trim();
     }
     if (!token) return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
-    const client = yield* HttpClient.HttpClient;
     const response = yield* client.execute(
       HttpClientRequest.post(`${endpoint}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`).pipe(
         HttpClientRequest.bearerToken(token),
@@ -143,12 +164,6 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
     return cursorUsageResponseToLimits(body, checkedAt);
   }).pipe(
     Effect.timeout("10 seconds"),
-    Effect.orElseSucceed(() =>
-      makeUnavailableUsageLimits({
-        checkedAt,
-        reason: "probeFailed",
-        message: "Cursor could not read usage limits.",
-      }),
-    ),
+    Effect.orElseSucceed(() => probeFailed(checkedAt)),
   );
 });

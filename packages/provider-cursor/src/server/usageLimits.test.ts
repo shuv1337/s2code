@@ -182,17 +182,56 @@ describe("Cursor usage limits", () => {
     }),
   );
 
-  it.effect("does not use a stored login for an explicit API key", () =>
+  it.effect("reads an API key's own account through the key exchange, never a stored login", () =>
     Effect.gen(function* () {
-      const limits = yield* withNodeServices(
-        readCursorUsageLimits({ apiEndpoint: "" }, { CURSOR_API_KEY: "different-account" }).pipe(
-          Effect.provideService(
-            HttpClient.HttpClient,
-            HttpClient.make(() => Effect.die("must not request usage")),
+      const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
+      const usage = (accessToken: string) =>
+        withNodeServices(
+          readCursorUsageLimits(
+            { apiEndpoint: "" },
+            { CURSOR_API_KEY: "account-key", AGENT_CLI_CREDENTIAL_STORE: "file" },
+            true,
+          ).pipe(
+            Effect.provideService(
+              FileSystem.FileSystem,
+              FileSystem.makeNoop({
+                readFileString: () => Effect.die("must not read a stored login"),
+              }),
+            ),
+            Effect.provideService(
+              HttpClient.HttpClient,
+              HttpClient.make((request) => {
+                requests.push({
+                  url: request.url,
+                  ...(request.headers.authorization
+                    ? { authorization: request.headers.authorization }
+                    : {}),
+                });
+                const body = request.url.endsWith("/auth/exchange_user_api_key")
+                  ? { accessToken }
+                  : { planUsage: { totalPercentUsed: 87 } };
+                return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(body)));
+              }),
+            ),
           ),
-        ),
-      );
-      expect(limits.unavailable?.reason).toBe("unsupported");
+        );
+
+      const limits = yield* usage("exchanged-token");
+      expect(limits.windows[0]?.usedPercent).toBe(87);
+      expect(requests).toEqual([
+        {
+          url: "https://api2.cursor.sh/auth/exchange_user_api_key",
+          authorization: "Bearer account-key",
+        },
+        {
+          url: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+          authorization: "Bearer exchanged-token",
+        },
+      ]);
+
+      requests.length = 0;
+      expect((yield* usage("  ")).unavailable?.reason).toBe("probeFailed");
+      expect(requests).toHaveLength(1);
     }),
   );
 

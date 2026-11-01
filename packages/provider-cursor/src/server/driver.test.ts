@@ -21,6 +21,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { vi } from "vite-plus/test";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import {
   DEFAULT_HANDOFF_TOKEN_CAP,
@@ -61,7 +62,9 @@ const layerTest = TestProviderHost.layer({ runBackgroundWork: false }).pipe(
   Layer.provideMerge(
     Layer.succeed(
       HttpClient.HttpClient,
-      HttpClient.make(() => Effect.die("Disabled Cursor must not make an HTTP request")),
+      HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }))),
+      ),
     ),
   ),
 );
