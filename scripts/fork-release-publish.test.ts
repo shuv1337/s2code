@@ -12,14 +12,22 @@ import {
   npmPlatformPackageManifest,
   npmLauncherPackageManifest,
 } from "./build-npm-platform-packages.ts";
-import { forkReleasePlan, forkReleaseTitle } from "./lib/fork-release.ts";
+import { desktopAssetGroups, forkReleasePlan, forkReleaseTitle } from "./lib/fork-release.ts";
 import { releaseCommandError } from "./fork-release.ts";
 
-const shim = `import fs from 'node:fs'; import crypto from 'node:crypto';
+const shim = `import fs from 'node:fs'; import crypto from 'node:crypto'; import cp from 'node:child_process';
 const file=process.env.FIXTURE_STATE; const s=JSON.parse(fs.readFileSync(file,'utf8'));
 const [command,...args]=process.argv.slice(2); s.commands.push([command,...args]);
 const save=()=>fs.writeFileSync(file,JSON.stringify(s));
 const fail=(status)=>{save();process.stderr.write('fixture failure (HTTP '+status+') PRIVATE_RESPONSE_BODY');process.exit(1)};
+// Like gh: --jq runs once per page, and --slurp cannot be combined with it.
+const respond=(pages)=>{
+ const jq=args.indexOf('--jq');
+ if(jq>=0 && args.includes('--slurp')) fail(400);
+ save();
+ if(jq<0) return void console.log(JSON.stringify(args.includes('--slurp')?pages:pages[0]));
+ for(const page of pages) process.stdout.write(cp.execFileSync('jq',['-r',args[jq+1]],{input:JSON.stringify(page),maxBuffer:1<<30}));
+};
 if(command==='git' && args.join(' ')==='rev-parse HEAD') { save(); console.log(s.release.target_commitish); }
 else if(command==='npm' && args[0]==='dist-tag') { const spec=args[2]; const at=spec.lastIndexOf('@'); (s.tags[spec.slice(0,at)]??={})[args[3]]=spec.slice(at+1); save(); }
 else if(command==='npm') fail(401);
@@ -32,13 +40,15 @@ else if(command==='gh') {
    // Like GitHub, the list can lag a draft created moments ago. In draft-race
    // a draft already exists but the list only shows it after a create attempt.
    const listed=s.mode==='new-release' || (s.mode==='draft-race' && !s.posted) ? [] : [s.release];
-   save(); console.log(JSON.stringify([[{...s.release,id:999,tag_name:s.release.tag_name+'0'},...listed]]));
+   const bulk=s.bulkReleases ? JSON.parse(fs.readFileSync(s.bulkReleases,'utf8')) : [];
+   const all=[{...s.release,id:999,tag_name:s.release.tag_name+'0'},...bulk,...listed];
+   respond(Array.from({length:Math.ceil(all.length/100)},(_,page)=>all.slice(page*100,page*100+100)));
  } else if(endpoint?.endsWith('/releases') && args.includes('POST')) {
    s.posted=true;
    if(s.mode!=='new-release') fail(422); // GitHub refuses a second release for this tag.
    const need=['tag_name='+s.release.tag_name,'target_commitish='+s.release.target_commitish,'draft=true','prerelease='+s.prerelease,'name='+s.title];
    if(need.some(arg=>!args.includes(arg)) || !args.some(arg=>arg.startsWith('body=') && arg.endsWith('Source: '+s.release.target_commitish+'.'))) fail(400);
-   save(); console.log(JSON.stringify(s.release));
+   respond([s.release]);
  } else if(endpoint?.startsWith('https://uploads.github.com/')) {
    if(!endpoint.includes('/releases/1234/assets?')) fail(404);
    const name=new URL(endpoint).searchParams.get('name'); const bytes=fs.readFileSync(args[args.indexOf('--input')+1]);
@@ -46,7 +56,7 @@ else if(command==='gh') {
    s.release.assets.push(asset); save(); console.log(JSON.stringify(asset));
  } else if(endpoint?.endsWith('/releases/1234')) {
    if(args.includes('PATCH')) { if(!args.includes('draft=false')) fail(400); s.release.draft=false; }
-   save(); console.log(JSON.stringify(s.release));
+   respond([s.release]);
  } else if(endpoint?.endsWith('/contents/index.json')) {
    const body=JSON.parse(fs.readFileSync(args[args.indexOf('--input')+1],'utf8'));
    s.index=Buffer.from(body.content,'base64').toString('utf8'); save(); console.log('{}');
@@ -106,6 +116,8 @@ function publishFixture(
   /** Every Nth registry answer of a kind fails with a retryable status. */
   flaky: { tags?: number; versions?: number } = {},
   signing = { mac: false, win: false, unsigned: true },
+  /** Other releases GitHub lists ahead of this one. */
+  bulkReleases: ReadonlyArray<unknown> = [],
 ) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
@@ -148,12 +160,15 @@ function publishFixture(
       };
     }
     const stateFile = NodePath.join(root, "state.json");
+    const bulkFile = NodePath.join(root, "bulk-releases.json");
+    NodeFS.writeFileSync(bulkFile, JSON.stringify(bulkReleases));
     NodeFS.writeFileSync(
       stateFile,
       JSON.stringify({
         mode,
         registry,
         tags,
+        bulkReleases: bulkFile,
         commands: [],
         // What a create must send, so a dropped field fails the fixture.
         prerelease: plan.channel !== "stable",
@@ -263,7 +278,7 @@ describe("fork publication fixtures", () => {
       expect(result.status, result.stderr).toBe(0);
       expect(state.release.draft).toBe(false);
       expect(state.release.assets).toEqual([expect.objectContaining({ name: "fixture.bin" })]);
-      expect(state.commands.some((args) => args.includes("--slurp"))).toBe(true);
+      expect(state.commands.some((args) => args.includes("--jq"))).toBe(true);
       expect(
         state.commands.some((args) => args.some((arg) => arg.includes("/releases/1234/assets?"))),
       ).toBe(true);
@@ -356,6 +371,58 @@ describe("fork publication fixtures", () => {
       // Without macOS and Windows feeds the release is not a complete index
       // entry, and publication proceeds with the index unchanged.
       expect(JSON.parse(state.index!)).toEqual([]);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "finds the draft and builds the index from a release history far past the exec buffer",
+    () => {
+      // Full GitHub release objects carry an uploader record on every asset.
+      const uploader = { login: "fixture", node_id: "x".repeat(400) };
+      const history = Array.from({ length: 1000 }, (_, index) => {
+        const value = forkReleasePlan({
+          repository: "shuv1337/s2code",
+          sha: "cd".repeat(20),
+          channel: "nightly",
+          version: `1.2.2-nightly.20261013.${index + 1}`,
+          signing: { mac: true, win: true, unsigned: false },
+          npm: false,
+        });
+        return {
+          id: 10_000 + index,
+          tag_name: value.tag,
+          draft: false,
+          target_commitish: value.sha,
+          assets: [
+            ...value.cliAssets,
+            ...value.cliLegacyAssets,
+            ...value.cliPreviousAssets,
+            ...desktopAssetGroups(value.version).map((group) => group[0]!),
+            ...value.feedAssets,
+            "SHA256SUMS",
+            "release.json",
+          ].map((name) => ({ name, size: 1, digest: "sha256:fixture", uploader })),
+        };
+      });
+      const { result, state } = publishFixture(
+        "resume",
+        "refs/heads/main",
+        false,
+        "nightly",
+        {},
+        {},
+        undefined,
+        history,
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(state.commands.some((args) => args.includes("--slurp"))).toBe(false);
+      // Drafts are invisible to the tags API, so the draft is still found by scanning the list.
+      expect(
+        state.commands.some((args) => args.some((arg) => arg.includes("/releases/tags/"))),
+      ).toBe(false);
+      expect(JSON.parse(state.index!)).toEqual(
+        history.map((release) => ({ tag_name: release.tag_name, draft: false })),
+      );
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(

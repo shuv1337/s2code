@@ -67,11 +67,14 @@ export function releaseCommandError(
     `${command} ${args.map((arg) => JSON.stringify(arg)).join(" ")} failed (exit ${String(exit)}${http ? `; HTTP ${http}` : ""}).`,
   );
 }
+// Node's 1 MiB default overflows (ENOBUFS) on output that grows with the release history.
+const COMMAND_MAX_BUFFER = 256 * 1024 * 1024;
 const run = (command: string, args: string[], cwd?: string) => {
   try {
     return CP.execFileSync(command, args, {
       cwd,
       encoding: "utf8",
+      maxBuffer: COMMAND_MAX_BUFFER,
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
   } catch (error) {
@@ -80,10 +83,15 @@ const run = (command: string, args: string[], cwd?: string) => {
 };
 const runAsync = (command: string, args: string[]) =>
   new Promise<void>((resolve, reject) => {
-    CP.execFile(command, args, { encoding: "utf8" }, (error, _stdout, stderr) => {
-      if (error) reject(releaseCommandError(command, args, error, stderr));
-      else resolve();
-    });
+    CP.execFile(
+      command,
+      args,
+      { encoding: "utf8", maxBuffer: COMMAND_MAX_BUFFER },
+      (error, _stdout, stderr) => {
+        if (error) reject(releaseCommandError(command, args, error, stderr));
+        else resolve();
+      },
+    );
   });
 const releaseFetch: typeof fetch = async (input, init) => {
   try {
@@ -293,7 +301,10 @@ function extractArchiveEntry(archive: string, entry: string, into: string) {
   const args = ["x", "-y", "-r", `-o${into}`, archive, entry];
   for (const command of SEVEN_ZIP_COMMANDS) {
     try {
-      CP.execFileSync(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+      CP.execFileSync(command, args, {
+        maxBuffer: COMMAND_MAX_BUFFER,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       return;
     } catch (error) {
       const failure = error as { code?: unknown; status?: unknown };
@@ -510,25 +521,32 @@ async function publishPrepared(plan: ForkReleasePlan) {
     target_commitish: string;
     assets: { name: string; digest?: string; size: number }[];
   };
+  // One compact JSON line per release, so output scales with what is read, not
+  // with GitHub's full release objects (uploader records on every asset).
+  const RELEASE_JQ =
+    "{id, tag_name, draft, target_commitish, assets: [.assets[] | {name, digest, size}]} | tojson";
+  const jsonLines = <T>(output: string) =>
+    output
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line) as T);
   let releaseId: number | undefined;
   const findRelease = () => {
+    // The tags endpoint never returns drafts, so a draft is found by scanning the list.
     const found =
       releaseId === undefined
-        ? (
-            JSON.parse(
-              gh(
-                "api",
-                "--paginate",
-                "--slurp",
-                `repos/${FORK_RELEASE_REPOSITORY}/releases?per_page=100`,
-              ),
-            ) as Release[][]
-          )
-            .flat()
-            .find((entry) => entry.tag_name === plan.tag)
-        : (JSON.parse(
-            gh("api", `repos/${FORK_RELEASE_REPOSITORY}/releases/${releaseId}`),
-          ) as Release);
+        ? jsonLines<Release>(
+            gh(
+              "api",
+              "--paginate",
+              `repos/${FORK_RELEASE_REPOSITORY}/releases?per_page=100`,
+              "--jq",
+              `.[] | select(.tag_name == ${JSON.stringify(plan.tag)}) | ${RELEASE_JQ}`,
+            ),
+          )[0]
+        : jsonLines<Release>(
+            gh("api", `repos/${FORK_RELEASE_REPOSITORY}/releases/${releaseId}`, "--jq", RELEASE_JQ),
+          )[0];
     if (found && found.tag_name !== plan.tag) throw new Error("GitHub release tag mismatch.");
     if (found) releaseId = found.id;
     return found;
@@ -634,6 +652,8 @@ async function publishPrepared(plan: ForkReleasePlan) {
               "-X",
               "POST",
               `repos/${FORK_RELEASE_REPOSITORY}/releases`,
+              "--jq",
+              RELEASE_JQ,
               "-f",
               `tag_name=${plan.tag}`,
               "-f",
@@ -729,15 +749,15 @@ async function publishPrepared(plan: ForkReleasePlan) {
     },
     publishIndex: async () => {
       if (plan.channel === "preview") return;
-      const pages = JSON.parse(
+      const releases: Parameters<typeof forkReleaseIndex>[0][number][] = jsonLines(
         gh(
           "api",
           "--paginate",
-          "--slurp",
           `repos/${FORK_RELEASE_REPOSITORY}/releases?per_page=100`,
+          "--jq",
+          ".[] | {tag_name, draft, assets: [.assets[] | {name}]} | tojson",
         ),
-      ) as Parameters<typeof forkReleaseIndex>[0][];
-      const releases = pages.flat();
+      );
       // The list can still lag this release; read it by id rather than drop it.
       if (!releases.some((entry) => entry.tag_name === plan.tag)) releases.push(getRelease());
       const index = forkReleaseIndex(releases);
