@@ -47,6 +47,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
@@ -81,6 +82,7 @@ const makeLayerTest = <E>(
 ) =>
   Layer.mergeAll(
     instances,
+    ServerSettings.layerTest(),
     layerTestDatabase,
     layerTestStores,
     layerTestEventSink,
@@ -91,6 +93,7 @@ const makeLayerTest = <E>(
       Layer.provide(
         Layer.mergeAll(
           instances,
+          ServerSettings.layerTest(),
           layerTestStores,
           ingestorEventSink,
           IdAllocator.layer,

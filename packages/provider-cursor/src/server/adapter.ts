@@ -341,6 +341,17 @@ const classifyCursorModelRejection =
       ? new CursorModelUnavailableError({ model: modelSelection.model, cause: error.cause })
       : error;
 
+// Short rate limits are retryable; a spent quota is not, which lets opted-in instances turn off.
+function usageLimitFailure(
+  cause: unknown,
+  otherwise: "provider_error" | "transport_error",
+): Pick<Parameters<typeof makeProviderFailure>[0], "class" | "retryable"> {
+  const limit = CursorAgentSdk.cursorUsageLimit(cause);
+  return limit === null
+    ? { class: otherwise }
+    : { class: "usage_limit", retryable: limit === "rate" };
+}
+
 function stableJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -2506,9 +2517,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                                     cause: result.error,
                                     // makeProviderFailure never reads a cause's own text.
                                     message: result.error?.message,
-                                    class: CursorAgentSdk.isCursorUsageLimitError(result.error)
-                                      ? "usage_limit"
-                                      : "provider_error",
+                                    ...usageLimitFailure(result.error, "provider_error"),
                                   })
                                 : makeProviderFailure({
                                     cause: transportFailure,
@@ -2534,9 +2543,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                               message: CursorAgentSdk.isCursorAgentSdkRunnerError(cause)
                                 ? CursorAgentSdk.cursorSdkFailureMessage(cause)
                                 : undefined,
-                              class: CursorAgentSdk.isCursorUsageLimitError(cause)
-                                ? "usage_limit"
-                                : "transport_error",
+                              ...usageLimitFailure(cause, "transport_error"),
                             }),
                           }),
                     });

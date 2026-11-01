@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { SecretReference } from "./secretReference.ts";
 
 const PROVIDER_SLUG_MAX_CHARS = 64;
@@ -78,6 +78,12 @@ export const ProviderInstanceConfig = Schema.Struct({
   accentColor: Schema.optional(TrimmedNonEmptyString),
   environment: Schema.optionalKey(ProviderInstanceEnvironment),
   enabled: Schema.optionalKey(Schema.Boolean),
+  /** Turn the instance off when a turn fails because its quota is exhausted. */
+  disableOnUsageLimit: Schema.optionalKey(Schema.Boolean),
+  /** Why the server turned the instance off; cleared when it is enabled again. */
+  usageLimitDisabled: Schema.optionalKey(
+    Schema.Struct({ at: IsoDateTime, message: TrimmedNonEmptyString }),
+  ),
   config: Schema.optionalKey(Schema.Unknown),
 });
 export type ProviderInstanceConfig = typeof ProviderInstanceConfig.Type;

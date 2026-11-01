@@ -44,18 +44,29 @@ export function cursorSdkFailureMessage(error: CursorAgentSdkRunnerError): strin
 }
 
 // The SDK maps backend details to codes like PRO_USER_USAGE_LIMIT or RATE_LIMITED, without a status.
-const CURSOR_USAGE_LIMIT_CODE =
-  /^(?:resource_exhausted|rate_limited(?:_changeable)?|\w*_usage_limit|\w*_rate_limit(?:_exceeded)?)$/i;
+const CURSOR_QUOTA_CODE = /^\w*_usage_limit$/i;
+const CURSOR_RATE_LIMIT_CODE =
+  /^(?:resource_exhausted|rate_limited(?:_changeable)?|\w*_rate_limit(?:_exceeded)?)$/i;
+// A spent quota can end a run with only this message, e.g. "Your team has reached its usage limit".
+const CURSOR_QUOTA_MESSAGE = /\b(?:reached|hit) (?:its|your) usage limit\b/i;
 
-export function isCursorUsageLimitError(cause: unknown): boolean {
+/** "quota" means the account is out until it resets; "rate" is a short burst limit. */
+export function cursorUsageLimit(cause: unknown): "quota" | "rate" | null {
   const error = isCursorAgentSdkRunnerError(cause) ? cause.cause : cause;
-  if (typeof error !== "object" || error === null) return false;
+  if (typeof error !== "object" || error === null) return null;
   const code = Reflect.get(error, "code");
-  return (
-    Reflect.get(error, "name") === "RateLimitError" ||
+  const message = Reflect.get(error, "message");
+  if (
+    (typeof code === "string" && CURSOR_QUOTA_CODE.test(code)) ||
+    (typeof message === "string" && CURSOR_QUOTA_MESSAGE.test(message))
+  ) {
+    return "quota";
+  }
+  return Reflect.get(error, "name") === "RateLimitError" ||
     Reflect.get(error, "status") === 429 ||
-    (typeof code === "string" && CURSOR_USAGE_LIMIT_CODE.test(code))
-  );
+    (typeof code === "string" && CURSOR_RATE_LIMIT_CODE.test(code))
+    ? "rate"
+    : null;
 }
 
 const GENERIC_SDK_ERROR_CODES = new Set(["", "error", "unknown"]);

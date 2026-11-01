@@ -35,6 +35,8 @@ import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3too
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import { disableInstanceOnExhaustedQuota } from "../provider/usageLimitAutoDisable.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -328,6 +330,7 @@ export const layer: Layer.Layer<
   | ProjectionStore.ProjectionStoreV2
   | ThreadCommandExecutor.ThreadCommandExecutor
   | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ServerSettings.ServerSettingsService
 > = Layer.effect(
   ProviderEventIngestorV2,
   Effect.gen(function* () {
@@ -339,6 +342,7 @@ export const layer: Layer.Layer<
     const analytics = yield* ProviderTurnAnalytics;
     const agentScope = yield* AgentScope;
     const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const scope = yield* Effect.scope;
     const completedTurnAnalytics = new Set<string>();
 
@@ -809,6 +813,14 @@ export const layer: Layer.Layer<
                     input.event.failure.class !== "usage_limit"
                   )
                     return;
+                  yield* disableInstanceOnExhaustedQuota(
+                    input.providerInstanceId,
+                    input.event.failure,
+                  ).pipe(
+                    Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+                    Effect.ignoreCause({ log: true }),
+                    Effect.forkIn(scope, { startImmediately: true }),
+                  );
                   const instance = yield* instances.getInstance(input.providerInstanceId);
                   if (!instance?.snapshot.refreshUsage) return;
                   yield* instance.snapshot.refreshUsage.pipe(

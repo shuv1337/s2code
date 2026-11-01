@@ -67,6 +67,7 @@ import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayo
 import { AcpSessionManagementSection } from "./AcpSessionManagementSection";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -799,6 +800,10 @@ export function ProviderInstanceCard({
     }
     onUpdate({ ...instance, enabled: value });
   };
+  const updateDisableOnUsageLimit = (value: boolean) => {
+    const { disableOnUsageLimit: _omit, ...rest } = instance;
+    onUpdate(value ? { ...rest, disableOnUsageLimit: true } : rest);
+  };
 
   const updateAccentColor = (value: string) => {
     const normalized = normalizeProviderAccentColor(value);
@@ -1244,6 +1249,24 @@ export function ProviderInstanceCard({
             </div>
           }
         />
+        <SettingsRow
+          title="Turn off at usage limit"
+          description="Turns this instance off when a turn fails because its quota is spent. Turn it back on yourself once the quota resets."
+          control={
+            <Switch
+              checked={instance.disableOnUsageLimit === true}
+              disabled={readOnly}
+              onCheckedChange={(checked) => updateDisableOnUsageLimit(Boolean(checked))}
+              aria-label={`Turn off ${displayName} at its usage limit`}
+            />
+          }
+        />
+        {instance.usageLimitDisabled && instance.enabled === false ? (
+          <SettingsRow
+            title={`Turned off automatically ${formatRelativeTimeLabel(instance.usageLimitDisabled.at)}`}
+            description={instance.usageLimitDisabled.message}
+          />
+        ) : null}
       </SettingsSection>
 
       {setup || environmentFields.length > 0 ? (

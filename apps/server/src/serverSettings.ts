@@ -111,12 +111,26 @@ const foldProviderInstanceEnabledFlags = (settings: ServerSettings): ServerSetti
   };
 };
 
+// Every write path normalizes, so re-enabling from any client clears the automatic-disable note.
+const clearUsageLimitNotesOfEnabledInstances = (settings: ServerSettings): ServerSettings => {
+  const stale = Object.entries(settings.providerInstances).filter(
+    ([, instance]) => instance.usageLimitDisabled !== undefined && instance.enabled !== false,
+  );
+  if (stale.length === 0) return settings;
+  const providerInstances = { ...settings.providerInstances };
+  for (const [instanceId, { usageLimitDisabled: _note, ...instance }] of stale) {
+    providerInstances[instanceId as keyof typeof providerInstances] = instance;
+  }
+  return { ...settings, providerInstances };
+};
+
 const normalizeServerSettings = (
   settings: ServerSettings,
 ): Effect.Effect<ServerSettings, ServerSettingsError> =>
   encodeServerSettings(settings).pipe(
     Effect.flatMap(decodeServerSettings),
     Effect.map(foldProviderInstanceEnabledFlags),
+    Effect.map(clearUsageLimitNotesOfEnabledInstances),
     Effect.map((next) => withIdleCompaction(next, globalIdleCompaction(next))),
     Effect.map((next) => ({ ...next, ...deriveLegacyProjectOverrides(next) })),
     Effect.mapError(

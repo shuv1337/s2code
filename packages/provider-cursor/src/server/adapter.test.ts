@@ -221,7 +221,24 @@ describe("CursorAdapterV2", () => {
         status: "error" as const,
         error: { message: "You've hit your usage limit", code: "PRO_USER_USAGE_LIMIT" },
       }),
-      failure: { class: "usage_limit", message: "You've hit your usage limit" },
+      failure: { class: "usage_limit", message: "You've hit your usage limit", retryable: false },
+    },
+    {
+      reason: "the quota message Cursor's run ended with, which carries no code",
+      wait: Effect.succeed({
+        id: "native-cursor-run",
+        status: "error" as const,
+        error: {
+          message:
+            "Your team has reached its usage limit Please reach out to an admin to enable on-demand usage, or return on 11/4/2026 when your limit resets.",
+        },
+      }),
+      failure: {
+        class: "usage_limit",
+        message:
+          "Your team has reached its usage limit Please reach out to an admin to enable on-demand usage, or return on 11/4/2026 when your limit resets.",
+        retryable: false,
+      },
     },
     {
       reason: "the error Cursor's run ended with",
@@ -255,6 +272,7 @@ describe("CursorAdapterV2", () => {
         class: "usage_limit",
         message:
           "Cursor Agent SDK run.wait failed: Too many requests (resource_exhausted, HTTP 429)",
+        retryable: true,
       },
     },
     {
@@ -428,6 +446,12 @@ describe("CursorAdapterV2", () => {
       assert.equal(terminal?.status, failure === null ? "completed" : "failed");
       assert.equal(terminal?.failure?.class, failure?.class);
       assert.equal(terminal?.failure?.message, failure?.message);
+      if (failure !== null) {
+        assert.equal(
+          terminal?.failure?.retryable,
+          "retryable" in failure ? failure.retryable : null,
+        );
+      }
       if (answers !== undefined) {
         assert.deepEqual(
           events.flatMap((event) =>

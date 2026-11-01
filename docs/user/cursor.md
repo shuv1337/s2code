@@ -29,6 +29,18 @@ Use **Change account** or **Sign out** in the same settings section. Both stop t
 instance's running threads and keep their history. Sign-out forgets the saved credential; to revoke
 the generated key before it expires, remove it from your Cursor dashboard's API keys.
 
+## Several accounts
+
+Add one Cursor instance per account. **Usage → Limits** shows each enabled account's monthly
+usage and reset date. A meter at 100% does not always mean the account is blocked: Cursor can still
+run Auto after the named-model allowance is spent.
+
+To take an account out of rotation once its quota runs out, turn on **Turn off at usage limit** in
+that instance's settings. When a turn fails because the account's quota is spent, S2Code turns the
+instance off and notes when and why. Short rate limits do not count. Turn the instance back on
+yourself after the quota resets; the thread that hit the limit stays failed so you can continue it
+on another account.
+
 ## V2 Capability Mapping
 
 The adapter supports:
