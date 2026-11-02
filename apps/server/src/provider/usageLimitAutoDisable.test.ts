@@ -7,12 +7,14 @@ import { disableInstanceOnExhaustedQuota } from "./usageLimitAutoDisable.ts";
 
 const optedIn = ProviderInstanceId.make("cursor_pool_opted_in");
 const optedOut = ProviderInstanceId.make("cursor_pool_opted_out");
+const codex = ProviderInstanceId.make("codex_rate_limited");
 const cursor = ProviderDriverKind.make("cursor");
 const quotaMessage =
   "Your team has reached its usage limit Please reach out to an admin to enable on-demand usage, or return on 11/4/2026 when your limit resets.";
 
 const layer = ServerSettings.layerTest({
   providerInstances: {
+    [codex]: { driver: ProviderDriverKind.make("codex"), enabled: true, disableOnUsageLimit: true },
     [optedIn]: {
       driver: cursor,
       displayName: "Cursor-3",
@@ -35,10 +37,28 @@ describe("disableInstanceOnExhaustedQuota", () => {
           optedIn,
           makeProviderFailure({ class: "usage_limit", message: "Slow down.", retryable: true }),
         ],
-        [optedIn, makeProviderFailure({ class: "provider_error", message: quotaMessage })],
-        [optedOut, makeProviderFailure({ class: "usage_limit", message: quotaMessage })],
+        [
+          optedIn,
+          makeProviderFailure({ class: "provider_error", message: quotaMessage, retryable: false }),
+        ],
+        [
+          optedOut,
+          makeProviderFailure({ class: "usage_limit", message: quotaMessage, retryable: false }),
+        ],
       ] as const) {
         assert.isFalse(yield* disableInstanceOnExhaustedQuota(instanceId, failure));
+      }
+      for (const retryable of [null, undefined] as const) {
+        const failure = makeProviderFailure({
+          class: "usage_limit",
+          code: "429",
+          message: "Too many requests",
+          ...(retryable === undefined ? {} : { retryable }),
+        });
+        assert.isNull(failure.retryable);
+        assert.isFalse(yield* disableInstanceOnExhaustedQuota(codex, failure));
+        assert.isTrue((yield* instance(codex))?.enabled);
+        assert.isUndefined((yield* instance(codex))?.usageLimitDisabled);
       }
       assert.isTrue((yield* instance(optedIn))?.enabled);
       assert.isTrue((yield* instance(optedOut))?.enabled);
@@ -46,7 +66,7 @@ describe("disableInstanceOnExhaustedQuota", () => {
       assert.isTrue(
         yield* disableInstanceOnExhaustedQuota(
           optedIn,
-          makeProviderFailure({ class: "usage_limit", message: quotaMessage }),
+          makeProviderFailure({ class: "usage_limit", message: quotaMessage, retryable: false }),
         ),
       );
       const disabled = yield* instance(optedIn);

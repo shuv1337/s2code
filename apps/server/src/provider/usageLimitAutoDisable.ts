@@ -3,9 +3,9 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as ServerSettings from "../serverSettings.ts";
 
-/** Adapters mark short rate limits retryable; an unmarked usage limit means the quota is spent. */
+/** Only an explicitly non-retryable usage limit indicates exhausted quota. */
 const isQuotaExhausted = (failure: OrchestrationV2ProviderFailure) =>
-  failure.class === "usage_limit" && failure.retryable !== true;
+  failure.class === "usage_limit" && failure.retryable === false;
 
 /** Turns off an opted-in instance whose turn failed on an exhausted quota. */
 export const disableInstanceOnExhaustedQuota = Effect.fn(
