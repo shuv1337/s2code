@@ -172,6 +172,7 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -436,6 +437,25 @@ export class OrchestratorV2 extends Context.Service<OrchestratorV2, Orchestrator
 /** Run ordinals can skip values: a queued run moves past newer runs when it starts. */
 function nextRunOrdinal(projection: Pick<OrchestrationV2ThreadProjection, "runs">): number {
   return projection.runs.reduce((max, run) => Math.max(max, run.ordinal), 0) + 1;
+}
+
+/** A failover chain carries through retries of its runs, so a chain fails over at most once. */
+function failoverChain(
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  command: {
+    readonly failoverChainId?: RunId | undefined;
+    readonly manualContinuationOfRunId?: RunId | undefined;
+    readonly usageLimitContinuationOfRunId?: RunId | undefined;
+    readonly restartContinuationOfRunId?: RunId | undefined;
+  },
+): Pick<OrchestrationV2Run, "failoverChainId"> {
+  const continued =
+    command.manualContinuationOfRunId ??
+    command.usageLimitContinuationOfRunId ??
+    command.restartContinuationOfRunId;
+  const failoverChainId =
+    command.failoverChainId ?? runs.find((run) => run.id === continued)?.failoverChainId;
+  return failoverChainId === undefined ? {} : { failoverChainId };
 }
 
 /** Stamp at wake start; queued prompts lack start times and delegated results jump the queue. */
@@ -1026,6 +1046,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const providerSessions = yield* ProviderSessionManagerV2;
   const providerSwitchService = yield* ProviderSwitchServiceV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const resolveSpentInstance = yield* makeSpentInstanceResolver;
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
@@ -1546,7 +1567,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const queuedMessage = projection.messages.find(
         (candidate) => candidate.id === storedQueuedRun.userMessageId,
       );
-      const modelSelection = queuedRunModelSelection(projection, storedQueuedRun);
+      const modelSelection = yield* resolveSpentInstance(
+        queuedRunModelSelection(projection, storedQueuedRun),
+        projection.thread.projectId,
+      );
       const queuedRun = {
         ...storedQueuedRun,
         modelSelection,
@@ -1577,10 +1601,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       )
         ? settings.providerInstances[queuedRun.providerInstanceId]
         : undefined;
+      // A spent quota outranks a project override, as in resolveProjectProviderInstanceEnabled.
       const instanceDisabledForProject =
-        projectOverride !== undefined
+        machineInstance?.usageLimitDisabled != null ||
+        (projectOverride !== undefined
           ? !projectOverride
-          : machineInstance !== undefined && !resolveProviderInstanceEnabled(machineInstance);
+          : machineInstance !== undefined && !resolveProviderInstanceEnabled(machineInstance));
       if (
         worktreeMissing ||
         instanceDisabledForProject ||
@@ -5357,10 +5383,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
       projection = yield* getProjectionWithPendingEvents(command.threadId, events);
     }
-    // Background wakes and delegated completions continue work the user already snoozed, so
-    // only a message someone actually sent ends the snooze.
+    // Background wakes, delegated completions and failovers continue work the user already
+    // snoozed, so only a message someone actually sent ends the snooze.
     const automaticWake =
-      command.notification !== undefined || command.delegatedCompletion !== undefined;
+      command.notification !== undefined ||
+      command.delegatedCompletion !== undefined ||
+      command.failoverChainId !== undefined;
     if (projection.thread.snoozedUntil != null && !automaticWake) {
       const now = yield* DateTime.now;
       const thread: OrchestrationV2AppThread = {
@@ -5857,6 +5885,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.restartContinuationOfRunId === undefined
           ? {}
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
+        ...failoverChain(projection.runs, command),
         ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
       };
       const attempt: OrchestrationV2RunAttempt = {
@@ -6200,6 +6229,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.restartContinuationOfRunId === undefined
           ? {}
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
+        ...failoverChain(projection.runs, command),
         ...(dispatchMode.type === "defer_start" && dispatchMode.workspaceStrategy !== undefined
           ? { workspacePreparation: dispatchMode.workspaceStrategy }
           : {}),
@@ -6896,6 +6926,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(command.restartContinuationOfRunId === undefined
         ? {}
         : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
+      ...failoverChain(projection.runs, command),
       ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
       ...wakeWorkStartedAt(projection.runs, command),
     };

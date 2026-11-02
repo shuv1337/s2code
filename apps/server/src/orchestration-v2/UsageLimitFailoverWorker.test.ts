@@ -98,16 +98,17 @@ const command = (input: Parameters<typeof projection>[0]) =>
 
 describe("usage limit failover", () => {
   it("continues the failed run on a pooled peer", () => {
-    expect(command({})).toMatchObject({
+    expect(command({ thread: { snoozedUntil: at } })).toMatchObject({
       type: "message.dispatch",
       manualContinuationOfRunId: runId,
+      failoverChainId: runId,
       modelSelection: { ...selection, instanceId: spare },
       dispatchMode: { type: "start_immediately" },
     });
   });
 
   it.each([
-    ["a run that was itself a failover", { run: { userMessageId: "usage-limit-failover:run:0" } }],
+    ["a run already in a failover chain", { run: { failoverChainId: "run:0" } }],
     ["a delegated run", { run: { delegatedTaskId: "node:task" } }],
     ["a retryable rate limit", { failure: { failure: { ...failure.failure, retryable: true } } }],
     [
@@ -118,6 +119,7 @@ describe("usage limit failover", () => {
     ["a thread already moved", { thread: { providerInstanceId: spare } }],
     ["a settled thread", { thread: { settledOverride: "settled" } }],
     ["an archived thread", { thread: { archivedAt: at } }],
+    ["a snoozed thread", { thread: { snoozedUntil: DateTime.makeUnsafe("2026-11-03T00:00:00Z") } }],
     ["a pending request", { runtimeRequests: [{ status: "pending" }] }],
   ])("leaves %s alone", (_name, overrides) => {
     expect(command(overrides)).toBeNull();

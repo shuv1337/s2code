@@ -12,6 +12,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
+  type RunId,
   type ServerProvider,
   ThreadId,
   TurnItemId,
@@ -23,7 +24,9 @@ import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
@@ -31,6 +34,7 @@ import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
+import { disableInstanceOnExhaustedQuota } from "../provider/usageLimitAutoDisable.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -58,6 +62,7 @@ const spent = instance("cursor_spent");
 const busy = instance("cursor_busy");
 const fresh = instance("cursor_fresh");
 const manual = instance("cursor_manual");
+const reserve = instance("cursor_reserve");
 // A second, independent pool: its failover is the barrier that proves the worker has already
 // decided about every earlier failure, since it handles failure events in commit order.
 const sentinelSource = instance("codex_sentinel_source");
@@ -69,6 +74,8 @@ interface PoolMember {
   readonly enabled?: boolean;
   /** The provider rejects every turn on this instance with this failure. */
   readonly failure?: OrchestrationV2ProviderFailure;
+  /** Turns on this instance stay in flight until this opens. */
+  readonly gate?: Deferred.Deferred<void>;
 }
 
 const quotaSpent = makeProviderFailure({
@@ -165,6 +172,7 @@ const makeProviderInstance = (
           startTurn: (turnInput) =>
             Effect.gen(function* () {
               yield* Ref.update(startedTurns, (started) => [...started, instanceId]);
+              if (member.gate !== undefined) yield* Deferred.await(member.gate);
               const at = yield* DateTime.now;
               const providerTurnId = ProviderTurnId.make(
                 `provider-turn:${instanceId}:${turnInput.runId}`,
@@ -230,7 +238,7 @@ const makeProviderInstance = (
                     }),
                 threadDisposition: "reusable",
               });
-            }),
+            }).pipe(Effect.forkDetach, Effect.asVoid),
           steerTurn: () => Effect.void,
           interruptTurn: () => Effect.void,
           respondToRuntimeRequest: () => Effect.void,
@@ -282,18 +290,29 @@ const serverProvider = (
   },
 });
 
+/** One server boot; a restart is another boot over the same database file. */
+interface Boot {
+  readonly databasePath?: string;
+  readonly startedTurns?: Ref.Ref<ReadonlyArray<ProviderInstanceId>>;
+  /** A boot without a worker stands for a server that went down before it acted. */
+  readonly failoverWorker?: boolean;
+  readonly effectWorker?: boolean;
+}
+
 /**
- * The real orchestrator, ingestor, effect worker, dispatch chokepoint and failover worker over an
- * in-memory database; only the provider instances and their usage snapshots are stand-ins.
+ * The real orchestrator, ingestor, effect worker, dispatch chokepoint and failover worker over a
+ * real database; only the provider instances and their usage snapshots are stand-ins.
  */
 const runPool = <A, E, R>(
   pool: Record<string, PoolMember>,
   body: (input: {
     readonly startedTurns: Ref.Ref<ReadonlyArray<ProviderInstanceId>>;
   }) => Effect.Effect<A, E, R>,
+  boot: Boot = {},
 ) =>
   Effect.gen(function* () {
-    const startedTurns = yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]);
+    const startedTurns =
+      boot.startedTurns ?? (yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]));
     const members = Object.entries({ ...pool, ...sentinelPool }).map(
       ([name, member]) => [instance(name), member] as const,
     );
@@ -344,11 +363,17 @@ const runPool = <A, E, R>(
       RuntimeLayer.layer,
       RuntimeLayer.layerEventSink,
       ProjectStore.layer,
-      UsageLimitFailoverWorker.layer.pipe(Layer.provide(RuntimeLayer.layer)),
+      boot.failoverWorker === false
+        ? Layer.empty
+        : UsageLimitFailoverWorker.layer.pipe(Layer.provide(RuntimeLayer.layer)),
     ).pipe(
       Layer.provide(McpSessionRegistryTestkit.layer),
       Layer.provide(McpProviderSessions.layer),
-      Layer.provide(SqlitePersistence.layerMemory),
+      Layer.provide(
+        boot.databasePath === undefined
+          ? SqlitePersistence.layerMemory
+          : SqlitePersistence.layerFromPath(boot.databasePath),
+      ),
       Layer.provide(layerCheckpointStore),
       Layer.provide(layerServerConfig),
       Layer.provide(layerInstances),
@@ -366,12 +391,21 @@ const runPool = <A, E, R>(
     );
     return yield* Effect.gen(function* () {
       // Production starts the daemon from server startup, not from the runtime layer.
-      yield* EffectWorker.runDaemon.pipe(Effect.forkScoped);
+      if (boot.effectWorker !== false) yield* EffectWorker.runDaemon.pipe(Effect.forkScoped);
       return yield* body({ startedTurns });
     }).pipe(Effect.provide(layerRuntime));
   }).pipe(Effect.scoped);
 
-const send = (threadId: ThreadId, id: string, text: string, modelSelection?: ModelSelection) =>
+const send = (
+  threadId: ThreadId,
+  id: string,
+  text: string,
+  options: {
+    readonly modelSelection?: ModelSelection;
+    readonly manualContinuationOfRunId?: RunId;
+    readonly queue?: boolean;
+  } = {},
+) =>
   ThreadManagementService.ThreadManagementService.use((threads) =>
     threads.dispatch({
       type: "message.dispatch",
@@ -380,16 +414,20 @@ const send = (threadId: ThreadId, id: string, text: string, modelSelection?: Mod
       threadId,
       text,
       attachments: [],
-      dispatchMode: { type: "start_immediately" },
+      dispatchMode: { type: options.queue ? "queue_after_active" : "start_immediately" },
       createdBy: "user",
       creationSource: "web",
-      ...(modelSelection === undefined ? {} : { modelSelection }),
+      ...(options.modelSelection === undefined ? {} : { modelSelection: options.modelSelection }),
+      ...(options.manualContinuationOfRunId === undefined
+        ? {}
+        : { manualContinuationOfRunId: options.manualContinuationOfRunId }),
     }),
   );
 
 const startThread = Effect.fn("UsageLimitFailoverTest.startThread")(function* (
   name: string,
   instanceId: ProviderInstanceId,
+  workspaceRoot?: string,
 ) {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
@@ -410,7 +448,7 @@ const startThread = Effect.fn("UsageLimitFailoverTest.startThread")(function* (
     payload: {
       projectId,
       title: name,
-      workspaceRoot: yield* checkpointWorkspace(name),
+      workspaceRoot: workspaceRoot ?? (yield* checkpointWorkspace(name)),
       defaultModelSelection: selection(instanceId),
       scripts: [],
       createdAt: now,
@@ -527,12 +565,9 @@ describe("usage limit failover through the real runtime", () => {
             ],
           );
 
-          const refused = yield* send(
-            threadId,
-            "manual:retry",
-            "Try it here.",
-            selection(manual),
-          ).pipe(Effect.flip);
+          const refused = yield* send(threadId, "manual:retry", "Try it here.", {
+            modelSelection: selection(manual),
+          }).pipe(Effect.flip);
           assert.equal(refused._tag, "ThreadManagementProviderInstanceDisabledError");
           assert.lengthOf(
             (yield* Orchestrator.OrchestratorV2.use((o) => o.getThreadProjection(threadId))).runs,
@@ -581,5 +616,160 @@ describe("usage limit failover through the real runtime", () => {
           assert.isUndefined((yield* instanceSettings(spent))?.usageLimitDisabled);
         }),
     ),
+  );
+
+  it.live("keeps a chain from hopping again when the user resumes the failed-over run", () =>
+    runPool(
+      {
+        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [fresh]: { driver: cursor, usedPercent: 10, failure: quotaSpent },
+        [busy]: { driver: cursor, usedPercent: 80, failure: quotaSpent },
+        [reserve]: { driver: cursor, usedPercent: 90 },
+      },
+      ({ startedTurns }) =>
+        Effect.gen(function* () {
+          const threadId = yield* startThread("chain", spent);
+          const [first, second] = (yield* awaitThread(threadId, settled(2))).runs;
+          // The dispatch chokepoint moves the resume off the now auto-disabled "cursor_fresh".
+          yield* send(threadId, "chain:resume", "Try again.", {
+            manualContinuationOfRunId: second!.id,
+          });
+          yield* awaitThread(threadId, settled(3));
+          yield* awaitFailoverWorkerCaughtUp;
+
+          const after = yield* Orchestrator.OrchestratorV2.use((o) =>
+            o.getThreadProjection(threadId),
+          );
+          assert.deepEqual(
+            after.runs.map((run) => [run.providerInstanceId, run.status, run.failoverChainId]),
+            [
+              [spent, "failed", undefined],
+              [fresh, "failed", first!.id],
+              [busy, "failed", first!.id],
+            ],
+          );
+          assert.notInclude(yield* Ref.get(startedTurns), reserve);
+        }),
+    ),
+  );
+
+  it.live("leaves a snoozed thread asleep on its spent instance", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const snoozedUntil = "2099-01-01T00:00:00.000Z";
+      yield* runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent, gate },
+          [fresh]: { driver: cursor, usedPercent: 10 },
+        },
+        () =>
+          Effect.gen(function* () {
+            const threadId = yield* startThread("snoozed", spent);
+            yield* Orchestrator.OrchestratorV2.use((o) =>
+              o.dispatch({
+                type: "thread.snooze",
+                commandId: CommandId.make("snoozed:snooze"),
+                threadId,
+                snoozedUntil,
+              }),
+            );
+            yield* Deferred.succeed(gate, undefined);
+            yield* awaitThread(threadId, idle);
+            yield* awaitFailoverWorkerCaughtUp;
+
+            const after = yield* Orchestrator.OrchestratorV2.use((o) =>
+              o.getThreadProjection(threadId),
+            );
+            assert.deepEqual(
+              after.runs.map((run) => [run.providerInstanceId, run.status]),
+              [[spent, "failed"]],
+            );
+            assert.equal(
+              after.thread.snoozedUntil && DateTime.formatIso(after.thread.snoozedUntil),
+              snoozedUntil,
+            );
+          }),
+      );
+    }),
+  );
+
+  it.live("starts a queued run on a pooled peer once its instance spent its quota", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      yield* runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 50, gate },
+          [fresh]: { driver: cursor, usedPercent: 10 },
+        },
+        () =>
+          Effect.gen(function* () {
+            const threadId = yield* startThread("queued", spent);
+            yield* send(threadId, "queued:next", "Then this.", { queue: true });
+            // Another thread spends the shared quota while this one still works.
+            assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+            yield* Deferred.succeed(gate, undefined);
+
+            const thread = yield* awaitThread(threadId, settled(2));
+            assert.deepEqual(
+              thread.runs.map((run) => [run.providerInstanceId, run.status]),
+              [
+                [spent, "completed"],
+                [fresh, "completed"],
+              ],
+            );
+          }),
+      );
+    }),
+  );
+
+  it.live("fails over a failure the server missed while down, once across restarts", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-failover-restart-" });
+      const boot = {
+        databasePath: `${directory}/state.sqlite`,
+        startedTurns: yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]),
+      };
+      const pool = {
+        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [fresh]: { driver: cursor, usedPercent: 10 },
+      };
+      const threadId = ThreadId.make("thread:restart");
+      const workspaceRoot = yield* checkpointWorkspace("restart");
+
+      // Down before the failover worker saw the failure.
+      yield* runPool(
+        pool,
+        () =>
+          startThread("restart", spent, workspaceRoot).pipe(
+            Effect.andThen((id) => awaitThread(id, settled(1))),
+          ),
+        { ...boot, failoverWorker: false },
+      );
+      // Up just long enough for the startup sweep to commit the failover, never starting its turn.
+      yield* runPool(pool, () => awaitThread(threadId, (thread) => thread.runs.length === 2), {
+        ...boot,
+        effectWorker: false,
+      });
+      const thread = yield* runPool(
+        pool,
+        () => awaitThread(threadId, settled(2)).pipe(Effect.tap(() => awaitFailoverWorkerCaughtUp)),
+        boot,
+      );
+
+      assert.deepEqual(
+        thread.runs.map((run) => [run.providerInstanceId, run.status]),
+        [
+          [spent, "failed"],
+          [fresh, "completed"],
+        ],
+      );
+      assert.deepEqual(yield* Ref.get(boot.startedTurns), [
+        spent,
+        fresh,
+        sentinelSource,
+        sentinelTarget,
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

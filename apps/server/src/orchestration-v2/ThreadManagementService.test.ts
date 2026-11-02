@@ -3,6 +3,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2Run,
   type OrchestrationV2ProviderThread,
@@ -147,7 +148,9 @@ const layerDispatchChokepointTest =
           dispatch: (command) =>
             Effect.sync(() => {
               dispatched.push(
-                command.type === "message.dispatch" && command.modelSelection
+                (command.type === "message.dispatch" ||
+                  command.type === "delegated_task.request") &&
+                  command.modelSelection
                   ? `${command.type}:${command.modelSelection.instanceId}`
                   : command.type,
               );
@@ -159,10 +162,11 @@ const layerDispatchChokepointTest =
       Layer.provideMerge(layerReceiptsTest),
     );
 
-it.effect(
-  "the dispatch chokepoint moves work off an instance auto-disabled for quota to a pooled peer",
-  () => {
+it.effect.each(["message.dispatch", "delegated_task.request"] as const)(
+  "the dispatch chokepoint moves a %s off an instance auto-disabled for quota to a pooled peer",
+  (commandType) => {
     const threadId = ThreadId.make("thread:thread-management:chokepoint");
+    const projectId = ProjectId.make("project:thread-management:chokepoint");
     const spent = ProviderInstanceId.make("codex_work");
     const spare = ProviderInstanceId.make("codex_spare");
     const codex = ProviderDriverKind.make("codex");
@@ -171,18 +175,41 @@ it.effect(
       threads: ThreadManagementService.ThreadManagementService["Service"],
       id: string,
     ) =>
-      threads.dispatch({
-        type: "message.dispatch",
-        commandId: CommandId.make(`command:thread-management:pool-${id}`),
-        threadId,
-        messageId: MessageId.make(`message:thread-management:pool-${id}`),
-        text: "Next step",
-        attachments: [],
-        dispatchMode: { type: "queue_after_active" },
-        createdBy: "user",
-        creationSource: "web",
-      });
-    const run = (spentConfig: Record<string, unknown>, id: string) => {
+      threads.dispatch(
+        commandType === "message.dispatch"
+          ? {
+              type: "message.dispatch",
+              commandId: CommandId.make(`command:thread-management:pool-${id}`),
+              threadId,
+              messageId: MessageId.make(`message:thread-management:pool-${id}`),
+              text: "Next step",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "user",
+              creationSource: "web",
+            }
+          : {
+              type: "delegated_task.request",
+              commandId: CommandId.make(`command:thread-management:pool-${id}`),
+              parentThreadId: threadId,
+              parentRunId: RunId.make("run:thread-management:parent"),
+              parentNodeId: NodeId.make("node:thread-management:parent"),
+              task: "Next step",
+              modelSelection: { instanceId: spent, model: "test" },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              createdBy: "agent",
+              creationSource: "mcp",
+            },
+      );
+    const run = (
+      settings: {
+        readonly spent: Record<string, unknown>;
+        readonly spareForProject?: boolean;
+        readonly spentForProject?: boolean;
+      },
+      id: string,
+    ) => {
       const dispatched: Array<string> = [];
       return Effect.gen(function* () {
         yield* send(yield* ThreadManagementService.ThreadManagementService, id).pipe(Effect.ignore);
@@ -192,8 +219,20 @@ it.effect(
           layerDispatchChokepointTest(
             ServerSettings.layerTest({
               providerInstances: {
-                [spent]: { ...pooled, ...spentConfig },
+                [spent]: { ...pooled, ...settings.spent },
                 [spare]: { ...pooled, enabled: true },
+              },
+              projectSettingsOverrides: {
+                [projectId]: {
+                  providerInstances: {
+                    ...(settings.spentForProject === undefined
+                      ? {}
+                      : { [spent]: { enabled: settings.spentForProject } }),
+                    ...(settings.spareForProject === undefined
+                      ? {}
+                      : { [spare]: { enabled: settings.spareForProject } }),
+                  },
+                },
               },
             }),
             [
@@ -217,12 +256,19 @@ it.effect(
     };
 
     return Effect.gen(function* () {
-      const note = { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." };
-      expect(yield* run({ enabled: false, usageLimitDisabled: note }, "auto")).toEqual([
-        `message.dispatch:${spare}`,
+      const quota = {
+        enabled: false,
+        usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+      };
+      expect(yield* run({ spent: quota }, "auto")).toEqual([`${commandType}:${spare}`]);
+      // A project that enables the spent instance cannot keep work on it.
+      expect(yield* run({ spent: quota, spentForProject: true }, "override")).toEqual([
+        `${commandType}:${spare}`,
       ]);
+      // A peer the project switched off is no replacement.
+      expect(yield* run({ spent: quota, spareForProject: false }, "peer-off")).toEqual([]);
       // A hand-disabled instance carries no note and keeps refusing work.
-      expect(yield* run({ enabled: false }, "manual")).toEqual([]);
+      expect(yield* run({ spent: { enabled: false } }, "manual")).toEqual([]);
     });
   },
 );

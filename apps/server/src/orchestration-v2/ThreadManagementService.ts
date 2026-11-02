@@ -42,7 +42,6 @@ import {
 } from "@t3tools/contracts";
 import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
-import { pickUsageLimitReplacement } from "@t3tools/shared/usageLimits";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -67,7 +66,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -578,7 +577,7 @@ const make = Effect.gen(function* () {
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
-  const providerRegistry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+  const resolveSpentInstance = yield* makeSpentInstanceResolver;
 
   const assertProviderInstanceEnabled: ThreadManagementServiceShape["assertProviderInstanceEnabled"] =
     (input) =>
@@ -736,7 +735,6 @@ const make = Effect.gen(function* () {
 
   const routeAroundSpentInstance = Effect.fn("ThreadManagementService.routeAroundSpentInstance")(
     function* (command: OrchestrationV2ServerCommand) {
-      if (Option.isNone(providerRegistry)) return command;
       if (command.type !== "message.dispatch" && command.type !== "delegated_task.request") {
         return command;
       }
@@ -760,22 +758,8 @@ const make = Effect.gen(function* () {
         command.type === "message.dispatch"
           ? (command.modelSelection ?? projection.thread.modelSelection)
           : command.modelSelection;
-      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
-      const projectId = projection.thread.projectId;
-      if (
-        settings.providerInstances[selection.instanceId]?.usageLimitDisabled === undefined ||
-        resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId)
-      ) {
-        return command;
-      }
-      const replacement = pickUsageLimitReplacement({
-        selection,
-        providers: yield* providerRegistry.value.getProviders,
-        settings,
-        projectId,
-        now: yield* Clock.currentTimeMillis,
-      });
-      return replacement === null ? command : { ...command, modelSelection: replacement };
+      const replacement = yield* resolveSpentInstance(selection, projection.thread.projectId);
+      return replacement === selection ? command : { ...command, modelSelection: replacement };
     },
   );
 
