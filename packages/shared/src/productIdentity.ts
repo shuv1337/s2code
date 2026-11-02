@@ -8,7 +8,7 @@ export const LEGACY_PRODUCT_ID = "shuv2code";
 export const NPM_PACKAGE_NAME = "@s2code/cli";
 export const PRODUCT_HOME_MARKER = ".product-identity";
 export const PRODUCT_CLI_SHIM_MARKER = `Written by ${PRODUCT_ID}: runs the desktop app's bundled CLI.`;
-const LEGACY_PRODUCT_CLI_SHIM_MARKER = `Written by ${LEGACY_PRODUCT_ID}: runs the desktop app's bundled CLI.`;
+export const LEGACY_PRODUCT_CLI_SHIM_MARKER = `Written by ${LEGACY_PRODUCT_ID}: runs the desktop app's bundled CLI.`;
 export const isOwnedCliShim = (content: string) =>
   content.includes(PRODUCT_CLI_SHIM_MARKER) || content.includes(LEGACY_PRODUCT_CLI_SHIM_MARKER);
 // Keep installed updaters on the published repository until the external cutover.

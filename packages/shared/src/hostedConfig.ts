@@ -10,7 +10,7 @@ export const UPSTREAM_HOSTED_DOMAINS = [
 export const HOSTED_UNAVAILABLE_MESSAGE =
   "Hosted Connect is unavailable: this fork has no configured cloud service. Use direct or Tailscale pairing instead. Upstream accounts are separate.";
 
-function isUpstreamHostedDomain(hostname: string) {
+export function isUpstreamHostedDomain(hostname: string) {
   const host = hostname.toLowerCase().replace(/\.+$/, "");
   return UPSTREAM_HOSTED_DOMAINS.some((root) => host === root || host.endsWith(`.${root}`));
 }

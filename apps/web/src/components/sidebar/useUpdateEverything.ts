@@ -35,7 +35,7 @@ import {
 const UPDATE_RESTART_DELAY_MS = 5_000;
 
 /** Servers this desktop app runs; they update with it. */
-function isHostedByThisApp(
+export function isHostedByThisApp(
   environment: ReturnType<typeof useEnvironments>["environments"][number],
 ) {
   return (

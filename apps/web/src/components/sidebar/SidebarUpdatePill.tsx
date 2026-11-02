@@ -134,7 +134,7 @@ const toastUpdateError: ReportLocalUpdateError = (title, description) => {
   toastManager.add(stackedThreadToast({ type: "error", title, description }));
 };
 
-async function downloadLocalUpdate(
+export async function downloadLocalUpdate(
   bridge: DesktopBridge,
   {
     notifyDownloaded,
@@ -160,7 +160,7 @@ async function downloadLocalUpdate(
   }
 }
 
-async function installLocalUpdate(
+export async function installLocalUpdate(
   bridge: DesktopBridge,
   reportError: ReportLocalUpdateError = toastUpdateError,
   expectedVersion?: string,

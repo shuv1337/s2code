@@ -23,14 +23,13 @@
       // electron-builder loads the macOS signer by path, and mobile-e2e.ts runs
       // agent-device's CLI by path, and mobile-behavior.ts spawns its runner by path.
       // release-desktop.yml runs the desktop launch check through xvfb-run, which knip
-      // does not trace. release-smoke.ts runs the nightly resolver by path.
+      // does not trace.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
-        "resolve-nightly-release.ts",
         "setup-worktree.ts",
         "sign-macos.ts",
         "smoke-desktop-app.ts",
