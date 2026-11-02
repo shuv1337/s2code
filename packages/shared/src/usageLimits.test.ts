@@ -172,6 +172,14 @@ describe("usage limit replacement", () => {
           }),
       ...overrides,
     });
+  const cursorUsage = (used: { readonly api: number; readonly auto: number }) => ({
+    checkedAt: "2026-09-03T11:00:00.000Z",
+    windows: [
+      { ...window, id: "apiPercentUsed", usedPercent: used.api },
+      { ...window, id: "autoPercentUsed", usedPercent: used.auto },
+    ],
+  });
+  const autoModel = [{ slug: "auto", name: "Auto", isCustom: false, capabilities: null }];
   const pooled = { driver: cursor, enabled: true, config: {}, disableOnUsageLimit: true };
   const settings = (instances: Record<string, object>) => ({
     ...DEFAULT_SERVER_SETTINGS,
@@ -229,6 +237,35 @@ describe("usage limit replacement", () => {
         ],
       },
       null,
+    ],
+    [
+      "headroom in the windows that serve the model, not the busiest window",
+      {
+        providers: [
+          providers[0]!,
+          member("busy", undefined, { usageLimits: cursorUsage({ api: 50, auto: 50 }) }),
+          member("idle", undefined, { usageLimits: cursorUsage({ api: 10, auto: 100 }) }),
+        ],
+      },
+      "idle",
+    ],
+    [
+      "headroom in either allowance for an Auto model",
+      {
+        model: "auto",
+        providers: [
+          providers[0]!,
+          member("busy", undefined, {
+            models: autoModel,
+            usageLimits: cursorUsage({ api: 50, auto: 50 }),
+          }),
+          member("idle", undefined, {
+            models: autoModel,
+            usageLimits: cursorUsage({ api: 100, auto: 10 }),
+          }),
+        ],
+      },
+      "idle",
     ],
     ["no member without the model", { model: "gpt-6.1-sol" }, null],
     ["no exhausted member", { providers: [providers[0]!, member("busy", 100)] }, null],
