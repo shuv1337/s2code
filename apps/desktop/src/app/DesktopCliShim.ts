@@ -14,7 +14,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // AppImage mounts change each run; the launcher must mount the image itself.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = PRODUCT_CLI_SHIM_MARKER;
+const MARKER = PRODUCT_CLI_SHIM_MARKER;
 
 export const launcherNames = (version: string) =>
   Array.from(

@@ -122,7 +122,7 @@ const buildTimeCloudMintPublicKey = readBuildTimeValue(
  * The relay's credential-minting key, pinned beside its URL. A relay config
  * carrying any other key is refused, so a client cannot plant its own.
  */
-export function makeCloudMintPublicKeyConfig(fallback = buildTimeCloudMintPublicKey) {
+function makeCloudMintPublicKeyConfig(fallback = buildTimeCloudMintPublicKey) {
   const runtimeConfig = Config.NonEmptyString("T3CODE_CLOUD_MINT_PUBLIC_KEY");
   return fallback ? runtimeConfig.pipe(Config.withDefault(fallback)) : runtimeConfig;
 }
