@@ -79,10 +79,11 @@ const layerEmptyInstances = Layer.mock(ProviderInstanceRegistry.ProviderInstance
 const makeLayerTest = <E>(
   ingestorEventSink: Layer.Layer<EventSink.EventSinkV2, E>,
   instances = layerEmptyInstances,
+  settings = ServerSettings.layerTest(),
 ) =>
   Layer.mergeAll(
     instances,
-    ServerSettings.layerTest(),
+    settings,
     layerTestDatabase,
     layerTestStores,
     layerTestEventSink,
@@ -93,7 +94,7 @@ const makeLayerTest = <E>(
       Layer.provide(
         Layer.mergeAll(
           instances,
-          ServerSettings.layerTest(),
+          settings,
           layerTestStores,
           ingestorEventSink,
           IdAllocator.layer,
@@ -232,10 +233,11 @@ function threadCreatedEvent(
 
 const layer = it.layer(layerTest);
 
-it.effect("refreshes the failing instance snapshot after a committed usage_limit terminal", () =>
+it.effect("refreshes usage and auto-disables after a committed exhausted-quota terminal", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const refreshed = yield* Deferred.make<void>();
+      const disabled = yield* Deferred.make<void>();
       const adapter = yield* ProviderAdapter.ProviderAdapterV2.pipe(
         Effect.provide(
           Layer.mock(ProviderAdapter.ProviderAdapterV2)({
@@ -278,6 +280,31 @@ it.effect("refreshes the failing instance snapshot after a committed usage_limit
             return id === instance.instanceId ? instance : undefined;
           }),
       });
+      const settings = Layer.effect(
+        ServerSettings.ServerSettingsService,
+        Effect.gen(function* () {
+          const service = yield* ServerSettings.ServerSettingsService;
+          return {
+            ...service,
+            updateProviderInstance: (...args: Parameters<typeof service.updateProviderInstance>) =>
+              service
+                .updateProviderInstance(...args)
+                .pipe(Effect.tap(() => Deferred.succeed(disabled, undefined))),
+          };
+        }),
+      ).pipe(
+        Layer.provide(
+          ServerSettings.layerTest({
+            providerInstances: {
+              [instance.instanceId]: {
+                driver: instance.driverKind,
+                enabled: true,
+                disableOnUsageLimit: true,
+              },
+            },
+          }),
+        ),
+      );
       yield* Effect.gen(function* () {
         const now = yield* DateTime.now;
         const eventSink = yield* EventSink.EventSinkV2;
@@ -313,16 +340,29 @@ it.effect("refreshes the failing instance snapshot after a committed usage_limit
               failure: makeProviderFailure({
                 class: failureClass,
                 message: "Provider rejected turn.",
+                retryable: false,
               }),
               threadDisposition: "reusable",
             },
           });
           assert.equal(stored.length, 1);
-          if (failureClass === "validation_error") assert.deepEqual(lookups, []);
+          if (failureClass === "validation_error") {
+            assert.deepEqual(lookups, []);
+            assert.isFalse(yield* Deferred.isDone(disabled));
+          }
         }
         assert.deepEqual(lookups, [instance.instanceId]);
         yield* Deferred.await(refreshed);
-      }).pipe(Effect.provide(makeLayerTest(layerTestEventSink, instances)));
+        yield* Deferred.await(disabled);
+        const service = yield* ServerSettings.ServerSettingsService;
+        const saved = (yield* service.getSettings).providerInstances[instance.instanceId];
+        assert.isFalse(saved?.enabled);
+        assert.isTrue(saved?.disableOnUsageLimit);
+        assert.deepEqual(saved?.usageLimitDisabled, {
+          at: DateTime.formatIso(now),
+          message: "Provider rejected turn.",
+        });
+      }).pipe(Effect.provide(makeLayerTest(layerTestEventSink, instances, settings)));
     }),
   ),
 );
