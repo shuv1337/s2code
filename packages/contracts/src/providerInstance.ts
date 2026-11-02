@@ -78,7 +78,10 @@ export const ProviderInstanceConfig = Schema.Struct({
   accentColor: Schema.optional(TrimmedNonEmptyString),
   environment: Schema.optionalKey(ProviderInstanceEnvironment),
   enabled: Schema.optionalKey(Schema.Boolean),
-  /** Turn the instance off when a turn fails because its quota is exhausted. */
+  /**
+   * Turn the instance off when a turn fails because its quota is exhausted. Same-driver instances
+   * with this set form a pool: work on a spent member moves to the one with the most headroom.
+   */
   disableOnUsageLimit: Schema.optionalKey(Schema.Boolean),
   /** Why the server turned the instance off; cleared when it is enabled again. */
   usageLimitDisabled: Schema.optionalKey(

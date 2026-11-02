@@ -1,5 +1,6 @@
 import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
+import * as UsageLimitFailoverWorker from "./UsageLimitFailoverWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -386,6 +387,9 @@ export const layerProduction = Layer.mergeAll(
         layerOrchestratorProvided,
       ),
     ),
+  ),
+  UsageLimitFailoverWorker.layer.pipe(
+    Layer.provide(Layer.merge(layerThreadManagementProvided, layerOrchestratorProvided)),
   ),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,

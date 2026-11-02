@@ -100,6 +100,49 @@ export function resolveNewThreadModelSelection(input: {
   };
 }
 
+/**
+ * Instances of one driver that opt into `disableOnUsageLimit` form a pool; a spent member's work
+ * moves to the member with the most headroom. Unknown usage ranks last, never as unused.
+ */
+export function pickUsageLimitReplacement(input: {
+  readonly selection: ModelSelection;
+  readonly providers: readonly ServerProvider[];
+  readonly settings: ServerSettings;
+  readonly projectId: ProjectId | null;
+  readonly now: number;
+}): ModelSelection | null {
+  const pooled = (instanceId: ProviderInstanceId) =>
+    Object.hasOwn(input.settings.providerInstances, instanceId)
+      ? input.settings.providerInstances[instanceId]
+      : undefined;
+  const source = pooled(input.selection.instanceId);
+  if (source?.disableOnUsageLimit !== true) return null;
+  const rank = (provider: ServerProvider) => {
+    const used = (provider.usageLimits?.windows ?? []).flatMap((window) =>
+      window.usedPercent === undefined ? [] : [window.usedPercent],
+    );
+    return used.length === 0 ? Number.POSITIVE_INFINITY : Math.max(...used);
+  };
+  const [best] = input.providers
+    .filter(
+      (provider) =>
+        provider.instanceId !== input.selection.instanceId &&
+        provider.driver === source.driver &&
+        pooled(provider.instanceId)?.disableOnUsageLimit === true &&
+        provider.enabled &&
+        provider.installed &&
+        provider.auth.status !== "unauthenticated" &&
+        isProviderAvailable(provider) &&
+        provider.models.some((model) => model.slug === input.selection.model) &&
+        !exhaustedUsageWindow(provider, input.now, input.selection.model) &&
+        resolveProjectProviderInstanceEnabled(input.settings, input.projectId, provider.instanceId),
+    )
+    .sort(
+      (left, right) => rank(left) - rank(right) || left.instanceId.localeCompare(right.instanceId),
+    );
+  return best === undefined ? null : { ...input.selection, instanceId: best.instanceId };
+}
+
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";
 export const CHATGPT_USAGE_LIMIT_CODE = "subscription_sharing_usage_limit_exceeded";
 /** A ChatGPT Business admin caps plan use in other apps; only the admin can raise it. */

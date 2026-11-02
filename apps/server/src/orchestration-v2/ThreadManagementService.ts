@@ -42,6 +42,7 @@ import {
 } from "@t3tools/contracts";
 import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
+import { pickUsageLimitReplacement } from "@t3tools/shared/usageLimits";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -66,6 +67,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -576,6 +578,7 @@ const make = Effect.gen(function* () {
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+  const providerRegistry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
 
   const assertProviderInstanceEnabled: ThreadManagementServiceShape["assertProviderInstanceEnabled"] =
     (input) =>
@@ -731,10 +734,57 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const routeAroundSpentInstance = Effect.fn("ThreadManagementService.routeAroundSpentInstance")(
+    function* (command: OrchestrationV2ServerCommand) {
+      if (Option.isNone(providerRegistry)) return command;
+      if (command.type !== "message.dispatch" && command.type !== "delegated_task.request") {
+        return command;
+      }
+      // Steering or restarting a live run cannot change its instance.
+      if (
+        command.type === "message.dispatch" &&
+        (command.dispatchMode.type === "steer_active" ||
+          command.dispatchMode.type === "restart_active")
+      ) {
+        return command;
+      }
+      const receipt = yield* receipts
+        .getByCommandId(command.commandId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isSome(receipt)) return command;
+      const projection = yield* orchestrator.getThreadRecords(
+        command.type === "message.dispatch" ? command.threadId : command.parentThreadId,
+        [],
+      );
+      const selection =
+        command.type === "message.dispatch"
+          ? (command.modelSelection ?? projection.thread.modelSelection)
+          : command.modelSelection;
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const projectId = projection.thread.projectId;
+      if (
+        settings.providerInstances[selection.instanceId]?.usageLimitDisabled === undefined ||
+        resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId)
+      ) {
+        return command;
+      }
+      const replacement = pickUsageLimitReplacement({
+        selection,
+        providers: yield* providerRegistry.value.getProviders,
+        settings,
+        projectId,
+        now: yield* Clock.currentTimeMillis,
+      });
+      return replacement === null ? command : { ...command, modelSelection: replacement };
+    },
+  );
+
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
     ensureCommandTranscripts(command).pipe(
-      Effect.andThen(assertDispatchTargetEnabled(command)),
-      Effect.andThen(orchestrator.dispatch(command)),
+      Effect.andThen(routeAroundSpentInstance(command)),
+      Effect.flatMap((routed) =>
+        assertDispatchTargetEnabled(routed).pipe(Effect.andThen(orchestrator.dispatch(routed))),
+      ),
     );
 
   const getProjectThreadRecords: ThreadManagementServiceShape["getProjectThreadRecords"] = (
