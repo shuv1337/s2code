@@ -111,7 +111,8 @@ export function desktopUpdateChannelOf(version: string): "latest" | "nightly" {
 }
 
 /** Whether a track switch may install `found` after its database check cleared `checked`: any build
- * on the switch's track at least as new, since later releases only add migrations. */
+ * on the switch's track at least as new, since later releases only add migrations.
+ * @public Upstream's track-switch dialog calls this; the nightly-only fork has no caller. */
 export function acceptsTrackSwitchRelease(
   found: string,
   channel: "latest" | "nightly",
