@@ -441,6 +441,31 @@ describe("resolveProjectProviderInstanceEnabled", () => {
   const projectId = "project-a" as ProjectId;
   const instanceId = ProviderInstanceId.make("codex_work");
 
+  it("ignores project enable overrides until usage-limit disable is cleared", () => {
+    const instance = { driver: ProviderDriverKind.make("codex"), enabled: false };
+    const settings: ServerSettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [instanceId]: {
+          ...instance,
+          usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Quota exhausted" },
+        },
+      },
+      projectSettingsOverrides: {
+        [projectId]: { providerInstances: { [instanceId]: { enabled: true } } },
+      },
+    };
+    expect(resolveProjectProviderInstanceEnabled(settings, projectId, instanceId)).toBe(false);
+    expect(resolveProjectProviderInstanceEnabled(settings, null, instanceId)).toBe(false);
+    expect(
+      resolveProjectProviderInstanceEnabled(
+        { ...settings, providerInstances: { [instanceId]: instance } },
+        projectId,
+        instanceId,
+      ),
+    ).toBe(true);
+  });
+
   it("lets a project disable an instance the machine enabled", () => {
     const settings: ServerSettings = {
       ...DEFAULT_SERVER_SETTINGS,

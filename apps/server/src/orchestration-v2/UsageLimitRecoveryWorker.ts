@@ -109,6 +109,8 @@ const makeSweep = Effect.gen(function* () {
     });
     let acted = false;
     for (const thread of candidates) {
+      if (preferences.providerInstances[thread.providerInstanceId]?.usageLimitDisabled != null)
+        continue;
       const command = limitRecoveryCommand(
         thread,
         preferences.autoResumeLimitedThreads,

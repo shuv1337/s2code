@@ -55,8 +55,11 @@ interface RegistryState {
   readonly changes: PubSub.PubSub<void>;
 }
 
-const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
-  Equal.equals(a, b);
+const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean => {
+  const { disableOnUsageLimit: _aPolicy, usageLimitDisabled: _aDisabled, ...aRuntime } = a;
+  const { disableOnUsageLimit: _bPolicy, usageLimitDisabled: _bDisabled, ...bRuntime } = b;
+  return Equal.equals(aRuntime, bRuntime);
+};
 
 const secretReferencesIn = (environment: ProviderInstanceEnvironment): Array<SecretReference> =>
   environment.flatMap((variable) => (typeof variable.value === "string" ? [] : [variable.value]));

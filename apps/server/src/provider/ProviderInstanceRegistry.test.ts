@@ -673,14 +673,20 @@ describe("ProviderInstanceRegistry secret environment", () => {
     const reads: Array<ReadonlyArray<string>> = [];
     const invalidated: Array<ReadonlyArray<string>> = [];
     const created: Array<ResolvedProviderInstanceEnvironment> = [];
+    const closed: Array<ProviderInstanceId> = [];
     const driver: AnyProviderDriver = {
       driverKind,
       metadata: { displayName: "Fake" },
       configSchema,
       defaultConfig: () => ({}),
       create: (input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           created.push(input.environment);
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              closed.push(input.instanceId);
+            }),
+          );
           return { instanceId: input.instanceId, enabled: input.enabled } as ProviderInstance;
         }),
     };
@@ -721,8 +727,50 @@ describe("ProviderInstanceRegistry secret environment", () => {
       yield* PubSub.take(changes);
       return built;
     });
-    return { vault, reads, invalidated, created, make, makeGated, gate };
+    return { vault, reads, invalidated, created, closed, configMap, make, makeGated, gate };
   }
+
+  it.effect("usage-limit policy changes", () => {
+    const fixture = setup({ [secret.reference]: "sk-live" });
+    return Effect.gen(function* () {
+      const { registry, mutator } = yield* fixture.make;
+      const original = yield* registry.getInstance(instanceId);
+      for (const policy of [
+        { disableOnUsageLimit: true },
+        { disableOnUsageLimit: false },
+        { usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Quota exhausted" } },
+        {},
+      ]) {
+        yield* mutator.reconcile({
+          [instanceId]: { ...fixture.configMap[instanceId]!, ...policy },
+        });
+        expect(yield* registry.getInstance(instanceId)).toBe(original);
+        expect(fixture.created).toHaveLength(1);
+        expect(fixture.closed).toEqual([]);
+      }
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("auto-disable rebuilds the instance like a manual disable", () => {
+    const fixture = setup({ [secret.reference]: "sk-live" });
+    return Effect.gen(function* () {
+      const { registry, mutator } = yield* fixture.make;
+      const original = yield* registry.getInstance(instanceId);
+      yield* mutator.reconcile({
+        [instanceId]: {
+          ...fixture.configMap[instanceId]!,
+          enabled: false,
+          usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Quota exhausted" },
+        },
+      });
+      const disabled = yield* registry.getInstance(instanceId);
+      expect(disabled).toBeDefined();
+      expect(disabled).not.toBe(original);
+      expect(disabled?.enabled).toBe(false);
+      expect(fixture.created).toHaveLength(2);
+      expect(fixture.closed).toEqual([instanceId]);
+    }).pipe(Effect.scoped);
+  });
 
   it.effect("starts an instance with the secret its environment points at", () => {
     const fixture = setup({ [secret.reference]: "sk-live" });
