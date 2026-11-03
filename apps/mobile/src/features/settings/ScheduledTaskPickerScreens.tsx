@@ -3,7 +3,11 @@ import * as Haptics from "expo-haptics";
 import { useMemo, useState } from "react";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
+import {
+  buildModelOptions,
+  groupByProvider,
+  resolveUsageLimitPoolSelection,
+} from "../../lib/modelOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { useEnvironmentServerConfig, useProjects } from "../../state/entities";
 import { useDebouncedValue, usePaginatedBranches } from "../../state/queries";
@@ -24,8 +28,12 @@ export function ScheduledTaskModelPickerRouteScreen() {
   const navigation = useNavigation();
   const { editor, setEditor } = useScheduledTaskEditor();
   const config = useEnvironmentServerConfig(editor?.environmentId ?? null);
-  const selectedModel = editor?.draft.modelSelection ?? null;
   const projectId = editor?.draft.projectId ?? null;
+  const savedModel = editor?.draft.modelSelection ?? null;
+  const selectedModel = useMemo(
+    () => savedModel && resolveUsageLimitPoolSelection(config, savedModel, projectId),
+    [config, savedModel, projectId],
+  );
   const models = useMemo(
     () => buildModelOptions(config, selectedModel, undefined, projectId),
     [config, selectedModel, projectId],

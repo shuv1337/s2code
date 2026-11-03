@@ -608,6 +608,10 @@ describe("mobile model options", () => {
 
     const shown = resolveUsageLimitPoolSelection(config, onSpent, null);
     expect(shown).toEqual({ instanceId: fresh, model: model.slug });
+    // Scheduled tasks resolve with their draft's project.
+    expect(resolveUsageLimitPoolSelection(config, onSpent, ProjectId.make("project-a"))).toEqual(
+      shown,
+    );
     expect(
       groupByProvider(buildModelOptions(config, shown, undefined, null)).map((group) => [
         group.providerKey,

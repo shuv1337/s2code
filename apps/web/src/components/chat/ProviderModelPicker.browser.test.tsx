@@ -15,9 +15,24 @@ import { ProviderModelPicker } from "./ProviderModelPicker";
 const cursor = ProviderDriverKind.make("cursor");
 const spent = ProviderInstanceId.make("cursor_spent");
 const fresh = ProviderInstanceId.make("cursor_fresh");
-const model = { slug: "composer-max", name: "Composer Max", isCustom: false, capabilities: null };
+const spentModel = {
+  slug: "composer-max",
+  name: "Composer Max",
+  isCustom: true,
+  capabilities: null,
+};
+const freshModel = {
+  slug: "composer-lite",
+  name: "Composer Lite",
+  isCustom: false,
+  capabilities: null,
+};
 
-const provider = (instanceId: ProviderInstanceId, enabled: boolean): ServerProvider => ({
+const provider = (
+  instanceId: ProviderInstanceId,
+  enabled: boolean,
+  model: typeof spentModel,
+): ServerProvider => ({
   instanceId,
   driver: cursor,
   enabled,
@@ -44,22 +59,22 @@ const settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverr
   projectSettingsOverrides: {},
 };
 
-it("opens on the pool's shown member when the thread's instance was auto-disabled", async () => {
-  await using _screen = await render(
+it("opens on the pool's shown member but keeps naming the auto-disabled member's model", async () => {
+  await using screen = await render(
     <ProviderModelPicker
       environmentId={null}
       activeInstanceId={spent}
-      model={model.slug}
+      model={spentModel.slug}
       lockedProvider={null}
       instanceEntries={providerInstanceEntriesFor(
-        [provider(spent, false), provider(fresh, true)],
+        [provider(spent, false, spentModel), provider(fresh, true, freshModel)],
         settings,
         null,
       )}
       modelOptionsByInstance={
         new Map([
-          [spent, [model]],
-          [fresh, [model]],
+          [spent, [{ ...spentModel, isUnavailable: true }]],
+          [fresh, [freshModel]],
         ])
       }
       keybindings={[]}
@@ -71,5 +86,8 @@ it("opens on the pool's shown member when the thread's instance was auto-disable
   await expect
     .element(page.getByRole("button", { name: usageLimitPoolLabel(cursor) }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect.element(page.getByRole("option", { name: /Composer Max/ })).toBeVisible();
+  await expect.element(page.getByRole("option", { name: /Composer Lite/ })).toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: "Composer Max (Unavailable)" }))
+    .toBeVisible();
 });
