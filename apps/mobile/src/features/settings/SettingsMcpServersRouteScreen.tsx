@@ -106,7 +106,7 @@ export function SettingsMcpServersRouteScreen({
           <>
             <SettingsSection
               title="Servers"
-              footer="Every agent started in this environment gets the servers that are on. Turning one off stops its calls immediately. Agents pick up new servers in their next session."
+              footer="Agents in Full access threads get the servers that are on. Turning one off stops its calls immediately. Agents pick up new servers in their next session."
             >
               {entries.length === 0 ? (
                 <Text className="p-4 text-base text-foreground-muted">No MCP servers yet.</Text>

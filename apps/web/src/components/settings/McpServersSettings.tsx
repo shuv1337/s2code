@@ -115,8 +115,8 @@ function EnvironmentMcpServers({
         }
       >
         <p className="px-4 pt-3 text-xs text-muted-foreground">
-          Remote MCP servers every agent on this environment can use. Tokens stay on this
-          environment.
+          Remote MCP servers that agents in Full access threads on this environment can use. Tokens
+          stay on this environment.
           {projectScoped
             ? " Environment-wide setting. Select an environment to change it."
             : !canManage

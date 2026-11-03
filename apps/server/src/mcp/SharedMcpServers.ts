@@ -20,6 +20,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
@@ -68,6 +69,18 @@ const PROMPT_METHODS = new Set([
 ]);
 const PROMPT_TIMEOUT = "5 seconds";
 
+/**
+ * The agent's own approval prompt is no boundary here: wherever its shell runs unasked it can call
+ * this route itself. So only full-access threads, which ask for nothing, see or run these tools.
+ */
+const SUPERVISED_LISTINGS: Readonly<Record<string, string>> = {
+  "tools/list": "tools",
+  "prompts/list": "prompts",
+  "resources/list": "resources",
+  "resources/templates/list": "resourceTemplates",
+};
+const SUPERVISED_PASSTHROUGH = new Set(["initialize", "ping"]);
+
 const answersPromptly = (method: string, body: string) => {
   if (method === "DELETE") return true;
   if (method !== "POST") return false;
@@ -93,6 +106,27 @@ const unavailable = (body: string, status: number, message: string) => {
         { error: "mcp_server_unavailable", message },
         { status, headers: NO_STORE },
       );
+};
+
+/** What a supervised thread gets instead of the upstream response, or undefined to forward it. */
+const supervisedAnswer = (body: string, label: string) => {
+  const method = Option.getOrUndefined(decodeJsonRpcMethod(body))?.method;
+  if (method !== undefined) {
+    if (SUPERVISED_PASSTHROUGH.has(method) || method.startsWith("notifications/")) return undefined;
+    const listing = SUPERVISED_LISTINGS[method];
+    const request = decodeJsonRpcRequest(body);
+    if (listing !== undefined && Option.isSome(request)) {
+      return HttpServerResponse.jsonUnsafe(
+        { jsonrpc: "2.0", id: request.value.id, result: { [listing]: [] } },
+        { headers: NO_STORE },
+      );
+    }
+  }
+  return unavailable(
+    body,
+    403,
+    `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
+  );
 };
 
 const invalidCredential = HttpServerResponse.jsonUnsafe(
@@ -135,7 +169,8 @@ const proxy = Effect.gen(function* () {
   const token = authorization?.startsWith("Bearer ") === true ? authorization.slice(7).trim() : "";
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   // Only credentials T3 issued to its own agents: outside MCP clients never borrow these servers.
-  if ((yield* registry.resolve(token)) === undefined) {
+  const caller = yield* registry.resolve(token);
+  if (caller === undefined) {
     yield* Effect.logWarning("rejected shared MCP request with an unusable credential");
     return invalidCredential;
   }
@@ -151,6 +186,18 @@ const proxy = Effect.gen(function* () {
     : undefined;
   if (server === undefined || !server.enabled) {
     return unavailable(body, 404, `MCP server "${name}" is turned off or removed in Settings.`);
+  }
+  if (request.method === "POST") {
+    // Read per request: narrowing a running thread's mode takes effect on its next call.
+    const thread = yield* ProjectionStore.ProjectionStoreV2.pipe(
+      Effect.flatMap((projections) => projections.getThreadShell(caller.thread.threadId)),
+      Effect.orElseSucceed(() => null),
+    );
+    const answer =
+      thread?.runtimeMode === "full-access"
+        ? undefined
+        : supervisedAnswer(body, displayName(name, server));
+    if (answer !== undefined) return answer;
   }
   const headers: Record<string, string> = {};
   for (const header of FORWARDED_REQUEST_HEADERS) {

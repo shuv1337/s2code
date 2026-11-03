@@ -1,9 +1,9 @@
 # MCP servers
 
-Add a remote MCP server, such as Executor, to an environment once, and every
-agent that environment starts can use its tools. You don't have to configure it
-in each provider. Claude, Codex, Cursor, OpenCode, Pi, Muse, and the ACP agents
-(Grok, Antigravity, fx, and Registry agents) all get it.
+Add a remote MCP server, such as Executor, to an environment once, and agents
+in that environment's Full access threads can use its tools. You don't have to
+configure it in each provider. Claude, Codex, Cursor, OpenCode, Pi, Muse, and
+the ACP agents (Grok, Antigravity, fx, and Registry agents) all get it.
 
 ## Add a server
 
@@ -26,16 +26,17 @@ changing, or removing servers needs permission to manage providers.
 
 ## How agents use it
 
+- Only threads with **Full access** get these tools. In other modes agents
+  don't see them, because an agent that can run commands could otherwise call
+  the server without asking you. After switching a thread to Full access, use
+  **Restart agent**.
 - New agent sessions get the current list. A running agent may keep the
   servers it started with, so use **Restart agent** after a change.
 - Agents connect through the environment, which adds the saved token. Turning a
-  server off or removing it stops access immediately, even for running
-  sessions.
-- T3 Code doesn't pre-approve these tools the way it does its own. Each
-  provider applies its own permission rules, and outside full access OpenCode,
-  Pi, and Codex through ACP ask before every call. Once a server is added here,
-  Codex through ACP asks before T3 Code's own tools too, because it doesn't say
-  which server a call is for.
+  server off, removing it, or taking a thread out of Full access stops access
+  immediately, even for running sessions.
+- Once a server is added here, Codex through ACP asks before T3 Code's own
+  tools outside Full access, because it doesn't say which server a call is for.
 - If the server is unreachable, takes more than 5 seconds to connect or list
   its tools, or rejects its token, its tools fail with a message saying so and
   the chat carries on. Failed calls are not retried, so a call that may have

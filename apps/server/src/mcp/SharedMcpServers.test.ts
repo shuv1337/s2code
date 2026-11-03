@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type McpServerConfig,
+  type RuntimeMode,
   type ServerSettings,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -30,9 +31,11 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import { liveThreadShell } from "./McpToolAccess.testkit.ts";
 import * as SharedMcpServers from "./SharedMcpServers.ts";
 
 const AGENT_TOKEN = "agent-session-token";
@@ -144,6 +147,16 @@ const fixture = Effect.gen(function* () {
   const settingsLayer = Layer.mock(ServerSettingsService.ServerSettingsService)({
     getSettings: Ref.get(settings),
   });
+  /** The calling thread's current mode, or null for a thread that can't be read. */
+  const runtimeMode = yield* Ref.make<RuntimeMode | null>("full-access");
+  const projectionsLayer = Layer.mock(ProjectionStore.ProjectionStoreV2)({
+    getThreadShell: (threadId) =>
+      Ref.get(runtimeMode).pipe(
+        Effect.map((mode) =>
+          mode === null ? null : liveThreadShell(threadId, { runtimeMode: mode }),
+        ),
+      ),
+  });
   const services = yield* Layer.build(
     Layer.mergeAll(
       HttpRouter.serve(
@@ -166,6 +179,7 @@ const fixture = Effect.gen(function* () {
         }),
       ),
       Layer.provide(settingsLayer),
+      Layer.provide(projectionsLayer),
       Layer.provideMerge(FetchHttpClient.layer),
     ),
   );
@@ -199,6 +213,7 @@ const fixture = Effect.gen(function* () {
     origin,
     received,
     hung,
+    runtimeMode,
     call,
     shared: Context.get(services, SharedMcpServers.SharedMcpServers),
   };
@@ -273,6 +288,47 @@ it.effect("only serves credentials T3 issued to its agents", () =>
     }
     expect(received).toEqual([]);
     expect(yield* (yield* call("/mcp", { method: "GET" })).text).toBe("orchestration");
+  }),
+);
+
+it.effect("offers and runs shared tools only for threads in full access", () =>
+  Effect.gen(function* () {
+    const { call, received, runtimeMode } = yield* fixture;
+    const send = (body: unknown) =>
+      call("/mcp/servers/executor", { body, headers: asAgent }).pipe(
+        Effect.flatMap((response) => response.json),
+      );
+    const execute = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "execute" } };
+    const refused = {
+      jsonrpc: "2.0",
+      id: 2,
+      error: {
+        code: -32000,
+        message:
+          "Executor only works in threads with Full access. Switch this thread to Full access, then use Restart agent.",
+      },
+    };
+
+    yield* Ref.set(runtimeMode, "auto");
+    expect(yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} })).toMatchObject({
+      result: { serverInfo: { name: "Fixture" } },
+    });
+    expect(yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [] },
+    });
+    expect(yield* send(execute)).toEqual(refused);
+    expect(yield* send({ ...execute, method: "resources/read" })).toEqual(refused);
+    const batch = yield* call("/mcp/servers/executor", { body: [execute], headers: asAgent });
+    expect(batch.status).toBe(403);
+
+    yield* Ref.set(runtimeMode, null);
+    expect(yield* send(execute)).toEqual(refused);
+    expect(received.map((request) => JSON.parse(request.body).method)).toEqual(["initialize"]);
+
+    yield* Ref.set(runtimeMode, "full-access");
+    expect(yield* send(execute)).toEqual(FAILED_CALL);
   }),
 );
 

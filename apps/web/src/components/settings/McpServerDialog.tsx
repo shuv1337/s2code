@@ -106,8 +106,8 @@ export function McpServerDialog({
             {existing ? `Edit ${existing.config.label ?? existing.id}` : "Add an MCP server"}
           </DialogTitle>
           <DialogDescription>
-            Every agent on {environmentLabel} gets this server's tools. The token stays on that
-            environment; agents call the server through it.
+            Agents in Full access threads on {environmentLabel} get this server's tools. The token
+            stays on that environment; agents call the server through it.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
