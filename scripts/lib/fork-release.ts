@@ -27,23 +27,13 @@ export async function publishAtomicReleaseIndex(
     throw new Error("Published release index content mismatch.");
 }
 
-export const FORK_SELF_HOSTED_RUNNER_NAME = "shuvbot-macos";
-/** `runs-on` for the self-hosted job, as the JSON string workflow_call inputs require. */
+/** `runs-on` for the self-hosted macOS arm64 job, as the JSON string workflow_call inputs require. */
 export const FORK_MACOS_ARM64_SELF_HOSTED_RUNNER = JSON.stringify([
   "self-hosted",
   "macOS",
   "ARM64",
-  FORK_SELF_HOSTED_RUNNER_NAME,
+  "shuvbot-macos",
 ]);
-
-/** GitHub-hosted, or the shuvbot runner on a scheduled or dispatched run of main. */
-export const forkRunnerAllowed = (env: Readonly<Record<string, string | undefined>>) =>
-  env.RUNNER_ENVIRONMENT === "github-hosted" ||
-  (env.RUNNER_ENVIRONMENT === "self-hosted" &&
-    env.RUNNER_NAME === FORK_SELF_HOSTED_RUNNER_NAME &&
-    (env.GITHUB_EVENT_NAME === "workflow_dispatch" || env.GITHUB_EVENT_NAME === "schedule") &&
-    env.GITHUB_REF === "refs/heads/main");
-
 export const FORK_NPM_PACKAGES = [
   ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`),
   NPM_PACKAGE_NAME,

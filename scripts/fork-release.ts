@@ -17,7 +17,6 @@ import {
   FORK_DESKTOP_MATRIX,
   FORK_NPM_PACKAGES,
   forkNpmPublishingReady,
-  forkRunnerAllowed,
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
   RELEASE_CREDENTIAL_VARIABLES,
@@ -127,13 +126,11 @@ function assertPublishContext(npm: boolean) {
     throw new Error("Publication requires explicit --execute in the protected workflow.");
   if (!npm) return;
   if (
-    !forkRunnerAllowed(process.env) ||
+    process.env.RUNNER_ENVIRONMENT !== "github-hosted" ||
     !process.env.ACTIONS_ID_TOKEN_REQUEST_URL ||
     !process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
   )
-    throw new Error(
-      "A GitHub-hosted runner (or shuvbot-macos on main) with OIDC id-token: write is required.",
-    );
+    throw new Error("GitHub-hosted OIDC with id-token: write is required.");
   if (!forkNpmPublishingReady(process.env))
     throw new Error(
       "S2CODE_NPM_TRUSTED_PUBLISHING_READY must attest the six new publishers and FORK_NPM_TRUSTED_PUBLISHING_READY the shuv2code bridge, including publish and dist-tag permissions for release.yml. These flags are not authentication tests.",

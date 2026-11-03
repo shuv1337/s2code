@@ -118,6 +118,7 @@ function publishFixture(
   signing = { mac: false, win: false, unsigned: true },
   /** Other releases GitHub lists ahead of this one. */
   bulkReleases: ReadonlyArray<unknown> = [],
+  runner: Record<string, string> = { RUNNER_ENVIRONMENT: "github-hosted" },
 ) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
@@ -210,7 +211,7 @@ function publishFixture(
           GITHUB_WORKFLOW_REF: `${plan.repository}/.github/workflows/release.yml@${ref}`,
           GITHUB_REF: ref,
           GITHUB_DEFAULT_BRANCH: "main",
-          RUNNER_ENVIRONMENT: "github-hosted",
+          ...runner,
           ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
           ...(npm
@@ -309,6 +310,29 @@ describe("fork publication fixtures", () => {
             : /npm .*publish.*HTTP 401/,
       );
       expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "keeps npm publication hosted-only, even for the shuvbot runner on main",
+    () => {
+      const { result, state } = publishFixture(
+        "resume",
+        "refs/heads/main",
+        true,
+        "preview",
+        {},
+        {},
+        { mac: false, win: false, unsigned: true },
+        [],
+        {
+          RUNNER_ENVIRONMENT: "self-hosted",
+          RUNNER_NAME: "shuvbot-macos",
+          GITHUB_EVENT_NAME: "workflow_dispatch",
+        },
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("GitHub-hosted OIDC with id-token: write is required.");
+      expect(state.commands.some((args) => args[0] === "npm")).toBe(false);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
