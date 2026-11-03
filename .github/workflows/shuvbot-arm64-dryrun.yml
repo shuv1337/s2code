@@ -3,15 +3,24 @@ name: TEMPORARY shuvbot arm64 dry run
 # TEMPORARY: delete this file before the PR that adds it is marked ready.
 # Builds the unsigned macOS arm64 app on the self-hosted shuvbot runner. It does
 # not publish, sign, upload or read secrets, and never runs scripts/fork-release.ts.
+#
+# The dry run is on hold. A push to the branch starts a shuvbot job only when the
+# pushed head commit message carries the opt-in marker named in the job's `if`.
+# There is no workflow_dispatch trigger: a manual run has no head commit, so it
+# could never pass that gate, and a dispatch must not be a way around the hold.
 on:
-  workflow_dispatch:
+  push:
+    branches: [ci/arm64-self-hosted-shuvbot]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    if: github.repository == 'shuv1337/s2code'
+    if: >-
+      github.repository == 'shuv1337/s2code' &&
+      github.event_name == 'push' &&
+      contains(github.event.head_commit.message, '[shuvbot-dryrun]')
     name: Build macOS arm64 (dry run)
     runs-on: [self-hosted, macOS, ARM64, shuvbot-macos]
     timeout-minutes: 45
