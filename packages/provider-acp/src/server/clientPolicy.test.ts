@@ -262,7 +262,36 @@ describe("acpMcpToolApprovalElicitationDisposition", () => {
       ),
       "allow",
     );
+    // Settings MCP servers share the request shape with T3's, so only full access skips the prompt.
+    const autoAcceptEdits: AcpRuntimePolicy = {
+      runtimeMode: "auto-accept-edits",
+      cwd: process.cwd(),
+      approvalPolicy: "never",
+    };
+    const auto: AcpRuntimePolicy = { runtimeMode: "auto", cwd: process.cwd() };
+    for (const [policy, expected] of [
+      [autoAcceptEdits, "ask"],
+      [auto, "ask"],
+      [approvalRequired, "ask"],
+      [fullAccess, "allow"],
+    ] as const) {
+      assert.equal(
+        acpMcpToolApprovalElicitationDisposition(policy, tagged, undefined, true),
+        expected,
+        policy.runtimeMode,
+      );
+    }
+    assert.equal(acpMcpToolApprovalElicitationDisposition(auto, tagged, undefined, false), "allow");
     const { _meta: _tag, ...untagged } = tagged;
+    assert.equal(
+      acpMcpToolApprovalElicitationDisposition(
+        auto,
+        untagged,
+        "mcp_tool_call_approval_exec-123",
+        true,
+      ),
+      "ask",
+    );
     assert.equal(
       acpMcpToolApprovalElicitationDisposition(
         fullAccess,

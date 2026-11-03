@@ -1,4 +1,6 @@
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
@@ -358,6 +360,56 @@ export const OrchestratorMcpUsageLimitsResult = Schema.Struct({
   notices: Schema.Array(TrimmedNonEmptyString),
 });
 export type OrchestratorMcpUsageLimitsResult = typeof OrchestratorMcpUsageLimitsResult.Type;
+
+/**
+ * A time exactly as `Date.prototype.toISOString` writes years 0000-9999, so every peer reads the
+ * same instant and comparing the text orders the times.
+ */
+export const CanonicalIsoDateTime = IsoDateTime.check(
+  Schema.makeFilter(
+    (text: string) =>
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(text) &&
+      Option.exists(DateTime.make(text), (time) => DateTime.formatIso(time) === text),
+  ),
+);
+
+/**
+ * The latest known quota state of one provider account, exchanged between linked environments.
+ * The newest `changedAt` wins, ties broken by the origin's environment id. A spent state with a
+ * `resetAt` no longer counts once that time has passed.
+ */
+export const ProviderAccountUsageLimitRecord = Schema.Struct({
+  account: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  driver: ProviderDriverKind,
+  spent: Schema.Boolean,
+  changedAt: CanonicalIsoDateTime,
+  resetAt: Schema.optionalKey(CanonicalIsoDateTime),
+  origin: Schema.Struct({
+    environmentId: EnvironmentId,
+    label: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  }),
+  message: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))),
+});
+export type ProviderAccountUsageLimitRecord = typeof ProviderAccountUsageLimitRecord.Type;
+
+export const PROVIDER_ACCOUNT_SYNC_MAX_RECORDS = 1_000;
+
+const ProviderAccountUsageLimitRecords = Schema.Array(ProviderAccountUsageLimitRecord).check(
+  Schema.isMaxLength(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS),
+);
+
+export const ProviderAccountSyncInput = Schema.Struct({
+  /** The calling environment; only records it originated are taken from it. */
+  from: EnvironmentId,
+  records: ProviderAccountUsageLimitRecords,
+});
+export type ProviderAccountSyncInput = typeof ProviderAccountSyncInput.Type;
+
+export const ProviderAccountSyncResult = Schema.Struct({
+  environmentId: EnvironmentId,
+  records: ProviderAccountUsageLimitRecords,
+});
+export type ProviderAccountSyncResult = typeof ProviderAccountSyncResult.Type;
 
 export const OrchestratorMcpThreadListInput = Schema.Struct({
   environmentId: OrchestratorMcpEnvironmentTarget,

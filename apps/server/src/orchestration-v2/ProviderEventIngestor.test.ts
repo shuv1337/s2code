@@ -23,6 +23,7 @@ import {
   RunAttemptId,
   RunId,
   RuntimeRequestId,
+  type ServerProvider,
   TurnItemId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -37,6 +38,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlError from "effect/sql/SqlError";
 import * as Stream from "effect/Stream";
 
+import { providerAccountKey } from "@t3tools/shared/providerAccount";
 import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerConfig from "../config.ts";
@@ -235,138 +237,159 @@ function threadCreatedEvent(
 
 const layer = it.layer(layerTest);
 
-it.effect("refreshes usage and auto-disables after a committed exhausted-quota terminal", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const refreshed = yield* Deferred.make<void>();
-      const disabled = yield* Deferred.make<void>();
-      const adapter = yield* ProviderAdapter.ProviderAdapterV2.pipe(
-        Effect.provide(
-          Layer.mock(ProviderAdapter.ProviderAdapterV2)({
-            instanceId: ProviderInstanceId.make("cursor-work"),
-            driver: ProviderDriverKind.make("cursor"),
-          }),
-        ),
-      );
-      const instance: ProviderInstance = {
-        instanceId: ProviderInstanceId.make("cursor-work"),
-        driverKind: ProviderDriverKind.make("cursor"),
-        continuationIdentity: {
+it.effect.each(["readable", "unreadable"] as const)(
+  "refreshes usage and auto-disables after a committed exhausted-quota terminal (%s account)",
+  (accountLookup) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const refreshed = yield* Deferred.make<void>();
+        const disabled = yield* Deferred.make<void>();
+        const adapter = yield* ProviderAdapter.ProviderAdapterV2.pipe(
+          Effect.provide(
+            Layer.mock(ProviderAdapter.ProviderAdapterV2)({
+              instanceId: ProviderInstanceId.make("cursor-work"),
+              driver: ProviderDriverKind.make("cursor"),
+            }),
+          ),
+        );
+        const snapshot: ServerProvider = {
+          instanceId: ProviderInstanceId.make("cursor-work"),
+          driver: ProviderDriverKind.make("cursor"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated", email: "dev@example.test" },
+          checkedAt: "2026-11-03T00:00:00.000Z",
+          models: [],
+          slashCommands: [],
+          skills: [],
+        };
+        const instance: ProviderInstance = {
+          instanceId: ProviderInstanceId.make("cursor-work"),
           driverKind: ProviderDriverKind.make("cursor"),
-          continuationKey: "work",
-        },
-        enabled: true,
-        displayName: undefined,
-        orchestrationAdapter: adapter,
-        textGeneration: {
-          generateBranchName: () => Effect.die("unused"),
-          generateCommitMessage: () => Effect.die("unused"),
-          generatePrContent: () => Effect.die("unused"),
-          generateThreadTitle: () => Effect.die("unused"),
-          generateReviewGuide: () => Effect.die("unused"),
-        },
-        snapshot: {
-          refreshUsage: Deferred.succeed(refreshed, undefined).pipe(Effect.asVoid),
-          getSnapshot: Effect.die("unused"),
-          refresh: Effect.die("unused"),
-          resolveMaintenance: () => Effect.die("unused"),
-          applyUsageLimits: () => Effect.die("unused"),
-          streamChanges: Stream.empty,
-        },
-      };
-      const lookups: ProviderInstanceId[] = [];
-      const instances = Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
-        getInstance: (id) =>
-          Effect.sync(() => {
-            lookups.push(id);
-            return id === instance.instanceId ? instance : undefined;
+          continuationIdentity: {
+            driverKind: ProviderDriverKind.make("cursor"),
+            continuationKey: "work",
+          },
+          enabled: true,
+          displayName: undefined,
+          orchestrationAdapter: adapter,
+          textGeneration: {
+            generateBranchName: () => Effect.die("unused"),
+            generateCommitMessage: () => Effect.die("unused"),
+            generatePrContent: () => Effect.die("unused"),
+            generateThreadTitle: () => Effect.die("unused"),
+            generateReviewGuide: () => Effect.die("unused"),
+          },
+          snapshot: {
+            refreshUsage: Deferred.succeed(refreshed, undefined).pipe(Effect.asVoid),
+            getSnapshot:
+              accountLookup === "readable" ? Effect.succeed(snapshot) : Effect.die("probe crashed"),
+            refresh: Effect.die("unused"),
+            resolveMaintenance: () => Effect.die("unused"),
+            applyUsageLimits: () => Effect.die("unused"),
+            streamChanges: Stream.empty,
+          },
+        };
+        const lookups: ProviderInstanceId[] = [];
+        const instances = Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+          getInstance: (id) =>
+            Effect.sync(() => {
+              lookups.push(id);
+              return id === instance.instanceId ? instance : undefined;
+            }),
+        });
+        const settings = Layer.effect(
+          ServerSettings.ServerSettingsService,
+          Effect.gen(function* () {
+            const service = yield* ServerSettings.ServerSettingsService;
+            return {
+              ...service,
+              updateProviderInstance: (
+                ...args: Parameters<typeof service.updateProviderInstance>
+              ) =>
+                service
+                  .updateProviderInstance(...args)
+                  .pipe(Effect.tap(() => Deferred.succeed(disabled, undefined))),
+            };
           }),
-      });
-      const settings = Layer.effect(
-        ServerSettings.ServerSettingsService,
-        Effect.gen(function* () {
-          const service = yield* ServerSettings.ServerSettingsService;
-          return {
-            ...service,
-            updateProviderInstance: (...args: Parameters<typeof service.updateProviderInstance>) =>
-              service
-                .updateProviderInstance(...args)
-                .pipe(Effect.tap(() => Deferred.succeed(disabled, undefined))),
-          };
-        }),
-      ).pipe(
-        Layer.provide(
-          ServerSettings.layerTest({
-            providerInstances: {
-              [instance.instanceId]: {
-                driver: instance.driverKind,
-                enabled: true,
-                disableOnUsageLimit: true,
+        ).pipe(
+          Layer.provide(
+            ServerSettings.layerTest({
+              providerInstances: {
+                [instance.instanceId]: {
+                  driver: instance.driverKind,
+                  enabled: true,
+                  disableOnUsageLimit: true,
+                },
               },
-            },
-          }),
-        ),
-      );
-      yield* Effect.gen(function* () {
-        const now = yield* DateTime.now;
-        const eventSink = yield* EventSink.EventSinkV2;
-        const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
-        const idAllocator = yield* IdAllocator.IdAllocatorV2;
-        const threadEvent = yield* threadCreatedEvent(now);
-        yield* eventSink.write({ events: [threadEvent] });
-        const input = {
-          providerSessionId: yield* idAllocator.allocate.providerSession({
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const now = yield* DateTime.now;
+          const eventSink = yield* EventSink.EventSinkV2;
+          const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+          const idAllocator = yield* IdAllocator.IdAllocatorV2;
+          const threadEvent = yield* threadCreatedEvent(now);
+          yield* eventSink.write({ events: [threadEvent] });
+          const input = {
+            providerSessionId: yield* idAllocator.allocate.providerSession({
+              providerInstanceId: instance.instanceId,
+              threadId: threadEvent.threadId,
+            }),
             providerInstanceId: instance.instanceId,
             threadId: threadEvent.threadId,
-          }),
-          providerInstanceId: instance.instanceId,
-          threadId: threadEvent.threadId,
-        };
-        for (const failureClass of ["validation_error", "usage_limit"] as const) {
-          const stored = yield* ingestor.ingestNormalized({
-            ...input,
-            event: {
-              type: "turn.terminal",
-              driver: instance.driverKind,
-              providerThreadId: idAllocator.derive.providerThread({
+          };
+          for (const failureClass of ["validation_error", "usage_limit"] as const) {
+            const stored = yield* ingestor.ingestNormalized({
+              ...input,
+              event: {
+                type: "turn.terminal",
                 driver: instance.driverKind,
-                nativeThreadId: "limited",
-              }),
-              providerTurnId: idAllocator.derive.providerTurn({
-                driver: instance.driverKind,
-                nativeTurnId: failureClass,
-              }),
-              runOrdinal: 1,
-              failureItemOrdinal: 1,
-              status: "failed",
-              failure: makeProviderFailure({
-                class: failureClass,
-                message: "Provider rejected turn.",
-                retryable: false,
-              }),
-              threadDisposition: "reusable",
-            },
-          });
-          assert.equal(stored.length, 1);
-          if (failureClass === "validation_error") {
-            assert.deepEqual(lookups, []);
-            assert.isFalse(yield* Deferred.isDone(disabled));
+                providerThreadId: idAllocator.derive.providerThread({
+                  driver: instance.driverKind,
+                  nativeThreadId: "limited",
+                }),
+                providerTurnId: idAllocator.derive.providerTurn({
+                  driver: instance.driverKind,
+                  nativeTurnId: failureClass,
+                }),
+                runOrdinal: 1,
+                failureItemOrdinal: 1,
+                status: "failed",
+                failure: makeProviderFailure({
+                  class: failureClass,
+                  message: "Provider rejected turn.",
+                  retryable: false,
+                }),
+                threadDisposition: "reusable",
+              },
+            });
+            assert.equal(stored.length, 1);
+            if (failureClass === "validation_error") {
+              assert.deepEqual(lookups, []);
+              assert.isFalse(yield* Deferred.isDone(disabled));
+            }
           }
-        }
-        assert.deepEqual(lookups, [instance.instanceId]);
-        yield* Deferred.await(refreshed);
-        yield* Deferred.await(disabled);
-        const service = yield* ServerSettings.ServerSettingsService;
-        const saved = (yield* service.getSettings).providerInstances[instance.instanceId];
-        assert.isFalse(saved?.enabled);
-        assert.isTrue(saved?.disableOnUsageLimit);
-        assert.deepEqual(saved?.usageLimitDisabled, {
-          at: DateTime.formatIso(now),
-          message: "Provider rejected turn.",
-        });
-      }).pipe(Effect.provide(makeLayerTest(layerTestEventSink, instances, settings)));
-    }),
-  ),
+          assert.deepEqual(lookups, [instance.instanceId]);
+          yield* Deferred.await(refreshed);
+          yield* Deferred.await(disabled);
+          const service = yield* ServerSettings.ServerSettingsService;
+          const saved = (yield* service.getSettings).providerInstances[instance.instanceId];
+          assert.isFalse(saved?.enabled);
+          assert.isTrue(saved?.disableOnUsageLimit);
+          const account = accountLookup === "readable" ? providerAccountKey(snapshot) : undefined;
+          if (accountLookup === "readable") assert.isDefined(account);
+          assert.deepEqual(saved?.usageLimitDisabled, {
+            at: DateTime.formatIso(now),
+            message: "Provider rejected turn.",
+            ...(account === undefined ? {} : { account }),
+          });
+        }).pipe(Effect.provide(makeLayerTest(layerTestEventSink, instances, settings)));
+      }),
+    ),
 );
 
 it.effect("records accepted billed turn usage once without billing the context window", () => {

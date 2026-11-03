@@ -66,12 +66,20 @@ describe("disableInstanceOnExhaustedQuota", () => {
       assert.isTrue(
         yield* disableInstanceOnExhaustedQuota(
           optedIn,
-          makeProviderFailure({ class: "usage_limit", message: quotaMessage, retryable: false }),
+          makeProviderFailure({
+            class: "usage_limit",
+            message: quotaMessage,
+            retryable: false,
+            resetAt: "2026-12-01T00:00:00.000Z",
+          }),
+          "account-key",
         ),
       );
       const disabled = yield* instance(optedIn);
       assert.isFalse(disabled?.enabled);
       assert.strictEqual(disabled?.usageLimitDisabled?.message, quotaMessage);
+      assert.strictEqual(disabled?.usageLimitDisabled?.account, "account-key");
+      assert.strictEqual(disabled?.usageLimitDisabled?.resetAt, "2026-12-01T00:00:00.000Z");
       assert.isTrue(disabled?.disableOnUsageLimit);
 
       yield* settings.updateProviderInstance({

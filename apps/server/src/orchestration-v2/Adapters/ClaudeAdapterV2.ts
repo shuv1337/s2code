@@ -1809,6 +1809,16 @@ export function claudeMcpQueryOverrides(input: {
         },
         timeout: CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
       },
+      ...Object.fromEntries(
+        (session.sharedMcpServers ?? []).map((server) => [
+          server.name,
+          {
+            type: "http" as const,
+            url: server.endpoint,
+            headers: { Authorization: session.authorizationHeader },
+          },
+        ]),
+      ),
     },
   };
 }

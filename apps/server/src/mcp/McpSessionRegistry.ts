@@ -1,4 +1,4 @@
-import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { ProviderInstanceId, sharedMcpServerHarnessName, ThreadId } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
@@ -20,7 +20,18 @@ export interface McpCredentialRequest {
   readonly browserToolsAvailable?: boolean;
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
   readonly subagent?: boolean;
+  /** Names of the Settings MCP servers this session reaches through `/mcp/servers/<name>`. */
+  readonly sharedMcpServers?: ReadonlyArray<string>;
 }
+
+export const sharedMcpServersAt = (
+  endpoint: string,
+  names: ReadonlyArray<string>,
+): ReadonlyArray<McpProviderSession.SharedMcpServer> =>
+  names.map((name) => ({
+    name: sharedMcpServerHarnessName(name),
+    endpoint: `${endpoint}/servers/${name}`,
+  }));
 
 export interface McpIssuedCredential {
   readonly config: McpProviderSession.McpProviderSessionConfig;
@@ -134,6 +145,9 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           authorizationHeader: `Bearer ${rawToken}`,
           browserToolsAvailable: scope.capabilities.has("preview"),
           capabilities: scope.capabilities,
+          ...(request.sharedMcpServers === undefined || request.sharedMcpServers.length === 0
+            ? {}
+            : { sharedMcpServers: sharedMcpServersAt(endpoint, request.sharedMcpServers) }),
         },
       };
     },

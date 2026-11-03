@@ -213,6 +213,16 @@ export function cursorMcpServers(
         Authorization: session.authorizationHeader,
       },
     },
+    ...Object.fromEntries(
+      (session.sharedMcpServers ?? []).map((server): [string, McpServerConfig] => [
+        server.name,
+        {
+          type: "http",
+          url: server.endpoint,
+          headers: { Authorization: session.authorizationHeader },
+        },
+      ]),
+    ),
   };
 }
 

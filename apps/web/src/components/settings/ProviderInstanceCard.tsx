@@ -1301,7 +1301,11 @@ export function ProviderInstanceCard({
         {instance.usageLimitDisabled && instance.enabled === false ? (
           <SettingsRow
             title={`Turned off automatically ${formatRelativeTimeLabel(instance.usageLimitDisabled.at)}`}
-            description={instance.usageLimitDisabled.message}
+            description={
+              instance.usageLimitDisabled.reportedBy === undefined
+                ? instance.usageLimitDisabled.message
+                : `Reported by ${instance.usageLimitDisabled.reportedBy}: ${instance.usageLimitDisabled.message}`
+            }
           />
         ) : null}
       </SettingsSection>

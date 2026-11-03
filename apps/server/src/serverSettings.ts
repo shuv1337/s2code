@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  type McpServerId,
   ModelSelection,
   ProjectId,
   ProjectScript,
@@ -255,6 +256,15 @@ export class ServerSettingsService extends Context.Service<
       patch?: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /**
+     * Replaces one instance with `update(current)` under the write lock, so no other write lands
+     * between the read and the write. Returns false, writing nothing, when `update` returns undefined.
+     */
+    readonly modifyProviderInstance: (
+      instanceId: ProviderInstanceId,
+      update: (current: ProviderInstanceConfig | undefined) => ProviderInstanceConfig | undefined,
+    ) => Effect.Effect<boolean, ServerSettingsError>;
+
     readonly withSettingsSnapshot: <A, E, R>(
       use: (settings: ServerSettings) => Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | ServerSettingsError, R>;
@@ -318,6 +328,21 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
           yield* ensureProviderInstanceMutationAllowed(currentSettings, mutation, "test settings");
           const patched = applyServerSettingsPatch(currentSettings, patch);
           return applyProviderInstanceMutation(patched, mutation);
+        }),
+      ),
+    modifyProviderInstance: (instanceId, update) =>
+      writeSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(currentSettingsRef);
+          const instance = update(current.providerInstances[instanceId]);
+          if (instance === undefined) return false;
+          const mutation = { operation: "upsert", instanceId, instance } as const;
+          yield* ensureProviderInstanceMutationAllowed(current, mutation, "test settings");
+          yield* Ref.set(
+            currentSettingsRef,
+            yield* normalizeServerSettings(applyProviderInstanceMutation(current, mutation)),
+          );
+          return true;
         }),
       ),
     withSettingsSnapshot: (use) =>
@@ -1009,6 +1034,31 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  // The token's secret is keyed by URL, so an echoed marker after a move would claim a token it no longer has.
+  const forgetMovedMcpServerTokens = (
+    current: ServerSettings,
+    next: ServerSettings,
+  ): ServerSettings => {
+    let changed = false;
+    const mcpServers = Object.fromEntries(
+      Object.entries(next.mcpServers).map(([id, server]) => {
+        const previous = Object.hasOwn(current.mcpServers, id)
+          ? current.mcpServers[id as McpServerId]
+          : undefined;
+        if (
+          previous === undefined ||
+          previous.url === server.url ||
+          server.bearerToken !== SECRET_REDACTED
+        ) {
+          return [id, server];
+        }
+        changed = true;
+        return [id, { ...server, bearerToken: "" }];
+      }),
+    ) as ServerSettings["mcpServers"];
+    return changed ? { ...next, mcpServers } : next;
+  };
+
   const persistSettingsSecrets = (current: ServerSettings, next: ServerSettings) =>
     Effect.sync(() => {
       const previous = new Map<string, SettingsSecret>();
@@ -1142,73 +1192,107 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /** The settings on disk, for a write about to replace them. Callers hold `writeSemaphore`. */
+  const readForUpdate = Effect.gen(function* () {
+    const { settings: current, parseFailure } = yield* reloadSettings;
+    if (Option.isSome(parseFailure)) {
+      return yield* new ServerSettingsError({
+        settingsPath,
+        operation: "read-file",
+        cause: parseFailure.value,
+      });
+    }
+    return current;
+  });
+
+  /**
+   * Writes `requested` over `current` once the managed policy allows it; `patch` is what the
+   * client sent, if any. Callers hold `writeSemaphore`.
+   */
+  const persistUpdate = Effect.fn("serverSettings.persistUpdate")(function* (
+    current: ServerSettings,
+    requested: ServerSettings,
+    patch: ServerSettingsPatch,
+  ) {
+    // Vet before secrets: a variable the policy hides from clients is not one they removed.
+    const vetted = managed.vetWrite(current, yield* normalizeServerSettings(requested), patch);
+    if (vetted._tag === "Locked") {
+      return yield* new ServerSettingsError({
+        settingsPath,
+        operation: "write-managed-setting",
+        managedSetting: vetted.path,
+        managedBy: managedPolicy?.organization,
+      });
+    }
+    const vettedProviders = managedProviders.vetWrite(current, vetted.settings);
+    if (vettedProviders._tag === "Locked") {
+      return yield* new ServerSettingsError({
+        settingsPath,
+        operation: "write-managed-setting",
+        managedSetting: vettedProviders.path,
+        managedBy: managedPolicy?.organization,
+      });
+    }
+    if (vettedProviders._tag === "Disallowed") {
+      return yield* new ServerSettingsError({
+        settingsPath,
+        operation: "use-disallowed-provider",
+        providerInstanceId: vettedProviders.instanceId,
+        providerLabel: vettedProviders.label,
+        managedBy: managedPolicy?.organization,
+      });
+    }
+    const updated = forgetMovedMcpServerTokens(current, vettedProviders.settings);
+    const persisted = yield* persistSettingsSecrets(current, updated);
+    const next = yield* normalizeServerSettings(persisted.settings);
+    const materializedNext = yield* Effect.uninterruptibleMask(() =>
+      Effect.gen(function* () {
+        yield* invalidateMaterialized;
+        const rollbackSecretChanges = yield* applySettingsSecretChanges(persisted.changes);
+        const materializedExit = yield* Effect.exit(materializeSettingsSecrets(next));
+        if (Exit.isFailure(materializedExit)) {
+          yield* rollbackSecretChanges;
+          return yield* Effect.failCause(materializedExit.cause);
+        }
+        const writeExit = yield* Effect.exit(writeSettingsAtomically(next));
+        if (Exit.isFailure(writeExit)) {
+          yield* rollbackSecretChanges;
+          return yield* Effect.failCause(writeExit.cause);
+        }
+        return materializedExit.value;
+      }).pipe(Effect.ensuring(invalidateMaterialized)),
+    );
+    yield* Cache.set(settingsCache, cacheKey, { settings: next, parseFailure: Option.none() });
+    const resolved = toEffective(materializedNext);
+    materialized = { source: next, value: resolved };
+    yield* emitChange(next);
+    return resolved;
+  });
+
   const updateAndPersistSettings = (
     patch: ServerSettingsPatch,
     update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
-        const { settings: current, parseFailure } = yield* reloadSettings;
-        if (Option.isSome(parseFailure)) {
-          return yield* new ServerSettingsError({
-            settingsPath,
-            operation: "read-file",
-            cause: parseFailure.value,
-          });
-        }
-        const updated = yield* update(current);
-        // Vet before secrets: a variable the policy hides from clients is not one they removed.
-        const vetted = managed.vetWrite(current, yield* normalizeServerSettings(updated), patch);
-        if (vetted._tag === "Locked") {
-          return yield* new ServerSettingsError({
-            settingsPath,
-            operation: "write-managed-setting",
-            managedSetting: vetted.path,
-            managedBy: managedPolicy?.organization,
-          });
-        }
-        const vettedProviders = managedProviders.vetWrite(current, vetted.settings);
-        if (vettedProviders._tag === "Locked") {
-          return yield* new ServerSettingsError({
-            settingsPath,
-            operation: "write-managed-setting",
-            managedSetting: vettedProviders.path,
-            managedBy: managedPolicy?.organization,
-          });
-        }
-        if (vettedProviders._tag === "Disallowed") {
-          return yield* new ServerSettingsError({
-            settingsPath,
-            operation: "use-disallowed-provider",
-            providerInstanceId: vettedProviders.instanceId,
-            providerLabel: vettedProviders.label,
-            managedBy: managedPolicy?.organization,
-          });
-        }
-        const persisted = yield* persistSettingsSecrets(current, vettedProviders.settings);
-        const next = yield* normalizeServerSettings(persisted.settings);
-        const materializedNext = yield* Effect.uninterruptibleMask(() =>
-          Effect.gen(function* () {
-            yield* invalidateMaterialized;
-            const rollbackSecretChanges = yield* applySettingsSecretChanges(persisted.changes);
-            const materializedExit = yield* Effect.exit(materializeSettingsSecrets(next));
-            if (Exit.isFailure(materializedExit)) {
-              yield* rollbackSecretChanges;
-              return yield* Effect.failCause(materializedExit.cause);
-            }
-            const writeExit = yield* Effect.exit(writeSettingsAtomically(next));
-            if (Exit.isFailure(writeExit)) {
-              yield* rollbackSecretChanges;
-              return yield* Effect.failCause(writeExit.cause);
-            }
-            return materializedExit.value;
-          }).pipe(Effect.ensuring(invalidateMaterialized)),
-        );
-        yield* Cache.set(settingsCache, cacheKey, { settings: next, parseFailure: Option.none() });
-        const resolved = toEffective(materializedNext);
-        materialized = { source: next, value: resolved };
-        yield* emitChange(next);
-        return resolved;
+        const current = yield* readForUpdate;
+        return yield* persistUpdate(current, yield* update(current), patch);
+      }),
+    );
+
+  const modifyProviderInstance: ServerSettingsService["Service"]["modifyProviderInstance"] = (
+    instanceId,
+    update,
+  ) =>
+    writeSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* readForUpdate;
+        const instance = update(current.providerInstances[instanceId]);
+        if (instance === undefined) return false;
+        const mutation = { operation: "upsert", instanceId, instance } as const;
+        yield* ensureProviderInstanceMutationAllowed(current, mutation, settingsPath);
+        yield* persistUpdate(current, applyProviderInstanceMutation(current, mutation), {});
+        return true;
       }),
     );
 
@@ -1335,6 +1419,7 @@ const make = Effect.gen(function* () {
           return applyProviderInstanceMutation(patched, mutation);
         }),
       ),
+    modifyProviderInstance,
     withSettingsSnapshot,
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));

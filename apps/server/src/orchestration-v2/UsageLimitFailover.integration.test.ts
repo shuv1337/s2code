@@ -268,7 +268,9 @@ const makeProviderInstance = (
     },
     displayName: undefined,
     enabled: true,
-    snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
+    snapshot: {
+      getSnapshot: Effect.succeed(serverProvider(instanceId, member, true)),
+    } as unknown as ProviderInstance["snapshot"],
     orchestrationAdapter: adapter,
     textGeneration: {} as ProviderInstance["textGeneration"],
   };

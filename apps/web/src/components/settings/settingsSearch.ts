@@ -30,6 +30,7 @@ export type SettingsPath =
   | "/settings/voice"
   | "/settings/browser"
   | "/settings/devices"
+  | "/settings/mcp-servers"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/worktrees"
@@ -101,6 +102,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/voice": "Voice",
   "/settings/browser": "Browser",
   "/settings/devices": "Devices",
+  "/settings/mcp-servers": "MCP servers",
   "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/source-control": "Source control",
   "/settings/worktrees": "Worktrees",
@@ -137,6 +139,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
       "/settings/voice",
       "/settings/browser",
       "/settings/devices",
+      "/settings/mcp-servers",
       "/settings/scheduled-tasks",
     ],
   },
@@ -885,6 +888,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["simulator support xcode android studio sdk avd runtime"],
   },
   {
+    id: "mcp-servers",
+    title: "MCP servers",
+    to: "/settings/mcp-servers",
+    searchTerms: [
+      "remote mcp model context protocol tool servers url bearer token executor agents add remove test",
+    ],
+  },
+  {
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/browser",
@@ -1218,6 +1229,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/voice": "environment",
   "/settings/browser": null,
   "/settings/devices": null,
+  "/settings/mcp-servers": null,
   "/settings/source-control": "environment-defaults",
   "/settings/worktrees": "project-defaults",
   "/settings/connections": "connections",

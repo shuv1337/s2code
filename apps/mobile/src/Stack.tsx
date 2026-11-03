@@ -102,6 +102,10 @@ import { SettingsEnvironmentDetailRouteScreen } from "./features/settings/Settin
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
 import { SettingsFollowUpRouteScreen } from "./features/settings/SettingsFollowUpRouteScreen";
 import {
+  SettingsMcpServerEditRouteScreen,
+  SettingsMcpServersRouteScreen,
+} from "./features/settings/SettingsMcpServersRouteScreen";
+import {
   SettingsEnvironmentMaintenanceRouteScreen,
   SettingsThreadsRouteScreen,
   SettingsWorktreesRouteScreen,
@@ -256,6 +260,15 @@ const SETTINGS_SCREENS = {
     screen: SettingsEnvironmentDetailRouteScreen,
     linking: "settings/environments/:environmentId",
     options: { ...SETTINGS_PAGE_OPTIONS, title: "Environment" },
+  }),
+  SettingsMcpServers: createNativeStackScreen({
+    screen: SettingsMcpServersRouteScreen,
+    linking: "settings/environments/:environmentId/mcp-servers",
+    options: { ...SETTINGS_PAGE_OPTIONS, title: "MCP servers" },
+  }),
+  SettingsMcpServerEdit: createNativeStackScreen({
+    screen: SettingsMcpServerEditRouteScreen,
+    options: { ...SETTINGS_PAGE_OPTIONS, title: "MCP server" },
   }),
   // Old links to New threads and Agent behavior open Threads, which absorbed them.
   SettingsEnvironmentNewThreads: createNativeStackScreen({

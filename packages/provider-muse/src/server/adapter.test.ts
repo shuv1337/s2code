@@ -387,30 +387,48 @@ vi.mock("node:fs/promises", { spy: true });
 describe("MuseAdapterV2", () => {
   it.effect("connects the thread's MCP credential on native start and resume", () =>
     Effect.gen(function* () {
-      yield* (yield* McpProviderSessions.McpProviderSessions).set({
-        environmentId: EnvironmentId.make("test-environment"),
-        threadId: THREAD_ID,
-        providerSessionId: "test-session",
-        providerInstanceId: INSTANCE_ID,
-        endpoint: "http://127.0.0.1:43210/mcp",
-        authorizationHeader: "Bearer thread-scoped-test-token",
-        browserToolsAvailable: true,
-      });
-      for (const nativeId of [undefined, "saved-native-session"]) {
-        const fake = yield* makeFakeMuse();
-        fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
-        yield* makeHarness(fake, INSTANCE_ID, nativeId);
-        const call = yield* fake.takeCall(nativeId ? "session/resume" : "session/start");
-        assert.deepStrictEqual(call.params.config, {
-          mcpServers: {
-            "t3-code": {
+      for (const [sharedMcpServers, sharedConfig] of [
+        [undefined, {}],
+        [[], {}],
+        [
+          [{ name: "executor", endpoint: "http://127.0.0.1:43210/mcp/servers/executor" }],
+          {
+            executor: {
               transport: "streamableHttp",
               mode: "optional",
-              url: "http://127.0.0.1:43210/mcp",
+              url: "http://127.0.0.1:43210/mcp/servers/executor",
               headers: { Authorization: "Bearer thread-scoped-test-token" },
             },
           },
+        ],
+      ] as const) {
+        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+          environmentId: EnvironmentId.make("test-environment"),
+          threadId: THREAD_ID,
+          providerSessionId: "test-session",
+          providerInstanceId: INSTANCE_ID,
+          endpoint: "http://127.0.0.1:43210/mcp",
+          authorizationHeader: "Bearer thread-scoped-test-token",
+          browserToolsAvailable: true,
+          ...(sharedMcpServers === undefined ? {} : { sharedMcpServers }),
         });
+        for (const nativeId of [undefined, "saved-native-session"]) {
+          const fake = yield* makeFakeMuse();
+          fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+          yield* makeHarness(fake, INSTANCE_ID, nativeId);
+          const call = yield* fake.takeCall(nativeId ? "session/resume" : "session/start");
+          assert.deepStrictEqual(call.params.config, {
+            mcpServers: {
+              "t3-code": {
+                transport: "streamableHttp",
+                mode: "optional",
+                url: "http://127.0.0.1:43210/mcp",
+                headers: { Authorization: "Bearer thread-scoped-test-token" },
+              },
+              ...sharedConfig,
+            },
+          });
+        }
       }
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );

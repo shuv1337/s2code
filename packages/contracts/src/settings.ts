@@ -863,6 +863,23 @@ export const UsageLimitSourceConfig = Schema.Struct({
 });
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 
+/** Names starting with "t3" are reserved for T3 Code's own server. */
+export const McpServerId = Schema.String.check(
+  Schema.isPattern(/^(?!t3)[a-z][a-z0-9-]{0,23}$/),
+).pipe(Schema.brand("McpServerId"));
+export type McpServerId = typeof McpServerId.Type;
+
+/** The name harnesses and agents see; the prefix keeps it from replacing a server configured in the harness. */
+export const sharedMcpServerHarnessName = (id: string) => `shared-${id}`;
+
+export const McpServerConfig = Schema.Struct({
+  label: Schema.optional(TrimmedNonEmptyString),
+  url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/./i)),
+  bearerToken: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("")), secretSetting),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+});
+export type McpServerConfig = typeof McpServerConfig.Type;
+
 export const SecretProviderKind = SecretProviderSlug.pipe(Schema.brand("SecretProviderKind"));
 export type SecretProviderKind = typeof SecretProviderKind.Type;
 
@@ -1363,6 +1380,10 @@ export const ServerSettings = Schema.Struct({
   secretProviders: Schema.Record(SecretProviderId, SecretProviderConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  // Remote MCP servers every agent here gets, proxied so credentials stay on this server.
+  mcpServers: Schema.Record(McpServerId, McpServerConfig).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   cursorKeychainUsageEnabled: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1708,6 +1729,8 @@ export const ServerSettingsPatch = Schema.Struct({
   secretProviders: Schema.optionalKey(
     Schema.Record(SecretProviderId, Schema.NullOr(SecretProviderConfigWrite)),
   ),
+  // Merge per server; null removes one.
+  mcpServers: Schema.optionalKey(Schema.Record(McpServerId, Schema.NullOr(McpServerConfig))),
   cursorKeychainUsageEnabled: Schema.optionalKey(Schema.Boolean),
 
   usagePriceOverrides: Schema.optionalKey(
@@ -1731,7 +1754,9 @@ export function requiredScopesForServerSettingsPatch(
       key === "providers" ||
       key === "providerInstances" ||
       key === "usageLimitSources" ||
-      key === "secretProviders"
+      key === "secretProviders" ||
+      // Full-access agents hold settings:write; they must not grant agents new tool servers.
+      key === "mcpServers"
     ) {
       changesProviders = true;
     } else {

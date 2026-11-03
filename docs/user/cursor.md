@@ -56,6 +56,19 @@ also runs out, the thread stops so you can choose. Messages sent later to a turn
 a healthy one. Short rate limits do not count, and accounts you turned off yourself are left alone.
 Turn an instance back on yourself after its quota resets.
 
+With **Linked environments** on in **Settings → Labs** on both machines and a full-access link
+between them, linked machines share which pool accounts are spent. An account turned off at its
+usage limit on one machine is also turned off in the other machine's pool, and turning it back on
+on either machine turns it back on on the other. While the account is still spent, a pool instance
+you add, turn on, or sign in to it later is turned off too. Turn it on again to keep it on, which
+also marks the account available on the linked machines. A change on the
+machine you linked to can take about a minute to arrive. Only machines linked to each other share:
+a machine does not pass on what it learned from a third. When the provider reports when a quota
+resets, the account stops counting as spent on the other machines after that time. Accounts are
+matched by the signed-in account, so the instances do not need the same names. Accounts you turned
+off yourself stay as they are, and an account without a known email, such as some API keys, is not
+shared.
+
 ## V2 Capability Mapping
 
 The adapter supports:

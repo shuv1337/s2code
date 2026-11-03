@@ -1405,6 +1405,12 @@ function codexThreadRuntimeParams(input: {
               enabled_tools: [CODEX_DIRECT_ONLY_T3_TOOL],
               omit_tools_from: ["code_mode", "deferred"],
             },
+            ...Object.fromEntries(
+              (mcpSession?.sharedMcpServers ?? []).map((server) => [
+                `mcp_servers.${server.name}`,
+                { url: server.endpoint, http_headers: t3Server.http_headers },
+              ]),
+            ),
           }),
     },
   };

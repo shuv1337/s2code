@@ -4024,6 +4024,9 @@ describe("AcpAdapterV2", () => {
         endpoint: "http://127.0.0.1:43123/mcp",
         authorizationHeader: "Bearer target-thread-token",
         browserToolsAvailable: true,
+        sharedMcpServers: [
+          { name: "executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+        ],
       });
       const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
         runtimeMode: "full-access",
@@ -4050,6 +4053,22 @@ describe("AcpAdapterV2", () => {
         modelSelection,
         runtimePolicy,
       });
+      const newSessionEvent = Option.getOrThrow(
+        yield* Stream.fromQueue(protocolEvents).pipe(
+          Stream.filter(
+            (event) => event.direction === "outgoing" && rawProtocolMethod(event) === "session/new",
+          ),
+          Stream.runHead,
+        ),
+      );
+      assert.deepEqual(
+        (
+          rawProtocolRequestParam(newSessionEvent, "mcpServers") as ReadonlyArray<{
+            readonly name: string;
+          }>
+        ).map((server) => server.name),
+        ["t3-code"],
+      );
       const forkedProviderThread = yield* runtime.forkThread({
         sourceProviderThread,
         targetThreadId,
@@ -4086,6 +4105,23 @@ describe("AcpAdapterV2", () => {
             env: [
               { name: "ELECTRON_RUN_AS_NODE", value: "1" },
               { name: "T3_ACP_MCP_ENDPOINT", value: "http://127.0.0.1:43123/mcp" },
+              { name: "T3_ACP_MCP_AUTHORIZATION", value: "Bearer target-thread-token" },
+            ],
+          },
+          {
+            type: "stdio",
+            name: "executor",
+            command: process.execPath,
+            args: [
+              process.argv[1] === undefined ? "t3" : NodePath.resolve(process.argv[1]),
+              "acp-mcp-bridge",
+            ],
+            env: [
+              { name: "ELECTRON_RUN_AS_NODE", value: "1" },
+              {
+                name: "T3_ACP_MCP_ENDPOINT",
+                value: "http://127.0.0.1:43123/mcp/servers/executor",
+              },
               { name: "T3_ACP_MCP_AUTHORIZATION", value: "Bearer target-thread-token" },
             ],
           },
@@ -4544,6 +4580,9 @@ describe("AcpAdapterV2", () => {
         endpoint: "http://127.0.0.1:43124/mcp",
         authorizationHeader: "Bearer rollback-target-token",
         browserToolsAvailable: false,
+        sharedMcpServers: [
+          { name: "executor", endpoint: "http://127.0.0.1:43124/mcp/servers/executor" },
+        ],
       });
       const runtimeInputs: Array<AcpAdapterV2RuntimeInput> = [];
       const makeRuntime = makeMockRuntime({
@@ -4637,6 +4676,14 @@ describe("AcpAdapterV2", () => {
         runtimeInputs[1]?.processEnvironment?.T3_ACP_MCP_AUTHORIZATION,
         "Bearer rollback-target-token",
       );
+      assert.equal(
+        runtimeInputs[1]?.processEnvironment?.T3_ACP_MCP_ENDPOINT,
+        "http://127.0.0.1:43124/mcp",
+      );
+      assert.deepEqual(runtimeInputs[1]?.acpMcpServers, [
+        { type: "acp", name: "t3-code", serverId: "t3-code" },
+        { type: "acp", name: "executor", serverId: "executor" },
+      ]);
       const replacementMcpServer = runtimeInputs[1]?.mcpServers[0];
       const replacementMcpEnvironment =
         replacementMcpServer !== undefined &&
@@ -5762,6 +5809,86 @@ describe("AcpAdapterV2", () => {
 
       assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
       assert.isTrue(events.some((event) => event.type === "turn.terminal"));
+    }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
+  it.live("keeps asking for MCP elicitations after the registry drops shared servers", () =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const path = yield* Path.Path;
+      const selfInvocation = yield* resolveSelfInvocation();
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const instanceId = ProviderInstanceId.make("acp-test-mcp-shared-elicitation");
+      const adapter = yield* makeAcpAdapterV2({
+        instanceId,
+        flavor: {
+          driver: ACP_TEST_DRIVER,
+          capabilities: AcpProviderCapabilitiesV2,
+          makeRuntime: makeMockRuntime({
+            childProcessSpawner,
+            mockAgentPath,
+            environment: { T3_ACP_EMIT_MCP_TOOL_APPROVAL_ELICITATION: "1" },
+          }),
+        },
+        selfInvocation,
+      });
+      const threadId = ThreadId.make("thread-acp-mcp-shared-elicitation");
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      const mcpSession = {
+        environmentId: EnvironmentId.make("environment-acp-mcp-shared-elicitation"),
+        threadId,
+        providerSessionId: "mcp-session-acp-mcp-shared-elicitation",
+        providerInstanceId: instanceId,
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer shared-elicitation-token",
+        browserToolsAvailable: true,
+      };
+      yield* mcpSessions.set({
+        ...mcpSession,
+        sharedMcpServers: [
+          { name: "shared-executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+        ],
+      });
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "auto",
+        interactionMode: "default",
+        cwd: process.cwd(),
+      });
+      const modelSelection = { instanceId, model: "default" } as const;
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-acp-mcp-shared-elicitation"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      // A re-attach refreshes the registry from Settings; the running agent still has the server.
+      yield* mcpSessions.set(mcpSession);
+      yield* runtime.startTurn(
+        makeTurnInput({
+          threadId,
+          providerThread,
+          instanceId,
+          runtimePolicy,
+          now: yield* DateTime.now,
+        }),
+      );
+      const events = Array.from(
+        yield* runtime.events.pipe(
+          Stream.takeUntil(
+            (event) => event.type === "runtime_request.updated" || event.type === "turn.terminal",
+          ),
+          Stream.runCollect,
+        ),
+      );
+
+      assert.strictEqual(events.at(-1)?.type, "runtime_request.updated");
     }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 

@@ -17,6 +17,7 @@ interface JsonRpcEnvelope {
 }
 
 interface Connection {
+  readonly endpoint: string;
   readonly mutex: Semaphore.Semaphore;
   sessionId: string | null;
   protocolVersion: string | null;
@@ -56,7 +57,8 @@ function errorMessage(error: unknown): string {
 }
 
 export interface AcpMcpOverAcpBridgeOptions {
-  readonly endpoint: string;
+  /** Keyed by ACP `serverId`; every endpoint accepts the same session authorization. */
+  readonly endpoints: ReadonlyMap<string, string>;
   readonly authorization: string;
   readonly allocateConnectionId: Effect.Effect<string>;
   readonly fetchImplementation?: (url: string, init?: RequestInit) => Promise<Response>;
@@ -111,7 +113,7 @@ export const makeAcpMcpOverAcpBridge = Effect.fn("AcpMcpOverAcpBridge.make")(fun
         }
         const response = yield* Effect.tryPromise({
           try: (signal) =>
-            fetchImplementation(options.endpoint, {
+            fetchImplementation(connection.endpoint, {
               method: "POST",
               signal,
               headers: {
@@ -155,7 +157,7 @@ export const makeAcpMcpOverAcpBridge = Effect.fn("AcpMcpOverAcpBridge.make")(fun
     if (sessionId !== null) {
       const response = yield* Effect.tryPromise({
         try: (signal) =>
-          fetchImplementation(options.endpoint, {
+          fetchImplementation(connection.endpoint, {
             method: "DELETE",
             signal,
             headers: {
@@ -184,7 +186,8 @@ export const makeAcpMcpOverAcpBridge = Effect.fn("AcpMcpOverAcpBridge.make")(fun
 
   return {
     connect: Effect.fn("mcpOverAcpBridge.connect")(function* (request) {
-      if (request.serverId !== "t3-code") {
+      const endpoint = options.endpoints.get(request.serverId);
+      if (endpoint === undefined) {
         return yield* Effect.fail(
           new AcpMcpOverAcpError(`Unknown ACP MCP server "${request.serverId}".`),
         );
@@ -194,6 +197,7 @@ export const makeAcpMcpOverAcpBridge = Effect.fn("AcpMcpOverAcpBridge.make")(fun
       }
       const connectionId = yield* options.allocateConnectionId;
       connections.set(connectionId, {
+        endpoint,
         mutex: yield* Semaphore.make(1),
         sessionId: null,
         protocolVersion: null,

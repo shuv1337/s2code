@@ -31,6 +31,10 @@
       "types": "./src/handoff.ts",
       "default": "./src/handoff.ts"
     },
+    "./mcp-server-token": {
+      "types": "./src/mcpServerToken.ts",
+      "default": "./src/mcpServerToken.ts"
+    },
     "./device/stream": {
       "types": "./src/device/stream.ts",
       "default": "./src/device/stream.ts"
