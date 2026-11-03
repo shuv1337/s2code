@@ -111,7 +111,11 @@ Unlinking on the linking side only forgets the token.
   just after the state it replaces, so a user's re-enable beats the state they
   saw whatever the clocks say. Applying a received state never stamps a new
   one: the settings watcher skips the re-enables an apply made, and counts any
-  other re-enable as the user's only while the stored state is spent.
+  other re-enable as the user's only while the stored state is spent. A reset
+  is applied once, but a spent state is checked again whenever a pool member's
+  signed-in account changes, remembering per member what it was checked as, so
+  a member seen off and then on is the user's and stays on. Applies write
+  through `modifyProviderInstance`, so an edit saved while one decides is kept.
 
 **Work a link paired below full access starts stays within that link.** The
 receiving environment knows a session is a peer link because the linking side

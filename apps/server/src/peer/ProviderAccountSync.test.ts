@@ -90,6 +90,7 @@ const makeHost = Effect.fn(function* (input: {
   const providers = yield* Ref.make(input.providers);
   const providerChanges = yield* PubSub.unbounded<ReadonlyArray<ServerProvider>>({ replay: 1 });
   const watched = yield* Latch.make(true);
+  const beforeNextProviders = yield* Ref.make<Effect.Effect<void>>(Effect.void);
 
   const layerSettings = Layer.effect(
     ServerSettingsModule.ServerSettingsService,
@@ -107,6 +108,10 @@ const makeHost = Effect.fn(function* (input: {
         updateSettings: (patch) => published(base.updateSettings(patch)),
         updateProviderInstance: (mutation, patch) =>
           published(base.updateProviderInstance(mutation, patch)),
+        modifyProviderInstance: (instanceId, update) =>
+          base
+            .modifyProviderInstance(instanceId, update)
+            .pipe(Effect.tap((wrote) => (wrote ? published(base.getSettings) : Effect.void))),
         streamChanges: Stream.fromPubSub(changes),
         subscribeChanges: PubSub.subscribe(changes).pipe(
           Effect.map((subscription) =>
@@ -192,7 +197,10 @@ const makeHost = Effect.fn(function* (input: {
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Ref.get(providers),
+          getProviders: Ref.getAndSet(beforeNextProviders, Effect.void).pipe(
+            Effect.flatten,
+            Effect.andThen(Ref.get(providers)),
+          ),
           streamChanges: Stream.fromPubSub(providerChanges),
         }),
         Layer.succeed(ServerEnvironment.ServerEnvironment, {
@@ -229,6 +237,9 @@ const makeHost = Effect.fn(function* (input: {
         .pipe(Effect.orDie),
     setProviders: (next: ReadonlyArray<ServerProvider>) =>
       Ref.set(providers, next).pipe(Effect.andThen(PubSub.publish(providerChanges, next))),
+    /** Runs `edit` while the next apply is deciding, after it read settings and before it writes. */
+    duringNextApply: (edit: Effect.Effect<unknown>) =>
+      Ref.set(beforeNextProviders, Effect.asVoid(edit)),
     /** Waits for the next sync to begin, which follows every record made here. */
     nextSync: Queue.take(syncs),
     /** Waits for the next call to the peer to finish. */
@@ -322,6 +333,68 @@ it.effect("a spent account turns off only that account's pool members on the lin
     yield* a.sync.syncNow;
     expect(yield* b.instance("cursor_off")).toEqual(pooled);
   }),
+);
+
+it.effect("an apply leaves what the user saved while it was deciding, except the quota", () =>
+  Effect.gen(function* () {
+    const { a, b } = yield* linkedHosts({
+      b: { cursor_b: pooled, cursor_b2: pooled },
+      bProviders: [providerFor("cursor_b"), providerFor("cursor_b2")],
+    });
+    yield* b.duringNextApply(
+      Effect.all([
+        b.write("cursor_b", { ...pooled, displayName: "Renamed" }),
+        b.write("cursor_b2", { ...pooled, enabled: false }),
+      ]),
+    );
+
+    yield* spendOn(a, "cursor_a");
+    yield* a.nextExchange;
+
+    expect(yield* b.instance("cursor_b")).toEqual({
+      ...pooled,
+      displayName: "Renamed",
+      enabled: false,
+      usageLimitDisabled: { ...spentNote(), reportedBy: "Host A" },
+    });
+    expect(yield* b.instance("cursor_b2")).toEqual({ ...pooled, enabled: false });
+  }),
+);
+
+it.effect(
+  "a pool member signed in to a spent account later, or added later, is turned off unless the user turns it on",
+  () =>
+    Effect.gen(function* () {
+      const { a, b } = yield* linkedHosts({
+        b: { cursor_b: pooled },
+        bProviders: [providerFor("cursor_b", { status: "authenticated", email: OTHER_EMAIL })],
+      });
+      yield* spendOn(a, "cursor_a");
+      yield* a.nextExchange;
+      expect(yield* b.instance("cursor_b")).toEqual(pooled);
+
+      const reported = { enabled: false, usageLimitDisabled: { reportedBy: "Host A" } };
+      yield* b.setProviders([providerFor("cursor_b")]);
+      // An exchange applies what is known, so once it returns the sign-in has been handled.
+      yield* b.records;
+      expect(yield* b.instance("cursor_b")).toMatchObject(reported);
+
+      yield* b.write("cursor_new", pooled);
+      yield* b.setProviders([providerFor("cursor_b"), providerFor("cursor_new")]);
+      yield* b.records;
+      expect(yield* b.instance("cursor_new")).toMatchObject(reported);
+
+      yield* b.write("cursor_mine", { ...pooled, enabled: false });
+      yield* b.setProviders([
+        providerFor("cursor_b"),
+        providerFor("cursor_new"),
+        providerFor("cursor_mine"),
+      ]);
+      yield* b.records;
+      yield* b.write("cursor_mine", pooled);
+      yield* b.records;
+      expect(yield* b.instance("cursor_mine")).toEqual(pooled);
+    }),
 );
 
 it.effect("a re-enable on the linked host turns the account back on here, and then settles", () =>

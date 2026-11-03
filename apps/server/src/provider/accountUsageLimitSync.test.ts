@@ -13,9 +13,11 @@ import { providerAccountKey } from "@t3tools/shared/providerAccount";
 
 import {
   applyRecord,
+  applyToInstance,
   localChangeTime,
   localSpentNotes,
   localTransitions,
+  type RecordChange,
   supersedes,
 } from "./accountUsageLimitSync.ts";
 
@@ -245,6 +247,104 @@ describe("localTransitions", () => {
   });
 });
 
+describe("applyToInstance", () => {
+  const note = (account: string, at: string, reportedBy?: string) => ({
+    at,
+    message: "Usage limit reached.",
+    account,
+    ...(reportedBy === undefined ? {} : { reportedBy }),
+  });
+  const reset = record({ spent: false });
+  it.each<
+    [
+      string,
+      ProviderAccountUsageLimitRecord,
+      RecordChange,
+      ProviderInstanceConfig | undefined,
+      ProviderInstanceConfig | undefined,
+    ]
+  >([
+    [
+      "turns off a pool member and keeps its other settings",
+      record({ message: "Team quota spent." }),
+      "disable",
+      pooled({ displayName: "Cursor-1" }),
+      pooled({
+        displayName: "Cursor-1",
+        enabled: false,
+        usageLimitDisabled: {
+          at: T1,
+          message: "Team quota spent.",
+          account: work,
+          reportedBy: "Laptop",
+        },
+      }),
+    ],
+    [
+      "falls back to a default message",
+      record(),
+      "disable",
+      pooled(),
+      pooled({ enabled: false, usageLimitDisabled: note(work, T1, "Laptop") }),
+    ],
+    [
+      "leaves a member the user turned off",
+      record(),
+      "disable",
+      pooled({ enabled: false }),
+      undefined,
+    ],
+    [
+      "leaves a member with a quota note",
+      record(),
+      "disable",
+      pooled({ usageLimitDisabled: note(work, T0) }),
+      undefined,
+    ],
+    [
+      "leaves an instance outside the pool",
+      record(),
+      "disable",
+      { driver: cursor, enabled: true },
+      undefined,
+    ],
+    ["leaves another driver's instance", record(), "disable", pooled({ driver: codex }), undefined],
+    ["leaves a removed instance", record(), "disable", undefined, undefined],
+    [
+      "turns back on what an older note turned off",
+      reset,
+      "enable",
+      pooled({ enabled: false, usageLimitDisabled: note(work, T0) }),
+      pooled(),
+    ],
+    [
+      "turns back on what a note as old as the reset turned off",
+      reset,
+      "enable",
+      pooled({ enabled: false, usageLimitDisabled: note(work, T1, "VPS") }),
+      pooled(),
+    ],
+    [
+      "leaves a newer note",
+      reset,
+      "enable",
+      pooled({ enabled: false, usageLimitDisabled: note(work, T2) }),
+      undefined,
+    ],
+    [
+      "leaves another account's note",
+      reset,
+      "enable",
+      pooled({ enabled: false, usageLimitDisabled: note(personal, T0) }),
+      undefined,
+    ],
+    ["leaves a member the user turned off", reset, "enable", pooled({ enabled: false }), undefined],
+    ["leaves a member that is on", reset, "enable", pooled(), undefined],
+  ])("%s", (_name, next, change, instance, expected) => {
+    expect(applyToInstance(next, change, instance)).toEqual(expected);
+  });
+});
+
 describe("applyRecord", () => {
   it("turns off only enabled pool members signed in to the spent account", () => {
     const instances: ProviderInstanceConfigMap = {
@@ -265,52 +365,18 @@ describe("applyRecord", () => {
       snapshot("personal", auth("personal@example.test")),
       snapshot("codex", auth("work@example.test"), codex),
     ];
-    const note = {
-      at: T1,
-      message: "Team quota spent.",
-      account: work,
-      reportedBy: "Laptop",
-    };
-    expect(
-      applyRecord({ record: record({ message: "Team quota spent." }), self, instances, providers }),
-    ).toEqual({
-      writes: [
-        {
-          instanceId: id("work_a"),
-          instance: { ...instances[id("work_a")], enabled: false, usageLimitDisabled: note },
-        },
-        {
-          instanceId: id("work_b"),
-          instance: { ...instances[id("work_b")], enabled: false, usageLimitDisabled: note },
-        },
+    expect(applyRecord({ record: record(), self, instances, providers, checked: {} })).toEqual({
+      changes: [
+        { instanceId: id("work_a"), change: "disable" },
+        { instanceId: id("work_b"), change: "disable" },
       ],
-      settled: true,
+      checked: {
+        [id("work_a")]: work,
+        [id("work_b")]: work,
+        [id("work_off")]: "off",
+        [id("personal")]: personal,
+      },
     });
-  });
-
-  it("leaves instances that already carry a quota note alone", () => {
-    const noted = pooled({
-      enabled: true,
-      usageLimitDisabled: { at: T0, message: "Old.", account: work },
-    });
-    expect(
-      applyRecord({
-        record: record(),
-        self,
-        instances: { [id("a")]: noted },
-        providers: [snapshot("a", auth("work@example.test"))],
-      }),
-    ).toEqual({ writes: [], settled: true });
-  });
-
-  it("falls back to a default message", () => {
-    const { writes } = applyRecord({
-      record: record(),
-      self,
-      instances: { [id("a")]: pooled() },
-      providers: [snapshot("a", auth("work@example.test"))],
-    });
-    expect(writes[0]?.instance.usageLimitDisabled?.message).toBe("Usage limit reached.");
   });
 
   it("ignores records that originated here", () => {
@@ -320,72 +386,70 @@ describe("applyRecord", () => {
         self,
         instances: { [id("a")]: pooled() },
         providers: [snapshot("a", auth("work@example.test"))],
+        checked: {},
       }),
-    ).toEqual({ writes: [], settled: true });
+    ).toEqual({ changes: [], checked: {} });
   });
 
-  it("is unsettled while a candidate has not finished its sign-in probe", () => {
-    const result = applyRecord({
-      record: record(),
-      self,
-      instances: {
-        [id("probing")]: pooled(),
-        [id("missing")]: pooled(),
-        [id("ready")]: pooled(),
-      },
-      providers: [
-        snapshot("probing", { status: "unknown" }),
-        snapshot("ready", auth("work@example.test")),
-      ],
-    });
-    expect(result.settled).toBe(false);
-    expect(result.writes.map((write) => write.instanceId)).toEqual([id("ready")]);
-  });
-
-  it("settles when candidates are signed out or signed in elsewhere", () => {
+  it("checks a member once its sign-in probe has finished", () => {
     expect(
       applyRecord({
         record: record(),
         self,
-        instances: { [id("out")]: pooled(), [id("other")]: pooled() },
+        instances: {
+          [id("probing")]: pooled(),
+          [id("missing")]: pooled(),
+          [id("ready")]: pooled(),
+        },
         providers: [
-          snapshot("out", { status: "unauthenticated" }),
-          snapshot("other", auth("personal@example.test")),
+          snapshot("probing", { status: "unknown" }),
+          snapshot("ready", auth("work@example.test")),
         ],
+        checked: {},
       }),
-    ).toEqual({ writes: [], settled: true });
+    ).toEqual({
+      changes: [{ instanceId: id("ready"), change: "disable" }],
+      checked: { ready: work },
+    });
+  });
+
+  it.each([
+    ["never checked", undefined, true],
+    ["already checked as this account", work, false],
+    ["checked as another account, then signed in to this one", personal, true],
+    ["checked while signed in without an account", "", true],
+    ["off when checked, then turned on by the user", "off", false],
+  ] as const)("a spent account and a member %s", (_name, previous, disabled) => {
+    const result = applyRecord({
+      record: record(),
+      self,
+      instances: { [id("a")]: pooled() },
+      providers: [snapshot("a", auth("work@example.test"))],
+      checked: previous === undefined ? {} : { a: previous },
+    });
+    expect(result.changes).toEqual(disabled ? [{ instanceId: id("a"), change: "disable" }] : []);
+    expect(result.checked).toEqual({ a: work });
   });
 
   it("turns back on what a note for the reset account turned off", () => {
-    const noted = (account: string, at: string, reportedBy?: string) =>
+    const noted = (account: string, at: string) =>
       pooled({
         enabled: false,
-        usageLimitDisabled: {
-          at,
-          message: "Usage limit reached.",
-          account,
-          ...(reportedBy === undefined ? {} : { reportedBy }),
-        },
+        usageLimitDisabled: { at, message: "Usage limit reached.", account },
       });
-    const instances: ProviderInstanceConfigMap = {
-      [id("older")]: noted(work, T0),
-      [id("same_time")]: noted(work, T1, "VPS"),
-      [id("newer")]: noted(work, T2),
-      [id("personal")]: noted(personal, T0),
-      [id("manual")]: pooled({ enabled: false }),
-      [id("enabled")]: pooled(),
-      [id("codex")]: { ...noted(work, T0), driver: codex },
-    };
-    const { usageLimitDisabled: _older, ...older } = instances[id("older")]!;
-    const { usageLimitDisabled: _same, ...sameTime } = instances[id("same_time")]!;
     expect(
-      applyRecord({ record: record({ spent: false }), self, instances, providers: [] }),
-    ).toEqual({
-      writes: [
-        { instanceId: id("older"), instance: { ...older, enabled: true } },
-        { instanceId: id("same_time"), instance: { ...sameTime, enabled: true } },
-      ],
-      settled: true,
-    });
+      applyRecord({
+        record: record({ spent: false }),
+        self,
+        instances: {
+          [id("older")]: noted(work, T0),
+          [id("newer")]: noted(work, T2),
+          [id("personal")]: noted(personal, T0),
+          [id("manual")]: pooled({ enabled: false }),
+        },
+        providers: [],
+        checked: {},
+      }),
+    ).toEqual({ changes: [{ instanceId: id("older"), change: "enable" }], checked: {} });
   });
 });

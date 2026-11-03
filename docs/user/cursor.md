@@ -48,8 +48,8 @@ Turn an instance back on yourself after its quota resets.
 With **Linked environments** on in **Settings → Labs** on both machines and a full-access link
 between them, linked machines share which pool accounts are spent. An account turned off at its
 usage limit on one machine is also turned off in the other machine's pool, and turning it back on
-on either machine turns it back on on the other. An instance you add or turn on later, while the
-account is still spent, finds out on its first turn like any spent account. A change on the
+on either machine turns it back on on the other. While the account is still spent, a pool instance
+you add or sign in to it later is turned off too, but one you turn back on yourself stays on. A change on the
 machine you linked to can take about a minute to arrive. Accounts are matched by the signed-in account, so the instances
 do not need the same names. Accounts you turned off yourself stay as they are, and an account
 without a known email, such as some API keys, is not shared.

@@ -818,10 +818,18 @@ export const layer: Layer.Layer<
                   const instance = yield* instances.getInstance(input.providerInstanceId);
                   yield* Effect.gen(function* () {
                     // A disabled instance's snapshot loses its email, so read the account first.
+                    // The account only lets linked environments follow; it never blocks the disable.
                     const account =
                       instance === undefined
                         ? undefined
-                        : providerAccountKey(yield* instance.snapshot.getSnapshot);
+                        : yield* instance.snapshot.getSnapshot.pipe(
+                            Effect.map(providerAccountKey),
+                            Effect.catchDefect((defect) =>
+                              Effect.logWarning("usage-limit.account-lookup-failed", {
+                                defect,
+                              }).pipe(Effect.as(undefined)),
+                            ),
+                          );
                     yield* disableInstanceOnExhaustedQuota(
                       input.providerInstanceId,
                       failure,

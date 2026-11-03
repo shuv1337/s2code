@@ -121,68 +121,100 @@ export const localTransitions = (
     return [];
   });
 
+export type RecordChange = "disable" | "enable";
+
+/**
+ * `instance` as `record` leaves it, or undefined when the record does not change it. Run again on
+ * the instance as it is when written, so an edit the user made meanwhile is kept, and only the
+ * enabled flag and quota note ever change.
+ */
+export const applyToInstance = (
+  record: ProviderAccountUsageLimitRecord,
+  change: RecordChange,
+  instance: ProviderInstanceConfig | undefined,
+): ProviderInstanceConfig | undefined => {
+  if (instance === undefined || instance.driver !== record.driver) return undefined;
+  const note = instance.usageLimitDisabled;
+  if (change === "enable") {
+    if (
+      instance.enabled !== false ||
+      note?.account !== record.account ||
+      Date.parse(note.at) > Date.parse(record.changedAt)
+    ) {
+      return undefined;
+    }
+    const { usageLimitDisabled: _note, ...rest } = instance;
+    return { ...rest, enabled: true };
+  }
+  if (instance.disableOnUsageLimit !== true || instance.enabled === false || note !== undefined) {
+    return undefined;
+  }
+  return {
+    ...instance,
+    enabled: false,
+    usageLimitDisabled: {
+      at: record.changedAt,
+      message: record.message ?? DEFAULT_SPENT_MESSAGE,
+      account: record.account,
+      reportedBy: record.origin.label,
+    },
+  };
+};
+
+/**
+ * The account each pool member was last checked against a spent record as: its key, "" when it
+ * is signed in without one, or `TURNED_OFF`.
+ */
+export type CheckedAccounts = Readonly<Record<string, string>>;
+const TURNED_OFF = "off";
+
 export interface RecordApplication {
-  readonly writes: ReadonlyArray<{
+  readonly changes: ReadonlyArray<{
     readonly instanceId: ProviderInstanceId;
-    readonly instance: ProviderInstanceConfig;
+    readonly change: RecordChange;
   }>;
-  /** False while an instance that may hold the account has not finished its sign-in probe. */
-  readonly settled: boolean;
+  readonly checked: CheckedAccounts;
 }
 
 /**
- * The instance writes that bring this environment in line with another environment's record.
- * A spent account turns off each enabled pool member signed in to it, as a local quota failure
- * would; a reset account turns back on what a quota note for it turned off. Instances the user
- * turned off by hand, and instances outside the pool, are left alone.
+ * A reset turns back on what a quota note for it turned off. A spent account turns off each
+ * enabled pool member newly signed in to it, as a local quota failure would; a member that was
+ * off when checked and is on again was turned on by the user, and stays on.
  */
 export const applyRecord = (input: {
   readonly record: ProviderAccountUsageLimitRecord;
   readonly self: EnvironmentId;
   readonly instances: ProviderInstanceConfigMap;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly checked: CheckedAccounts;
 }): RecordApplication => {
   const { record } = input;
-  if (record.origin.environmentId === input.self) return { writes: [], settled: true };
-  const writes: Array<RecordApplication["writes"][number]> = [];
-  let settled = true;
+  const changes: Array<RecordApplication["changes"][number]> = [];
+  if (record.origin.environmentId === input.self) return { changes, checked: input.checked };
+  const checked: Record<string, string> = { ...input.checked };
   for (const [key, instance] of Object.entries(input.instances)) {
     const instanceId = key as ProviderInstanceId;
-    if (instance.driver !== record.driver) continue;
-    const note = instance.usageLimitDisabled;
     if (!record.spent) {
-      if (
-        instance.enabled === false &&
-        note?.account === record.account &&
-        Date.parse(note.at) <= Date.parse(record.changedAt)
-      ) {
-        const { usageLimitDisabled: _note, ...rest } = instance;
-        writes.push({ instanceId, instance: { ...rest, enabled: true } });
+      if (applyToInstance(record, "enable", instance) !== undefined) {
+        changes.push({ instanceId, change: "enable" });
       }
       continue;
     }
-    if (instance.disableOnUsageLimit !== true || instance.enabled === false || note !== undefined) {
+    if (instance.driver !== record.driver || instance.disableOnUsageLimit !== true) continue;
+    if (instance.enabled === false) {
+      checked[instanceId] = TURNED_OFF;
       continue;
     }
+    // Checked once its sign-in probe has finished.
     const provider = input.providers.find((entry) => entry.instanceId === instanceId);
-    if (provider === undefined || provider.auth.status === "unknown") {
-      settled = false;
-      continue;
+    if (provider === undefined || provider.auth.status === "unknown") continue;
+    const account = providerAccountKey(provider) ?? "";
+    const previous = input.checked[instanceId];
+    checked[instanceId] = account;
+    if (previous === TURNED_OFF || previous === account || account !== record.account) continue;
+    if (applyToInstance(record, "disable", instance) !== undefined) {
+      changes.push({ instanceId, change: "disable" });
     }
-    if (providerAccountKey(provider) !== record.account) continue;
-    writes.push({
-      instanceId,
-      instance: {
-        ...instance,
-        enabled: false,
-        usageLimitDisabled: {
-          at: record.changedAt,
-          message: record.message ?? DEFAULT_SPENT_MESSAGE,
-          account: record.account,
-          reportedBy: record.origin.label,
-        },
-      },
-    });
   }
-  return { writes, settled };
+  return { changes, checked };
 };

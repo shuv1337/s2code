@@ -12,7 +12,8 @@ export default Effect.gen(function* () {
       origin_environment_id TEXT NOT NULL,
       origin_label TEXT NOT NULL,
       message TEXT,
-      applied INTEGER NOT NULL
+      applied INTEGER NOT NULL,
+      checked TEXT NOT NULL DEFAULT '{}'
     )
   `;
 });

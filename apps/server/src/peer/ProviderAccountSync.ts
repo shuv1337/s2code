@@ -19,6 +19,8 @@ import * as Stream from "effect/Stream";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import {
   applyRecord,
+  applyToInstance,
+  type CheckedAccounts,
   type LocalTransition,
   localChangeTime,
   localSpentNotes,
@@ -63,9 +65,15 @@ interface UsageLimitRow {
   readonly origin_label: string;
   readonly message: string | null;
   readonly applied: number;
+  readonly checked: string;
 }
 
 const decodeRecord = Schema.decodeUnknownOption(ProviderAccountUsageLimitRecord);
+const CheckedJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.String));
+const decodeChecked = Schema.decodeUnknownOption(CheckedJson);
+const encodeChecked = Schema.encodeSync(CheckedJson);
+const checkedOf = (row: UsageLimitRow): CheckedAccounts =>
+  Option.getOrElse(decodeChecked(row.checked), () => ({}));
 
 const recordOf = (row: UsageLimitRow) =>
   decodeRecord({
@@ -102,19 +110,13 @@ const make = Effect.gen(function* () {
     })),
   );
 
-  const readRows = (where: "all" | "pending") =>
-    (where === "all"
-      ? // A peer refuses more, and the oldest states have long converged.
-        sql<UsageLimitRow>`
-          SELECT * FROM (
-            SELECT * FROM provider_account_usage_limits
-            ORDER BY changed_at DESC LIMIT ${PROVIDER_ACCOUNT_SYNC_MAX_RECORDS}
-          ) ORDER BY account
-        `
-      : sql<UsageLimitRow>`
-          SELECT * FROM provider_account_usage_limits WHERE applied = 0 ORDER BY account
-        `
-    ).pipe(Effect.map((rows) => rows.flatMap((row) => Option.toArray(recordOf(row)))));
+  // A peer refuses more, and the oldest states have long converged.
+  const readAll = sql<UsageLimitRow>`
+    SELECT * FROM (
+      SELECT * FROM provider_account_usage_limits
+      ORDER BY changed_at DESC LIMIT ${PROVIDER_ACCOUNT_SYNC_MAX_RECORDS}
+    ) ORDER BY account
+  `.pipe(Effect.map((rows) => rows.flatMap((row) => Option.toArray(recordOf(row)))));
 
   const readOne = (account: string) =>
     sql<UsageLimitRow>`
@@ -136,11 +138,12 @@ const make = Effect.gen(function* () {
     if (!supersedes(record, yield* readOne(record.account))) return false;
     yield* sql`
       INSERT INTO provider_account_usage_limits (
-        account, driver, spent, changed_at, origin_environment_id, origin_label, message, applied
+        account, driver, spent, changed_at, origin_environment_id, origin_label, message, applied,
+        checked
       ) VALUES (
         ${record.account}, ${record.driver}, ${record.spent ? 1 : 0}, ${record.changedAt},
         ${record.origin.environmentId}, ${record.origin.label}, ${record.message ?? null},
-        ${applied ? 1 : 0}
+        ${applied ? 1 : 0}, '{}'
       )
       ON CONFLICT (account) DO UPDATE SET
         driver = excluded.driver,
@@ -149,7 +152,8 @@ const make = Effect.gen(function* () {
         origin_environment_id = excluded.origin_environment_id,
         origin_label = excluded.origin_label,
         message = excluded.message,
-        applied = excluded.applied
+        applied = excluded.applied,
+        checked = excluded.checked
     `;
     return true;
   });
@@ -165,35 +169,47 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** Brings settings in line with other environments' records not yet applied here. */
+  /**
+   * Brings settings in line with other environments' records: a reset once, and a spent account
+   * again whenever a pool member's account changes.
+   */
   const applyPending = Effect.fn("ProviderAccountSync.applyPending")(function* () {
     const here = (yield* self).environmentId;
     yield* lock.withPermits(1)(
       Effect.gen(function* () {
-        const pending = (yield* readRows("pending")).filter(
-          (record) => record.origin.environmentId !== here,
-        );
-        for (const record of pending) {
+        const rows = yield* sql<UsageLimitRow>`
+          SELECT * FROM provider_account_usage_limits
+          WHERE origin_environment_id != ${here} AND (spent = 1 OR applied = 0)
+          ORDER BY account
+        `;
+        for (const row of rows) {
+          const record = Option.getOrUndefined(recordOf(row));
+          if (record === undefined) continue;
           yield* Effect.gen(function* () {
-            const current = yield* settings.getSettings;
+            const instances = (yield* settings.getSettings).providerInstances;
             const providers = yield* registry.getProviders;
-            const { writes, settled } = applyRecord({
+            const { changes, checked } = applyRecord({
               record,
               self: here,
-              instances: current.providerInstances,
+              instances,
               providers,
+              checked: checkedOf(row),
             });
-            for (const write of writes) {
-              const cleared = current.providerInstances[write.instanceId]?.usageLimitDisabled;
-              yield* settings.updateProviderInstance({ operation: "upsert", ...write });
-              if (!record.spent && cleared !== undefined) {
-                appliedEnables.add(enableKey(write.instanceId, cleared.at));
+            for (const { instanceId, change } of changes) {
+              let cleared: string | undefined;
+              const wrote = yield* settings.modifyProviderInstance(instanceId, (current) => {
+                cleared = current?.usageLimitDisabled?.at;
+                return applyToInstance(record, change, current);
+              });
+              if (wrote && change === "enable" && cleared !== undefined) {
+                appliedEnables.add(enableKey(instanceId, cleared));
               }
             }
-            if (!settled) return;
-            // Only the record that was applied; a newer one merged since stays pending.
+            const checkedJson = encodeChecked(checked);
+            if (row.applied === 1 && row.checked === checkedJson) return;
+            // Only the record that was applied; a newer one merged since starts over.
             yield* sql`
-              UPDATE provider_account_usage_limits SET applied = 1
+              UPDATE provider_account_usage_limits SET applied = 1, checked = ${checkedJson}
               WHERE account = ${record.account}
                 AND changed_at = ${record.changedAt}
                 AND origin_environment_id = ${record.origin.environmentId}
@@ -278,7 +294,7 @@ const make = Effect.gen(function* () {
       const result = yield* peers.call({
         environmentId: link.environmentId,
         tool: SYNC_TOOL,
-        arguments: { records: yield* readRows("all") },
+        arguments: { records: yield* readAll },
         limits: { runtimeMode: "full-access", interactionMode: "default" },
         success: ProviderAccountSyncResult,
       });
@@ -328,7 +344,7 @@ const make = Effect.gen(function* () {
   )(function* (records) {
     yield* merge(records);
     yield* applyPendingSafely;
-    return yield* readRows("all");
+    return yield* readAll;
   }, Effect.orDie);
 
   // Subscribed before the snapshot below is read, so no change falls between them.
@@ -341,13 +357,16 @@ const make = Effect.gen(function* () {
       yield* Stream.runForEach(changes, (next) => {
         const transitions = localTransitions(previous, next.providerInstances);
         previous = next.providerInstances;
-        return transitions.length === 0
-          ? Effect.void
-          : recordLocal(transitions, false).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("provider-account-sync.record-failed", { cause }),
-              ),
-            );
+        // An instance joining the pool rebuilds no provider, so it is checked from here.
+        return (
+          transitions.length === 0
+            ? Effect.void
+            : recordLocal(transitions, false).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("provider-account-sync.record-failed", { cause }),
+                ),
+              )
+        ).pipe(Effect.andThen(applyPendingSafely));
       });
     }).pipe(
       Effect.catchCause((cause) =>
@@ -355,7 +374,7 @@ const make = Effect.gen(function* () {
       ),
     ),
   );
-  // A sign-in probe finishing can settle an apply that was waiting on it.
+  // A finished sign-in probe can reveal a pool member's account.
   yield* forkParked(Stream.runForEach(registry.streamChanges, () => applyPendingSafely));
   yield* forkParked(Queue.take(syncRequested).pipe(Effect.andThen(syncNow), Effect.forever));
   yield* forkParked(
