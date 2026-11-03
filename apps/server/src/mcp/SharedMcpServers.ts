@@ -79,7 +79,6 @@ const SUPERVISED_LISTINGS: Readonly<Record<string, string>> = {
   "resources/list": "resources",
   "resources/templates/list": "resourceTemplates",
 };
-const SUPERVISED_PASSTHROUGH = new Set(["initialize", "ping"]);
 
 const answersPromptly = (method: string, body: string) => {
   if (method === "DELETE") return true;
@@ -112,7 +111,7 @@ const unavailable = (body: string, status: number, message: string) => {
 const supervisedAnswer = (body: string, label: string) => {
   const method = Option.getOrUndefined(decodeJsonRpcMethod(body))?.method;
   if (method !== undefined) {
-    if (SUPERVISED_PASSTHROUGH.has(method) || method.startsWith("notifications/")) return undefined;
+    if (method === "initialize") return undefined;
     const listing = SUPERVISED_LISTINGS[method];
     const request = decodeJsonRpcRequest(body);
     if (listing !== undefined && Option.isSome(request)) {
@@ -187,16 +186,13 @@ const proxy = Effect.gen(function* () {
   if (server === undefined || !server.enabled) {
     return unavailable(body, 404, `MCP server "${name}" is turned off or removed in Settings.`);
   }
-  if (request.method === "POST") {
-    // Read per request: narrowing a running thread's mode takes effect on its next call.
-    const thread = yield* ProjectionStore.ProjectionStoreV2.pipe(
-      Effect.flatMap((projections) => projections.getThreadShell(caller.thread.threadId)),
-      Effect.orElseSucceed(() => null),
-    );
-    const answer =
-      thread?.runtimeMode === "full-access"
-        ? undefined
-        : supervisedAnswer(body, displayName(name, server));
+  // Read per request: narrowing a running thread's mode takes effect on its next call.
+  const thread = yield* ProjectionStore.ProjectionStoreV2.pipe(
+    Effect.flatMap((projections) => projections.getThreadShell(caller.thread.threadId)),
+    Effect.orElseSucceed(() => null),
+  );
+  if (thread?.runtimeMode !== "full-access") {
+    const answer = supervisedAnswer(body, displayName(name, server));
     if (answer !== undefined) return answer;
   }
   const headers: Record<string, string> = {};

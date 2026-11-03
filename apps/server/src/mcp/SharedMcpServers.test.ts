@@ -107,7 +107,8 @@ const upstream = (received: Array<Received>, hung: Queue.Queue<string>) =>
       if (request.headers.authorization !== `Bearer ${UPSTREAM_TOKEN}`) {
         return HttpServerResponse.text("unauthorized", { status: 401 });
       }
-      if (request.method === "DELETE") return HttpServerResponse.empty({ status: 200 });
+      if (request.method === "GET" || request.method === "DELETE")
+        return HttpServerResponse.empty({ status: 200 });
       const message = JSON.parse(body) as { id?: number; method: string };
       switch (message.method) {
         case "initialize":
@@ -142,6 +143,7 @@ const server = (url: string, overrides: Partial<McpServerConfig> = {}) => ({
 
 const fixture = Effect.gen(function* () {
   const received: Array<Received> = [];
+  let bearerTokenReads = 0;
   const hung = yield* Queue.unbounded<string>();
   const settings = yield* Ref.make<ServerSettings>(DEFAULT_SERVER_SETTINGS);
   const settingsLayer = Layer.mock(ServerSettingsService.ServerSettingsService)({
@@ -187,7 +189,13 @@ const fixture = Effect.gen(function* () {
   yield* Ref.update(settings, (current) => ({
     ...current,
     mcpServers: {
-      executor: server(`${origin}/upstream/mcp`, { label: "Executor" }),
+      executor: {
+        ...server(`${origin}/upstream/mcp`, { label: "Executor" }),
+        get bearerToken() {
+          bearerTokenReads += 1;
+          return UPSTREAM_TOKEN;
+        },
+      },
       denied: server(`${origin}/upstream/mcp`, { bearerToken: "stale" }),
       broken: server(`${origin}/upstream/broken`),
       moved: server(`${origin}/upstream/moved`),
@@ -212,6 +220,7 @@ const fixture = Effect.gen(function* () {
   return {
     origin,
     received,
+    bearerTokenReads: () => bearerTokenReads,
     hung,
     runtimeMode,
     call,
@@ -291,6 +300,52 @@ it.effect("only serves credentials T3 issued to its agents", () =>
   }),
 );
 
+it.effect.each(
+  (["approval-required", "auto-accept-edits", "auto", "full-access", null] as const).flatMap(
+    (mode) =>
+      (
+        [
+          { method: "GET", rpcMethod: undefined },
+          { method: "DELETE", rpcMethod: undefined },
+          { method: "POST", rpcMethod: "tools/call" },
+          { method: "POST", rpcMethod: "ping" },
+          { method: "POST", rpcMethod: "notifications/initialized" },
+        ] as const
+      ).map((request) => ({ mode, ...request })),
+  ),
+)("gates $method $rpcMethod in $mode before using the saved token", ({ mode, method, rpcMethod }) =>
+  Effect.gen(function* () {
+    const { call, received, runtimeMode, bearerTokenReads } = yield* fixture;
+    yield* Ref.set(runtimeMode, mode);
+    const response = yield* call("/mcp/servers/executor", {
+      method,
+      headers: asAgent,
+      ...(rpcMethod === undefined
+        ? {}
+        : {
+            body: {
+              jsonrpc: "2.0",
+              ...(rpcMethod.startsWith("notifications/") ? {} : { id: 2 }),
+              method: rpcMethod,
+            },
+          }),
+    });
+    if (mode === "full-access") {
+      expect(response.status).toBe(rpcMethod === "notifications/initialized" ? 202 : 200);
+      expect(received).toHaveLength(1);
+      expect(received[0]?.headers.authorization).toBe(`Bearer ${UPSTREAM_TOKEN}`);
+      expect(bearerTokenReads()).toBeGreaterThan(0);
+    } else {
+      expect(received).toEqual([]);
+      expect(bearerTokenReads()).toBe(0);
+      expect(response.status).toBe(
+        method === "POST" && rpcMethod !== "notifications/initialized" ? 200 : 403,
+      );
+      expect(yield* response.text).toContain("only works in threads with Full access");
+    }
+  }),
+);
+
 it.effect("offers and runs shared tools only for threads in full access", () =>
   Effect.gen(function* () {
     const { call, received, runtimeMode } = yield* fixture;
@@ -309,23 +364,38 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
       },
     };
 
-    yield* Ref.set(runtimeMode, "auto");
-    expect(yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} })).toMatchObject({
-      result: { serverInfo: { name: "Fixture" } },
-    });
-    expect(yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toEqual({
-      jsonrpc: "2.0",
-      id: 1,
-      result: { tools: [] },
-    });
-    expect(yield* send(execute)).toEqual(refused);
-    expect(yield* send({ ...execute, method: "resources/read" })).toEqual(refused);
-    const batch = yield* call("/mcp/servers/executor", { body: [execute], headers: asAgent });
-    expect(batch.status).toBe(403);
+    for (const mode of ["approval-required", "auto-accept-edits", "auto", null] as const) {
+      yield* Ref.set(runtimeMode, mode);
+      expect(
+        yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} }),
+      ).toMatchObject({
+        result: { serverInfo: { name: "Fixture" } },
+      });
+      const requestsBeforeListing = received.length;
+      for (const [method, field] of Object.entries({
+        "tools/list": "tools",
+        "prompts/list": "prompts",
+        "resources/list": "resources",
+        "resources/templates/list": "resourceTemplates",
+      })) {
+        expect(yield* send({ jsonrpc: "2.0", id: 1, method })).toEqual({
+          jsonrpc: "2.0",
+          id: 1,
+          result: { [field]: [] },
+        });
+      }
+      expect(received).toHaveLength(requestsBeforeListing);
+      expect(yield* send(execute)).toEqual(refused);
+      expect(yield* send({ ...execute, method: "resources/read" })).toEqual(refused);
+      const batch = yield* call("/mcp/servers/executor", { body: [execute], headers: asAgent });
+      expect(batch.status).toBe(403);
+    }
 
     yield* Ref.set(runtimeMode, null);
     expect(yield* send(execute)).toEqual(refused);
-    expect(received.map((request) => JSON.parse(request.body).method)).toEqual(["initialize"]);
+    expect(received.map((request) => JSON.parse(request.body).method)).toEqual(
+      Array(4).fill("initialize"),
+    );
 
     yield* Ref.set(runtimeMode, "full-access");
     expect(yield* send(execute)).toEqual(FAILED_CALL);
