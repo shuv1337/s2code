@@ -247,7 +247,7 @@ describe("fork desktop app command", () => {
         expect(error).toMatchObject({
           _tag: "DesktopAppSshUnsupportedError",
           message: expect.stringMatching(
-            /^`shuv2code(?:-nightly|-preview)? app` only controls a desktop app on the same machine. It cannot run over SSH\.$/,
+            /^`s2code(?:-nightly|-preview)? app` only controls a desktop app on the same machine. It cannot run over SSH\.$/,
           ),
         });
         expect(yield* pathExists(baseDir)).toBe(false);
@@ -268,7 +268,7 @@ describe("fork desktop app command", () => {
           _tag: "DesktopAppPlatformUnsupportedError",
           platform: "freebsd",
           message: expect.stringMatching(
-            /^`shuv2code(?:-nightly|-preview)? app` is not supported on freebsd\.$/,
+            /^`s2code(?:-nightly|-preview)? app` is not supported on freebsd\.$/,
           ),
         });
         expect(yield* pathExists(baseDir)).toBe(false);
@@ -338,12 +338,12 @@ describe("fork desktop app command", () => {
           testVersion.value = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
           const suffix = channel === "stable" ? "" : `-${channel}`;
           const desktop = yield* fakeDesktop({
-            baseDir: NodePath.join(root, `.shuv2code-v2${suffix}`),
+            baseDir: NodePath.join(root, `${DEFAULT_HOME_DIRECTORY}${suffix}`),
           });
           const other = yield* fakeDesktop({
             baseDir: NodePath.join(
               root,
-              channel === "stable" ? ".shuv2code-v2-nightly" : ".shuv2code-v2",
+              channel === "stable" ? `${DEFAULT_HOME_DIRECTORY}-nightly` : DEFAULT_HOME_DIRECTORY,
             ),
           });
           yield* runCli(["app"]);
@@ -360,10 +360,12 @@ describe("fork desktop app command", () => {
         Effect.gen(function* () {
           testVersion.value = `1.2.3-${channel}.20261014.1`;
           const development = yield* fakeDesktop({
-            baseDir: NodePath.join(root, `.shuv2code-v2-${channel}`),
+            baseDir: NodePath.join(root, `${DEFAULT_HOME_DIRECTORY}-${channel}`),
             stateSubdirectory: "dev",
           });
-          const stable = yield* fakeDesktop({ baseDir: NodePath.join(root, ".shuv2code-v2") });
+          const stable = yield* fakeDesktop({
+            baseDir: NodePath.join(root, DEFAULT_HOME_DIRECTORY),
+          });
           yield* runCli(["app"]);
           expect(development.received).toHaveLength(1);
           expect(stable.received).toHaveLength(0);

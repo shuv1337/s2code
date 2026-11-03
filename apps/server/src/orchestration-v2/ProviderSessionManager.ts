@@ -45,6 +45,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import * as SharedMcpServers from "../mcp/SharedMcpServers.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -461,6 +462,12 @@ export const layerWithOptions = (
                   Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
                   Effect.orElseSucceed(() => false),
                 );
+                const sharedMcpServers = Option.isNone(serverSettings)
+                  ? []
+                  : yield* serverSettings.value.getSettings.pipe(
+                      Effect.map(SharedMcpServers.enabledSharedMcpServerNames),
+                      Effect.orElseSucceed((): ReadonlyArray<string> => []),
+                    );
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before async validation so release cannot revoke between validation and reservation.
@@ -485,6 +492,19 @@ export const layerWithOptions = (
                     // A credential issued while the lineage read failed is replaced once it works.
                     (resolved.thread.subagent === true) === subagent
                   ) {
+                    // Sessions opened from here on get Settings' current servers; live ones keep theirs.
+                    const { sharedMcpServers: _previous, ...rest } = existing;
+                    yield* mcpSessions.set(
+                      sharedMcpServers.length === 0
+                        ? rest
+                        : {
+                            ...rest,
+                            sharedMcpServers: McpSessionRegistry.sharedMcpServersAt(
+                              existing.endpoint,
+                              sharedMcpServers,
+                            ),
+                          },
+                    );
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
                   dropMcpCredentialReservation(threadId, existing.providerSessionId);
@@ -496,6 +516,7 @@ export const layerWithOptions = (
                   browserToolsAvailable,
                   capabilities,
                   subagent,
+                  sharedMcpServers,
                 });
                 yield* mcpSessions.set(credential.config);
                 reserveMcpCredential(threadId, credential.config.providerSessionId);

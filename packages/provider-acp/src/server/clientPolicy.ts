@@ -203,6 +203,7 @@ export function acpMcpToolApprovalElicitationDisposition(
   runtimePolicy: AcpRuntimePolicy,
   request: EffectAcpSchema.CreateElicitationRequest,
   nativeRequestId?: string,
+  sharedMcpServersConfigured = false,
 ): "ask" | "allow" | undefined {
   if (
     request.mode !== "form" ||
@@ -211,8 +212,12 @@ export function acpMcpToolApprovalElicitationDisposition(
   ) {
     return undefined;
   }
-  // T3's authenticated MCP endpoint enforces scope; only explicit approval mode needs a user prompt.
-  return acpPolicyRequiresApproval(runtimePolicy) ? "ask" : "allow";
+  if (acpPolicyRequiresApproval(runtimePolicy)) return "ask";
+  // T3's authenticated MCP endpoint enforces scope. These requests do not name their server,
+  // so once Settings servers (which T3 does not scope) are injected, only full access skips the prompt.
+  return sharedMcpServersConfigured && runtimePolicy.runtimeMode !== "full-access"
+    ? "ask"
+    : "allow";
 }
 
 export function acpClientExecuteDisposition(

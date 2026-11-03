@@ -1,5 +1,10 @@
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
-import type { ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+import { rememberModelOptions } from "../../state/use-model-option-memory";
+import type {
+  ModelSelection,
+  ProviderInstanceId,
+  ProviderOptionSelection,
+} from "@t3tools/contracts";
 
 export function modelFavoriteKey(provider: ProviderInstanceId, model: string): string {
   return `${provider}:${model}`;
@@ -50,6 +55,15 @@ export function pendingModelAfterPress(input: {
   return input.restoreSelection
     ? { ...input.pressed, selection: input.restoreSelection(input.pressed.selection) }
     : input.pressed;
+}
+
+/** Option edits stay on the saved selection, not the usage-limit pool member it is shown as. */
+export function applySavedModelOptions(
+  saved: ModelSelection,
+  options: ReadonlyArray<ProviderOptionSelection>,
+): ModelSelection {
+  rememberModelOptions(saved.instanceId, saved.model, options);
+  return { ...saved, options };
 }
 
 export function canCommitPendingModel(

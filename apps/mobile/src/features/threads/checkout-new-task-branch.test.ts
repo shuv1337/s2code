@@ -5,10 +5,13 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import { EnvironmentId, VcsListRefsInput } from "@t3tools/contracts";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
 import * as Schema from "effect/Schema";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { checkoutNewTaskBranch } from "./checkout-new-task-branch";
+
+isolateGitEnv();
 
 const exec = NodeUtil.promisify(NodeChildProcess.execFile);
 let directory: string;

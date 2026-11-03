@@ -70,6 +70,7 @@ import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceR
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+import * as SharedMcpServers from "./mcp/SharedMcpServers.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
@@ -755,6 +756,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAttachmentUploadRoute,
     GuestHttp.layer,
     DeviceHubProxy.layer,
+    SharedMcpServers.layerProxyRoute,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer.pipe(
@@ -1120,6 +1122,7 @@ const layerMakeServer = Layer.unwrap(
       routerConfig: HTTP_ROUTER_CONFIG,
     }).pipe(
       withUntracedRequests,
+      Layer.provide(ProjectionStoreV2.layer),
       Layer.tap(() => Deferred.succeed(routesReady, undefined).pipe(Effect.orDie)),
     );
     const layerServerApplication = Layer.mergeAll(

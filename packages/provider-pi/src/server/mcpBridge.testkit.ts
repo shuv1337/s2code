@@ -48,6 +48,12 @@ export async function loadMcpBridge(
     readonly allowsTool?: (name: string) => boolean;
     readonly runtimeMode?: string;
     readonly inputSchema?: Record<string, unknown>;
+    readonly sharedServers?: ReadonlyArray<{
+      readonly name: string;
+      readonly url: string;
+      readonly tools: ReadonlyArray<Record<string, unknown>>;
+    }>;
+    readonly unreachableUrls?: ReadonlyArray<string>;
   } = {},
 ) {
   const handlers = new Map<string, AgentStartHook>();
@@ -92,6 +98,10 @@ export async function loadMcpBridge(
         T3_MCP_BEARER_TOKEN: "fixture-token",
         T3_PI_MCP_EXTENSION_PATH: "/fixture/pi-t3-extension.ts",
         T3_PI_RUNTIME_MODE: options.runtimeMode,
+        T3_MCP_SHARED_SERVERS:
+          options.sharedServers === undefined
+            ? undefined
+            : JSON.stringify(options.sharedServers.map(({ name, url }) => ({ name, url }))),
       },
     },
     AbortSignal,
@@ -102,6 +112,7 @@ export async function loadMcpBridge(
       transport: { body: string; headers: Record<string, string>; signal?: AbortSignal },
     ) => {
       transport.signal?.throwIfAborted();
+      if (options.unreachableUrls?.includes(url)) throw new TypeError("fetch failed");
       transports.push({
         url,
         authorization: transport.headers.authorization!,
@@ -115,7 +126,9 @@ export async function loadMcpBridge(
       requests.push(request);
       const result =
         request.method === "tools/list"
-          ? { tools: catalog }
+          ? {
+              tools: options.sharedServers?.find((server) => server.url === url)?.tools ?? catalog,
+            }
           : request.method === "tools/call"
             ? (options.result ?? { content: [{ type: "text", text: "browser snapshot" }] })
             : {};

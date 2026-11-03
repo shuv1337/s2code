@@ -9,8 +9,11 @@ import * as Path from "effect/Path";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
 import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
+import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
 
 import * as GitHubChangeRequestTemplate from "./gitHubChangeRequestTemplate.ts";
+
+isolateGitEnv();
 
 const TEMPLATE_DIRECTORIES = [
   ".github/PULL_REQUEST_TEMPLATE",

@@ -27,7 +27,7 @@ import { ModelCapabilities, ProviderOptionDescriptor } from "./model.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderUsageLimits, UsageLimitSourceSnapshots } from "./providerUsageLimits.ts";
-import { ServerSettings } from "./settings.ts";
+import { McpServerId, ServerSettings } from "./settings.ts";
 import { DesktopUpdateChannelSchema } from "./ipc.ts";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -313,6 +313,25 @@ export const OtlpEndpointCheckResult = Schema.Union([
   Schema.TaggedStruct("Unreachable", { timedOut: Schema.Boolean }),
 ]);
 export type OtlpEndpointCheckResult = typeof OtlpEndpointCheckResult.Type;
+
+/** An omitted token uses the one saved for `id`, and only while `url` is still its saved URL. */
+export const McpServerTestInput = Schema.Struct({
+  id: McpServerId,
+  url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/./i)),
+  bearerToken: Schema.optional(Schema.String),
+});
+export type McpServerTestInput = typeof McpServerTestInput.Type;
+
+export const McpServerTestResult = Schema.Union([
+  Schema.TaggedStruct("Connected", {
+    serverName: Schema.optional(Schema.String),
+    tools: Schema.Array(Schema.String),
+  }),
+  Schema.TaggedStruct("Rejected", { status: Schema.Number }),
+  Schema.TaggedStruct("Unreachable", { timedOut: Schema.Boolean }),
+  Schema.TaggedStruct("Failed", { message: Schema.String }),
+]);
+export type McpServerTestResult = typeof McpServerTestResult.Type;
 
 /** The client tells the server what it is, so the triage context can name it. */
 export const ServerPrepareTriageInput = Schema.Struct({

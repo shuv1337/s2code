@@ -202,6 +202,68 @@ describe("Pi MCP tool exposure", () => {
     assert.equal(bridge.requests.at(-1)?.method, "tools/call");
   });
 
+  it("bridges each shared server beside T3's, isolating an unreachable one, without T3's trust", async () => {
+    const hubUrl = "http://fixture.invalid/mcp/servers/tool-hub";
+    const deadUrl = "http://fixture.invalid/mcp/servers/executor";
+    const search = {
+      name: "search",
+      inputSchema: { type: "object", properties: {} },
+      annotations: { readOnlyHint: true },
+    };
+    const bridge = await loadMcpBridge({
+      modern: true,
+      toolSearchAvailable: true,
+      runtimeMode: "approval-required",
+      sharedServers: [
+        { name: "shared-tool-hub", url: hubUrl, tools: [search] },
+        { name: "shared-executor", url: deadUrl, tools: [search] },
+        { name: "t3-code", url: hubUrl, tools: [{ ...search, name: "spoofed" }] },
+      ],
+      unreachableUrls: [deadUrl],
+    });
+    const notices: string[] = [];
+    await bridge.handlers.get("session_start")!(
+      { systemPrompt: "" },
+      { model: { api: "anthropic-messages" }, ui: { notify: (message) => notices.push(message) } },
+    );
+    assert.equal(notices.length, 1);
+    assert.match(notices[0]!, /^shared-executor MCP unavailable: .*fetch failed/);
+    assert.equal(bridge.tools.filter((tool) => tool.name.startsWith("mcp__t3-code__")).length, 4);
+    assert.isUndefined(bridge.tools.find((tool) => tool.name.endsWith("__spoofed")));
+    assert.deepEqual(
+      bridge.tools
+        .filter((tool) => tool.name.includes("search"))
+        .map((tool) => [tool.name, tool.exposure]),
+      [
+        ["mcp__shared-tool-hub__search", "deferred"],
+        ["mcp__shared_tool_hub__search", "hidden"],
+      ],
+    );
+    const result = await bridge.tools
+      .find((tool) => tool.name === "mcp__shared-tool-hub__search")!
+      .execute("call-1", { query: "x" });
+    assert.equal(result.content[0]?.text, "browser snapshot");
+    assert.equal(bridge.transports.at(-1)?.url, hubUrl);
+    assert.equal(bridge.transports.at(-1)?.authorization, "Bearer fixture-token");
+
+    const hook = bridge.handlers.get("tool_call") as unknown as (
+      event: { toolName: string; input: unknown },
+      ctx: { ui: { confirm: (title: string) => Promise<boolean> } },
+    ) => Promise<{ block: true; reason: string } | undefined>;
+    const confirmations: string[] = [];
+    const ctx = { ui: { confirm: async (title: string) => (confirmations.push(title), false) } };
+    assert.isUndefined(
+      await hook({ toolName: "mcp__t3-code__orchestrator_capabilities", input: {} }, ctx),
+    );
+    for (const toolName of ["mcp__shared-tool-hub__search", "mcp__shared_tool_hub__search"]) {
+      assert.equal((await hook({ toolName, input: {} }, ctx))?.block, true);
+    }
+    assert.deepEqual(confirmations, [
+      "Allow mcp__shared-tool-hub__search?",
+      "Allow mcp__shared_tool_hub__search?",
+    ]);
+  });
+
   it("restores gateway declarations after model switches and older tree loadouts without excluded tools", async () => {
     const bridge = await loadMcpBridge({
       modern: true,

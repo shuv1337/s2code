@@ -55,6 +55,7 @@ import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
+import * as SharedMcpServers from "./mcp/SharedMcpServers.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
@@ -504,6 +505,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(OtlpEndpointCheck.OtlpEndpointCheck)({}),
+  Layer.mock(SharedMcpServers.SharedMcpServers)({}),
   Layer.mock(VoiceSession.VoiceSession)({}),
   Layer.mock(PeerLinks.PeerLinks)({}),
   Layer.mock(PairingGrantStore.PairingGrantStore)({}),

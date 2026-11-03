@@ -1345,6 +1345,15 @@ function codexThreadRuntimeParams(input: {
                 Authorization: mcpSession.authorizationHeader,
               },
             },
+            ...Object.fromEntries(
+              (mcpSession.sharedMcpServers ?? []).map((server) => [
+                `mcp_servers.${server.name}`,
+                {
+                  url: server.endpoint,
+                  http_headers: { Authorization: mcpSession.authorizationHeader },
+                },
+              ]),
+            ),
           }),
     },
   };

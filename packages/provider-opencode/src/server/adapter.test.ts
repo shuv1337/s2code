@@ -8,6 +8,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { OpencodeClient, ToolPart } from "@opencode-ai/sdk/v2";
 import {
   CheckpointId,
+  EnvironmentId,
   NodeId,
   ProjectId,
   ProviderInstanceId,
@@ -2489,6 +2490,83 @@ describe("OpenCodeAdapterV2", () => {
           TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
         ),
       ),
+    ),
+  );
+
+  it.effect.each([
+    { name: "no shared servers", sharedMcpServers: undefined },
+    {
+      name: "shared servers, one unreachable",
+      sharedMcpServers: [
+        { name: "executor", endpoint: "http://127.0.0.1:3773/mcp/servers/executor" },
+        { name: "docs", endpoint: "http://127.0.0.1:3773/mcp/servers/docs" },
+      ],
+    },
+  ])("registers T3's MCP server and $name with the session credential", ({ sharedMcpServers }) =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-opencode-shared-mcp");
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      yield* mcpSessions.set({
+        environmentId: EnvironmentId.make("environment-opencode-shared-mcp"),
+        threadId,
+        providerSessionId: "mcp-session-opencode",
+        providerInstanceId: ProviderInstanceId.make("opencode-shared-mcp"),
+        endpoint: "http://127.0.0.1:3773/mcp",
+        authorizationHeader: "Bearer thread-credential",
+        browserToolsAvailable: false,
+        ...(sharedMcpServers === undefined ? {} : { sharedMcpServers }),
+      });
+      const added: Array<{ readonly name: string; readonly config: unknown }> = [];
+      const adapter = yield* makeOpenCodeAdapterV2({
+        instanceId: ProviderInstanceId.make("opencode-shared-mcp"),
+        settings: OPENCODE_TEST_SETTINGS,
+        environment: {},
+      }).pipe(
+        Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, {
+          connectToOpenCodeServer: () =>
+            Effect.succeed({ url: "http://test.invalid", exitCode: null, external: false }),
+          createOpenCodeSdkClient: () => ({
+            event: { subscribe: async () => ({ stream: asyncEventStream().stream }) },
+            mcp: {
+              add: async (input: { readonly name: string; readonly config: unknown }) => {
+                added.push(input);
+                if (input.name === "executor") throw new Error("Upstream unreachable");
+                return { data: {} };
+              },
+            },
+          }),
+        } as unknown as OpenCodeRuntime.OpenCodeRuntime["Service"]),
+        Effect.provideService(ProviderHost.ProviderHost, {
+          paths: { cwd: "/workspace" },
+          resolveAttachmentPath: () => null,
+        } as unknown as ProviderHost.ProviderHost["Service"]),
+      );
+      yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("session-opencode-shared-mcp"),
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("opencode-shared-mcp"),
+          model: "anthropic/claude-sonnet",
+          options: [],
+        },
+        runtimePolicy: runtimePolicy("approval-required", { cwd: "/workspace" }),
+      });
+      const remote = (url: string) => ({
+        type: "remote",
+        url,
+        headers: { Authorization: "Bearer thread-credential" },
+        oauth: false,
+      });
+      assert.deepStrictEqual(added, [
+        { name: "t3-code", config: remote("http://127.0.0.1:3773/mcp") },
+        ...(sharedMcpServers ?? []).map((server) => ({
+          name: server.name,
+          config: remote(server.endpoint),
+        })),
+      ]);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
     ),
   );
 

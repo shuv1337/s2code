@@ -967,6 +967,33 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               },
             }),
           );
+          // Each spawned server is this session's alone, so plain names cannot collide across threads.
+          yield* Effect.forEach(
+            mcpSession.sharedMcpServers ?? [],
+            (server) =>
+              OpenCodeRuntime.runOpenCodeSdk("mcp.add", (signal) =>
+                client.mcp.add(
+                  {
+                    name: server.name,
+                    config: {
+                      type: "remote",
+                      url: server.endpoint,
+                      headers: { Authorization: mcpSession.authorizationHeader },
+                      oauth: false,
+                    },
+                  },
+                  { signal, throwOnError: true },
+                ),
+              ).pipe(
+                Effect.timeout("5 seconds"),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Could not add a shared MCP server to OpenCode.", cause).pipe(
+                    Effect.annotateLogs({ mcpServer: server.name }),
+                  ),
+                ),
+              ),
+            { concurrency: "unbounded", discard: true },
+          );
         }
 
         const now = yield* DateTime.now;
