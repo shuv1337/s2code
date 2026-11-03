@@ -498,10 +498,10 @@ jobs:
     name: Mobile Native Static Analysis
     needs: changes
     # Lint only; the app itself needs the Xcode 27.1 SDK, which no hosted image
-    # has, so EAS builds it. Hosted macOS arm64 jobs often go unacquired, so
-    # scheduled runs skip this lint instead of failing on capacity.
+    # has, so EAS builds it. Intel because hosted macOS arm64 jobs often go
+    # unacquired; scheduled runs skip this lint instead of failing on capacity.
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.mobile_native != 'false' }}
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
       - name: Checkout
