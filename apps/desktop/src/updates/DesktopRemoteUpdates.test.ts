@@ -77,6 +77,9 @@ function runRemoteUpdatesTest(
   ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
 }
 
+const ownershipRefusal = (requestedChannel: "latest" | "nightly") =>
+  new DesktopUpdates.DesktopUpdateChannelOwnershipError({ requestedChannel }).message;
+
 function terminalReports(reports: DesktopUpdateStatusReport[]): DesktopUpdateStatusReport[] {
   return reports.filter((report) => report.outcome !== undefined);
 }
@@ -119,7 +122,8 @@ describe("DesktopRemoteUpdates", () => {
     );
   });
 
-  it.effect("switches to the requested track before preparing its release", () => {
+  // Release channels are separate installations, so a packaged host refuses a remote crossing.
+  it.effect("refuses to switch a packaged Stable host to Nightly", () => {
     // In-memory settings keep the channel write off real disk I/O.
     const harness = makeHarness({ beforeSetUpdateChannel: Effect.void });
 
@@ -132,62 +136,54 @@ describe("DesktopRemoteUpdates", () => {
           targetVersion: "1.2.4-nightly.20261027.1",
         });
         yield* settle;
-        assert.equal((yield* updates.getState).channel, "nightly");
 
-        harness.emit("update-available", { version: "1.2.4-nightly.20261027.1" });
-        yield* settle;
-        harness.emit("update-downloaded", { version: "1.2.4-nightly.20261027.1" });
-        yield* settle;
-
-        const terminals = terminalReports(reports);
         assert.deepEqual(
-          terminals.map((report) => [report.requestId, report.outcome]),
-          [["req-switch", "ready-to-install"]],
+          terminalReports(reports).map((report) => [
+            report.requestId,
+            report.outcome,
+            report.reason,
+          ]),
+          [["req-switch", "failed", ownershipRefusal("nightly")]],
         );
-        assert.equal(terminals[0]?.state.downloadedVersion, "1.2.4-nightly.20261027.1");
+        assert.equal((yield* updates.getState).channel, "latest");
+        assert.equal(harness.checkCount(), 0);
+        assert.equal(harness.downloadCount(), 0);
       }),
     );
   });
 
-  it.effect(
-    "refuses a crossing whose feed has only an older build, and never offers it later",
-    () => {
-      const harness = makeHarness({ beforeSetUpdateChannel: Effect.void });
+  it.effect("refuses a crossing, and a plain update never offers the other track's build", () => {
+    const harness = makeHarness({ beforeSetUpdateChannel: Effect.void });
 
-      return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
-        Effect.gen(function* () {
-          const updates = yield* DesktopUpdates.DesktopUpdates;
-          const older = "1.2.4-nightly.20261020.1";
-          yield* Queue.offer(requests, {
-            ...request("req-older"),
-            channel: "nightly",
-            targetVersion: "1.2.4-nightly.20261027.1",
-          });
-          yield* settle;
-          // Answers the track change's check, then the request's own check.
-          harness.emit("update-available", { version: older });
-          yield* settle;
-          harness.emit("update-available", { version: older });
-          yield* settle;
+    return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        const older = "1.2.4-nightly.20261020.1";
+        yield* Queue.offer(requests, {
+          ...request("req-older"),
+          channel: "nightly",
+          targetVersion: "1.2.4-nightly.20261027.1",
+        });
+        yield* settle;
+        harness.emit("update-available", { version: older });
+        yield* settle;
 
-          assert.deepEqual(
-            terminalReports(reports).map((report) => [report.outcome, report.reason]),
-            [["failed", "The desktop app found no build of 1.2.4-nightly.20261027.1."]],
-          );
-          // The saved track is the user's intent; a retry picks it up from here.
-          assert.equal((yield* updates.getState).channel, "nightly");
+        assert.deepEqual(
+          terminalReports(reports).map((report) => [report.outcome, report.reason]),
+          [["failed", ownershipRefusal("nightly")]],
+        );
+        assert.equal((yield* updates.getState).channel, "latest");
 
-          // A plain update afterwards cannot reach the build the switch refused.
-          yield* Queue.offer(requests, request("req-plain"));
-          yield* settle;
-          harness.emit("update-available", { version: older });
-          yield* settle;
-          assert.isNull((yield* updates.getState).availableVersion);
-          assert.equal(harness.downloadCount(), 0);
-        }),
-      );
-    },
-  );
+        // A plain update afterwards cannot reach the build the switch refused.
+        yield* Queue.offer(requests, request("req-plain"));
+        yield* settle;
+        harness.emit("update-available", { version: older });
+        yield* settle;
+        assert.isNull((yield* updates.getState).availableVersion);
+        assert.equal(harness.downloadCount(), 0);
+      }),
+    );
+  });
 
   it.effect("only saves the track on a host already running the release", () => {
     const harness = makeHarness({ savedChannel: "nightly" });
@@ -296,7 +292,7 @@ describe("DesktopRemoteUpdates", () => {
     );
   });
 
-  it.effect("fails a crossing to an older-numbered Stable that the feed does not offer", () => {
+  it.effect("refuses to switch a packaged Nightly host to an older-numbered Stable", () => {
     const harness = makeHarness({
       appVersion: "1.2.4-nightly.20261027.1",
       beforeSetUpdateChannel: Effect.void,
@@ -304,28 +300,29 @@ describe("DesktopRemoteUpdates", () => {
 
     return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
       Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* Queue.offer(requests, {
           ...request("req-to-stable"),
           channel: "latest",
           targetVersion: "1.2.3",
         });
         yield* settle;
-        harness.emit("update-not-available");
-        yield* settle;
-        harness.emit("update-not-available");
-        yield* settle;
 
-        // Still on Nightly, though the target is numbered below this build.
         assert.deepEqual(
           terminalReports(reports).map((report) => [report.outcome, report.reason]),
-          [["failed", "The desktop app found no build of 1.2.3."]],
+          [["failed", ownershipRefusal("latest")]],
         );
+        assert.equal((yield* updates.getState).channel, "nightly");
+        assert.equal(harness.checkCount(), 0);
       }),
     );
   });
 
   it.effect("accepts a newer build than the checked release on the requested track", () => {
-    const harness = makeHarness({ beforeSetUpdateChannel: Effect.void });
+    const harness = makeHarness({
+      appVersion: "1.2.4-nightly.20261026.1",
+      beforeSetUpdateChannel: Effect.void,
+    });
 
     return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
       Effect.gen(function* () {
