@@ -26,6 +26,14 @@ export async function publishAtomicReleaseIndex(
   if ((await store.read())?.content !== content)
     throw new Error("Published release index content mismatch.");
 }
+
+/** `runs-on` for the self-hosted macOS arm64 job, as the JSON string workflow_call inputs require. */
+export const FORK_MACOS_ARM64_SELF_HOSTED_RUNNER = JSON.stringify([
+  "self-hosted",
+  "macOS",
+  "ARM64",
+  "shuvbot-macos",
+]);
 export const FORK_NPM_PACKAGES = [
   ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`),
   NPM_PACKAGE_NAME,
@@ -39,7 +47,7 @@ export const FORK_DESKTOP_MATRIX = [
     label: "macOS arm64",
     platform: "mac",
     arch: "arm64",
-    runner: "macos-26",
+    runner: FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
     target: "dmg",
     rust_target: "aarch64-apple-darwin",
     resource_key: "darwin-arm64",

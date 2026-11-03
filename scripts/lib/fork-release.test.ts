@@ -21,6 +21,7 @@ import {
   publishAtomicReleaseIndex,
   FORK_RELEASE_INDEX_URL,
   forkNpmPublishingReady,
+  FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
 } from "./fork-release.ts";
 import serverPackage from "../../apps/server/package.json" with { type: "json" };
 const sha = "ab".repeat(20);
@@ -88,7 +89,7 @@ describe("fork release contract", () => {
   it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
     expect(FORK_DESKTOP_MATRIX).toHaveLength(6);
     expect(FORK_DESKTOP_MATRIX.map((target) => target.runner)).toEqual([
-      "macos-26",
+      FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
       "macos-15-intel",
       "ubuntu-24.04",
       "ubuntu-24.04-arm",
