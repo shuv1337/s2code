@@ -363,6 +363,10 @@
       "types": "./src/HostProcess.ts",
       "import": "./src/HostProcess.ts"
     },
+    "./testing/gitEnv": {
+      "types": "./src/testing/gitEnv.ts",
+      "import": "./src/testing/gitEnv.ts"
+    },
     "./testing/longTempDir": {
       "types": "./src/testing/longTempDir.ts",
       "import": "./src/testing/longTempDir.ts"

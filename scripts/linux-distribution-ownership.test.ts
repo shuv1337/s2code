@@ -14,7 +14,10 @@ import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
+import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
 import { createBuildConfig } from "./build-desktop-artifact.ts";
+
+isolateGitEnv();
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "..");
 const aurRoot = NodePath.join(repoRoot, "packaging/aur");
