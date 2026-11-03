@@ -4,7 +4,10 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
 import { mobileContentDelivered, newestMobileBuildCommit } from "./mobile-content-delivered.ts";
+
+isolateGitEnv();
 
 function fixture(
   run: (
