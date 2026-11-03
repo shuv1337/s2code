@@ -21,44 +21,59 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
+/**
+ * The quota a model draws on, as alternatives: the model runs while any one source has room, and a
+ * source runs out when any of its windows does.
+ */
+function modelQuotaSources(
+  provider: ServerProvider | undefined,
+  model: string,
+): ReadonlyArray<ReadonlyArray<ServerProviderUsageWindow>> {
+  const windows = provider?.usageLimits?.windows ?? [];
+  switch (provider?.driver) {
+    case "cursor": {
+      const api = windows.filter((window) => window.id === "apiPercentUsed");
+      const auto = windows.filter((window) => window.id === "autoPercentUsed");
+      return /^(auto|default|grok|composer)/.test(model) ? [auto, api] : [api];
+    }
+    case "antigravity": {
+      const family = model.match(/^(gemini|claude|gpt)-/)?.[1];
+      return [
+        windows.filter((window) => {
+          const pool = window.id.match(/^(gemini|claude|gpt|3p)-/)?.[1];
+          return (
+            pool === undefined ||
+            family === undefined ||
+            pool === family ||
+            (pool === "3p" && (family === "claude" || family === "gpt"))
+          );
+        }),
+      ];
+    }
+    case "opencode":
+      return [
+        windows.filter(
+          (window) => !window.id.startsWith("go_") || model.startsWith("opencode-go/"),
+        ),
+      ];
+    default:
+      return [windows];
+  }
+}
+
 export function exhaustedUsageWindow(
   provider: ServerProvider | undefined,
   now: number,
   model?: string,
 ) {
-  const exhausted = (provider?.usageLimits?.windows ?? []).filter(
-    (window) =>
-      (window.usedPercent ?? 0) >= 100 &&
-      (!window.resetsAt ||
-        !Number.isFinite(Date.parse(window.resetsAt)) ||
-        Date.parse(window.resetsAt) > now),
-  );
-  if (model === undefined) return exhausted[0];
-  switch (provider?.driver) {
-    case "cursor": {
-      const api = exhausted.find((window) => window.id === "apiPercentUsed");
-      const auto = exhausted.find((window) => window.id === "autoPercentUsed");
-      return /^(auto|default|grok|composer)/.test(model) ? auto && api : api;
-    }
-    case "antigravity": {
-      const family = model.match(/^(gemini|claude|gpt)-/)?.[1];
-      return exhausted.find((window) => {
-        const pool = window.id.match(/^(gemini|claude|gpt|3p)-/)?.[1];
-        return (
-          pool === undefined ||
-          family === undefined ||
-          pool === family ||
-          (pool === "3p" && (family === "claude" || family === "gpt"))
-        );
-      });
-    }
-    case "opencode":
-      return exhausted.find(
-        (window) => !window.id.startsWith("go_") || model.startsWith("opencode-go/"),
-      );
-    default:
-      return exhausted[0];
-  }
+  const isExhausted = (window: ServerProviderUsageWindow) =>
+    (window.usedPercent ?? 0) >= 100 &&
+    (!window.resetsAt ||
+      !Number.isFinite(Date.parse(window.resetsAt)) ||
+      Date.parse(window.resetsAt) > now);
+  if (model === undefined) return provider?.usageLimits?.windows.find(isExhausted);
+  const blocked = modelQuotaSources(provider, model).map((source) => source.find(isExhausted));
+  return blocked.every((window) => window !== undefined) ? blocked.at(-1) : undefined;
 }
 
 export function resolveNewThreadModelSelection(input: {
@@ -98,6 +113,49 @@ export function resolveNewThreadModelSelection(input: {
     selection: input.fallbackSelection,
     fallback: { provider, resetsAt: window.resetsAt ?? null },
   };
+}
+
+/**
+ * Instances of one driver that opt into `disableOnUsageLimit` form a pool; a spent member's work
+ * moves to the member with the most headroom. Unknown usage ranks last, never as unused.
+ */
+export function pickUsageLimitReplacement(input: {
+  readonly selection: ModelSelection;
+  readonly providers: readonly ServerProvider[];
+  readonly settings: ServerSettings;
+  readonly projectId: ProjectId | null;
+  readonly now: number;
+}): ModelSelection | null {
+  const pooled = (instanceId: ProviderInstanceId) =>
+    Object.hasOwn(input.settings.providerInstances, instanceId)
+      ? input.settings.providerInstances[instanceId]
+      : undefined;
+  const source = pooled(input.selection.instanceId);
+  if (source?.disableOnUsageLimit !== true) return null;
+  const rank = (provider: ServerProvider) => {
+    const used = modelQuotaSources(provider, input.selection.model).flatMap((source) =>
+      source.length === 0 ? [] : [Math.max(...source.map((window) => window.usedPercent))],
+    );
+    return used.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...used);
+  };
+  const [best] = input.providers
+    .filter(
+      (provider) =>
+        provider.instanceId !== input.selection.instanceId &&
+        provider.driver === source.driver &&
+        pooled(provider.instanceId)?.disableOnUsageLimit === true &&
+        provider.enabled &&
+        provider.installed &&
+        provider.auth.status !== "unauthenticated" &&
+        isProviderAvailable(provider) &&
+        provider.models.some((model) => model.slug === input.selection.model) &&
+        !exhaustedUsageWindow(provider, input.now, input.selection.model) &&
+        resolveProjectProviderInstanceEnabled(input.settings, input.projectId, provider.instanceId),
+    )
+    .sort(
+      (left, right) => rank(left) - rank(right) || left.instanceId.localeCompare(right.instanceId),
+    );
+  return best === undefined ? null : { ...input.selection, instanceId: best.instanceId };
 }
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";

@@ -469,6 +469,90 @@ it.effect("runs a thread-bound automation on the provider the thread uses now", 
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
 });
 
+it.effect.each(["a launch", "an unbound automation"] as const)(
+  "starts %s on a pooled peer when its instance is auto-disabled for quota",
+  (entry) => {
+    const spare = { ...modelSelection, instanceId: ProviderInstanceId.make("codex_spare") };
+    const pooled = { driver: adapter.driver, disableOnUsageLimit: true };
+    const harness = makeHarness({
+      adapters: [adapter, { ...adapter, instanceId: spare.instanceId }],
+      serverSettings: {
+        providerInstances: {
+          [modelSelection.instanceId]: {
+            ...pooled,
+            enabled: false,
+            usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+          },
+          [spare.instanceId]: { ...pooled, enabled: true },
+        },
+      },
+      providers: [
+        {
+          instanceId: spare.instanceId,
+          driver: adapter.driver,
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated" },
+          checkedAt: "2026-11-02T00:00:00.000Z",
+          models: [{ slug: spare.model, name: "Codex", isCustom: false, capabilities: null }],
+          slashCommands: [],
+          skills: [],
+        },
+      ],
+    });
+    const layerScheduledTasks = ScheduledTasks.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          harness.layer,
+          NodeCrypto.layer,
+          Scheduler.layer,
+          Layer.mock(SecretRequests.SecretRequests)({}),
+        ),
+      ),
+    );
+    return Effect.gen(function* () {
+      const tasks = yield* ScheduledTasks.ScheduledTaskService;
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      let threadId: ThreadId;
+      if (entry === "a launch") {
+        threadId = (yield* launches.launch(
+          launchInput({ command: "command:spent", thread: "thread:spent", message: "Start" }),
+        )).threadId;
+      } else {
+        const { task } = yield* tasks.upsert({
+          id: ScheduledTaskId.make("scheduled-task:spent"),
+          title: "Nightly audit",
+          prompt: "Audit the build.",
+          enabled: false,
+          schedule: { type: "interval", everyMs: 3_600_000 },
+          projectId,
+          threadId: null,
+          workspaceStrategy: { type: "root" },
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        const result = yield* tasks.runNow({ id: task.id });
+        assert.equal(result.task.lastRunStatus, "succeeded");
+        // The stored selection still seeds the next run, once the quota is back.
+        assert.deepStrictEqual(result.task.modelSelection, modelSelection);
+        threadId = result.threadId!;
+      }
+      const projection = yield* threads.getThreadProjection(threadId);
+      assert.deepStrictEqual(projection.thread.modelSelection, spare);
+      assert.deepStrictEqual(
+        projection.runs.map((run) => run.providerInstanceId),
+        [spare.instanceId],
+      );
+    }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
+  },
+);
+
 it.effect("retains automation and sender attribution while a message waits in the queue", () => {
   const harness = makeHarness({ runSetup: () => Effect.never });
   return Effect.gen(function* () {

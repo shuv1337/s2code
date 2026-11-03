@@ -3,6 +3,7 @@ import {
   CommandId,
   EnvironmentId,
   MessageId,
+  NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2Run,
   type OrchestrationV2ProviderThread,
@@ -14,6 +15,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   RunId,
+  type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -30,6 +32,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 
 import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -118,8 +121,15 @@ const layerReceiptsTest = CommandReceiptStore.layer.pipe(
 );
 
 const layerDispatchChokepointTest =
-  (settingsLayer: ReturnType<typeof ServerSettings.layerTest>) => (dispatched: Array<string>) =>
+  (
+    settingsLayer: ReturnType<typeof ServerSettings.layerTest>,
+    providers: ReadonlyArray<ServerProvider> = [],
+  ) =>
+  (dispatched: Array<string>) =>
     ThreadManagementService.layer.pipe(
+      Layer.provide(
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
+      ),
       Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
@@ -137,7 +147,13 @@ const layerDispatchChokepointTest =
             } as unknown as OrchestrationV2ThreadProjection),
           dispatch: (command) =>
             Effect.sync(() => {
-              dispatched.push(command.type);
+              dispatched.push(
+                (command.type === "message.dispatch" ||
+                  command.type === "delegated_task.request") &&
+                  command.modelSelection
+                  ? `${command.type}:${command.modelSelection.instanceId}`
+                  : command.type,
+              );
               return { sequence: 1, storedEvents: [] } as never;
             }),
         }),
@@ -145,6 +161,117 @@ const layerDispatchChokepointTest =
       Layer.provide(settingsLayer),
       Layer.provideMerge(layerReceiptsTest),
     );
+
+it.effect.each(["message.dispatch", "delegated_task.request"] as const)(
+  "the dispatch chokepoint moves a %s off an instance auto-disabled for quota to a pooled peer",
+  (commandType) => {
+    const threadId = ThreadId.make("thread:thread-management:chokepoint");
+    const projectId = ProjectId.make("project:thread-management:chokepoint");
+    const spent = ProviderInstanceId.make("codex_work");
+    const spare = ProviderInstanceId.make("codex_spare");
+    const codex = ProviderDriverKind.make("codex");
+    const pooled = { driver: codex, disableOnUsageLimit: true };
+    const send = (
+      threads: ThreadManagementService.ThreadManagementService["Service"],
+      id: string,
+    ) =>
+      threads.dispatch(
+        commandType === "message.dispatch"
+          ? {
+              type: "message.dispatch",
+              commandId: CommandId.make(`command:thread-management:pool-${id}`),
+              threadId,
+              messageId: MessageId.make(`message:thread-management:pool-${id}`),
+              text: "Next step",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "user",
+              creationSource: "web",
+            }
+          : {
+              type: "delegated_task.request",
+              commandId: CommandId.make(`command:thread-management:pool-${id}`),
+              parentThreadId: threadId,
+              parentRunId: RunId.make("run:thread-management:parent"),
+              parentNodeId: NodeId.make("node:thread-management:parent"),
+              task: "Next step",
+              modelSelection: { instanceId: spent, model: "test" },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              createdBy: "agent",
+              creationSource: "mcp",
+            },
+      );
+    const run = (
+      settings: {
+        readonly spent: Record<string, unknown>;
+        readonly spareForProject?: boolean;
+        readonly spentForProject?: boolean;
+      },
+      id: string,
+    ) => {
+      const dispatched: Array<string> = [];
+      return Effect.gen(function* () {
+        yield* send(yield* ThreadManagementService.ThreadManagementService, id).pipe(Effect.ignore);
+        return dispatched;
+      }).pipe(
+        Effect.provide(
+          layerDispatchChokepointTest(
+            ServerSettings.layerTest({
+              providerInstances: {
+                [spent]: { ...pooled, ...settings.spent },
+                [spare]: { ...pooled, enabled: true },
+              },
+              projectSettingsOverrides: {
+                [projectId]: {
+                  providerInstances: {
+                    ...(settings.spentForProject === undefined
+                      ? {}
+                      : { [spent]: { enabled: settings.spentForProject } }),
+                    ...(settings.spareForProject === undefined
+                      ? {}
+                      : { [spare]: { enabled: settings.spareForProject } }),
+                  },
+                },
+              },
+            }),
+            [
+              {
+                instanceId: spare,
+                driver: codex,
+                enabled: true,
+                installed: true,
+                version: null,
+                status: "ready",
+                auth: { status: "authenticated" },
+                checkedAt: "2026-11-02T00:00:00.000Z",
+                models: [{ slug: "test", name: "Test", isCustom: false, capabilities: null }],
+                slashCommands: [],
+                skills: [],
+              },
+            ],
+          )(dispatched),
+        ),
+      );
+    };
+
+    return Effect.gen(function* () {
+      const quota = {
+        enabled: false,
+        usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+      };
+      expect(yield* run({ spent: quota }, "auto")).toEqual([`${commandType}:${spare}`]);
+      // A project that enables the spent instance cannot keep work on it.
+      expect(yield* run({ spent: quota, spentForProject: true }, "override")).toEqual([
+        `${commandType}:${spare}`,
+      ]);
+      // A peer the project switched off is no replacement.
+      expect(yield* run({ spent: quota, spareForProject: false }, "peer-off")).toEqual([]);
+      // A hand-disabled instance carries no note and keeps refusing work.
+      expect(yield* run({ spent: { enabled: false } }, "manual")).toEqual([]);
+    });
+  },
+);
 
 it.effect(
   "the dispatch chokepoint refuses a continuation message.dispatch on a project-disabled instance before reaching the orchestrator",

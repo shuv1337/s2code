@@ -1251,7 +1251,7 @@ export function ProviderInstanceCard({
         />
         <SettingsRow
           title="Turn off at usage limit"
-          description="Turns this instance off when a turn fails because its quota is spent. Turn it back on yourself once the quota resets."
+          description="Turns this instance off when a turn fails because its quota is spent, and moves its threads to another instance of this provider with this setting on. Turn it back on yourself once the quota resets."
           control={
             <Switch
               checked={instance.disableOnUsageLimit === true}

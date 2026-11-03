@@ -22,6 +22,7 @@ import {
   paceOf,
   paceRemainingPercent,
   usesChatGptSharing,
+  pickUsageLimitReplacement,
   resolveNewThreadModelSelection,
 } from "./usageLimits.ts";
 
@@ -150,6 +151,131 @@ describe("new thread model fallback", () => {
         ],
       }).selection,
     ).toEqual(usesFallback ? fallback : defaultSelection);
+  });
+});
+
+describe("usage limit replacement", () => {
+  const cursor = ProviderDriverKind.make("cursor");
+  const model = "claude-opus-5-5";
+  const member = (id: string, usedPercent: number | undefined, overrides = {}) =>
+    provider({
+      instanceId: ProviderInstanceId.make(id),
+      driver: cursor,
+      models: [{ slug: model, name: "Opus", isCustom: false, capabilities: null }],
+      ...(usedPercent === undefined
+        ? {}
+        : {
+            usageLimits: {
+              checkedAt: "2026-09-03T11:00:00.000Z",
+              windows: [{ ...window, id: "apiPercentUsed", usedPercent }],
+            },
+          }),
+      ...overrides,
+    });
+  const cursorUsage = (used: { readonly api: number; readonly auto: number }) => ({
+    checkedAt: "2026-09-03T11:00:00.000Z",
+    windows: [
+      { ...window, id: "apiPercentUsed", usedPercent: used.api },
+      { ...window, id: "autoPercentUsed", usedPercent: used.auto },
+    ],
+  });
+  const autoModel = [{ slug: "auto", name: "Auto", isCustom: false, capabilities: null }];
+  const pooled = { driver: cursor, enabled: true, config: {}, disableOnUsageLimit: true };
+  const settings = (instances: Record<string, object>) => ({
+    ...DEFAULT_SERVER_SETTINGS,
+    providerInstances: Object.fromEntries(
+      ["spent", "busy", "idle", "unknown", "solo"].map((id) => [
+        id,
+        { ...pooled, ...instances[id] },
+      ]),
+    ) as typeof DEFAULT_SERVER_SETTINGS.providerInstances,
+  });
+  const providers = [
+    member("spent", 100),
+    member("busy", 70),
+    member("idle", 10),
+    member("unknown", undefined),
+  ];
+  const pick = (overrides: {
+    readonly instances?: Record<string, object>;
+    readonly providers?: readonly ServerProvider[];
+    readonly model?: string;
+  }) =>
+    pickUsageLimitReplacement({
+      selection: { instanceId: ProviderInstanceId.make("spent"), model: overrides.model ?? model },
+      providers: overrides.providers ?? providers,
+      settings: settings(overrides.instances ?? {}),
+      projectId: null,
+      now,
+    })?.instanceId ?? null;
+
+  it.each([
+    ["the member with the most headroom", {}, "idle"],
+    [
+      "known usage over unknown",
+      { providers: providers.slice(0, 2).concat(providers[3]!) },
+      "busy",
+    ],
+    ["unknown usage as a last resort", { providers: [providers[0]!, providers[3]!] }, "unknown"],
+    [
+      "nothing when the source is not pooled",
+      { instances: { spent: { disableOnUsageLimit: false } } },
+      null,
+    ],
+    [
+      "no member that left the pool",
+      { instances: { idle: { disableOnUsageLimit: undefined } } },
+      "busy",
+    ],
+    ["no disabled member", { instances: { idle: { enabled: false } } }, "busy"],
+    [
+      "no member of another driver",
+      {
+        providers: [
+          providers[0]!,
+          member("idle", 10, { driver: ProviderDriverKind.make("codex") }),
+        ],
+      },
+      null,
+    ],
+    [
+      "headroom in the windows that serve the model, not the busiest window",
+      {
+        providers: [
+          providers[0]!,
+          member("busy", undefined, { usageLimits: cursorUsage({ api: 50, auto: 50 }) }),
+          member("idle", undefined, { usageLimits: cursorUsage({ api: 10, auto: 100 }) }),
+        ],
+      },
+      "idle",
+    ],
+    [
+      "headroom in either allowance for an Auto model",
+      {
+        model: "auto",
+        providers: [
+          providers[0]!,
+          member("busy", undefined, {
+            models: autoModel,
+            usageLimits: cursorUsage({ api: 50, auto: 50 }),
+          }),
+          member("idle", undefined, {
+            models: autoModel,
+            usageLimits: cursorUsage({ api: 100, auto: 10 }),
+          }),
+        ],
+      },
+      "idle",
+    ],
+    ["no member without the model", { model: "gpt-6.1-sol" }, null],
+    ["no exhausted member", { providers: [providers[0]!, member("busy", 100)] }, null],
+    [
+      "no unauthenticated member",
+      { providers: [providers[0]!, member("idle", 10, { auth: { status: "unauthenticated" } })] },
+      null,
+    ],
+  ] as const)("picks %s", (_name, overrides, expected) => {
+    expect(pick(overrides)).toBe(expected);
   });
 });
 

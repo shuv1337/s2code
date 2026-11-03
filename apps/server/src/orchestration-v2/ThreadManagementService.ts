@@ -66,6 +66,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -576,6 +577,7 @@ const make = Effect.gen(function* () {
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+  const resolveSpentInstance = yield* makeSpentInstanceResolver;
 
   const assertProviderInstanceEnabled: ThreadManagementServiceShape["assertProviderInstanceEnabled"] =
     (input) =>
@@ -731,10 +733,42 @@ const make = Effect.gen(function* () {
     }
   };
 
+  const routeAroundSpentInstance = Effect.fn("ThreadManagementService.routeAroundSpentInstance")(
+    function* (command: OrchestrationV2ServerCommand) {
+      if (command.type !== "message.dispatch" && command.type !== "delegated_task.request") {
+        return command;
+      }
+      // Steering or restarting a live run cannot change its instance.
+      if (
+        command.type === "message.dispatch" &&
+        (command.dispatchMode.type === "steer_active" ||
+          command.dispatchMode.type === "restart_active")
+      ) {
+        return command;
+      }
+      const receipt = yield* receipts
+        .getByCommandId(command.commandId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isSome(receipt)) return command;
+      const projection = yield* orchestrator.getThreadRecords(
+        command.type === "message.dispatch" ? command.threadId : command.parentThreadId,
+        [],
+      );
+      const selection =
+        command.type === "message.dispatch"
+          ? (command.modelSelection ?? projection.thread.modelSelection)
+          : command.modelSelection;
+      const replacement = yield* resolveSpentInstance(selection, projection.thread.projectId);
+      return replacement === selection ? command : { ...command, modelSelection: replacement };
+    },
+  );
+
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
     ensureCommandTranscripts(command).pipe(
-      Effect.andThen(assertDispatchTargetEnabled(command)),
-      Effect.andThen(orchestrator.dispatch(command)),
+      Effect.andThen(routeAroundSpentInstance(command)),
+      Effect.flatMap((routed) =>
+        assertDispatchTargetEnabled(routed).pipe(Effect.andThen(orchestrator.dispatch(routed))),
+      ),
     );
 
   const getProjectThreadRecords: ThreadManagementServiceShape["getProjectThreadRecords"] = (

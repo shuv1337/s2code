@@ -35,11 +35,14 @@ Add one Cursor instance per account. **Usage → Limits** shows each enabled acc
 usage and reset date. A meter at 100% does not always mean the account is blocked: Cursor can still
 run Auto after the named-model allowance is spent.
 
-To take an account out of rotation once its quota runs out, turn on **Turn off at usage limit** in
-that instance's settings. When a turn fails because the account's quota is spent, S2Code turns the
-instance off and notes when and why. Short rate limits do not count. Turn the instance back on
-yourself after the quota resets; the thread that hit the limit stays failed so you can continue it
-on another account.
+To rotate accounts automatically, turn on **Turn off at usage limit** for each account. When a turn
+fails because an account's quota is spent, S2Code turns that instance off, notes when and why, and
+continues the thread on the account with the most headroom among the others that have the setting
+on. The new account starts a fresh Cursor session and receives the recent conversation, so expect
+it to re-read context once. A thread switches automatically only once per message; if the next account
+also runs out, the thread stops so you can choose. Messages sent later to a turned-off account go to
+a healthy one. Short rate limits do not count, and accounts you turned off yourself are left alone.
+Turn an instance back on yourself after its quota resets.
 
 ## V2 Capability Mapping
 
