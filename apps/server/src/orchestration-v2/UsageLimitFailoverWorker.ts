@@ -17,11 +17,14 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
+import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import type { ProjectionRecords } from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
@@ -85,6 +88,8 @@ export function usageLimitFailoverCommand(input: {
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
+    const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+    const eventSink = yield* EventSink.EventSinkV2;
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const threads = yield* ThreadManagement.ThreadManagementService;
     const settings = yield* ServerSettings.ServerSettingsService;
@@ -93,6 +98,8 @@ export const layer = Layer.effectDiscard(
       threadId: ThreadId,
       runId: RunId,
     ) {
+      const commandId = CommandId.make(`${FAILOVER_ID_PREFIX}${runId}`);
+      if (Option.isSome(yield* receipts.getByCommandId(commandId))) return;
       const projection = yield* orchestrator.getThreadRecords(
         threadId,
         ["runs", "turnItems", "runtimeRequests"],
@@ -105,7 +112,16 @@ export const layer = Layer.effectDiscard(
         settings: yield* settings.getSettings,
         now: yield* Clock.currentTimeMillis,
       });
-      if (command?.type !== "message.dispatch") return;
+      if (command?.type !== "message.dispatch") {
+        yield* eventSink.commitRejectedCommand({
+          commandId,
+          threadId,
+          commandType: "message.dispatch",
+          rejectedAt: yield* DateTime.now,
+          error: "Automatic usage-limit failover declined.",
+        });
+        return;
+      }
       yield* Effect.logInfo("orchestration-v2.usage-limit-failover", {
         threadId,
         runId,
@@ -116,7 +132,7 @@ export const layer = Layer.effectDiscard(
     });
     const logFailure = (threadId: ThreadId) => (cause: unknown) =>
       Effect.logWarning("orchestration-v2.usage-limit-failover.failed", { threadId, cause });
-    // The deterministic command id makes a failover that already committed a receipted no-op.
+    // Receipts preserve both dispatched and declined decisions across sweeps and restarts.
     const sweep = Effect.fn("UsageLimitFailoverWorker.sweep")(function* () {
       const { threads: shells } = yield* orchestrator.getShellSnapshot();
       for (const shell of shells) {
@@ -152,4 +168,4 @@ export const layer = Layer.effectDiscard(
     // Failures that landed while the server was down, or before the subscription, fail over now.
     yield* forkParked(sweepSafely);
   }),
-);
+).pipe(Layer.provide(CommandReceiptStore.layer));

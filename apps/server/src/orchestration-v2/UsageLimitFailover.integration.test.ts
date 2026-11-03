@@ -365,7 +365,9 @@ const runPool = <A, E, R>(
       ProjectStore.layer,
       boot.failoverWorker === false
         ? Layer.empty
-        : UsageLimitFailoverWorker.layer.pipe(Layer.provide(RuntimeLayer.layer)),
+        : UsageLimitFailoverWorker.layer.pipe(
+            Layer.provide(Layer.merge(RuntimeLayer.layer, RuntimeLayer.layerEventSink)),
+          ),
     ).pipe(
       Layer.provide(McpSessionRegistryTestkit.layer),
       Layer.provide(McpProviderSessions.layer),
@@ -404,6 +406,7 @@ const send = (
     readonly modelSelection?: ModelSelection;
     readonly manualContinuationOfRunId?: RunId;
     readonly queue?: boolean;
+    readonly failoverChainId?: RunId;
   } = {},
 ) =>
   ThreadManagementService.ThreadManagementService.use((threads) =>
@@ -417,6 +420,9 @@ const send = (
       dispatchMode: { type: options.queue ? "queue_after_active" : "start_immediately" },
       createdBy: "user",
       creationSource: "web",
+      ...(options.failoverChainId === undefined
+        ? {}
+        : { failoverChainId: options.failoverChainId }),
       ...(options.modelSelection === undefined ? {} : { modelSelection: options.modelSelection }),
       ...(options.manualContinuationOfRunId === undefined
         ? {}
@@ -497,10 +503,14 @@ const settled = (runs: number) => (projection: OrchestrationV2ThreadProjection) 
   projection.runs.length === runs && idle(projection);
 
 /** Resolves once the worker has handled every failure committed before this call. */
-const awaitFailoverWorkerCaughtUp = Effect.gen(function* () {
-  const threadId = yield* startThread("sentinel", sentinelSource);
+const failoverBarrier = Effect.fn("UsageLimitFailoverTest.failoverBarrier")(function* (
+  name: string,
+) {
+  const threadId = yield* startThread(name, sentinelSource);
   yield* awaitThread(threadId, settled(2));
 });
+
+const awaitFailoverWorkerCaughtUp = failoverBarrier("sentinel");
 
 const instanceSettings = (instanceId: ProviderInstanceId) =>
   ServerSettings.ServerSettingsService.use((settings) => settings.getSettings).pipe(
@@ -710,6 +720,15 @@ describe("usage limit failover through the real runtime", () => {
             yield* Deferred.succeed(gate, undefined);
 
             const thread = yield* awaitThread(threadId, settled(2));
+            const queued = thread.runs[1]!;
+            const providerThread = thread.providerThreads.find(
+              (entry) => entry.id === queued.providerThreadId,
+            );
+            assert.equal(providerThread?.providerInstanceId, fresh);
+            assert.equal(providerThread?.nativeThreadRef?.nativeId, `${fresh}:${threadId}`);
+            assert.isTrue(
+              thread.contextHandoffs.some((handoff) => handoff.strategy === "full_thread_summary"),
+            );
             assert.deepEqual(
               thread.runs.map((run) => [run.providerInstanceId, run.status]),
               [
@@ -720,6 +739,108 @@ describe("usage limit failover through the real runtime", () => {
           }),
       );
     }),
+  );
+
+  it.live("holds spent queued work despite a project enabled override", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      yield* runPool({ [spent]: { driver: cursor, usedPercent: 50, gate } }, () =>
+        Effect.gen(function* () {
+          const threadId = yield* startThread("override", spent);
+          yield* send(threadId, "override:next", "Then this.", { queue: true });
+          yield* ServerSettings.ServerSettingsService.use((settings) =>
+            settings.updateSettings({
+              projectSettingsOverrides: {
+                [ProjectId.make("project:override")]: {
+                  providerInstances: { [spent]: { enabled: true } },
+                },
+              },
+            }),
+          );
+          yield* disableInstanceOnExhaustedQuota(spent, quotaSpent);
+          yield* Deferred.succeed(gate, undefined);
+          yield* awaitThread(threadId, (thread) => thread.runs[1]?.queueHeld === true);
+          const thread = yield* Orchestrator.OrchestratorV2.use((o) =>
+            o.getThreadProjection(threadId),
+          );
+          assert.equal(thread.runs[1]?.status, "queued");
+          assert.equal(thread.runs[1]?.providerInstanceId, spent);
+        }),
+      );
+    }),
+  );
+
+  it.live("keeps a snooze when an automatic failover dispatch arrives", () =>
+    runPool(
+      {
+        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [fresh]: { driver: cursor, usedPercent: 0 },
+      },
+      () =>
+        Effect.gen(function* () {
+          const threadId = yield* startThread("automatic-snooze", spent);
+          const failed = (yield* awaitThread(threadId, settled(1))).runs[0]!;
+          const snoozedUntil = "2099-01-01T00:00:00.000Z";
+          yield* Orchestrator.OrchestratorV2.use((o) =>
+            o.dispatch({
+              type: "thread.snooze",
+              commandId: CommandId.make("automatic-snooze:snooze"),
+              threadId,
+              snoozedUntil,
+            }),
+          );
+          yield* send(threadId, "automatic-snooze:failover", "Continue.", {
+            modelSelection: selection(fresh),
+            manualContinuationOfRunId: failed.id,
+            failoverChainId: failed.id,
+          });
+          const thread = yield* awaitThread(threadId, settled(2));
+          assert.equal(
+            thread.thread.snoozedUntil && DateTime.formatIso(thread.thread.snoozedUntil),
+            snoozedUntil,
+          );
+          assert.equal(thread.runs[1]?.providerInstanceId, fresh);
+        }),
+      { failoverWorker: false },
+    ),
+  );
+
+  it.live("does not revive a declined failure after reboot and quota reset", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-failover-declined-" });
+      const boot = { databasePath: `${directory}/state.sqlite` };
+      const threadId = ThreadId.make("thread:declined");
+      const workspaceRoot = yield* checkpointWorkspace("declined");
+      yield* runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+          [fresh]: { driver: cursor, usedPercent: 100 },
+        },
+        () =>
+          startThread("declined", spent, workspaceRoot).pipe(
+            Effect.andThen((id) => awaitThread(id, settled(1))),
+            Effect.andThen(awaitFailoverWorkerCaughtUp),
+          ),
+        boot,
+      );
+      yield* runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+          [fresh]: { driver: cursor, usedPercent: 0 },
+        },
+        () =>
+          Effect.gen(function* () {
+            yield* failoverBarrier("sentinel-reboot");
+            const thread = yield* Orchestrator.OrchestratorV2.use((o) =>
+              o.getThreadProjection(threadId),
+            );
+            assert.lengthOf(thread.runs, 1);
+            assert.equal(thread.runs[0]?.status, "failed");
+          }),
+        boot,
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.live("fails over a failure the server missed while down, once across restarts", () =>

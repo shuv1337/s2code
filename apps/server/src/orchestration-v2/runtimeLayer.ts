@@ -389,7 +389,9 @@ export const layerProduction = Layer.mergeAll(
     ),
   ),
   UsageLimitFailoverWorker.layer.pipe(
-    Layer.provide(Layer.merge(layerThreadManagementProvided, layerOrchestratorProvided)),
+    Layer.provide(
+      Layer.mergeAll(layerThreadManagementProvided, layerOrchestratorProvided, layerEventSink),
+    ),
   ),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,
