@@ -3,6 +3,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   EasDeviceHostConfig,
+  McpServerConfig,
   type ServerSettings,
   SimlockDeviceHostConfig,
   UsageLimitSourceConfig,
@@ -33,6 +34,7 @@ const providerSecretFields = new Map([
   ),
 ]);
 const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
+const mcpServerSecretFields = secretSettingsFields(McpServerConfig);
 const easDeviceHostSecretFields = secretSettingsFields(EasDeviceHostConfig);
 const simlockDeviceHostSecretFields = secretSettingsFields(SimlockDeviceHostConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
@@ -149,6 +151,19 @@ export function mapSettingsSecrets(
     ]),
   ) as ServerSettings["usageLimitSources"];
 
+  const mcpServers = Object.fromEntries(
+    Object.entries(settings.mcpServers).map(([id, server]) => [
+      id,
+      mapFields(
+        server,
+        mcpServerSecretFields,
+        (field, serverHost) =>
+          `mcp-server-${encode(id)}-${encode(field)}` +
+          (serverHost === null ? "" : `-${encode(serverHost)}`),
+      ),
+    ]),
+  ) as ServerSettings["mcpServers"];
+
   const easDeviceHosts = settings.easDeviceHosts.map(
     (host) =>
       mapFields(
@@ -177,6 +192,7 @@ export function mapSettingsSecrets(
     providerInstances,
     sourceControlHosts,
     usageLimitSources,
+    mcpServers,
     easDeviceHosts,
     simlockDeviceHosts,
   };
