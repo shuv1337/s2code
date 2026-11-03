@@ -1,3 +1,6 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Secret names are derived synchronously while mapping settings.
+import * as NodeCrypto from "node:crypto";
+
 import {
   AntigravitySettings,
   ClaudeSettings,
@@ -38,6 +41,10 @@ const mcpServerSecretFields = secretSettingsFields(McpServerConfig);
 const easDeviceHostSecretFields = secretSettingsFields(EasDeviceHostConfig);
 const simlockDeviceHostSecretFields = secretSettingsFields(SimlockDeviceHostConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
+
+/** Keyed by URL too, so no race, echo, or hand edit can pair the token with another server. */
+export const mcpServerSecretName = (id: string, url: string, field = "bearerToken") =>
+  `mcp-server-${encode(id)}-${encode(field)}-${NodeCrypto.createHash("sha256").update(url).digest("base64url").slice(0, 16)}`;
 
 export interface SettingsSecret {
   readonly secretName: string;
@@ -158,7 +165,7 @@ export function mapSettingsSecrets(
         server,
         mcpServerSecretFields,
         (field, serverHost) =>
-          `mcp-server-${encode(id)}-${encode(field)}` +
+          mcpServerSecretName(id, server.url, field) +
           (serverHost === null ? "" : `-${encode(serverHost)}`),
       ),
     ]),

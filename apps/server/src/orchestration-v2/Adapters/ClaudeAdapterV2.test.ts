@@ -548,7 +548,6 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       const threadId = ThreadId.make("thread-claude-mcp-pre-approval");
       for (const [sharedMcpServers, sharedEntries] of [
         [undefined, {}],
-        [[], {}],
         [
           SHARED_MCP_SERVERS,
           {

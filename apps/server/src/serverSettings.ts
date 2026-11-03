@@ -951,7 +951,7 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
-  // An echoed redacted token keeps the stored one, which must never follow the server to a new URL.
+  // The token's secret is keyed by URL, so an echoed marker after a move would claim a token it no longer has.
   const forgetMovedMcpServerTokens = (
     current: ServerSettings,
     next: ServerSettings,

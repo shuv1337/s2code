@@ -3,13 +3,10 @@ import * as Result from "effect/Result";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  describeMcpServerTest,
   draftFromMcpServer,
   mcpServerFromDraft,
-  mcpServerTestInputFromDraft,
   newMcpServerDraft,
   nextMcpServerToken,
-  savedTokenDropped,
   type McpServerTarget,
 } from "./McpServersSettings.logic";
 
@@ -60,35 +57,11 @@ describe("mcpServerFromDraft", () => {
     }
   });
 
-  it("keeps, replaces, or clears the saved token and keeps the id and enabled state", () => {
+  it("keeps the id, enabled state, and saved token of an edited server", () => {
     const draft = draftFromMcpServer(id, saved);
     expect(draft.token).toEqual({ kind: "saved" });
-    const save = (token: typeof draft.token) =>
-      mcpServerFromDraft({ ...draft, id: "ignored", token }, new Set([id]), edit);
-    expect(save({ kind: "saved" })).toEqual(Result.succeed({ id, config: saved }));
-    expect(save({ kind: "new", value: "next" })).toEqual(
-      Result.succeed({ id, config: { ...saved, bearerToken: "next" } }),
-    );
-    expect(save({ kind: "cleared" })).toEqual(
-      Result.succeed({ id, config: { ...saved, bearerToken: "" } }),
-    );
-    const moved = (token: typeof draft.token) =>
-      mcpServerFromDraft(
-        { ...draft, url: "https://other.example.com/mcp", token },
-        new Set([id]),
-        edit,
-      );
-    expect(moved({ kind: "saved" })).toEqual(
-      Result.succeed({
-        id,
-        config: { ...saved, url: "https://other.example.com/mcp", bearerToken: "" },
-      }),
-    );
-    expect(moved({ kind: "new", value: "next" })).toEqual(
-      Result.succeed({
-        id,
-        config: { ...saved, url: "https://other.example.com/mcp", bearerToken: "next" },
-      }),
+    expect(mcpServerFromDraft({ ...draft, id: "ignored" }, new Set([id]), edit)).toEqual(
+      Result.succeed({ id, config: saved }),
     );
   });
 });
@@ -101,49 +74,5 @@ describe("nextMcpServerToken", () => {
     expect(nextMcpServerToken("", { ...edit, config: { ...saved, bearerToken: "" } })).toEqual({
       kind: "cleared",
     });
-  });
-});
-
-describe("mcpServerTestInputFromDraft", () => {
-  it("never sends the redaction marker and sends an explicit token otherwise", () => {
-    const draft = draftFromMcpServer(id, saved);
-    expect(mcpServerTestInputFromDraft(draft, new Set([id]), edit)).toEqual({
-      id,
-      url: saved.url,
-    });
-    expect(
-      mcpServerTestInputFromDraft({ ...draft, token: { kind: "cleared" } }, new Set([id]), edit),
-    ).toEqual({ id, url: saved.url, bearerToken: "" });
-    expect(mcpServerTestInputFromDraft({ ...draft, url: "nope" }, new Set([id]), edit)).toBeNull();
-  });
-
-  it("drops a saved token once the URL changes", () => {
-    const draft = draftFromMcpServer(id, saved);
-    const movedDraft = { ...draft, url: "https://other.example.com" };
-    expect(savedTokenDropped(draft, edit)).toBe(false);
-    expect(savedTokenDropped(movedDraft, edit)).toBe(true);
-    expect(mcpServerTestInputFromDraft(movedDraft, new Set([id]), edit)).toEqual({
-      id,
-      url: "https://other.example.com",
-      bearerToken: "",
-    });
-  });
-});
-
-describe("describeMcpServerTest", () => {
-  it("names the first tools and points a rejected token at the token", () => {
-    expect(
-      describeMcpServerTest({
-        _tag: "Connected",
-        tools: ["search", "execute", "describe", "call", "skills", "resume"],
-      }).label,
-    ).toBe("Connected · 6 tools: search, execute, describe, …");
-    expect(describeMcpServerTest({ _tag: "Rejected", status: 401 })).toEqual({
-      label: "Rejected (HTTP 401): check the token",
-      ok: false,
-    });
-    expect(describeMcpServerTest({ _tag: "Rejected", status: 500 }).label).toBe(
-      "Rejected (HTTP 500)",
-    );
   });
 });

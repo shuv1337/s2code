@@ -28,6 +28,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { sourceControlHostSecretName } from "./sourceControl/sourceControlHostSecrets.ts";
+import { mcpServerSecretName, SECRET_REDACTED } from "./settingsSecrets.ts";
 import * as ServerConfig from "./config.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
@@ -1394,7 +1395,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           }),
           sourceControlHostSecretName({ kind: "gitcafe", field: "token", serverHost: null }),
           "usage-limit-source-aHVi",
-          "mcp-server-ZXhlY3V0b3I-YmVhcmVyVG9rZW4",
+          mcpServerSecretName("executor", "https://executor.example.test/mcp"),
         ];
         for (const name of secretNames) {
           assert.isTrue(Option.isSome(yield* store.get(name)), name);
@@ -1441,7 +1442,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const service = yield* ServerSettingsModule.ServerSettingsService;
       const store = yield* ServerSecretStore.ServerSecretStore;
       const id = McpServerId.make("executor");
-      const secretName = "mcp-server-ZXhlY3V0b3I-YmVhcmVyVG9rZW4";
+      const secretName = mcpServerSecretName(id, "https://executor.example.test/mcp");
       const original = {
         label: "Executor",
         url: "https://executor.example.test/mcp",
@@ -1475,6 +1476,37 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         bearerToken: "new-secret",
       });
       assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("reads a saved MCP server token only for the URL it was saved with", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const savedUrl = "https://executor.example.test/mcp";
+      for (const id of ["executor", "docs"]) {
+        yield* store.set(
+          mcpServerSecretName(id, savedUrl),
+          new TextEncoder().encode(`${id}-secret`),
+        );
+      }
+      const server = (url: string) => ({ url, bearerToken: SECRET_REDACTED, enabled: true });
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({
+          mcpServers: {
+            executor: server("https://elsewhere.example.test/mcp"),
+            docs: server(savedUrl),
+          },
+        }),
+      );
+
+      const loaded = yield* serverSettings.getSettings;
+
+      assert.equal(loaded.mcpServers[McpServerId.make("executor")]?.bearerToken, "");
+      assert.equal(loaded.mcpServers[McpServerId.make("docs")]?.bearerToken, "docs-secret");
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

@@ -5,11 +5,14 @@ import {
   type McpServerTestResult,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
+import {
+  mcpSavedTokenKept as sharedSavedTokenKept,
+  mcpServerTestInput as sharedTestInput,
+  mcpServerTokenToSave,
+  type McpServerTokenEdit,
+} from "@t3tools/client-runtime/mcp-server-token";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-
-/** What the server sends in place of a saved token, and accepts back as "keep it". */
-export const MCP_SECRET_REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
 const decodeId = Schema.decodeUnknownOption(McpServerId);
 const decodeConfig = Schema.decodeUnknownOption(McpServerConfig);
@@ -74,18 +77,15 @@ export function parseMcpServerId(
   return { ok: true, value: decoded.value };
 }
 
-/** A saved token never follows the server to a new URL; saving there drops it. */
+function tokenEdit(draft: McpServerDraft, saved: McpServerConfig | undefined): McpServerTokenEdit {
+  return { saved, url: draft.url, typed: draft.token, cleared: draft.clearToken };
+}
+
 export function mcpSavedTokenKept(
   draft: McpServerDraft,
   saved: McpServerConfig | undefined,
 ): boolean {
-  return mcpServerHasToken(saved) && !draft.clearToken && draft.url.trim() === saved?.url;
-}
-
-function bearerToken(draft: McpServerDraft, saved: McpServerConfig | undefined): string {
-  const typed = draft.token.trim();
-  if (typed) return typed;
-  return mcpSavedTokenKept(draft, saved) ? MCP_SECRET_REDACTED : "";
+  return sharedSavedTokenKept(tokenEdit(draft, saved));
 }
 
 export function parseMcpServerDraft(
@@ -100,7 +100,7 @@ export function parseMcpServerDraft(
   const config = decodeConfig({
     ...(label ? { label } : {}),
     url: draft.url.trim(),
-    bearerToken: bearerToken(draft, saved),
+    bearerToken: mcpServerTokenToSave(tokenEdit(draft, saved)),
     enabled: draft.enabled,
   });
   if (Option.isNone(config))
@@ -108,7 +108,6 @@ export function parseMcpServerDraft(
   return { ok: true, value: { id: id.value, config: config.value } };
 }
 
-/** Omitting the token tells the server to test with the saved one. */
 export function mcpServerTestInput(
   draft: McpServerDraft,
   existing: Readonly<Record<string, McpServerConfig>>,
@@ -117,13 +116,8 @@ export function mcpServerTestInput(
   const parsed = parseMcpServerDraft(draft, existing, isNew);
   if (!parsed.ok) return parsed;
   const { id, config } = parsed.value;
-  return {
-    ok: true,
-    value:
-      config.bearerToken === MCP_SECRET_REDACTED
-        ? { id, url: config.url }
-        : { id, url: config.url, bearerToken: config.bearerToken },
-  };
+  const saved = isNew ? undefined : existing[id];
+  return { ok: true, value: sharedTestInput(id, config.url, tokenEdit(draft, saved)) };
 }
 
 export function upsertMcpServerPatch(id: string, config: McpServerConfig) {

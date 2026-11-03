@@ -992,7 +992,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   ),
                 ),
               ),
-            { discard: true },
+            { concurrency: "unbounded", discard: true },
           );
         }
 

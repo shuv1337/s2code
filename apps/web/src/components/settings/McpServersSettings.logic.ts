@@ -4,6 +4,12 @@ import {
   type McpServerTestInput,
   type McpServerTestResult,
 } from "@t3tools/contracts";
+import {
+  mcpSavedTokenKept,
+  mcpServerTestInput,
+  mcpServerTokenToSave,
+  type McpServerTokenEdit,
+} from "@t3tools/client-runtime/mcp-server-token";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -82,26 +88,18 @@ function validateUrl(raw: string): Result.Result<string, string> {
   return Result.succeed(url);
 }
 
-/** True when the URL moved away from the saved one, so saving drops the saved token. */
-export function savedTokenDropped(draft: McpServerDraft, target: McpServerTarget): boolean {
-  return (
-    target.mode === "edit" && draft.token.kind === "saved" && draft.url.trim() !== target.config.url
-  );
+function tokenEdit(draft: McpServerDraft, target: McpServerTarget): McpServerTokenEdit {
+  return {
+    saved: target.mode === "edit" ? target.config : undefined,
+    url: draft.url,
+    typed: draft.token.kind === "new" ? draft.token.value : "",
+    cleared: draft.token.kind === "cleared",
+  };
 }
 
-function tokenValue(draft: McpServerDraft, target: McpServerTarget): string {
-  const { token } = draft;
-  switch (token.kind) {
-    case "saved":
-      // Sending the redaction marker back keeps the stored token.
-      return target.mode === "edit" && !savedTokenDropped(draft, target)
-        ? target.config.bearerToken
-        : "";
-    case "new":
-      return token.value.trim();
-    case "cleared":
-      return "";
-  }
+/** True when the URL moved away from the saved one, so saving drops the saved token. */
+export function savedTokenDropped(draft: McpServerDraft, target: McpServerTarget): boolean {
+  return draft.token.kind === "saved" && !mcpSavedTokenKept(tokenEdit(draft, target));
 }
 
 /** The settings entry a draft adds or replaces, or every field that blocks it, one message each. */
@@ -127,16 +125,13 @@ export function mcpServerFromDraft(
     config: {
       ...(label ? { label } : {}),
       url: url.success,
-      bearerToken: tokenValue(draft, target),
+      bearerToken: mcpServerTokenToSave(tokenEdit(draft, target)),
       enabled: target.mode === "edit" ? target.config.enabled : true,
     },
   });
 }
 
-/**
- * The test request for a draft, or null while its name or URL is invalid. A kept saved token
- * is omitted so the server uses its own copy.
- */
+/** The test request for a draft, or null while its name or URL is invalid. */
 export function mcpServerTestInputFromDraft(
   draft: McpServerDraft,
   existingIds: ReadonlySet<string>,
@@ -144,10 +139,7 @@ export function mcpServerTestInputFromDraft(
 ): McpServerTestInput | null {
   const entry = mcpServerFromDraft(draft, existingIds, target);
   if (Result.isFailure(entry)) return null;
-  const { id, config } = entry.success;
-  return draft.token.kind === "saved" && !savedTokenDropped(draft, target)
-    ? { id, url: config.url }
-    : { id, url: config.url, bearerToken: config.bearerToken };
+  return mcpServerTestInput(entry.success.id, entry.success.config.url, tokenEdit(draft, target));
 }
 
 export function mcpServerHost(url: string): string {

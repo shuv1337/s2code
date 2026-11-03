@@ -1327,7 +1327,6 @@ describe("CodexAdapterV2 post-settle continuation", () => {
 
   it.effect.each([
     { label: "no shared servers", sharedMcpServers: undefined, sharedConfig: {} },
-    { label: "an empty shared server list", sharedMcpServers: [], sharedConfig: {} },
     {
       label: "shared servers",
       sharedMcpServers: [

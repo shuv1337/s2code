@@ -199,7 +199,8 @@ const directoryModels = (directory: string): ReadonlyArray<ProviderReplayEntry> 
 ];
 
 const bigPickle: ModelSelection = { instanceId, model: "opencode/big-pickle" };
-const policy = (runtimeMode: "full-access" | "approval-required" = "full-access") => ({
+type RuntimeMode = "full-access" | "approval-required" | "auto" | "auto-accept-edits";
+const policy = (runtimeMode: RuntimeMode = "full-access") => ({
   runtimeMode,
   interactionMode: "default" as const,
   cwd: WORK,
@@ -226,7 +227,7 @@ const providerThread = (now: DateTime.Utc): OrchestrationV2ProviderThread => ({
 const turnInput = (
   thread: OrchestrationV2ProviderThread,
   modelSelection: ModelSelection = bigPickle,
-  runtimeMode: "full-access" | "approval-required" = "full-access",
+  runtimeMode: RuntimeMode = "full-access",
 ) => ({
   appThread: { title: TITLE } as OrchestrationV2AppThread,
   threadId,
@@ -2425,6 +2426,8 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
   it.effect.each([
     { runtimeMode: "full-access" as const, effect: "allow" },
     { runtimeMode: "approval-required" as const, effect: "ask" },
+    { runtimeMode: "auto" as const, effect: "ask" },
+    { runtimeMode: "auto-accept-edits" as const, effect: "ask" },
   ])(
     "registers shared MCP servers per thread under $effect rules and survives one failing",
     ({ runtimeMode, effect }) =>
@@ -2476,7 +2479,16 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           out("session.update", {
             sessionID: SESSION,
             permissions: supervised
-              ? [...supervisedRules.slice(0, 3), ...sharedRules, ...supervisedRules.slice(3)]
+              ? [
+                  supervisedRules[0],
+                  {
+                    ...supervisedRules[1],
+                    effect: runtimeMode === "auto-accept-edits" ? "allow" : "ask",
+                  },
+                  supervisedRules[2],
+                  ...sharedRules,
+                  ...supervisedRules.slice(3),
+                ]
               : [t3Rules[0], ...sharedRules, ...mcpRules],
           }),
           reply("session.update", null),

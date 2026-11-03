@@ -13,10 +13,10 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 import {
@@ -77,7 +77,7 @@ interface Received {
 }
 
 /** Answers like a small streamable-HTTP MCP server that requires `UPSTREAM_TOKEN`. */
-const upstream = (received: Array<Received>, hung: Deferred.Deferred<void>) =>
+const upstream = (received: Array<Received>, hung: Queue.Queue<string>) =>
   HttpRouter.add(
     "*",
     "/upstream/*",
@@ -87,7 +87,7 @@ const upstream = (received: Array<Received>, hung: Deferred.Deferred<void>) =>
       const body = request.method === "POST" ? yield* request.text : "";
       received.push({ method: request.method, path, headers: request.headers, body });
       if (path === "/upstream/hang")
-        return yield* Deferred.succeed(hung, undefined).pipe(Effect.andThen(Effect.never));
+        return yield* Queue.offer(hung, body).pipe(Effect.andThen(Effect.never));
       if (path === "/upstream/moved") {
         return HttpServerResponse.empty({ status: 302, headers: { location: "/upstream/mcp" } });
       }
@@ -139,7 +139,7 @@ const server = (url: string, overrides: Partial<McpServerConfig> = {}) => ({
 
 const fixture = Effect.gen(function* () {
   const received: Array<Received> = [];
-  const hung = yield* Deferred.make<void>();
+  const hung = yield* Queue.unbounded<string>();
   const settings = yield* Ref.make<ServerSettings>(DEFAULT_SERVER_SETTINGS);
   const settingsLayer = Layer.mock(ServerSettingsService.ServerSettingsService)({
     getSettings: Ref.get(settings),
@@ -179,6 +179,7 @@ const fixture = Effect.gen(function* () {
       moved: server(`${origin}/upstream/moved`),
       offline: server("http://127.0.0.1:1/mcp", { label: "Offline" }),
       paused: server(`${origin}/upstream/mcp`, { enabled: false }),
+      hang: server(`${origin}/upstream/hang`, { label: "Hang" }),
     } as ServerSettings["mcpServers"],
   }));
   const httpClient = Context.get(services, HttpClient.HttpClient);
@@ -377,20 +378,31 @@ it.effect("reports a server that never answers as timed out", () =>
     const testing = yield* shared
       .test({ id: McpServerId.make("hang"), url: `${origin}/upstream/hang` })
       .pipe(Effect.forkChild);
-    yield* Deferred.await(hung);
+    yield* Queue.take(hung);
     yield* TestClock.adjust("10 seconds");
     expect(yield* Fiber.join(testing)).toEqual({ _tag: "Unreachable", timedOut: true });
   }),
 );
 
-it("lists enabled servers in a stable order", () => {
-  expect(
-    SharedMcpServers.enabledSharedMcpServerNames({
-      mcpServers: {
-        zeta: server("https://zeta.test/mcp"),
-        alpha: server("https://alpha.test/mcp"),
-        off: server("https://off.test/mcp", { enabled: false }),
-      } as ServerSettings["mcpServers"],
-    }),
-  ).toEqual(["alpha", "zeta"]);
-});
+it.effect("gives a hung server a deadline only where harnesses wait to start", () =>
+  Effect.gen(function* () {
+    const { call, hung } = yield* fixture;
+    const send = (body: unknown) =>
+      call("/mcp/servers/hang", { body, headers: asAgent }).pipe(Effect.forkChild);
+
+    const listing = yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(yield* Queue.take(hung)).toContain("tools/list");
+    yield* TestClock.adjust("5 seconds");
+    expect(yield* (yield* Fiber.join(listing)).json).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: -32000, message: "Hang did not answer within 5 seconds." },
+    });
+
+    const toolCall = yield* send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: {} });
+    expect(yield* Queue.take(hung)).toContain("tools/call");
+    yield* TestClock.adjust("10 minutes");
+    expect(toolCall.pollUnsafe()).toBeUndefined();
+    yield* Fiber.interrupt(toolCall);
+  }),
+);

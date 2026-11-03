@@ -53,6 +53,30 @@ const decodeJsonRpcRequest = Schema.decodeUnknownOption(
     }),
   ),
 );
+const decodeJsonRpcMethod = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ method: Schema.String })),
+);
+
+/** Harnesses wait on these before a session or turn can start, so a hung server must not hold them. */
+const PROMPT_METHODS = new Set([
+  "initialize",
+  "ping",
+  "tools/list",
+  "prompts/list",
+  "resources/list",
+  "resources/templates/list",
+]);
+const PROMPT_TIMEOUT = "5 seconds";
+
+const answersPromptly = (method: string, body: string) => {
+  if (method === "DELETE") return true;
+  if (method !== "POST") return false;
+  const request = decodeJsonRpcMethod(body);
+  return (
+    Option.isSome(request) &&
+    (PROMPT_METHODS.has(request.value.method) || request.value.method.startsWith("notifications/"))
+  );
+};
 
 /**
  * A JSON-RPC error reaches the model as the call's result; an HTTP error only
@@ -143,7 +167,18 @@ const proxy = Effect.gen(function* () {
   );
   const httpClient = yield* HttpClient.HttpClient;
   // Never retried: a call that may have reached the server could have changed something.
-  const response = yield* sendUpstream(httpClient, upstreamRequest).pipe(Effect.option);
+  const sent = sendUpstream(httpClient, upstreamRequest).pipe(Effect.option);
+  const outcome = yield* answersPromptly(request.method, body)
+    ? Effect.timeoutOption(sent, PROMPT_TIMEOUT)
+    : Effect.asSome(sent);
+  if (Option.isNone(outcome)) {
+    return unavailable(
+      body,
+      504,
+      `${displayName(name, server)} did not answer within ${PROMPT_TIMEOUT}.`,
+    );
+  }
+  const response = outcome.value;
   if (Option.isNone(response)) {
     return unavailable(body, 502, `Could not reach ${displayName(name, server)}.`);
   }
