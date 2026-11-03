@@ -5,6 +5,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as NetService from "@t3tools/shared/Net";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -85,6 +86,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("CLI deferred imp
           port: 3_773,
         }),
       });
+      yield* fs.writeFileString(NodePath.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
       const unreachable: typeof globalThis.fetch = () =>
         Promise.reject(new Error("connection refused"));
 
@@ -113,6 +115,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("CLI deferred imp
           port: 3_773,
         }),
       });
+      yield* fs.writeFileString(NodePath.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
 
       hooks.importsAttempted.length = 0;
       let mutations = 0;

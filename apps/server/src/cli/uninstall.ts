@@ -35,8 +35,12 @@ export interface UninstallPlan {
   readonly service: boolean;
   readonly launchers: ReadonlyArray<string>;
   readonly runtimeDir: string | undefined;
+  /** `service.env` opens this home to the network, which the next install must not inherit. */
+  readonly networkSettings: string | undefined;
   readonly userdataDir: string;
 }
+
+const NETWORK_SETTINGS = ["S2CODE_LAN", "SHUV2CODE_LAN", "S2CODE_HOST", "SHUV2CODE_HOST"] as const;
 
 /** Delete only launchers targeting this home's runtime/versions. */
 export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(function* (input: {
@@ -132,11 +136,15 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
       }
     }
   }
+  const serviceEnv = yield* CliService.readServiceEnv(input.baseDir);
   const plan: UninstallPlan = {
     service: status.supported && status.installed && servesThisHome && ownsUnit,
     launchers,
     runtimeDir: (yield* fs.exists(runtimeDir).pipe(Effect.orElseSucceed(() => false)))
       ? runtimeDir
+      : undefined,
+    networkSettings: NETWORK_SETTINGS.some((key) => Object.hasOwn(serviceEnv.entries, key))
+      ? serviceEnv.path
       : undefined,
     userdataDir: path.join(input.baseDir, "userdata"),
   };
@@ -177,7 +185,12 @@ export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   const service = yield* BootService.BootService;
   const plan = yield* planUninstall({ baseDir: input.baseDir });
 
-  if (!plan.service && plan.launchers.length === 0 && plan.runtimeDir === undefined) {
+  if (
+    !plan.service &&
+    plan.launchers.length === 0 &&
+    plan.runtimeDir === undefined &&
+    plan.networkSettings === undefined
+  ) {
     yield* Console.log(`Nothing to remove: s2code is not installed for ${input.baseDir}.`);
     yield* Console.log(`  ${yield* resolveUninstallGuidance}`);
     return;
@@ -188,6 +201,11 @@ export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   for (const launcher of plan.launchers) yield* Console.log(`  the launcher at ${launcher}`);
   if (plan.runtimeDir !== undefined) {
     yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);
+  }
+  if (plan.networkSettings !== undefined) {
+    yield* Console.log(
+      `  the local network and host settings in ${plan.networkSettings}, so a new install starts on this machine only`,
+    );
   }
   yield* Console.log(
     `Your projects, threads, and settings under ${plan.userdataDir} are kept. Delete that directory yourself if you want them gone too.`,
@@ -249,6 +267,17 @@ export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
         );
       yield* Console.log(`Removed ${plan.runtimeDir}.`);
     }
+  }
+  if (plan.networkSettings !== undefined) {
+    yield* CliService.writeServiceEnv(
+      input.baseDir,
+      Object.fromEntries(NETWORK_SETTINGS.map((key) => [key, undefined])),
+    ).pipe(
+      Effect.mapError(
+        () => new CliUninstallError({ reason: `Could not update ${plan.networkSettings}.` }),
+      ),
+    );
+    yield* Console.log(`Reset the local network and host settings in ${plan.networkSettings}.`);
   }
   yield* Console.log("");
   yield* Console.log(

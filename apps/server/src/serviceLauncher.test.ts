@@ -384,7 +384,8 @@ if (context.update?.status === "pending") {
       const observationsPath = path.join(root, "environment-observations.jsonl");
       const envPath = path.join(root, SERVICE_ENV_FILE);
       yield* fs.writeFileString(envPath, "T3CODE_TEST_SERVICE_TOKEN=initial\n");
-      vi.stubEnv("T3CODE_HOME", root);
+      yield* fs.writeFileString(path.join(root, ".product-identity"), "s2code\n");
+      for (const name of ["S2CODE_HOME", "SHUV2CODE_HOME", "T3CODE_HOME"]) vi.stubEnv(name, root);
       vi.stubEnv("T3CODE_TEST_SERVICE_TOKEN", "inherited");
       yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });

@@ -2,6 +2,7 @@
 import * as NodeURL from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import { PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Stream from "effect/Stream";
@@ -27,7 +28,7 @@ it.live("enables CLI caching while respecting overrides and unavailable storage"
           {
             env: {
               XDG_CACHE_HOME: `${root}/cache`,
-              T3CODE_HOME: `${root}/home`,
+              S2CODE_HOME: `${root}/home`,
               NODE_COMPILE_CACHE: undefined,
               NODE_DISABLE_COMPILE_CACHE: undefined,
               APPIMAGE: "",
@@ -48,7 +49,7 @@ it.live("enables CLI caching while respecting overrides and unavailable storage"
     const normal = yield* run({});
     expect(normal.exitCode).toBe(0);
     expect(normal.stderr.replaceAll("\\", "/")).toContain(
-      `CACHE=${root}/cache/t3code/compile-cache`.replaceAll("\\", "/"),
+      `CACHE=${root}/cache/${PRODUCT_ID}/compile-cache`.replaceAll("\\", "/"),
     );
     const appImage = yield* run({ APPIMAGE: `${root}/T3Code.AppImage` });
     expect(appImage.exitCode).toBe(0);

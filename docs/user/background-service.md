@@ -51,7 +51,8 @@ Preview builds do not update automatically.
 `s2code uninstall` removes only that channel's background service, launcher, and
 downloaded versions after showing you the list and asking once. Your projects,
 threads, and settings under the fork channel's home (stable: `~/.s2code-v2/userdata`) are kept,
-along with `service.env` in that home. Pass `--yes` from a script.
+along with `service.env` in that home, minus its `S2CODE_LAN` and `S2CODE_HOST` settings, so a
+new install answers only on this machine. Pass `--yes` from a script.
 
 ## Local network access
 

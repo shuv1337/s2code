@@ -192,6 +192,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       expected: "S2CODE_LAN=false\n",
     },
     {
+      label: "a saved LAN choice after a full uninstall",
+      installed: false,
+      before: "full uninstall",
+      env: "S2CODE_PORT=4000\nS2CODE_LAN=true\n",
+      expected: "S2CODE_PORT=4000\nS2CODE_LAN=false\n",
+    },
+    {
       label: "a set host",
       installed: false,
       env: "S2CODE_HOST=::\n",
@@ -235,7 +242,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
           Effect.provideService(HostProcess.Platform, "linux"),
           Effect.provide(Layer.fresh(TestConsole.layer)),
         );
-        expect(yield* fs.readFileString(`${baseDir}/service.env`)).toBe(input.env);
+        expect(yield* fs.readFileString(`${baseDir}/service.env`)).not.toContain("LAN=");
       }
       vi.spyOn(BootService, "layer").mockReturnValue(
         Layer.succeed(BootService.BootService, service),

@@ -17,6 +17,7 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -150,6 +151,7 @@ it.effect.each(["snapshot", "mutation"] as const)(
           port: 3_773,
         }),
       });
+      yield* fs.writeFileString(NodePath.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
       const now = "2026-01-01T00:00:00.000Z";
       const requestReceived = Promise.withResolvers<void>();
       const releaseResponse = Promise.withResolvers<void>();
