@@ -5,10 +5,13 @@ import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  type AuthMcpClientAccess,
   EnvironmentId,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
   PreviewTabId,
+  type ProviderAccountUsageLimitRecord,
+  ProviderDriverKind,
   ProviderInstanceId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -23,6 +26,7 @@ import * as Stream from "effect/Stream";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 
+import * as ProviderAccountSync from "../peer/ProviderAccountSync.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../pullRequest/PullRequestReviewGuideService.ts";
 import * as ServerConfig from "../config.ts";
@@ -1220,4 +1224,159 @@ it.effect(
         expect(yield* start("root/default")).toBe(400);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("exchanges account states only with a full-access peer link", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const record = (account: string): ProviderAccountUsageLimitRecord => ({
+        account,
+        driver: ProviderDriverKind.make("codex"),
+        spent: true,
+        changedAt: "2026-11-03T00:00:00.000Z",
+        origin: { environmentId, label: "Box" },
+      });
+      const exchanged: Array<ReadonlyArray<ProviderAccountUsageLimitRecord>> = [];
+      const clientScope = (
+        access: AuthMcpClientAccess,
+        linked: boolean,
+      ): McpInvocationContext.McpInvocationScope => ({
+        environmentId,
+        requestNamespace: "client:sync",
+        thread: undefined,
+        client: { sessionId: "sync", label: "T3 Code · laptop", access, linked },
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      });
+      const clients = new Map([
+        ["link", clientScope("full-access", true)],
+        ["readOnlyLink", clientScope("read-only", true)],
+        ["outside", clientScope("full-access", false)],
+      ]);
+      const threadScope: McpInvocationContext.McpThreadInvocationScope = {
+        environmentId,
+        requestNamespace: "agent",
+        thread: {
+          threadId: ThreadId.make("thread-sync"),
+          providerSessionId: "agent",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const settingsContext = yield* Layer.build(ServerSettings.layerTest());
+      const settings = Context.get(settingsContext, ServerSettings.ServerSettingsService);
+      yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
+      const serverLayer = McpHttpServer.layerProviderAccountSyncToolkit.pipe(
+        Layer.provideMerge(
+          McpHttpServer.layerMcpTransport.pipe(
+            Layer.provide(Layer.succeedContext(settingsContext)),
+          ),
+        ),
+        Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+        Layer.provide(
+          Layer.mock(ProviderAccountSync.ProviderAccountSync)({
+            exchange: (records) =>
+              Effect.sync(() => {
+                exchanged.push(records);
+                return [record("here@example.com")];
+              }),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (token) => Effect.succeed(token === "agent" ? threadScope : undefined),
+          }),
+        ),
+        Layer.provide(
+          Layer.succeed(McpHttpServer.McpClientAuthenticator, {
+            authenticate: (request) =>
+              Effect.succeed(clients.get(request.headers.authorization?.slice(7) ?? "")),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+      /** Lists and calls the tool as `token`; the HTTP status when the session is refused. */
+      const sync = (token: string, limit?: string) =>
+        Effect.gen(function* () {
+          const headers = {
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${token}`,
+            ...(limit === undefined ? {} : { "t3-mode-limit": limit }),
+          };
+          const initialize = yield* httpClient.post("/mcp", {
+            headers,
+            body: HttpBody.text(
+              `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+              "application/json",
+            ),
+          });
+          if (initialize.status !== 200) return initialize.status;
+          const rpc = (id: number, method: string, params: object) =>
+            httpClient
+              .post("/mcp", {
+                headers: {
+                  ...headers,
+                  "mcp-session-id": initialize.headers["mcp-session-id"]!,
+                  "mcp-protocol-version": "2025-06-18",
+                },
+                body: HttpBody.text(
+                  JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+                  "application/json",
+                ),
+              })
+              .pipe(Effect.flatMap((response) => response.json));
+          const listed = (yield* rpc(2, "tools/list", {})) as {
+            readonly result: { readonly tools: ReadonlyArray<{ readonly name: string }> };
+          };
+          const called = (yield* rpc(3, "tools/call", {
+            name: "t3_provider_account_sync",
+            arguments: { records: [record("there@example.com")] },
+          })) as {
+            readonly error?: { readonly message: string };
+            readonly result?: {
+              readonly isError?: boolean;
+              readonly structuredContent?: unknown;
+              readonly content: ReadonlyArray<{ readonly text: string }>;
+            };
+          };
+          return {
+            listed: listed.result.tools.map((tool) => tool.name),
+            outcome:
+              called.error?.message ??
+              (called.result?.isError === true
+                ? (decodeJsonText(called.result.content[0]!.text) as { code: string }).code
+                : called.result?.structuredContent),
+          };
+        });
+
+      expect(yield* sync("link")).toEqual({
+        listed: ["t3_provider_account_sync"],
+        outcome: { environmentId, records: [record("here@example.com")] },
+      });
+      expect(exchanged).toEqual([[record("there@example.com")]]);
+
+      const hidden = { listed: [], outcome: "Tool 't3_provider_account_sync' not found" };
+      expect(yield* sync("outside")).toEqual(hidden);
+      expect(yield* sync("agent")).toEqual(hidden);
+      // A link sees the tool, but one paired or narrowed below full access cannot change settings.
+      expect(yield* sync("readOnlyLink")).toEqual({
+        listed: ["t3_provider_account_sync"],
+        outcome: "capability_denied",
+      });
+      expect(yield* sync("link", "auto/default")).toEqual({
+        listed: ["t3_provider_account_sync"],
+        outcome: "capability_denied",
+      });
+      expect(exchanged).toHaveLength(1);
+
+      yield* settings.updateSettings({ linkedEnvironmentsEnabled: false });
+      expect(yield* sync("link")).toBe(403);
+      expect(exchanged).toHaveLength(1);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

@@ -22,6 +22,7 @@ import {
   RunAttemptId,
   RunId,
   RuntimeRequestId,
+  type ServerProvider,
   TurnItemId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -36,6 +37,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlError from "effect/sql/SqlError";
 import * as Stream from "effect/Stream";
 
+import { providerAccountKey } from "@t3tools/shared/providerAccount";
 import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerConfig from "../config.ts";
@@ -246,6 +248,19 @@ it.effect("refreshes usage and auto-disables after a committed exhausted-quota t
           }),
         ),
       );
+      const snapshot: ServerProvider = {
+        instanceId: ProviderInstanceId.make("cursor-work"),
+        driver: ProviderDriverKind.make("cursor"),
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "ready",
+        auth: { status: "authenticated", email: "dev@example.test" },
+        checkedAt: "2026-11-03T00:00:00.000Z",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      };
       const instance: ProviderInstance = {
         instanceId: ProviderInstanceId.make("cursor-work"),
         driverKind: ProviderDriverKind.make("cursor"),
@@ -265,7 +280,7 @@ it.effect("refreshes usage and auto-disables after a committed exhausted-quota t
         },
         snapshot: {
           refreshUsage: Deferred.succeed(refreshed, undefined).pipe(Effect.asVoid),
-          getSnapshot: Effect.die("unused"),
+          getSnapshot: Effect.succeed(snapshot),
           refresh: Effect.die("unused"),
           resolveMaintenance: () => Effect.die("unused"),
           applyUsageLimits: () => Effect.die("unused"),
@@ -358,9 +373,12 @@ it.effect("refreshes usage and auto-disables after a committed exhausted-quota t
         const saved = (yield* service.getSettings).providerInstances[instance.instanceId];
         assert.isFalse(saved?.enabled);
         assert.isTrue(saved?.disableOnUsageLimit);
+        const account = providerAccountKey(snapshot);
+        assert.isDefined(account);
         assert.deepEqual(saved?.usageLimitDisabled, {
           at: DateTime.formatIso(now),
           message: "Provider rejected turn.",
+          ...(account === undefined ? {} : { account }),
         });
       }).pipe(Effect.provide(makeLayerTest(layerTestEventSink, instances, settings)));
     }),

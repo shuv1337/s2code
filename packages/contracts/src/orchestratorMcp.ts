@@ -359,6 +359,38 @@ export const OrchestratorMcpUsageLimitsResult = Schema.Struct({
 });
 export type OrchestratorMcpUsageLimitsResult = typeof OrchestratorMcpUsageLimitsResult.Type;
 
+/**
+ * The latest known quota state of one provider account, exchanged between linked environments.
+ * The newest `changedAt` wins, ties broken by the origin's environment id.
+ */
+export const ProviderAccountUsageLimitRecord = Schema.Struct({
+  account: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  driver: ProviderDriverKind,
+  spent: Schema.Boolean,
+  changedAt: IsoDateTime,
+  origin: Schema.Struct({
+    environmentId: EnvironmentId,
+    label: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  }),
+  message: Schema.optionalKey(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))),
+});
+export type ProviderAccountUsageLimitRecord = typeof ProviderAccountUsageLimitRecord.Type;
+
+const ProviderAccountUsageLimitRecords = Schema.Array(ProviderAccountUsageLimitRecord).check(
+  Schema.isMaxLength(1_000),
+);
+
+export const ProviderAccountSyncInput = Schema.Struct({
+  records: ProviderAccountUsageLimitRecords,
+});
+export type ProviderAccountSyncInput = typeof ProviderAccountSyncInput.Type;
+
+export const ProviderAccountSyncResult = Schema.Struct({
+  environmentId: EnvironmentId,
+  records: ProviderAccountUsageLimitRecords,
+});
+export type ProviderAccountSyncResult = typeof ProviderAccountSyncResult.Type;
+
 export const OrchestratorMcpThreadListInput = Schema.Struct({
   environmentId: OrchestratorMcpEnvironmentTarget,
   projectId: OrchestratorMcpProjectTarget,

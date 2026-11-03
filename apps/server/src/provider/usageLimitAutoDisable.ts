@@ -10,7 +10,11 @@ const isQuotaExhausted = (failure: OrchestrationV2ProviderFailure) =>
 /** Turns off an opted-in instance whose turn failed on an exhausted quota. */
 export const disableInstanceOnExhaustedQuota = Effect.fn(
   "ProviderUsageLimitAutoDisable.disableInstanceOnExhaustedQuota",
-)(function* (instanceId: ProviderInstanceId, failure: OrchestrationV2ProviderFailure) {
+)(function* (
+  instanceId: ProviderInstanceId,
+  failure: OrchestrationV2ProviderFailure,
+  account?: string,
+) {
   if (!isQuotaExhausted(failure)) return false;
   const settings = yield* ServerSettings.ServerSettingsService;
   const current = (yield* settings.getSettings).providerInstances[instanceId];
@@ -19,7 +23,15 @@ export const disableInstanceOnExhaustedQuota = Effect.fn(
   yield* settings.updateProviderInstance({
     operation: "upsert",
     instanceId,
-    instance: { ...current, enabled: false, usageLimitDisabled: { at, message: failure.message } },
+    instance: {
+      ...current,
+      enabled: false,
+      usageLimitDisabled: {
+        at,
+        message: failure.message,
+        ...(account === undefined ? {} : { account }),
+      },
+    },
   });
   return true;
 });

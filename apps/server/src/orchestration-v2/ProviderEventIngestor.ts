@@ -31,6 +31,7 @@ import * as SqlError from "effect/sql/SqlError";
 
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { providerAccountKey } from "@t3tools/shared/providerAccount";
 import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -813,15 +814,24 @@ export const layer: Layer.Layer<
                     input.event.failure.class !== "usage_limit"
                   )
                     return;
-                  yield* disableInstanceOnExhaustedQuota(
-                    input.providerInstanceId,
-                    input.event.failure,
-                  ).pipe(
+                  const failure = input.event.failure;
+                  const instance = yield* instances.getInstance(input.providerInstanceId);
+                  yield* Effect.gen(function* () {
+                    // A disabled instance's snapshot loses its email, so read the account first.
+                    const account =
+                      instance === undefined
+                        ? undefined
+                        : providerAccountKey(yield* instance.snapshot.getSnapshot);
+                    yield* disableInstanceOnExhaustedQuota(
+                      input.providerInstanceId,
+                      failure,
+                      account,
+                    );
+                  }).pipe(
                     Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
                     Effect.ignoreCause({ log: true }),
                     Effect.forkIn(scope, { startImmediately: true }),
                   );
-                  const instance = yield* instances.getInstance(input.providerInstanceId);
                   if (!instance?.snapshot.refreshUsage) return;
                   yield* instance.snapshot.refreshUsage.pipe(
                     Effect.ignoreCause({ log: true }),

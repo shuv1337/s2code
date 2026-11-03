@@ -67,11 +67,13 @@ describe("disableInstanceOnExhaustedQuota", () => {
         yield* disableInstanceOnExhaustedQuota(
           optedIn,
           makeProviderFailure({ class: "usage_limit", message: quotaMessage, retryable: false }),
+          "account-key",
         ),
       );
       const disabled = yield* instance(optedIn);
       assert.isFalse(disabled?.enabled);
       assert.strictEqual(disabled?.usageLimitDisabled?.message, quotaMessage);
+      assert.strictEqual(disabled?.usageLimitDisabled?.account, "account-key");
       assert.isTrue(disabled?.disableOnUsageLimit);
 
       yield* settings.updateProviderInstance({

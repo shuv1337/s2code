@@ -103,6 +103,14 @@ Unlinking on the linking side only forgets the token.
 - **A forwarded wait is split into calls of at most 50 s**, because the
   receiving `/mcp` sends nothing while a wait is open and T3 Connect's edge
   drops idle requests after about 100 s.
+- **Spent-quota account states sync in one exchange over the linking side's
+  session**, which carries both directions, so the linked side never calls
+  back. The tool is visible only to full-access peer-link sessions, and a peer
+  is called only when its descriptor advertises `providerAccountSync`. Each
+  account's state is last-writer-wins, and a change made locally is stamped
+  just after the state it replaces, so a user's re-enable beats the state they
+  saw whatever the clocks say. Applying a received state never stamps a new
+  one; a re-enable counts as the user's only while the stored state is spent.
 
 **Work a link paired below full access starts stays within that link.** The
 receiving environment knows a session is a peer link because the linking side
