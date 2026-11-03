@@ -22,8 +22,11 @@ import {
   paceOf,
   paceRemainingPercent,
   usesChatGptSharing,
+  hiddenUsageLimitPoolMembers,
+  pickUsageLimitPoolStart,
   pickUsageLimitReplacement,
   resolveNewThreadModelSelection,
+  usageLimitPoolDriver,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -276,6 +279,51 @@ describe("usage limit replacement", () => {
     ],
   ] as const)("picks %s", (_name, overrides, expected) => {
     expect(pick(overrides)).toBe(expected);
+  });
+
+  it.each([
+    ["moves a thread start to the member with the most headroom", "busy", "idle"],
+    ["keeps a thread start on the selected member when it has the most headroom", "idle", "idle"],
+  ] as const)("%s", (_name, selected, expected) => {
+    expect(
+      pickUsageLimitPoolStart({
+        selection: { instanceId: ProviderInstanceId.make(selected), model },
+        providers,
+        settings: settings({}),
+        projectId: null,
+        now,
+      })?.instanceId,
+    ).toBe(expected);
+  });
+
+  it("shows each pool once in pickers, preferring a usable active member", () => {
+    const candidate = (id: string, pool: ProviderDriverKind | null, eligible = true) => ({
+      instanceId: ProviderInstanceId.make(id),
+      pool,
+      eligible,
+    });
+    const candidates = [
+      candidate("spent", cursor, false),
+      candidate("busy", cursor),
+      candidate("idle", cursor),
+      candidate("codex", null),
+    ];
+    const hidden = (preferred: string) => [
+      ...hiddenUsageLimitPoolMembers(candidates, [ProviderInstanceId.make(preferred)]),
+    ];
+    expect(hidden("idle")).toEqual(["spent", "busy"]);
+    expect(hidden("spent")).toEqual(["spent", "idle"]);
+    expect(usageLimitPoolDriver(settings({}), ProviderInstanceId.make("busy"))).toBe(cursor);
+    expect(
+      usageLimitPoolDriver(
+        settings(
+          Object.fromEntries(
+            ["spent", "busy", "unknown", "solo"].map((id) => [id, { disableOnUsageLimit: false }]),
+          ),
+        ),
+        ProviderInstanceId.make("idle"),
+      ),
+    ).toBeNull();
   });
 });
 

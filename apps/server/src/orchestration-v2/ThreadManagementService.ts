@@ -752,13 +752,15 @@ const make = Effect.gen(function* () {
       if (Option.isSome(receipt)) return command;
       const projection = yield* orchestrator.getThreadRecords(
         command.type === "message.dispatch" ? command.threadId : command.parentThreadId,
-        [],
+        ["runs"],
       );
       const selection =
         command.type === "message.dispatch"
           ? (command.modelSelection ?? projection.thread.modelSelection)
           : command.modelSelection;
-      const replacement = yield* resolveSpentInstance(selection, projection.thread.projectId);
+      const replacement = yield* resolveSpentInstance(selection, projection.thread.projectId, {
+        threadStart: command.type === "delegated_task.request" || projection.runs.length === 0,
+      });
       return replacement === selection ? command : { ...command, modelSelection: replacement };
     },
   );

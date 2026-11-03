@@ -11,7 +11,16 @@ import type {
   RuntimeMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
-import { isProviderDriverKind, resolveProjectProviderInstanceEnabled } from "@t3tools/contracts";
+import {
+  isProviderAvailable,
+  isProviderDriverKind,
+  resolveProjectProviderInstanceEnabled,
+} from "@t3tools/contracts";
+import {
+  hiddenUsageLimitPoolMembers,
+  usageLimitPoolDriver,
+  usageLimitPoolLabel,
+} from "@t3tools/shared/usageLimits";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
@@ -295,18 +304,30 @@ export function buildModelOptions(
     };
   };
 
-  for (const provider of config?.providers ?? []) {
-    if (
-      !matchesLockedProvider(provider) ||
-      !isProviderEnabledForProject(config, provider, projectId) ||
-      !provider.installed ||
-      provider.auth.status === "unauthenticated" ||
-      (provider.driver === "antigravity" && provider.availability === "unavailable")
-    ) {
-      continue;
-    }
+  const listed = (config?.providers ?? []).filter(
+    (provider) =>
+      matchesLockedProvider(provider) &&
+      isProviderEnabledForProject(config, provider, projectId) &&
+      provider.installed &&
+      provider.auth.status !== "unauthenticated" &&
+      !(provider.driver === "antigravity" && provider.availability === "unavailable"),
+  );
+  const poolOf = (instanceId: ModelSelection["instanceId"]) =>
+    config?.settings ? usageLimitPoolDriver(config.settings, instanceId) : null;
+  const hiddenPoolMembers = hiddenUsageLimitPoolMembers(
+    listed.map((provider) => ({
+      instanceId: provider.instanceId,
+      pool: poolOf(provider.instanceId),
+      eligible: provider.enabled && isProviderAvailable(provider),
+    })),
+    [fallbackModelSelection?.instanceId, providerInstanceId],
+  );
 
-    const providerLabel = providerDisplayLabel(provider);
+  for (const provider of listed) {
+    if (hiddenPoolMembers.has(provider.instanceId)) continue;
+    const pool = poolOf(provider.instanceId);
+    const providerLabel =
+      pool === null ? providerDisplayLabel(provider) : usageLimitPoolLabel(pool);
     const providerBadge = providerBadgeFor(provider.instanceId);
     const updateRequired = provider.updateRequiredModels?.length
       ? { driver: provider.driver, updateRequiredModels: provider.updateRequiredModels }

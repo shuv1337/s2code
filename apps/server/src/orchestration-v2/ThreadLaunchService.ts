@@ -820,6 +820,7 @@ const make = Effect.gen(function* () {
         modelSelection: yield* resolveSpentInstance(
           normalized.modelSelection,
           normalized.projectId,
+          { threadStart: true },
         ),
       };
       yield* ProjectCloneTracker.rejectCommandsDuringClone(cloneTracker, {

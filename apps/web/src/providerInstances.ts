@@ -17,6 +17,11 @@ import {
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import {
+  hiddenUsageLimitPoolMembers,
+  usageLimitPoolDriver,
+  usageLimitPoolLabel,
+} from "@t3tools/shared/usageLimits";
 
 export { normalizeProviderAccentColor, shouldShowInstanceBadge };
 
@@ -34,6 +39,7 @@ export interface ProviderInstanceEntry {
   readonly acpRegistryAgentId?: string | undefined;
   readonly acpRegistryIconUrl?: string | undefined;
   readonly continuationGroupKey?: string | undefined;
+  readonly usageLimitPool?: ProviderDriverKind | null | undefined;
   readonly enabled: boolean;
   readonly installed: boolean;
   readonly status: ServerProviderState;
@@ -121,9 +127,11 @@ export function applyProviderInstanceSettings(
 }
 
 function applyProviderInstanceBranding(
-  entry: ProviderInstanceEntry,
+  base: ProviderInstanceEntry,
   settings: Pick<ServerSettings, "providerInstances">,
 ): ProviderInstanceEntry {
+  const usageLimitPool = usageLimitPoolDriver(settings, base.instanceId);
+  const entry = usageLimitPool === null ? base : { ...base, usageLimitPool };
   const explicitInstance = Object.hasOwn(settings.providerInstances, entry.instanceId)
     ? settings.providerInstances[entry.instanceId]
     : undefined;
@@ -146,6 +154,32 @@ function applyProviderInstanceBranding(
       ? { acpRegistryIconUrl: iconUrl.trim() }
       : {}),
   };
+}
+
+/**
+ * Pickers offer a usage-limit pool as one entry; the server starts each thread on its member with
+ * the most headroom. The kept member is the active one when it is in the pool.
+ */
+export function collapseUsageLimitPools(
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+  preferred: ReadonlyArray<ProviderInstanceId | undefined>,
+): ReadonlyArray<ProviderInstanceEntry> {
+  if (!entries.some((entry) => entry.usageLimitPool != null)) return entries;
+  const hidden = hiddenUsageLimitPoolMembers(
+    entries.map((entry) => ({
+      instanceId: entry.instanceId,
+      pool: entry.usageLimitPool ?? null,
+      eligible: isProviderInstancePickerReady(entry),
+    })),
+    preferred,
+  );
+  return entries.flatMap((entry) =>
+    hidden.has(entry.instanceId)
+      ? []
+      : entry.usageLimitPool != null
+        ? [{ ...entry, displayName: usageLimitPoolLabel(entry.usageLimitPool) }]
+        : [entry],
+  );
 }
 
 /** Picker order: each driver's default instance first, then its custom instances. */

@@ -14,7 +14,11 @@ import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPick
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
-import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
+import {
+  collapseUsageLimitPools,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from "../../providerInstances";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -98,8 +102,19 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const size = props.size ?? "sm";
 
+  const instanceEntries = collapseUsageLimitPools(props.instanceEntries, [
+    props.activeInstanceId,
+    ...(props.selectedModels?.map((selection) => selection.instanceId) ?? []),
+  ]);
+  const activePool = props.instanceEntries.find(
+    (entry) => entry.instanceId === props.activeInstanceId,
+  )?.usageLimitPool;
   const activeEntry =
-    props.instanceEntries.find((entry) => entry.instanceId === props.activeInstanceId) ?? null;
+    instanceEntries.find(
+      (entry) =>
+        entry.instanceId === props.activeInstanceId ||
+        (activePool != null && entry.usageLimitPool === activePool),
+    ) ?? null;
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
@@ -121,7 +136,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     ? `${getDisplayModelName(selectedModel)}${selectedModel.isUnavailable ? " (Unavailable)" : ""}`
     : triggerTitle;
   const showInstanceBadge =
-    activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
+    activeEntry !== null && shouldShowInstanceBadge(activeEntry, instanceEntries);
 
   const setIsMenuOpen = (open: boolean) => {
     props.onOpenChange?.(open);
@@ -140,7 +155,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     ? shortcutLabelForCommand(props.keybindings, "modelPicker.toggle")
     : null;
   const selectedEntries = props.selectedModels?.map((selection) => {
-    const entry = props.instanceEntries.find(
+    const entry = instanceEntries.find(
       (candidate) => candidate.instanceId === selection.instanceId,
     );
     const model = resolveModelPickerSelectedModel({
@@ -296,7 +311,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             : {})}
           lockedProvider={props.lockedProvider}
           lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-          instanceEntries={props.instanceEntries}
+          instanceEntries={instanceEntries}
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
           terminalOpen={props.terminalOpen ?? false}

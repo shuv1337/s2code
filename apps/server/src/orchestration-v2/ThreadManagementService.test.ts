@@ -144,6 +144,7 @@ const layerDispatchChokepointTest =
                   model: "test",
                 },
               },
+              runs: [{ id: RunId.make("run:thread-management:parent") }],
             } as unknown as OrchestrationV2ThreadProjection),
           dispatch: (command) =>
             Effect.sync(() => {

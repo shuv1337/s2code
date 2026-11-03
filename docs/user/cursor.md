@@ -35,10 +35,11 @@ Add one Cursor instance per account. **Usage → Limits** shows each enabled acc
 usage and reset date. A meter at 100% does not always mean the account is blocked: Cursor can still
 run Auto after the named-model allowance is spent.
 
-To rotate accounts automatically, turn on **Turn off at usage limit** for each account. When a turn
-fails because an account's quota is spent, S2Code turns that instance off, notes when and why, and
-continues the thread on the account with the most headroom among the others that have the setting
-on. The new account starts a fresh Cursor session and receives the recent conversation, so expect
+To pool accounts, turn on **Turn off at usage limit** for each account. Once two accounts have it
+on, the model picker shows them as one **Cursor pool** entry. Each new thread starts on the account
+with the most headroom for its model and stays there. When a turn fails because that account's
+quota is spent, S2Code turns the instance off, notes when and why, and continues the thread on the
+pool account with the most headroom. The new account starts a fresh Cursor session and receives the recent conversation, so expect
 it to re-read context once. A thread switches automatically only once per message; if the next account
 also runs out, the thread stops so you can choose. Messages sent later to a turned-off account go to
 a healthy one. Short rate limits do not count, and accounts you turned off yourself are left alone.
