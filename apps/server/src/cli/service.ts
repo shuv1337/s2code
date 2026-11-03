@@ -12,7 +12,11 @@ import { FetchHttpClient } from "effect/http";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import * as ServiceProtection from "../cloud/serviceProtection.ts";
-import { compareExactServiceVersions, SERVICE_ENV_FILE } from "../cloud/serviceProtocol.ts";
+import {
+  compareExactServiceVersions,
+  SERVICE_ENV_FILE,
+  SERVICE_STATE_FILE,
+} from "../cloud/serviceProtocol.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
@@ -83,6 +87,16 @@ export const readServiceEnvSetting = (
   key: "HOST" | "LAN",
 ): string | undefined => entries[`S2CODE_${key}`] ?? entries[`SHUV2CODE_${key}`];
 
+/**
+ * A service served this home before, even if its unit is gone: `service uninstall` keeps the
+ * launcher state that `service install` writes, and a full `s2code uninstall` removes it.
+ */
+export const hasServedHome = Effect.fn("cli.service.has_served_home")(function* (baseDir: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  return yield* fs.exists(path.join(baseDir, "runtime", SERVICE_STATE_FILE));
+});
+
 export const writeServiceEnv = Effect.fn("cli.service.write_env")(function* (
   baseDir: string,
   entries: Readonly<Record<string, string | undefined>>,
@@ -105,7 +119,7 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
   if (status.installed && status.current) {
     return { changed: false, status } satisfies ServiceReconcileResult;
   }
-  if (status.supported && !status.installed) {
+  if (status.supported && !status.installed && !(yield* hasServedHome(baseDir))) {
     // A new service listens on this machine only, until `s2code up` opens the local network.
     const { entries } = yield* readServiceEnv(baseDir);
     if (

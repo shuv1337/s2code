@@ -13,6 +13,7 @@ import { afterEach, vi } from "vite-plus/test";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import { formatServiceStatus, serviceCommand } from "./service.ts";
+import { runUninstall } from "./uninstall.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -159,10 +160,37 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       }),
   );
 
-  it.effect.each([
-    { label: "a new service", installed: false, env: "", expected: "S2CODE_LAN=false\n" },
+  it.effect.each<{
+    readonly label: string;
+    readonly installed: boolean;
+    readonly before?: "service uninstall" | "full uninstall";
+    readonly env: string;
+    readonly expected: string;
+  }>([
+    { label: "a fresh home", installed: false, env: "", expected: "S2CODE_LAN=false\n" },
     // Services installed before S2CODE_LAN existed keep listening on the local network.
     { label: "a reinstall over an older service", installed: true, env: "", expected: "" },
+    {
+      label: "a reinstall after `service uninstall`",
+      installed: false,
+      before: "service uninstall",
+      env: "",
+      expected: "",
+    },
+    {
+      label: "an earlier LAN choice after `service uninstall`",
+      installed: false,
+      before: "service uninstall",
+      env: "S2CODE_LAN=false\n",
+      expected: "S2CODE_LAN=false\n",
+    },
+    {
+      label: "a home after a full uninstall",
+      installed: false,
+      before: "full uninstall",
+      env: "",
+      expected: "S2CODE_LAN=false\n",
+    },
     {
       label: "a set host",
       installed: false,
@@ -193,6 +221,22 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
         installed: input.installed,
         current: false,
       });
+      if (input.before !== undefined) {
+        // What `service install` left behind; the unit itself is already gone.
+        yield* fs.makeDirectory(`${baseDir}/runtime/versions/1.0.0`, { recursive: true });
+        yield* fs.writeFileString(`${baseDir}/runtime/versions/1.0.0/t3`, "");
+        yield* fs.writeFileString(`${baseDir}/runtime/service-state.json`, "{}\n");
+      }
+      if (input.before === "full uninstall") {
+        yield* runUninstall({ baseDir, assumeYes: true }).pipe(
+          Effect.provideService(BootService.BootService, service),
+          Effect.provideService(HostProcess.IsExecutable, false),
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provide(Layer.fresh(TestConsole.layer)),
+        );
+        expect(yield* fs.readFileString(`${baseDir}/service.env`)).toBe(input.env);
+      }
       vi.spyOn(BootService, "layer").mockReturnValue(
         Layer.succeed(BootService.BootService, service),
       );

@@ -42,7 +42,7 @@ interface Setup {
   /** T3 Connect revoked the link; `s2code connect` links again. */
   readonly connectRevoked: boolean;
   readonly lan: boolean;
-  /** An installed service with no S2CODE_LAN keeps the old default: on. */
+  /** A home a service served, with no S2CODE_LAN, keeps the old default: on. */
   readonly lanFromOldDefault: boolean;
   readonly host: string | undefined;
 }
@@ -80,12 +80,13 @@ const readSetup = Effect.fn("cli.up.read_setup")(function* () {
         revoked: connectRevoked,
       })
     : null;
+  const servedBefore = service.installed || (yield* CliService.hasServedHome(baseDir));
   return {
     service,
     connect,
     connectRevoked,
-    lan: Option.getOrElse(lan, () => service.installed),
-    lanFromOldDefault: Option.isNone(lan) && service.installed,
+    lan: Option.getOrElse(lan, () => servedBefore),
+    lanFromOldDefault: Option.isNone(lan) && servedBefore,
     host: CliService.readServiceEnvSetting(entries, "HOST"),
   } satisfies Setup;
 });

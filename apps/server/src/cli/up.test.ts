@@ -159,6 +159,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
   it.effect.each<{
     readonly label: string;
     readonly installed: boolean;
+    /** `service uninstall` removed the unit but kept the launcher state. */
+    readonly servedBefore?: boolean;
     readonly status?: Partial<BootService.BootServiceStatus>;
     readonly installFails?: boolean;
     readonly restartFails?: boolean;
@@ -280,12 +282,35 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       restarts: 0,
       envAfter: "S2CODE_LAN=true\n",
     },
+    {
+      label: "a reinstall after `service uninstall` keeps the old default",
+      installed: false,
+      servedBefore: true,
+      env: "",
+      args: ["--yes"],
+      installs: 1,
+      restarts: 0,
+      envAfter: "S2CODE_LAN=true\n",
+    },
+    {
+      label: "a fresh home stays off the local network",
+      installed: false,
+      env: "",
+      args: ["--yes"],
+      installs: 0,
+      restarts: 0,
+      envAfter: "",
+    },
   ])("restarts the service only when it must: $label", (input) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-up-test-" });
       yield* fs.writeFileString(`${baseDir}/.product-identity`, "s2code\n");
       yield* fs.writeFileString(`${baseDir}/service.env`, input.env);
+      if (input.servedBefore === true) {
+        yield* fs.makeDirectory(`${baseDir}/runtime`);
+        yield* fs.writeFileString(`${baseDir}/runtime/service-state.json`, "{}\n");
+      }
       let installs = 0;
       let restarts = 0;
       const status = {

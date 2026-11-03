@@ -573,6 +573,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(yield* discoveredService.uninstall).toBe(true);
       expect(yield* fs.exists(unitPath)).toBe(false);
       expect((yield* discoveredService.status).installed).toBe(false);
+      // A later `service install` reads it to keep this home's LAN default.
+      expect(yield* fs.exists(statePath)).toBe(true);
       // systemd can take 90s to stop, exceeding the runner's 60s default.
       expect(timeouts.get("systemctl --user disable --now s2code-v2.service")).toEqual(
         Duration.seconds(120),
