@@ -190,6 +190,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         assert(child.pid !== undefined);
         const stateDir = path.join(baseDir, "userdata");
         yield* fs.makeDirectory(stateDir, { recursive: true });
+        yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "shuv2code\n");
         yield* fs.writeFileString(
           path.join(stateDir, "server-runtime.json"),
           yield* encodeUnknownJson({
