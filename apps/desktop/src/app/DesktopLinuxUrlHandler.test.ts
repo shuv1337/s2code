@@ -238,7 +238,8 @@ describe("DesktopLinuxUrlHandler", () => {
         DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: process.execPath,
-          scheme: "t3code",
+          scheme: "s2code",
+          additionalSchemes: ["shuv2code"],
           iconPath: "/home/alice/.local/share/icons/com.t3tools.T3Code.desktop.png",
         }),
       );

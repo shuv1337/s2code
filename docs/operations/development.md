@@ -18,8 +18,9 @@ Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Cod
 ## Private-fork CI
 
 Normal PRs and main pushes run **one validation job**, named `CI` on Ubuntu:
-one pinned dependency install, formatting, lint, and a small fork identity/release
-invariant suite. No typecheck, build, broad application suites, Rust or macOS
+one pinned dependency install, formatting, lint, a small fork identity/release
+invariant suite, and the usage-limit pool failover integration test. No
+typecheck, build, broad application suites, Rust or macOS
 analysis runs by default. Stale runs are cancelled per PR/branch. The existing
 Protect main required status remains `CI`.
 

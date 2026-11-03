@@ -38,7 +38,7 @@ it("reports the installed service version and host paths", () => {
     formatServiceStatus(status, "0.0.29"),
     [
       "T3 Code service",
-      "  Status: installed · shuv2code@0.0.29",
+      "  Status: installed · s2code@0.0.29",
       "  Unit: /home/me/.config/systemd/user/t3code.service",
       "  Logs: /home/me/.t3/userdata/logs/boot-service.log",
     ].join("\n"),
@@ -48,7 +48,7 @@ it("reports the installed service version and host paths", () => {
 it("gives a direct repair command for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `shuv2code service install` to repair it.",
+    "Next: Run `s2code service install` to repair it.",
   );
 });
 
@@ -67,7 +67,7 @@ it("explains an incomplete nightly installation and keeps repair on its installe
   expect(output).toContain("last login session ends");
   expect(output).toContain('sudo loginctl enable-linger "$(id -un)"');
   expect(output).toContain("[service-stopped]");
-  expect(output).toContain("Run `shuv2code-nightly service install` to repair it.");
+  expect(output).toContain("Run `s2code-nightly service install` to repair it.");
   expect(output).not.toContain("npx");
 });
 
@@ -76,7 +76,7 @@ it("points an older service at a repair, never at npx", () => {
     { ...status, current: false, installedVersion: "0.0.28" },
     "0.0.29",
   );
-  expect(output).toContain("Run `shuv2code service install` to repair it.");
+  expect(output).toContain("Run `s2code service install` to repair it.");
   expect(output).not.toContain("npx");
 });
 
@@ -93,11 +93,8 @@ it("reports a newer installed service and tells the CLI to catch up to it", () =
     "0.0.31-nightly.1",
   );
 
-  assert.include(
-    output,
-    "shuv2code@0.0.32-nightly.1 (newer than this shuv2code@0.0.31-nightly.1 CLI)",
-  );
-  assert.include(output, "Run `shuv2code-nightly update 0.0.32-nightly.1` to match it");
+  assert.include(output, "s2code@0.0.32-nightly.1 (newer than this s2code@0.0.31-nightly.1 CLI)");
+  assert.include(output, "Run `s2code-nightly update 0.0.32-nightly.1` to match it");
   assert.notInclude(output, "npx");
 });
 
@@ -107,7 +104,7 @@ it("does not suggest cross-channel update commands as service recovery", () => {
     "0.0.31",
   );
   expect(output).toContain("Install the other channel separately");
-  expect(output).not.toContain("shuv2code update");
+  expect(output).not.toContain("s2code update");
 });
 
 const newerServiceStatus = { ...status, current: false, installedVersion: "999.0.0" };

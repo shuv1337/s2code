@@ -1,7 +1,18 @@
+import ExpoModulesCore
 import Foundation
 import Synchronization
 import UIKit
 import WatchConnectivity
+
+@Record
+struct T3WatchPairingRequest {
+  var origin: String
+  var credential: String
+  var mode: String
+  var label: String
+  var issuedAt: String
+  var expiresAt: String
+}
 
 private struct T3WatchPairingOffer: Codable {
   var id: UUID
@@ -65,19 +76,18 @@ enum T3WatchPairing {
     ]
   }
 
-  static func offer(origin: URL, credential: String, mode: String, label: String,
-    issuedAt: String, expiresAt: String) async throws -> String {
+  static func offer(_ request: T3WatchPairingRequest, origin: URL) async throws -> String {
     guard WCSession.isSupported() else { throw unavailable() }
     let session = WCSession.default
     guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else {
       throw unavailable()
     }
-    guard parseDate(issuedAt) != nil, parseDate(expiresAt) != nil else {
+    guard parseDate(request.issuedAt) != nil, parseDate(request.expiresAt) != nil else {
       throw invalidReply()
     }
     let data = try JSONEncoder().encode(T3WatchPairingOffer(
-      id: UUID(), origin: origin, credential: credential, mode: mode, label: label,
-      issuedAt: issuedAt, expiresAt: expiresAt))
+      id: UUID(), origin: origin, credential: request.credential, mode: request.mode,
+      label: request.label, issuedAt: request.issuedAt, expiresAt: request.expiresAt))
     guard data.count <= 64 * 1_024 else { throw invalidReply() }
     guard session.isReachable else {
       session.transferUserInfo([pairingUserInfoKey: data])
@@ -106,8 +116,7 @@ enum T3WatchPairing {
     }
     let reply = try JSONDecoder().decode(T3WatchPairingReply.self, from: response)
     if let error = reply.error {
-      throw NSError(domain: "T3WatchPairing", code: 2,
-        userInfo: [NSLocalizedDescriptionKey: error])
+      throw NSError(domain: "T3WatchPairing", code: 2, userInfo: [NSLocalizedDescriptionKey: error])
     }
     guard let delivery = reply.delivery, delivery == "paired" || delivery == "queued" else {
       throw invalidReply()

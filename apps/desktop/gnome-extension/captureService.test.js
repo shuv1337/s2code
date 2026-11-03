@@ -34,10 +34,10 @@ it("ships only caller identities claimed by the real desktop entry resolver", ()
     return appId;
   });
   expect(CLIENT_NAMES).toEqual([
-    ...callers.map(gnomeCaptureClientName),
+    ...callers.map((appId) => gnomeCaptureClientName(appId)),
     ...callers.map((appId) => gnomeCaptureClientName(appId).replace(DBUS_NAME, LEGACY_DBUS_NAME)),
   ]);
-  expect(new Set(callers.map(gnomeCaptureClientName)).size).toBe(4);
+  expect(new Set(callers.map((appId) => gnomeCaptureClientName(appId))).size).toBe(4);
 });
 
 it.each([`${DBUS_NAME}.Client.nightly`, `${DBUS_NAME}.Client.preview`])(

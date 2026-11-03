@@ -9,9 +9,12 @@ import * as Schema from "effect/Schema";
 import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
 import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
 import { processOutput } from "@t3tools/source-control-testing/TestSourceControlHost";
+import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
 
 import * as ForgejoCli from "./ForgejoCli.ts";
 import * as ForgejoSourceControlProvider from "./ForgejoSourceControlProvider.ts";
+
+isolateGitEnv();
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 

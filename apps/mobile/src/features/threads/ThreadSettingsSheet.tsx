@@ -119,6 +119,7 @@ import {
   selectableChoices,
 } from "./thread-settings-options";
 import {
+  applySavedModelOptions,
   canCommitPendingModel,
   favoritesFirst,
   modelFavoriteKey,
@@ -1522,9 +1523,10 @@ export function ExistingThreadSettingsRouteScreen({
   }
 
   const serverConfig = selectedEnvironmentRuntime?.serverConfig ?? null;
+  const savedModelSelection = draftSettings.modelSelection ?? selectedThread.modelSelection;
   const modelSelection = resolveUsageLimitPoolSelection(
     serverConfig,
-    draftSettings.modelSelection ?? selectedThread.modelSelection,
+    savedModelSelection,
     selectedThread.projectId,
   );
   const lockedProviderInstanceId = threadAllowsProviderSwitch({
@@ -1565,10 +1567,9 @@ export function ExistingThreadSettingsRouteScreen({
         capabilities: currentModelOption?.capabilities,
         selections: modelSelection.options,
       })}
-      onUpdateOptionSelections={(options) => {
-        rememberModelOptions(modelSelection.instanceId, modelSelection.model, options ?? []);
-        updateModelSelection({ ...modelSelection, options });
-      }}
+      onUpdateOptionSelections={(options) =>
+        updateModelSelection(applySavedModelOptions(savedModelSelection, options))
+      }
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
       onClose={() => navigation.goBack()}

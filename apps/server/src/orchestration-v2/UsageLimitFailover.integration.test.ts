@@ -89,9 +89,10 @@ const quotaSpent = makeProviderFailure({
   retryable: false,
 });
 
+// Pooled threads start on the member with the most headroom, so the failing source gets it.
 const sentinelPool: Record<string, PoolMember> = {
-  [sentinelSource]: { driver: codex, usedPercent: 100, failure: quotaSpent },
-  [sentinelTarget]: { driver: codex, usedPercent: 0 },
+  [sentinelSource]: { driver: codex, usedPercent: 0, failure: quotaSpent },
+  [sentinelTarget]: { driver: codex, usedPercent: 50 },
 };
 
 const selection = (instanceId: ProviderInstanceId): ModelSelection => ({ instanceId, model });
@@ -515,6 +516,24 @@ const startThread = Effect.fn("UsageLimitFailoverTest.startThread")(function* (
   return threadId;
 });
 
+/**
+ * A pooled thread starts on the member with the most headroom, so `instanceId` must have it; its
+ * quota then runs out while the first turn waits on `gate`.
+ */
+const startThreadThenSpendQuota = Effect.fn("UsageLimitFailoverTest.startThreadThenSpendQuota")(
+  function* (
+    name: string,
+    instanceId: ProviderInstanceId,
+    gate: Deferred.Deferred<void>,
+    workspaceRoot?: string,
+  ) {
+    const threadId = yield* startThread(name, instanceId, workspaceRoot);
+    assert.isTrue(yield* disableInstanceOnExhaustedQuota(instanceId, quotaSpent));
+    yield* Deferred.succeed(gate, undefined);
+    return threadId;
+  },
+);
+
 const awaitThread = Effect.fn("UsageLimitFailoverTest.awaitThread")(function* (
   threadId: ThreadId,
   ready: (projection: OrchestrationV2ThreadProjection) => boolean,
@@ -554,16 +573,17 @@ const instanceSettings = (instanceId: ProviderInstanceId) =>
   );
 
 describe("usage limit failover through the real runtime", () => {
-  it.live("hands off to the pool member with the most headroom, once per chain", () =>
-    runPool(
+  it.live("hands off to the pool member with the most headroom, once per chain", () => {
+    const gate = Deferred.makeUnsafe<void>();
+    return runPool(
       {
-        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
         [busy]: { driver: cursor, usedPercent: 80 },
         [fresh]: { driver: cursor, usedPercent: 10, failure: quotaSpent },
       },
       ({ startedTurns }) =>
         Effect.gen(function* () {
-          const threadId = yield* startThread("headroom", spent);
+          const threadId = yield* startThreadThenSpendQuota("headroom", spent, gate);
           const thread = yield* awaitThread(threadId, settled(2));
           yield* awaitFailoverWorkerCaughtUp;
 
@@ -587,19 +607,20 @@ describe("usage limit failover through the real runtime", () => {
           ]);
           assert.isFalse((yield* instanceSettings(busy))?.enabled === false);
         }),
-    ),
-  );
+    );
+  });
 
-  it.live("never picks a hand-disabled member, and that member keeps refusing work", () =>
-    runPool(
+  it.live("never picks a hand-disabled member, and that member keeps refusing work", () => {
+    const gate = Deferred.makeUnsafe<void>();
+    return runPool(
       {
-        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
         [busy]: { driver: cursor, usedPercent: 80 },
         [manual]: { driver: cursor, usedPercent: 0, enabled: false },
       },
       ({ startedTurns }) =>
         Effect.gen(function* () {
-          const threadId = yield* startThread("manual", spent);
+          const threadId = yield* startThreadThenSpendQuota("manual", spent, gate);
           const thread = yield* awaitThread(threadId, settled(2));
 
           // "cursor_manual" has the most headroom but is switched off by hand.
@@ -624,8 +645,8 @@ describe("usage limit failover through the real runtime", () => {
           const saved = yield* instanceSettings(manual);
           assert.deepEqual([saved?.enabled, saved?.usageLimitDisabled], [false, undefined]);
         }),
-    ),
-  );
+    );
+  });
 
   it.live.each([
     ["retryable", true],
@@ -635,7 +656,7 @@ describe("usage limit failover through the real runtime", () => {
       {
         [spent]: {
           driver: cursor,
-          usedPercent: 100,
+          usedPercent: 0,
           failure: makeProviderFailure({
             class: "usage_limit",
             message: "Rate limited, try again shortly.",
@@ -664,17 +685,18 @@ describe("usage limit failover through the real runtime", () => {
     ),
   );
 
-  it.live("keeps a chain from hopping again when the user resumes the failed-over run", () =>
-    runPool(
+  it.live("keeps a chain from hopping again when the user resumes the failed-over run", () => {
+    const gate = Deferred.makeUnsafe<void>();
+    return runPool(
       {
-        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
         [fresh]: { driver: cursor, usedPercent: 10, failure: quotaSpent },
         [busy]: { driver: cursor, usedPercent: 80, failure: quotaSpent },
         [reserve]: { driver: cursor, usedPercent: 90 },
       },
       ({ startedTurns }) =>
         Effect.gen(function* () {
-          const threadId = yield* startThread("chain", spent);
+          const threadId = yield* startThreadThenSpendQuota("chain", spent, gate);
           const [first, second] = (yield* awaitThread(threadId, settled(2))).runs;
           // The dispatch chokepoint moves the resume off the now auto-disabled "cursor_fresh".
           yield* send(threadId, "chain:resume", "Try again.", {
@@ -696,8 +718,8 @@ describe("usage limit failover through the real runtime", () => {
           );
           assert.notInclude(yield* Ref.get(startedTurns), reserve);
         }),
-    ),
-  );
+    );
+  });
 
   it.live("leaves a snoozed thread asleep on its spent instance", () =>
     Effect.gen(function* () {
@@ -705,12 +727,13 @@ describe("usage limit failover through the real runtime", () => {
       const snoozedUntil = "2099-01-01T00:00:00.000Z";
       yield* runPool(
         {
-          [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent, gate },
+          [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
           [fresh]: { driver: cursor, usedPercent: 10 },
         },
         () =>
           Effect.gen(function* () {
             const threadId = yield* startThread("snoozed", spent);
+            assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
             yield* Orchestrator.OrchestratorV2.use((o) =>
               o.dispatch({
                 type: "thread.snooze",
@@ -829,15 +852,16 @@ describe("usage limit failover through the real runtime", () => {
     }),
   );
 
-  it.live("keeps a snooze when an automatic failover dispatch arrives", () =>
-    runPool(
+  it.live("keeps a snooze when an automatic failover dispatch arrives", () => {
+    const gate = Deferred.makeUnsafe<void>();
+    return runPool(
       {
-        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
-        [fresh]: { driver: cursor, usedPercent: 0 },
+        [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
+        [fresh]: { driver: cursor, usedPercent: 10 },
       },
       () =>
         Effect.gen(function* () {
-          const threadId = yield* startThread("automatic-snooze", spent);
+          const threadId = yield* startThreadThenSpendQuota("automatic-snooze", spent, gate);
           const failed = (yield* awaitThread(threadId, settled(1))).runs[0]!;
           const snoozedUntil = "2099-01-01T00:00:00.000Z";
           yield* Orchestrator.OrchestratorV2.use((o) =>
@@ -861,8 +885,8 @@ describe("usage limit failover through the real runtime", () => {
           assert.equal(thread.runs[1]?.providerInstanceId, fresh);
         }),
       { failoverWorker: false },
-    ),
-  );
+    );
+  });
 
   it.live("preserves a declined receipt after reboot but fails over a new run", () =>
     Effect.gen(function* () {
@@ -978,8 +1002,9 @@ describe("usage limit failover through the real runtime", () => {
         databasePath: `${directory}/state.sqlite`,
         startedTurns: yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]),
       };
+      const gate = yield* Deferred.make<void>();
       const pool = {
-        [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+        [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
         [fresh]: { driver: cursor, usedPercent: 10 },
       };
       const threadId = ThreadId.make("thread:restart");
@@ -989,7 +1014,7 @@ describe("usage limit failover through the real runtime", () => {
       yield* runPool(
         pool,
         () =>
-          startThread("restart", spent, workspaceRoot).pipe(
+          startThreadThenSpendQuota("restart", spent, gate, workspaceRoot).pipe(
             Effect.andThen((id) => awaitThread(id, settled(1))),
           ),
         { ...boot, failoverWorker: false },
