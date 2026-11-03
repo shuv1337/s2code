@@ -44,6 +44,19 @@ when all five are verifiable, with exact matching optional dependency versions.
 The `shuv2code` bridge launcher publishes the same version and depends on those
 canonical platform packages, preserving upgrades for existing npm installs.
 
+## macOS arm64 runner
+
+The macOS arm64 desktop build runs first on `shuvbot-macos`, a self-hosted Apple Silicon
+runner (labels `self-hosted, macOS, ARM64, shuvbot-macos`) that Fleet Ops owns. Ask Fleet Ops about
+its availability, Xcode installs and maintenance. Retries 2-6 fall back to hosted `macos-26`.
+The job pins Xcode 27.1 through `DEVELOPER_DIR` and fails on a beta, because the runner's
+default Xcode is a beta. It runs only on `main`, never on `pull_request`; a dispatch from another
+branch is refused. `scripts/fork-release.ts` likewise accepts the runner only for
+`schedule` or `workflow_dispatch` on `refs/heads/main`.
+
+To go back to hosted runners, change `FORK_MACOS_ARM64_SELF_HOSTED_RUNNER` in
+`scripts/lib/fork-release.ts` to `"macos-26"`. macOS x64 stays on `macos-15-intel`.
+
 ## Nightly only
 
 The fork publishes only nightly releases, using the red production artwork.

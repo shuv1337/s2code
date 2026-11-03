@@ -137,13 +137,19 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'shuv1337/s2code'
+    # A label array (self-hosted shuvbot) is passed as a JSON string; hosted labels stay plain.
+    # Self-hosted jobs never run on pull_request, and only on main.
+    if: >-
+      github.repository == 'shuv1337/s2code' &&
+      (!startsWith(inputs.runner, '[') ||
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main'))
     name: Build ${{ inputs.label }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ startsWith(inputs.runner, '[') && fromJSON(inputs.runner) || inputs.runner }}
     # Windows waits for the Linux CLI archive inside its own budget (see
     # "Wait for Linux CLI archive"), so it gets that wait on top of the usual 30.
     # This does not extend the hosted-runner queue. GitHub cancels an unassigned
     # macos-26 job at about 15 minutes; release.yml requests another runner.
+    # The shuvbot runner has no such queue limit; see docs/operations/release.md.
     timeout-minutes: ${{ inputs.platform == 'win' && 70 || 30 }}
     env:
       T3CODE_CLERK_PUBLISHABLE_KEY: ${{ inputs.clerk_publishable_key }}
@@ -170,6 +176,23 @@ jobs:
           git fetch --no-tags --depth=1 origin "$CHECKOUT_REF"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
           git -c checkout.workers=0 checkout --detach FETCH_HEAD
+
+      # shuvbot's xcode-select and /Applications/Xcode.app point at a beta, so the
+      # stable Xcode is pinned by path and then verified, never assumed.
+      - name: Pin stable Xcode and UTF-8 locale on the self-hosted runner
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        env:
+          XCODE_DEVELOPER_DIR: /Applications/Xcode-27.1.0.app/Contents/Developer
+          XCODE_EXPECTED_VERSION: "27.1"
+        run: |
+          set -euo pipefail
+          {
+            echo "DEVELOPER_DIR=$XCODE_DEVELOPER_DIR"
+            echo "LANG=en_US.UTF-8"
+            echo "LC_ALL=en_US.UTF-8"
+          } >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$XCODE_DEVELOPER_DIR" .github/scripts/require-stable-xcode.sh
 
       # The runner's PowerShell 7.6/.NET 10 intermittently crashes during signing:
       # https://github.com/dotnet/runtime/issues/131636

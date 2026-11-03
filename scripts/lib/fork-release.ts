@@ -26,6 +26,24 @@ export async function publishAtomicReleaseIndex(
   if ((await store.read())?.content !== content)
     throw new Error("Published release index content mismatch.");
 }
+
+export const FORK_SELF_HOSTED_RUNNER_NAME = "shuvbot-macos";
+/** `runs-on` for the self-hosted job, as the JSON string workflow_call inputs require. */
+export const FORK_MACOS_ARM64_SELF_HOSTED_RUNNER = JSON.stringify([
+  "self-hosted",
+  "macOS",
+  "ARM64",
+  FORK_SELF_HOSTED_RUNNER_NAME,
+]);
+
+/** GitHub-hosted, or the shuvbot runner on a scheduled or dispatched run of main. */
+export const forkRunnerAllowed = (env: Readonly<Record<string, string | undefined>>) =>
+  env.RUNNER_ENVIRONMENT === "github-hosted" ||
+  (env.RUNNER_ENVIRONMENT === "self-hosted" &&
+    env.RUNNER_NAME === FORK_SELF_HOSTED_RUNNER_NAME &&
+    (env.GITHUB_EVENT_NAME === "workflow_dispatch" || env.GITHUB_EVENT_NAME === "schedule") &&
+    env.GITHUB_REF === "refs/heads/main");
+
 export const FORK_NPM_PACKAGES = [
   ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`),
   NPM_PACKAGE_NAME,
@@ -39,7 +57,7 @@ export const FORK_DESKTOP_MATRIX = [
     label: "macOS arm64",
     platform: "mac",
     arch: "arm64",
-    runner: "macos-26",
+    runner: FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
     target: "dmg",
     rust_target: "aarch64-apple-darwin",
     resource_key: "darwin-arm64",

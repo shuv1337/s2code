@@ -1,7 +1,10 @@
 const FS = require("node:fs");
 
-// GitHub cancels a hosted job that never receives a runner after about 15 minutes.
-// timeout-minutes does not extend that wait; a later job is a new request.
+// The first attempt runs on the self-hosted shuvbot runner (scripts/lib/fork-release.ts).
+// A later attempt falls back to a hosted runner. GitHub cancels a hosted job that never
+// receives a runner after about 15 minutes; timeout-minutes does not extend that wait,
+// and a later job is a new request.
+const HOSTED_FALLBACK_RUNNER = "macos-26";
 const MAC_ARM64_CALLERS = [
   "Desktop (macOS arm64)",
   "Desktop (macOS arm64 retry 2)",
@@ -17,15 +20,18 @@ function splitDesktopMatrix(matrix) {
   if (!matrix || !Array.isArray(matrix.include))
     throw new Error("Desktop matrix is missing include.");
   const mac = matrix.include.filter(
-    (target) =>
-      target.platform === "mac" && target.arch === "arm64" && target.runner === "macos-26",
+    (target) => target.platform === "mac" && target.arch === "arm64",
   );
   const rest = matrix.include.filter(
     (target) => !(target.platform === "mac" && target.arch === "arm64"),
   );
   if (mac.length !== 1)
     throw new Error(`Expected one macOS arm64 desktop target, found ${mac.length}.`);
-  return { mac: mac[0], rest: { include: rest } };
+  return {
+    mac: mac[0],
+    fallback: { ...mac[0], runner: HOSTED_FALLBACK_RUNNER },
+    rest: { include: rest },
+  };
 }
 
 function readJobsJsonl(path) {
@@ -43,9 +49,9 @@ function readJobsJsonl(path) {
 
 const NOT_ACQUIRED_ANNOTATION = "not acquired by Runner of type hosted";
 // The run stays red: GitHub cannot ignore a cancelled reusable-workflow job.
-// Re-run failed jobs would queue macos-26 again. Publication guards refuse a second copy.
+// Re-run failed jobs would queue the first runner again. Publication guards refuse a second copy.
 const SUCCESS_AFTER_MISS_NOTICE =
-  "A later macOS arm64 attempt acquired a runner and succeeded. This run stays red. Do not use Re-run failed jobs: that queues macos-26 again.";
+  "A later macOS arm64 attempt acquired a runner and succeeded. This run stays red. Do not use Re-run failed jobs: that queues the first runner again.";
 
 function annotationMessages(job) {
   if (!Array.isArray(job.annotations)) return null;
@@ -102,6 +108,7 @@ function main() {
     writeGithubOutput([
       ["matrix_rest", JSON.stringify(split.rest)],
       ["matrix_mac_arm64", JSON.stringify(split.mac)],
+      ["matrix_mac_arm64_fallback", JSON.stringify(split.fallback)],
     ]);
     return;
   }
@@ -113,7 +120,7 @@ function main() {
     console.log(`macOS arm64 acquire ${callerName}: ${decision.reason}`);
     if (decision.retry)
       console.log(
-        "::notice::macOS arm64 hosted runner was not acquired. Requesting another macos-26 runner.",
+        "::notice::macOS arm64 hosted runner was not acquired. Requesting a hosted macos-26 runner.",
       );
     writeGithubOutput([["retry", decision.retry ? "true" : "false"]]);
     return;
@@ -130,7 +137,7 @@ function main() {
     const acquired = decision.reason === "not-acquired";
     console.error(
       acquired
-        ? "GitHub hosted macos-26 never assigned a runner. Each attempt waits about 15 minutes, then GitHub cancels it with runner_id 0. timeout-minutes does not extend that wait. A runner may still never arrive."
+        ? "No macOS arm64 attempt was assigned a runner. A hosted attempt waits about 15 minutes, then GitHub cancels it with runner_id 0. timeout-minutes does not extend that wait. A runner may still never arrive."
         : `macOS arm64 desktop build did not succeed (${decision.reason}).`,
     );
     process.exitCode = 1;
@@ -140,6 +147,7 @@ function main() {
 }
 
 module.exports = {
+  HOSTED_FALLBACK_RUNNER,
   MAC_ARM64_CALLERS,
   NOT_ACQUIRED_ANNOTATION,
   SUCCESS_AFTER_MISS_NOTICE,

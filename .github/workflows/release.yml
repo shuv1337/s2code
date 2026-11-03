@@ -72,6 +72,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       matrix_rest: ${{ steps.split_matrix.outputs.matrix_rest }}
       matrix_mac_arm64: ${{ steps.split_matrix.outputs.matrix_mac_arm64 }}
+      matrix_mac_arm64_fallback: ${{ steps.split_matrix.outputs.matrix_mac_arm64_fallback }}
       due: ${{ needs.due.outputs.due }}
     steps:
       - uses: actions/checkout@v6
@@ -181,16 +182,20 @@ jobs:
       # environment, so the team id comes from preflight rather than `vars`.
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
-  # macos-26 cancels an unassigned job after ~15 minutes (runner_id 0). That
-  # is not timeout-minutes (already 30). A missed attempt stays cancelled, so
-  # the run stays red even when a later attempt succeeds. The gate notice says
-  # not to re-run failed jobs. `with` and the check steps are anchored.
+  # macOS arm64 builds first on the self-hosted shuvbot runner (owned by Fleet
+  # Ops; see docs/operations/release.md). Retries 2-6 use hosted macos-26, which
+  # cancels an unassigned job after ~15 minutes (runner_id 0). That is not
+  # timeout-minutes (already 30). A missed attempt stays cancelled, so the run
+  # stays red even when a later attempt succeeds. The gate notice says not to
+  # re-run failed jobs. `with` (retries) and the check steps are anchored.
+  # To revert to hosted runners, set FORK_MACOS_ARM64_SELF_HOSTED_RUNNER in
+  # scripts/lib/fork-release.ts to "macos-26".
   desktop_mac_arm64:
     name: Desktop (macOS arm64)
     needs: [preflight, build_bundle]
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: &mac_arm64_build
+    with:
       label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
       runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
       platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
@@ -237,7 +242,23 @@ jobs:
     if: always() && !cancelled() && needs.mac_arm64_after_1.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: *mac_arm64_build
+    with: &mac_arm64_fallback_build
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64_fallback).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
   mac_arm64_after_2:
     name: macOS arm64 runner check 2
@@ -257,7 +278,7 @@ jobs:
     if: always() && !cancelled() && needs.mac_arm64_after_2.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: *mac_arm64_build
+    with: *mac_arm64_fallback_build
 
   mac_arm64_after_3:
     name: macOS arm64 runner check 3
@@ -277,7 +298,7 @@ jobs:
     if: always() && !cancelled() && needs.mac_arm64_after_3.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: *mac_arm64_build
+    with: *mac_arm64_fallback_build
 
   mac_arm64_after_4:
     name: macOS arm64 runner check 4
@@ -297,7 +318,7 @@ jobs:
     if: always() && !cancelled() && needs.mac_arm64_after_4.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: *mac_arm64_build
+    with: *mac_arm64_fallback_build
 
   mac_arm64_after_5:
     name: macOS arm64 runner check 5
@@ -317,7 +338,7 @@ jobs:
     if: always() && !cancelled() && needs.mac_arm64_after_5.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: *mac_arm64_build
+    with: *mac_arm64_fallback_build
 
   mac_arm64_ready:
     name: macOS arm64 runner acquired

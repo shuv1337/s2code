@@ -21,6 +21,8 @@ import {
   publishAtomicReleaseIndex,
   FORK_RELEASE_INDEX_URL,
   forkNpmPublishingReady,
+  forkRunnerAllowed,
+  FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
 } from "./fork-release.ts";
 import serverPackage from "../../apps/server/package.json" with { type: "json" };
 const sha = "ab".repeat(20);
@@ -88,7 +90,7 @@ describe("fork release contract", () => {
   it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
     expect(FORK_DESKTOP_MATRIX).toHaveLength(6);
     expect(FORK_DESKTOP_MATRIX.map((target) => target.runner)).toEqual([
-      "macos-26",
+      FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
       "macos-15-intel",
       "ubuntu-24.04",
       "ubuntu-24.04-arm",
@@ -103,6 +105,30 @@ describe("fork release contract", () => {
           (linux) => linux.platform === "linux" && linux.arch === target.arch && linux.cli_archive,
         ),
       ).toBe(true);
+  });
+  it("allows GitHub-hosted and the shuvbot runner on main, and refuses every other runner", () => {
+    const shuvbot = {
+      RUNNER_ENVIRONMENT: "self-hosted",
+      RUNNER_NAME: "shuvbot-macos",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+    };
+    expect(forkRunnerAllowed({ RUNNER_ENVIRONMENT: "github-hosted" })).toBe(true);
+    expect(forkRunnerAllowed(shuvbot)).toBe(true);
+    expect(forkRunnerAllowed({ ...shuvbot, GITHUB_EVENT_NAME: "schedule" })).toBe(true);
+    for (const override of [
+      { RUNNER_NAME: "other-mac" },
+      { RUNNER_NAME: undefined },
+      { GITHUB_EVENT_NAME: "pull_request" },
+      { GITHUB_EVENT_NAME: "push" },
+      { GITHUB_EVENT_NAME: undefined },
+      { GITHUB_REF: "refs/heads/ci/arm64-self-hosted-shuvbot" },
+      { GITHUB_REF: "refs/pull/1/merge" },
+      { GITHUB_REF: undefined },
+    ])
+      expect(forkRunnerAllowed({ ...shuvbot, ...override })).toBe(false);
+    expect(forkRunnerAllowed({})).toBe(false);
+    expect(forkRunnerAllowed({ ...shuvbot, RUNNER_ENVIRONMENT: undefined })).toBe(false);
   });
   it("fails closed without stable credentials, regardless of unsigned opt-in", () => {
     expect(() => releaseSigningPolicy("stable", false, {})).toThrow("Missing fork signing");
