@@ -1,9 +1,11 @@
 import {
+  type EnvironmentId,
   PROVIDER_ACCOUNT_SYNC_MAX_RECORDS,
   ProviderAccountSyncResult,
   ProviderAccountUsageLimitRecord,
   type PeerLink,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -21,6 +23,8 @@ import {
   applyRecord,
   applyToInstance,
   type CheckedAccounts,
+  isAcceptable,
+  isExpired,
   type LocalTransition,
   localChangeTime,
   localSpentNotes,
@@ -33,17 +37,25 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 import * as PeerMcpClient from "./PeerMcpClient.ts";
 
+/** The linked environment on the other end of an exchange, as this one knows it. */
+export interface RecordSource {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+}
+
 /**
- * Keeps pooled provider accounts' quota states in step across linked environments, so an
- * account whose quota ran out on one machine is not picked on another. Records travel over the
- * link's own `/mcp` session; credentials and emails never do.
+ * Keeps pooled provider accounts' quota states in step across directly linked environments, so
+ * an account whose quota ran out on one machine is not picked on another. Records travel over the
+ * link's own `/mcp` session; credentials never do, and accounts go as hashed keys (see
+ * `providerAccountKey`), not as emails.
  */
 export class ProviderAccountSync extends Context.Service<
   ProviderAccountSync,
   {
-    /** Merges another environment's records, applies what changed here, and returns every record known here. */
+    /** Merges the states `from` originated, applies what changed here, and returns the states that originated here. */
     readonly exchange: (
       records: ReadonlyArray<ProviderAccountUsageLimitRecord>,
+      from: RecordSource,
     ) => Effect.Effect<ReadonlyArray<ProviderAccountUsageLimitRecord>>;
     /** Exchanges records once with every linked environment that supports it. */
     readonly syncNow: Effect.Effect<void>;
@@ -55,12 +67,16 @@ const SYNC_INTERVAL = "60 seconds";
 const SYNC_TOOL = "t3_provider_account_sync";
 const MAX_MESSAGE_LENGTH = 2_000;
 const MAX_LABEL_LENGTH = 256;
+// A peer sends at most one exchange's worth, so more from one origin is a flood.
+const MAX_ROWS_PER_ORIGIN = PROVIDER_ACCOUNT_SYNC_MAX_RECORDS;
+const MAX_ROWS = 5 * PROVIDER_ACCOUNT_SYNC_MAX_RECORDS;
 
 interface UsageLimitRow {
   readonly account: string;
   readonly driver: string;
   readonly spent: number;
   readonly changed_at: string;
+  readonly reset_at: string | null;
   readonly origin_environment_id: string;
   readonly origin_label: string;
   readonly message: string | null;
@@ -81,6 +97,7 @@ const recordOf = (row: UsageLimitRow) =>
     driver: row.driver,
     spent: row.spent === 1,
     changedAt: row.changed_at,
+    ...(row.reset_at === null ? {} : { resetAt: row.reset_at }),
     origin: { environmentId: row.origin_environment_id, label: row.origin_label },
     ...(row.message === null ? {} : { message: row.message }),
   });
@@ -110,21 +127,28 @@ const make = Effect.gen(function* () {
     })),
   );
 
-  // A peer refuses more, and the oldest states have long converged.
-  const readAll = sql<UsageLimitRow>`
-    SELECT * FROM (
-      SELECT * FROM provider_account_usage_limits
-      ORDER BY changed_at DESC LIMIT ${PROVIDER_ACCOUNT_SYNC_MAX_RECORDS}
-    ) ORDER BY account
-  `.pipe(Effect.map((rows) => rows.flatMap((row) => Option.toArray(recordOf(row)))));
+  // Only states that started here, since a peer cannot tell a passed-on state from its origin's.
+  // Stored times are canonical, so their text orders them.
+  const readLocal = Effect.gen(function* () {
+    const here = (yield* self).environmentId;
+    const rows = yield* sql<UsageLimitRow>`
+      SELECT * FROM (
+        SELECT * FROM provider_account_usage_limits WHERE origin_environment_id = ${here}
+        ORDER BY changed_at DESC LIMIT ${PROVIDER_ACCOUNT_SYNC_MAX_RECORDS}
+      ) ORDER BY account
+    `;
+    return rows.flatMap((row) => Option.toArray(recordOf(row)));
+  });
 
-  const readOne = (account: string) =>
+  /** The account's state, unless it is one this environment would no longer take. */
+  const readOne = (account: string, nowMs: number) =>
     sql<UsageLimitRow>`
       SELECT * FROM provider_account_usage_limits WHERE account = ${account}
     `.pipe(
-      Effect.map((rows) =>
-        rows[0] === undefined ? undefined : Option.getOrUndefined(recordOf(rows[0])),
-      ),
+      Effect.map((rows) => {
+        const record = rows[0] === undefined ? undefined : Option.getOrUndefined(recordOf(rows[0]));
+        return record !== undefined && isAcceptable(record, nowMs) ? record : undefined;
+      }),
     );
 
   /**
@@ -134,21 +158,23 @@ const make = Effect.gen(function* () {
   const store = Effect.fnUntraced(function* (
     record: ProviderAccountUsageLimitRecord,
     applied: boolean,
+    nowMs: number,
   ) {
-    if (!supersedes(record, yield* readOne(record.account))) return false;
+    if (!supersedes(record, yield* readOne(record.account, nowMs))) return false;
     yield* sql`
       INSERT INTO provider_account_usage_limits (
-        account, driver, spent, changed_at, origin_environment_id, origin_label, message, applied,
-        checked
+        account, driver, spent, changed_at, reset_at, origin_environment_id, origin_label,
+        message, applied, checked
       ) VALUES (
         ${record.account}, ${record.driver}, ${record.spent ? 1 : 0}, ${record.changedAt},
-        ${record.origin.environmentId}, ${record.origin.label}, ${record.message ?? null},
-        ${applied ? 1 : 0}, '{}'
+        ${record.resetAt ?? null}, ${record.origin.environmentId}, ${record.origin.label},
+        ${record.message ?? null}, ${applied ? 1 : 0}, '{}'
       )
       ON CONFLICT (account) DO UPDATE SET
         driver = excluded.driver,
         spent = excluded.spent,
         changed_at = excluded.changed_at,
+        reset_at = excluded.reset_at,
         origin_environment_id = excluded.origin_environment_id,
         origin_label = excluded.origin_label,
         message = excluded.message,
@@ -158,13 +184,59 @@ const make = Effect.gen(function* () {
     return true;
   });
 
+  /** Drops reset quotas, then the oldest states past each origin's and the total cap. Callers hold `lock`. */
+  const prune = Effect.fnUntraced(function* (nowMs: number) {
+    yield* sql`
+      DELETE FROM provider_account_usage_limits
+      WHERE spent = 1 AND reset_at <= ${DateTime.formatIso(DateTime.makeUnsafe(nowMs))}
+    `;
+    yield* sql`
+      DELETE FROM provider_account_usage_limits WHERE account IN (
+        SELECT account FROM (
+          SELECT account, ROW_NUMBER() OVER (
+            PARTITION BY origin_environment_id ORDER BY changed_at DESC, account
+          ) AS position
+          FROM provider_account_usage_limits
+        ) WHERE position > ${MAX_ROWS_PER_ORIGIN}
+      )
+    `;
+    yield* sql`
+      DELETE FROM provider_account_usage_limits WHERE account IN (
+        SELECT account FROM provider_account_usage_limits
+        ORDER BY changed_at DESC, account LIMIT -1 OFFSET ${MAX_ROWS}
+      )
+    `;
+  });
+
   const merge = Effect.fn("ProviderAccountSync.merge")(function* (
     records: ReadonlyArray<ProviderAccountUsageLimitRecord>,
+    from: RecordSource,
   ) {
     const here = (yield* self).environmentId;
+    const nowMs = yield* Clock.currentTimeMillis;
+    // Taken as the caller's own, a state it claims for this environment or a third one would be
+    // passed on as that one's.
+    const accepted =
+      from.environmentId === here
+        ? []
+        : records.filter(
+            (record) =>
+              record.origin.environmentId === from.environmentId && isAcceptable(record, nowMs),
+          );
+    if (accepted.length < records.length) {
+      yield* Effect.logWarning("provider-account-sync.records-refused", {
+        environmentId: from.environmentId,
+        refused: records.length - accepted.length,
+      });
+    }
+    const origin = {
+      environmentId: from.environmentId,
+      label: clip(from.label, MAX_LABEL_LENGTH) || from.environmentId,
+    };
     yield* lock.withPermits(1)(
-      Effect.forEach(records, (record) => store(record, record.origin.environmentId === here), {
-        discard: true,
+      Effect.gen(function* () {
+        for (const record of accepted) yield* store({ ...record, origin }, false, nowMs);
+        yield* prune(nowMs);
       }),
     );
   });
@@ -175,8 +247,10 @@ const make = Effect.gen(function* () {
    */
   const applyPending = Effect.fn("ProviderAccountSync.applyPending")(function* () {
     const here = (yield* self).environmentId;
+    const nowMs = yield* Clock.currentTimeMillis;
     yield* lock.withPermits(1)(
       Effect.gen(function* () {
+        yield* prune(nowMs);
         const rows = yield* sql<UsageLimitRow>`
           SELECT * FROM provider_account_usage_limits
           WHERE origin_environment_id != ${here} AND (spent = 1 OR applied = 0)
@@ -184,7 +258,7 @@ const make = Effect.gen(function* () {
         `;
         for (const row of rows) {
           const record = Option.getOrUndefined(recordOf(row));
-          if (record === undefined) continue;
+          if (record === undefined || !isAcceptable(record, nowMs)) continue;
           yield* Effect.gen(function* () {
             const instances = (yield* settings.getSettings).providerInstances;
             const providers = yield* registry.getProviders;
@@ -244,12 +318,12 @@ const make = Effect.gen(function* () {
     startup: boolean,
   ) {
     const origin = yield* self;
-    const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+    const nowMs = yield* Clock.currentTimeMillis;
     const recorded = yield* lock.withPermits(1)(
       Effect.gen(function* () {
         let recorded = false;
         for (const transition of transitions) {
-          const current = yield* readOne(transition.account);
+          const current = yield* readOne(transition.account, nowMs);
           let changedAt: string;
           if (transition.spent) {
             // A note from before this run is recorded as it was, unless something newer is known.
@@ -260,9 +334,11 @@ const make = Effect.gen(function* () {
             ) {
               continue;
             }
-            changedAt = startup
-              ? transition.at
-              : localChangeTime(Date.parse(transition.at), current);
+            changedAt = localChangeTime(
+              nowMs,
+              startup ? undefined : current,
+              Date.parse(transition.at),
+            );
           } else {
             // Only a user turning on what a quota turned off resets it; applied resets do not.
             if (appliedEnables.delete(enableKey(transition.instanceId, transition.at))) continue;
@@ -273,17 +349,19 @@ const make = Effect.gen(function* () {
             transition.spent && transition.message !== undefined
               ? clip(transition.message, MAX_MESSAGE_LENGTH)
               : "";
-          const stored = yield* store(
-            {
-              account: transition.account,
-              driver: transition.driver,
-              spent: transition.spent,
-              changedAt,
-              origin,
-              ...(message === "" ? {} : { message }),
-            },
-            true,
-          );
+          const record: ProviderAccountUsageLimitRecord = {
+            account: transition.account,
+            driver: transition.driver,
+            spent: transition.spent,
+            changedAt,
+            ...(transition.spent && transition.resetAt !== undefined
+              ? { resetAt: transition.resetAt }
+              : {}),
+            origin,
+            ...(message === "" ? {} : { message }),
+          };
+          if (isExpired(record, nowMs)) continue;
+          const stored = yield* store(record, true, nowMs);
           recorded = recorded || stored;
         }
         return recorded;
@@ -302,7 +380,7 @@ const make = Effect.gen(function* () {
       const result = yield* peers.call({
         environmentId: link.environmentId,
         tool: SYNC_TOOL,
-        arguments: { records: yield* readAll },
+        arguments: { from: (yield* self).environmentId, records: yield* readLocal },
         limits: { runtimeMode: "full-access", interactionMode: "default" },
         success: ProviderAccountSyncResult,
       });
@@ -311,7 +389,8 @@ const make = Effect.gen(function* () {
           environmentId: link.environmentId,
         });
       }
-      yield* merge(result.records);
+      // Named as the user linked it, not as the peer calls itself.
+      yield* merge(result.records, { environmentId: link.environmentId, label: link.label });
       yield* applyPending();
     },
     (effect, link) =>
@@ -349,10 +428,10 @@ const make = Effect.gen(function* () {
 
   const exchange: ProviderAccountSync["Service"]["exchange"] = Effect.fn(
     "ProviderAccountSync.exchange",
-  )(function* (records) {
-    yield* merge(records);
+  )(function* (records, from) {
+    yield* merge(records, from);
     yield* applyPendingSafely;
-    return yield* readAll;
+    return yield* readLocal;
   }, Effect.orDie);
 
   // Subscribed before the snapshot below is read, so no change falls between them.

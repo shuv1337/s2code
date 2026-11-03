@@ -4,7 +4,8 @@ import * as Hex from "effect/encoding/Hex";
 
 /**
  * An opaque key for the account an instance is signed in to. Every environment derives the same
- * key for the same account, whatever its instance ids, and the email itself never leaves here.
+ * key for the same account, whatever its instance ids. The email is not sent as text, but the key
+ * is an unsalted hash, so anyone who guesses the email can confirm it.
  */
 export const providerAccountKey = (
   provider: Pick<ServerProvider, "driver" | "auth">,

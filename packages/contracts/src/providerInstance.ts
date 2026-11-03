@@ -92,6 +92,8 @@ export const ProviderInstanceConfig = Schema.Struct({
       account: Schema.optionalKey(TrimmedNonEmptyString),
       /** The linked environment that reported the spent quota; absent when it was seen here. */
       reportedBy: Schema.optionalKey(TrimmedNonEmptyString),
+      /** When the provider said the quota resets, if it did. */
+      resetAt: Schema.optionalKey(IsoDateTime),
     }),
   ),
   config: Schema.optionalKey(Schema.Unknown),

@@ -13,14 +13,18 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { providerAccountKey } from "@t3tools/shared/providerAccount";
+import * as Arr from "effect/Array";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -56,6 +60,18 @@ const providerFor = (
 });
 
 const decodeSyncInput = Schema.decodeUnknownEffect(ProviderAccountSyncInput);
+const NOW = "2026-11-03T12:00:00.000Z";
+
+const NOBODY = { environmentId: EnvironmentId.make("env-nobody"), label: "Nobody" };
+
+interface StoredRow {
+  readonly account: string;
+  readonly driver: string;
+  readonly spent: number;
+  readonly changed_at: string;
+  readonly origin_environment_id: string;
+  readonly origin_label: string;
+}
 
 const accountOf = (email: string) =>
   providerAccountKey({ driver: cursor, auth: { status: "authenticated", email } })!;
@@ -79,6 +95,10 @@ const makeHost = Effect.fn(function* (input: {
   readonly peer?: Peer;
   readonly online?: boolean;
 }) {
+  // Once, before any host's periodic sync is scheduled, so no jump fires one.
+  if ((yield* Clock.currentTimeMillis) < Date.parse(NOW)) {
+    yield* TestClock.setTime(Date.parse(NOW));
+  }
   const environmentId = EnvironmentId.make(input.id);
   const writes = yield* Queue.unbounded<ServerSettings>();
   const writeCount = yield* Ref.make(0);
@@ -183,7 +203,8 @@ const makeHost = Effect.fn(function* (input: {
         const answer = yield* Schema.decodeEffect(Schema.fromJsonString(call.success))(
           JSON.stringify({
             environmentId: peer.environmentId,
-            records: yield* peer.sync.exchange(records),
+            // The peer's handler names the caller by the label its link session was paired under.
+            records: yield* peer.sync.exchange(records, { environmentId, label: input.label }),
           }),
         ).pipe(Effect.orDie);
         yield* Queue.offer(exchanges, "ok");
@@ -193,7 +214,7 @@ const makeHost = Effect.fn(function* (input: {
 
   const context = yield* ProviderAccountSync.layer.pipe(
     Layer.provideMerge(layerSettings),
-    Layer.provide(Sqlite.layerMemory),
+    Layer.provideMerge(Sqlite.layerMemory),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProviderRegistry.ProviderRegistry)({
@@ -216,11 +237,28 @@ const makeHost = Effect.fn(function* (input: {
   );
   const sync = yield* ProviderAccountSync.ProviderAccountSync.pipe(Effect.provide(context));
   const settings = yield* ServerSettingsModule.ServerSettingsService.pipe(Effect.provide(context));
+  const sql = yield* SqlClient.SqlClient.pipe(Effect.provide(context));
   const instance = (id: string) =>
     settings.getSettings.pipe(
       Effect.orDie,
       Effect.map((current) => current.providerInstances[ProviderInstanceId.make(id)]),
     );
+  /** Every state stored here, whoever it came from. */
+  const stored = sql<StoredRow>`
+    SELECT account, driver, spent, changed_at, origin_environment_id, origin_label
+    FROM provider_account_usage_limits ORDER BY account
+  `.pipe(
+    Effect.orDie,
+    Effect.map((rows) =>
+      rows.map((row) => ({
+        account: row.account,
+        driver: row.driver,
+        spent: row.spent === 1,
+        changedAt: row.changed_at,
+        origin: { environmentId: row.origin_environment_id, label: row.origin_label },
+      })),
+    ),
+  );
   return {
     environmentId,
     label: input.label,
@@ -252,7 +290,9 @@ const makeHost = Effect.fn(function* (input: {
     /** Holds settings changes back from the service's watcher until `releaseWatcher`. */
     holdWatcher: watched.close,
     releaseWatcher: watched.open,
-    records: sync.exchange([]),
+    stored,
+    /** Every state stored here, once an exchange has applied what is known. */
+    records: sync.exchange([], NOBODY).pipe(Effect.andThen(stored)),
   };
 });
 
@@ -521,39 +561,196 @@ it.effect("the newest record wins, and a tie goes to the larger environment id",
       origin: { environmentId: EnvironmentId.make(environmentId), label: environmentId },
     });
     const current = recordFrom("env-k", "2026-11-03T10:00:00.000Z", true);
+    const merged = (record: ProviderAccountUsageLimitRecord) =>
+      host.sync.exchange([record], record.origin).pipe(Effect.andThen(host.stored));
 
-    expect(yield* host.sync.exchange([current])).toEqual([current]);
-    expect(
-      yield* host.sync.exchange([recordFrom("env-z", "2026-11-03T09:00:00.000Z", false)]),
-    ).toEqual([current]);
-    expect(
-      yield* host.sync.exchange([recordFrom("env-a", "2026-11-03T10:00:00.000Z", false)]),
-    ).toEqual([current]);
+    expect(yield* merged(current)).toEqual([current]);
+    expect(yield* merged(recordFrom("env-z", "2026-11-03T09:00:00.000Z", false))).toEqual([
+      current,
+    ]);
+    expect(yield* merged(recordFrom("env-a", "2026-11-03T10:00:00.000Z", false))).toEqual([
+      current,
+    ]);
     const tieWinner = recordFrom("env-z", "2026-11-03T10:00:00.000Z", false);
-    expect(yield* host.sync.exchange([tieWinner])).toEqual([tieWinner]);
+    expect(yield* merged(tieWinner)).toEqual([tieWinner]);
     const newer = recordFrom("env-a", "2026-11-03T11:00:00.000Z", true);
-    expect(yield* host.sync.exchange([newer])).toEqual([newer]);
+    expect(yield* merged(newer)).toEqual([newer]);
   }),
 );
 
-it.effect("hands out only as many of the newest records as a peer accepts", () =>
+it.effect("a state stamped far ahead of this clock is refused, on the wire and when merged", () =>
   Effect.gen(function* () {
-    const host = yield* makeHost({ id: "env-m", label: "Host M", instances: {}, providers: [] });
-    const records = Array.from(
-      { length: PROVIDER_ACCOUNT_SYNC_MAX_RECORDS + 1 },
-      (_, index): ProviderAccountUsageLimitRecord => ({
-        account: `account-${index}`,
-        driver: cursor,
-        spent: true,
-        changedAt: DateTime.formatIso(DateTime.makeUnsafe(Date.parse(SPENT_AT) + index * 1_000)),
-        origin: { environmentId: EnvironmentId.make("env-k"), label: "Host K" },
-      }),
-    );
-    yield* host.sync.exchange(records.slice(0, PROVIDER_ACCOUNT_SYNC_MAX_RECORDS));
-    const known = yield* host.sync.exchange(records.slice(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS));
+    const b = yield* makeHost({
+      id: "env-b",
+      label: "Host B",
+      instances: { cursor_b: pooled },
+      providers: [providerFor("cursor_b")],
+    });
+    const caller = { environmentId: EnvironmentId.make("env-a"), label: "Host A" };
+    const spentAt = (changedAt: string, email = POOL_EMAIL): ProviderAccountUsageLimitRecord => ({
+      account: accountOf(email),
+      driver: cursor,
+      spent: true,
+      changedAt,
+      origin: caller,
+    });
+    const maxDate = spentAt("+275760-09-13T00:00:00.000Z");
 
-    expect(known).toHaveLength(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS);
-    expect(known.map((record) => record.account)).not.toContain("account-0");
+    const decoded = yield* Effect.exit(
+      decodeSyncInput({ from: caller.environmentId, records: [maxDate] }),
+    );
+    expect(Exit.isFailure(decoded)).toBe(true);
+    yield* b.sync.exchange([maxDate, spentAt("2026-11-03T12:06:00.000Z", OTHER_EMAIL)], caller);
+    expect(yield* b.instance("cursor_b")).toEqual(pooled);
+    expect(yield* b.stored).toEqual([]);
+
+    // A few minutes ahead is clock skew, and lands.
+    yield* b.sync.exchange([spentAt("2026-11-03T12:04:00.000Z")], caller);
+    expect(yield* b.instance("cursor_b")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "Host A" },
+    });
+  }),
+);
+
+it.effect("takes only the caller's own states, under its link's label, and passes none on", () =>
+  Effect.gen(function* () {
+    const THIRD_EMAIL = "third@example.test";
+    const b = yield* makeHost({
+      id: "env-b",
+      label: "Host B",
+      instances: { cursor_b: pooled, cursor_b2: pooled },
+      providers: [
+        providerFor("cursor_b"),
+        providerFor("cursor_b2", { status: "authenticated", email: OTHER_EMAIL }),
+      ],
+    });
+    yield* b.nextSync;
+    const a = yield* makeHost({
+      id: "env-a",
+      label: "Host A",
+      instances: { cursor_a: pooled },
+      providers: [providerFor("cursor_a")],
+      peer: { ...b, label: "B as linked" },
+    });
+    yield* a.nextExchange;
+
+    const mallory = { environmentId: EnvironmentId.make("env-m"), label: "T3 Code · Host M" };
+    const claimed = (
+      email: string,
+      environmentId: string,
+      label: string,
+    ): ProviderAccountUsageLimitRecord => ({
+      account: accountOf(email),
+      driver: cursor,
+      spent: true,
+      changedAt: SPENT_AT,
+      origin: { environmentId: EnvironmentId.make(environmentId), label },
+    });
+    yield* b.sync.exchange(
+      [
+        claimed(POOL_EMAIL, "env-b", "Host B"),
+        claimed(THIRD_EMAIL, "env-c", "Host C"),
+        claimed(OTHER_EMAIL, "env-m", "Host A"),
+      ],
+      mallory,
+    );
+    yield* a.sync.syncNow;
+    yield* a.nextExchange;
+    expect(yield* a.instance("cursor_a")).toEqual(pooled);
+    expect(yield* a.stored).toEqual([]);
+
+    expect(yield* b.instance("cursor_b")).toEqual(pooled);
+    expect(yield* b.instance("cursor_b2")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "T3 Code · Host M" },
+    });
+    expect(yield* b.stored).toEqual([
+      { ...claimed(OTHER_EMAIL, "env-m", "Host A"), origin: mallory },
+    ]);
+
+    // B's own state arrives, named as A linked it rather than as B calls itself.
+    yield* spendOn(b, "cursor_b");
+    yield* b.nextSync;
+    yield* a.sync.syncNow;
+    yield* a.nextExchange;
+    expect(yield* a.instance("cursor_a")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "B as linked" },
+    });
+  }),
+);
+
+it.effect("a spent state stops counting once its quota resets", () =>
+  Effect.gen(function* () {
+    const b = yield* makeHost({
+      id: "env-b",
+      label: "Host B",
+      instances: { cursor_b: pooled },
+      providers: [providerFor("cursor_b")],
+    });
+    const caller = { environmentId: EnvironmentId.make("env-a"), label: "Host A" };
+    const spentUntil = (resetAt: string): ProviderAccountUsageLimitRecord => ({
+      account: accountOf(POOL_EMAIL),
+      driver: cursor,
+      spent: true,
+      changedAt: SPENT_AT,
+      resetAt,
+      origin: caller,
+    });
+
+    yield* b.sync.exchange([spentUntil("2026-11-03T11:00:00.000Z")], caller);
+    expect(yield* b.instance("cursor_b")).toEqual(pooled);
+    expect(yield* b.stored).toEqual([]);
+
+    yield* b.sync.exchange([spentUntil("2026-11-03T13:00:00.000Z")], caller);
+    expect(yield* b.instance("cursor_b")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "Host A", resetAt: "2026-11-03T13:00:00.000Z" },
+    });
+
+    yield* TestClock.adjust("90 minutes");
+    yield* b.write("cursor_new", pooled);
+    yield* b.setProviders([providerFor("cursor_b"), providerFor("cursor_new")]);
+    expect(yield* b.records).toEqual([]);
+    expect(yield* b.instance("cursor_new")).toEqual(pooled);
+  }),
+);
+
+it.effect("a flood keeps each origin's newest states, up to a total", () =>
+  Effect.gen(function* () {
+    const host = yield* makeHost({ id: "env-h", label: "Host H", instances: {}, providers: [] });
+    const flood = (origin: string, count: number) => {
+      const from = { environmentId: EnvironmentId.make(origin), label: origin };
+      const records = Array.from(
+        { length: count },
+        (_, index): ProviderAccountUsageLimitRecord => ({
+          account: `${origin}-account-${index}`,
+          driver: cursor,
+          spent: true,
+          changedAt: DateTime.formatIso(DateTime.makeUnsafe(Date.parse(SPENT_AT) + index * 1_000)),
+          origin: from,
+        }),
+      );
+      return Effect.forEach(
+        Arr.chunksOf(records, PROVIDER_ACCOUNT_SYNC_MAX_RECORDS),
+        (chunk) => host.sync.exchange(chunk, from),
+        { discard: true },
+      );
+    };
+
+    yield* flood("env-k", 5_001);
+    const kept = (yield* host.stored).map((row) => row.account);
+    expect(kept).toHaveLength(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS);
+    expect(kept).toContain("env-k-account-4001");
+    expect(kept).not.toContain("env-k-account-4000");
+
+    for (const origin of ["env-k1", "env-k2", "env-k3", "env-k4", "env-k5"]) {
+      yield* flood(origin, PROVIDER_ACCOUNT_SYNC_MAX_RECORDS);
+    }
+    const all = (yield* host.stored).map((row) => row.account);
+    expect(all).toHaveLength(5_000);
+    expect(all).toContain("env-k-account-5000");
   }),
 );
 

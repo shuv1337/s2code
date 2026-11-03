@@ -111,7 +111,7 @@ describe("localChangeTime", () => {
     ["nothing known", t1, undefined, T1],
     ["clock ahead of the record", Date.parse(T2), record(), T2],
     ["clock equal to the record", t1, record(), "2026-11-03T11:00:00.001Z"],
-    ["clock behind the record", Date.parse(T0), record(), "2026-11-03T11:00:00.001Z"],
+    ["clock behind the record", t1 - 120_000, record(), "2026-11-03T11:00:00.001Z"],
   ] as const)("%s", (_name, nowMs, current, expected) => {
     const at = localChangeTime(nowMs, current);
     expect(at).toBe(expected);
@@ -123,6 +123,11 @@ describe("localChangeTime", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("clamps past a state stamped at the latest time a date can hold, rather than throwing", () => {
+    const maxDate = record({ changedAt: "+275760-09-13T00:00:00.000Z" });
+    expect(localChangeTime(t1, maxDate)).toBe("2026-11-03T11:05:00.000Z");
   });
 });
 
@@ -185,6 +190,25 @@ describe("localTransitions", () => {
           spent: true,
           at: T2,
           message: "Usage limit reached.",
+        },
+      ],
+    ],
+    [
+      "a quota note with its reset time, as a peer will read it",
+      pooled(),
+      pooled({
+        ...spentHere,
+        usageLimitDisabled: { ...spentHere.usageLimitDisabled!, resetAt: "2026-12-01T00:00Z" },
+      }),
+      [
+        {
+          instanceId: instance,
+          account: work,
+          driver: cursor,
+          spent: true,
+          at: T1,
+          message: "Usage limit reached.",
+          resetAt: "2026-12-01T00:00:00.000Z",
         },
       ],
     ],

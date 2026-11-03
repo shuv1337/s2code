@@ -1,16 +1,42 @@
-import type {
-  EnvironmentId,
-  ProviderAccountUsageLimitRecord,
-  ProviderDriverKind,
-  ProviderInstanceConfig,
-  ProviderInstanceConfigMap,
-  ProviderInstanceId,
-  ServerProvider,
+import {
+  CanonicalIsoDateTime,
+  type EnvironmentId,
+  type ProviderAccountUsageLimitRecord,
+  type ProviderDriverKind,
+  type ProviderInstanceConfig,
+  type ProviderInstanceConfigMap,
+  type ProviderInstanceId,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { providerAccountKey } from "@t3tools/shared/providerAccount";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 const DEFAULT_SPENT_MESSAGE = "Usage limit reached.";
+
+/** How far ahead of this clock a state may be stamped; a later one is refused or clamped. */
+const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+
+const isCanonicalTime = Schema.is(CanonicalIsoDateTime);
+
+/** `text` as a peer will read it, or undefined when it names no time one could. */
+const canonicalTime = (text: string | undefined): string | undefined => {
+  const time = text === undefined ? undefined : Option.getOrUndefined(DateTime.make(text));
+  const iso = time === undefined ? undefined : DateTime.formatIso(time);
+  return iso !== undefined && isCanonicalTime(iso) ? iso : undefined;
+};
+
+/** A spent state whose quota has reset since; it is neither stored nor applied. */
+export const isExpired = (record: ProviderAccountUsageLimitRecord, nowMs: number): boolean =>
+  record.spent && record.resetAt !== undefined && Date.parse(record.resetAt) <= nowMs;
+
+/** Whether this environment takes `record`: readable, not from too far ahead, and not expired. */
+export const isAcceptable = (record: ProviderAccountUsageLimitRecord, nowMs: number): boolean =>
+  isCanonicalTime(record.changedAt) &&
+  (record.resetAt === undefined || isCanonicalTime(record.resetAt)) &&
+  Date.parse(record.changedAt) <= nowMs + MAX_CLOCK_SKEW_MS &&
+  !isExpired(record, nowMs);
 
 /** Whether `next` replaces `current` as an account's state: newer wins, then the larger origin id. */
 export const supersedes = (
@@ -28,18 +54,20 @@ export const supersedes = (
 };
 
 /**
- * When a change made here takes effect: now, but always after the state it replaces, so a user
- * acting on a state another environment reported wins over it whatever the two clocks say.
+ * When a change made here at `atMs` takes effect: then, but always after the state it replaces,
+ * so a user acting on a state another environment reported wins over it whatever the two clocks
+ * say. Never beyond what a peer accepts from this clock.
  */
 export const localChangeTime = (
   nowMs: number,
   current: ProviderAccountUsageLimitRecord | undefined,
-): string =>
-  DateTime.formatIso(
-    DateTime.makeUnsafe(
-      current === undefined ? nowMs : Math.max(nowMs, Date.parse(current.changedAt) + 1),
-    ),
-  );
+  atMs = nowMs,
+): string => {
+  const at = Number.isFinite(atMs) ? atMs : nowMs;
+  const after = current === undefined ? Number.NaN : Date.parse(current.changedAt) + 1;
+  const ms = Number.isFinite(after) ? Math.max(at, after) : at;
+  return DateTime.formatIso(DateTime.makeUnsafe(Math.min(ms, nowMs + MAX_CLOCK_SKEW_MS)));
+};
 
 export interface LocalTransition {
   readonly instanceId: ProviderInstanceId;
@@ -49,13 +77,14 @@ export interface LocalTransition {
   /** When the quota note this transition wrote, or for a re-enable cleared, was stamped. */
   readonly at: string;
   readonly message?: string;
+  readonly resetAt?: string;
 }
 
 /** A note this environment wrote itself, for a quota it saw run out. */
 const localNote = (instance: ProviderInstanceConfig) => {
   const note = instance.usageLimitDisabled;
   return note?.account !== undefined && note.reportedBy === undefined && instance.enabled === false
-    ? { ...note, account: note.account }
+    ? { ...note, account: note.account, resetAt: canonicalTime(note.resetAt) }
     : undefined;
 };
 
@@ -76,6 +105,7 @@ export const localSpentNotes = (instances: ProviderInstanceConfigMap): LocalTran
             spent: true,
             at: note.at,
             message: note.message,
+            ...(note.resetAt === undefined ? {} : { resetAt: note.resetAt }),
           },
         ];
   });
@@ -102,6 +132,7 @@ export const localTransitions = (
           spent: true,
           at: note.at,
           message: note.message,
+          ...(note.resetAt === undefined ? {} : { resetAt: note.resetAt }),
         },
       ];
     }
@@ -159,6 +190,7 @@ export const applyToInstance = (
       message: record.message ?? DEFAULT_SPENT_MESSAGE,
       account: record.account,
       reportedBy: record.origin.label,
+      ...(record.resetAt === undefined ? {} : { resetAt: record.resetAt }),
     },
   };
 };

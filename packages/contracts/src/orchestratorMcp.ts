@@ -1,4 +1,6 @@
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
@@ -360,14 +362,28 @@ export const OrchestratorMcpUsageLimitsResult = Schema.Struct({
 export type OrchestratorMcpUsageLimitsResult = typeof OrchestratorMcpUsageLimitsResult.Type;
 
 /**
+ * A time exactly as `Date.prototype.toISOString` writes years 0000-9999, so every peer reads the
+ * same instant and comparing the text orders the times.
+ */
+export const CanonicalIsoDateTime = IsoDateTime.check(
+  Schema.makeFilter(
+    (text: string) =>
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(text) &&
+      Option.exists(DateTime.make(text), (time) => DateTime.formatIso(time) === text),
+  ),
+);
+
+/**
  * The latest known quota state of one provider account, exchanged between linked environments.
- * The newest `changedAt` wins, ties broken by the origin's environment id.
+ * The newest `changedAt` wins, ties broken by the origin's environment id. A spent state with a
+ * `resetAt` no longer counts once that time has passed.
  */
 export const ProviderAccountUsageLimitRecord = Schema.Struct({
   account: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
   driver: ProviderDriverKind,
   spent: Schema.Boolean,
-  changedAt: IsoDateTime,
+  changedAt: CanonicalIsoDateTime,
+  resetAt: Schema.optionalKey(CanonicalIsoDateTime),
   origin: Schema.Struct({
     environmentId: EnvironmentId,
     label: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
@@ -383,6 +399,8 @@ const ProviderAccountUsageLimitRecords = Schema.Array(ProviderAccountUsageLimitR
 );
 
 export const ProviderAccountSyncInput = Schema.Struct({
+  /** The calling environment; only records it originated are taken from it. */
+  from: EnvironmentId,
   records: ProviderAccountUsageLimitRecords,
 });
 export type ProviderAccountSyncInput = typeof ProviderAccountSyncInput.Type;

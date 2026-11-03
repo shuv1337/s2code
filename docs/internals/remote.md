@@ -118,6 +118,22 @@ Unlinking on the linking side only forgets the token.
   user's and stays on; that re-enable also stamps the reset that supersedes
   the state. Applies write
   through `modifyProviderInstance`, so an edit saved while one decides is kept.
+- **Account states travel one link and no further.** Each side takes only the
+  states the other originated and hands out only its own, because a receiver
+  cannot tell a passed-on state from its origin's: a relay could otherwise
+  claim the receiver's own or a third environment's. The linking side names
+  the peer by its stored link label, and the linked side names the caller by
+  the label its session was paired under, as Sharing & access lists it. The
+  caller's environment id is its own word, trusted as far as a full-access
+  link already is. Machines that are not linked directly do not share states.
+- **Every state is bounded so a peer cannot pin it.** Times are canonical UTC
+  ISO, so their text orders them; a state stamped more than 5 minutes ahead of
+  the receiver's clock is refused, and a local change is clamped to the same
+  bound, so no peer can stamp a state no later change beats. A spent state
+  with the provider's `resetAt` stops counting after it and is pruned. Each
+  origin keeps its newest 1,000 states and the table 5,000. Account keys are
+  an unsalted hash of the driver, email and workspace: no email is sent, but
+  one who guesses an email can confirm it.
 
 **Work a link paired below full access starts stays within that link.** The
 receiving environment knows a session is a peer link because the linking side

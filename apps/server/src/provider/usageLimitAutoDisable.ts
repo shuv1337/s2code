@@ -30,6 +30,7 @@ export const disableInstanceOnExhaustedQuota = Effect.fn(
         at,
         message: failure.message,
         ...(account === undefined ? {} : { account }),
+        ...(failure.resetAt == null ? {} : { resetAt: failure.resetAt }),
       },
     },
   });

@@ -7,7 +7,7 @@ import { ProviderAccountSyncToolkit } from "./tools.ts";
 
 export const layer = McpToolAccess.toLayer(ProviderAccountSyncToolkit, {
   t3_provider_account_sync: McpToolAccess.writesEnvironment(
-    ({ records }) =>
+    ({ from, records }) =>
       Effect.gen(function* () {
         const scope = yield* McpInvocationContext.McpInvocationContext;
         if (scope.client?.linked !== true)
@@ -16,7 +16,12 @@ export const layer = McpToolAccess.toLayer(ProviderAccountSyncToolkit, {
             message: "Only a linked T3 Code environment exchanges account states.",
           });
         const sync = yield* ProviderAccountSync.ProviderAccountSync;
-        return { environmentId: scope.environmentId, records: yield* sync.exchange(records) };
+        // Named by the label its link was paired under, as Sharing & access lists it.
+        const local = yield* sync.exchange(records, {
+          environmentId: from,
+          label: scope.client.label,
+        });
+        return { environmentId: scope.environmentId, records: local };
       }),
     { linkedCallers: "allowed" },
   ),

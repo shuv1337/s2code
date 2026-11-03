@@ -1236,7 +1236,10 @@ it.effect("exchanges account states only with a full-access peer link", () =>
         changedAt: "2026-11-03T00:00:00.000Z",
         origin: { environmentId, label: "Box" },
       });
-      const exchanged: Array<ReadonlyArray<ProviderAccountUsageLimitRecord>> = [];
+      const exchanged: Array<
+        [ReadonlyArray<ProviderAccountUsageLimitRecord>, ProviderAccountSync.RecordSource]
+      > = [];
+      const laptop = EnvironmentId.make("env-laptop");
       const clientScope = (
         access: AuthMcpClientAccess,
         linked: boolean,
@@ -1277,9 +1280,9 @@ it.effect("exchanges account states only with a full-access peer link", () =>
         Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
         Layer.provide(
           Layer.mock(ProviderAccountSync.ProviderAccountSync)({
-            exchange: (records) =>
+            exchange: (records, from) =>
               Effect.sync(() => {
-                exchanged.push(records);
+                exchanged.push([records, from]);
                 return [record("here@example.com")];
               }),
           }),
@@ -1335,7 +1338,7 @@ it.effect("exchanges account states only with a full-access peer link", () =>
           };
           const called = (yield* rpc(3, "tools/call", {
             name: "t3_provider_account_sync",
-            arguments: { records: [record("there@example.com")] },
+            arguments: { from: laptop, records: [record("there@example.com")] },
           })) as {
             readonly error?: { readonly message: string };
             readonly result?: {
@@ -1358,7 +1361,10 @@ it.effect("exchanges account states only with a full-access peer link", () =>
         listed: ["t3_provider_account_sync"],
         outcome: { environmentId, records: [record("here@example.com")] },
       });
-      expect(exchanged).toEqual([[record("there@example.com")]]);
+      // The caller is named by the label its session was paired under, whatever its records say.
+      expect(exchanged).toEqual([
+        [[record("there@example.com")], { environmentId: laptop, label: "T3 Code · laptop" }],
+      ]);
 
       const hidden = { listed: [], outcome: "Tool 't3_provider_account_sync' not found" };
       expect(yield* sync("outside")).toEqual(hidden);
