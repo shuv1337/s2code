@@ -1,0 +1,54 @@
+name: TEMPORARY shuvbot arm64 dry run
+
+# TEMPORARY: delete this file before the PR that adds it is marked ready.
+# Builds the unsigned macOS arm64 app on the self-hosted shuvbot runner. It does
+# not publish, sign, upload or read secrets, and never runs scripts/fork-release.ts.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'shuv1337/s2code'
+    name: Build macOS arm64 (dry run)
+    runs-on: [self-hosted, macOS, ARM64, shuvbot-macos]
+    timeout-minutes: 45
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+      DEVELOPER_DIR: /Applications/Xcode-27.1.0.app/Contents/Developer
+    steps:
+      - name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$CHECKOUT_REF"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c checkout.workers=0 checkout --detach FETCH_HEAD
+
+      - name: Require stable Xcode (prints xcodebuild -version)
+        shell: bash
+        env:
+          XCODE_EXPECTED_VERSION: "27.1"
+        run: .github/scripts/require-stable-xcode.sh
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install desktop dependencies
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - name: Build unsigned macOS arm64 DMG
+        shell: bash
+        run: vp run dist:desktop:artifact --platform mac --target dmg --arch arm64 --build-version "0.0.0-dryrun.${GITHUB_RUN_ID}" --verbose
