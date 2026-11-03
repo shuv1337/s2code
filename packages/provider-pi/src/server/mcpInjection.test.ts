@@ -3,6 +3,7 @@ import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts"
 
 import {
   T3_MCP_BEARER_ENV,
+  T3_MCP_SHARED_SERVERS_ENV,
   T3_MCP_URL_ENV,
   T3_PI_RUNTIME_MODE_ENV,
   T3_PI_MCP_EXTENSION_PATH_ENV,
@@ -19,6 +20,9 @@ const mcpSession = {
   endpoint: "http://127.0.0.1:43123/mcp",
   authorizationHeader: "Bearer secret-pi-token",
   browserToolsAvailable: true,
+  sharedMcpServers: [
+    { name: "shared-executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+  ],
 };
 
 describe("pi T3 MCP injection", () => {
@@ -57,14 +61,26 @@ describe("pi T3 MCP injection", () => {
     assert.notInclude(launch.args, "--no-extensions");
     assert.equal(launch.env[T3_MCP_URL_ENV], "http://127.0.0.1:43123/mcp");
     assert.equal(launch.env[T3_MCP_BEARER_ENV], "secret-pi-token");
+    assert.deepEqual(JSON.parse(launch.env[T3_MCP_SHARED_SERVERS_ENV]!), [
+      { name: "shared-executor", url: "http://127.0.0.1:43123/mcp/servers/executor" },
+    ]);
     assert.equal(launch.env[T3_PI_RUNTIME_MODE_ENV], "approval-required");
     assert.equal(launch.env[T3_PI_MCP_EXTENSION_PATH_ENV], "/tmp/cache/pi-t3-mcp-extension.ts");
+    const withoutShared = buildPiRpcLaunch({
+      launchArgs: [],
+      environment: {},
+      mcpSession: { ...mcpSession, sharedMcpServers: [] },
+      extensionPath: "/tmp/cache/pi-t3-mcp-extension.ts",
+    });
+    assert.equal(withoutShared.env[T3_MCP_URL_ENV], "http://127.0.0.1:43123/mcp");
+    assert.isUndefined(withoutShared.env[T3_MCP_SHARED_SERVERS_ENV]);
 
     const permissionOnly = buildPiRpcLaunch({
       launchArgs: [],
       environment: {
         [T3_MCP_URL_ENV]: "http://127.0.0.1:9999/stale",
         [T3_MCP_BEARER_ENV]: "stale-token",
+        [T3_MCP_SHARED_SERVERS_ENV]: '[{"name":"stale","url":"http://127.0.0.1:9999/stale"}]',
         [T3_PI_MCP_EXTENSION_PATH_ENV]: "/stale/extension.ts",
       },
       mcpSession: undefined,
@@ -79,6 +95,7 @@ describe("pi T3 MCP injection", () => {
     ]);
     assert.isUndefined(permissionOnly.env[T3_MCP_URL_ENV]);
     assert.isUndefined(permissionOnly.env[T3_MCP_BEARER_ENV]);
+    assert.isUndefined(permissionOnly.env[T3_MCP_SHARED_SERVERS_ENV]);
     assert.equal(permissionOnly.env[T3_PI_RUNTIME_MODE_ENV], "auto-accept-edits");
     assert.equal(
       permissionOnly.env[T3_PI_MCP_EXTENSION_PATH_ENV],
@@ -114,6 +131,7 @@ describe("pi T3 MCP injection", () => {
       "--no-extensions",
       "--no-tools",
     ]);
+    assert.isUndefined(launch.env[T3_MCP_SHARED_SERVERS_ENV]);
     assert.deepInclude(resolvePiLaunchArgs("--mode text"), {
       ok: false,
       message: "Pi launch argument '--mode' is controlled by T3 Code and cannot be overridden.",

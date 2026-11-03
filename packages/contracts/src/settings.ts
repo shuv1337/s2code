@@ -860,11 +860,14 @@ export const UsageLimitSourceConfig = Schema.Struct({
 });
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 
-/** The name agents see the server under. Names starting with "t3" are reserved for T3 Code's own server. */
+/** Names starting with "t3" are reserved for T3 Code's own server. */
 export const McpServerId = Schema.String.check(
   Schema.isPattern(/^(?!t3)[a-z][a-z0-9-]{0,23}$/),
 ).pipe(Schema.brand("McpServerId"));
 export type McpServerId = typeof McpServerId.Type;
+
+/** The name harnesses and agents see; the prefix keeps it from replacing a server configured in the harness. */
+export const sharedMcpServerHarnessName = (id: string) => `shared-${id}`;
 
 export const McpServerConfig = Schema.Struct({
   label: Schema.optional(TrimmedNonEmptyString),

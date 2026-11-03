@@ -8,19 +8,24 @@ describe("AcpMcpOverAcpBridge", () => {
   it.effect("forwards authenticated MCP requests and closes the negotiated session", () =>
     Effect.gen(function* () {
       const requests: Array<{
+        readonly url: string;
         readonly method: string;
         readonly headers: Headers;
         readonly body: unknown;
       }> = [];
+      let nextConnection = 0;
       const bridge = yield* makeAcpMcpOverAcpBridge({
-        endpoint: "http://127.0.0.1:1/mcp",
+        endpoints: new Map([
+          ["t3-code", "http://127.0.0.1:1/mcp"],
+          ["executor", "http://127.0.0.1:1/mcp/servers/executor"],
+        ]),
         authorization: "Bearer bridge-test",
-        allocateConnectionId: Effect.succeed("connection-1"),
-        fetchImplementation: async (_url, init) => {
+        allocateConnectionId: Effect.sync(() => `connection-${++nextConnection}`),
+        fetchImplementation: async (url, init) => {
           const method = init?.method ?? "GET";
           const headers = new Headers(init?.headers);
           const body = init?.body === undefined ? null : JSON.parse(String(init.body));
-          requests.push({ method, headers, body });
+          requests.push({ url, method, headers, body });
           if (method === "DELETE") return new Response(null, { status: 204 });
           if (body === null || typeof body !== "object") return new Response(null, { status: 202 });
           const request = body as { readonly id?: unknown; readonly method?: unknown };
@@ -57,11 +62,21 @@ describe("AcpMcpOverAcpBridge", () => {
       });
       yield* bridge.disconnect({ connectionId: connected.connectionId });
 
+      expect(requests[0]?.url).toBe("http://127.0.0.1:1/mcp");
       expect(requests[0]?.headers.get("authorization")).toBe("Bearer bridge-test");
       expect(requests[1]?.headers.get("mcp-session-id")).toBe("session-42");
       expect(requests[1]?.headers.get("mcp-protocol-version")).toBe("2025-06-18");
       expect(requests.at(-1)?.method).toBe("DELETE");
       expect(requests.at(-1)?.headers.get("mcp-session-id")).toBe("session-42");
+
+      const shared = yield* bridge.connect({ serverId: "executor" });
+      expect(shared).toEqual({ connectionId: "connection-2" });
+      expect(
+        yield* bridge.message({ connectionId: shared.connectionId, method: "tools/list" }),
+      ).toEqual({ tools: [] });
+      expect(requests.at(-1)?.url).toBe("http://127.0.0.1:1/mcp/servers/executor");
+      expect(requests.at(-1)?.headers.get("authorization")).toBe("Bearer bridge-test");
+      expect(requests.at(-1)?.headers.get("mcp-session-id")).toBeNull();
     }),
   );
 
@@ -69,7 +84,7 @@ describe("AcpMcpOverAcpBridge", () => {
     Effect.gen(function* () {
       const started = Promise.withResolvers<AbortSignal>();
       const bridge = yield* makeAcpMcpOverAcpBridge({
-        endpoint: "http://127.0.0.1:1/mcp",
+        endpoints: new Map([["t3-code", "http://127.0.0.1:1/mcp"]]),
         authorization: "Bearer bridge-test",
         allocateConnectionId: Effect.succeed("connection-1"),
         fetchImplementation: (_url, init) => {
@@ -91,7 +106,7 @@ describe("AcpMcpOverAcpBridge", () => {
   it.effect("rejects unknown servers, connections, and oversized messages", () =>
     Effect.gen(function* () {
       const bridge = yield* makeAcpMcpOverAcpBridge({
-        endpoint: "http://127.0.0.1:1/mcp",
+        endpoints: new Map([["t3-code", "http://127.0.0.1:1/mcp"]]),
         authorization: "Bearer bridge-test",
         allocateConnectionId: Effect.succeed("connection-1"),
         fetchImplementation: () => Promise.resolve(new Response(null, { status: 202 })),

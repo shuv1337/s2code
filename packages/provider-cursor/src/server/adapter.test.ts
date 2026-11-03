@@ -1669,13 +1669,35 @@ describe("CursorAdapterV2", () => {
       browserToolsAvailable: true,
     };
 
-    assert.deepEqual(cursorMcpServers(mcpSession), {
+    const t3CodeServer = {
       "t3-code": {
         type: "http",
         url: "http://127.0.0.1:43123/mcp",
         headers: {
           Authorization: "Bearer secret-cursor-mcp-token",
         },
+      },
+    } as const;
+    assert.deepEqual(cursorMcpServers(mcpSession), t3CodeServer);
+    assert.deepEqual(cursorMcpServers({ ...mcpSession, sharedMcpServers: [] }), t3CodeServer);
+    const sharedSession = {
+      ...mcpSession,
+      sharedMcpServers: [
+        { name: "executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+        { name: "docs", endpoint: "http://127.0.0.1:43123/mcp/servers/docs" },
+      ],
+    };
+    assert.deepEqual(cursorMcpServers(sharedSession), {
+      ...t3CodeServer,
+      executor: {
+        type: "http",
+        url: "http://127.0.0.1:43123/mcp/servers/executor",
+        headers: { Authorization: "Bearer secret-cursor-mcp-token" },
+      },
+      docs: {
+        type: "http",
+        url: "http://127.0.0.1:43123/mcp/servers/docs",
+        headers: { Authorization: "Bearer secret-cursor-mcp-token" },
       },
     });
 
@@ -1691,10 +1713,10 @@ describe("CursorAdapterV2", () => {
         cwd: "/workspace",
       },
       threadId,
-      mcpSession,
+      mcpSession: sharedSession,
       platform: "linux",
     });
-    assert.deepEqual(options.mcpServers, cursorMcpServers(mcpSession));
+    assert.deepEqual(options.mcpServers, cursorMcpServers(sharedSession));
 
     const logged = JSON.stringify(CursorAgentSdk.loggedCursorAgentOptions(options));
     assert.notInclude(logged, "secret-cursor-api-key");

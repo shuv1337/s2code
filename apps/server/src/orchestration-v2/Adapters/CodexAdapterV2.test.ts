@@ -1325,55 +1325,79 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
-  it.effect("adds the session MCP server without replacing launch-argument servers", () =>
-    Effect.gen(function* () {
-      const scenario = "launch-mcp-servers";
-      yield* (yield* McpProviderSessions.McpProviderSessions).set({
-        environmentId: EnvironmentId.make("environment-codex-mcp"),
-        threadId: ThreadId.make(`thread-${scenario}`),
-        providerSessionId: `provider-session-${scenario}`,
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        endpoint: "http://127.0.0.1:43123/mcp",
-        authorizationHeader: "Bearer secret-codex-token",
-        browserToolsAvailable: true,
-      });
-      const requests: Array<unknown> = [];
-      yield* makeCodexReplayHarness(
-        makeCodexReplayTranscript({
-          scenario,
-          entries: codexReplayPreamble({
-            nativeThreadId: "launch-mcp-thread",
-            nativeTurnId: "unused",
-            prompt: "unused",
-          }).slice(0, 5),
-        }),
-        () => Effect.void,
-        (method, params) =>
-          Effect.sync(() => {
-            if (method === "thread/start") requests.push(params);
+  it.effect.each([
+    { label: "no shared servers", sharedMcpServers: undefined, sharedConfig: {} },
+    { label: "an empty shared server list", sharedMcpServers: [], sharedConfig: {} },
+    {
+      label: "shared servers",
+      sharedMcpServers: [
+        { name: "shared-executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+        { name: "shared-docs", endpoint: "http://127.0.0.1:43123/mcp/servers/docs" },
+      ],
+      sharedConfig: {
+        "mcp_servers.shared-executor": {
+          url: "http://127.0.0.1:43123/mcp/servers/executor",
+          http_headers: { Authorization: "Bearer secret-codex-token" },
+        },
+        "mcp_servers.shared-docs": {
+          url: "http://127.0.0.1:43123/mcp/servers/docs",
+          http_headers: { Authorization: "Bearer secret-codex-token" },
+        },
+      },
+    },
+  ])(
+    "adds the session MCP servers without replacing launch-argument servers ($label)",
+    ({ sharedMcpServers, sharedConfig }) =>
+      Effect.gen(function* () {
+        const scenario = "launch-mcp-servers";
+        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+          environmentId: EnvironmentId.make("environment-codex-mcp"),
+          threadId: ThreadId.make(`thread-${scenario}`),
+          providerSessionId: `provider-session-${scenario}`,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer secret-codex-token",
+          browserToolsAvailable: true,
+          ...(sharedMcpServers === undefined ? {} : { sharedMcpServers }),
+        });
+        const requests: Array<unknown> = [];
+        yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario,
+            entries: codexReplayPreamble({
+              nativeThreadId: "launch-mcp-thread",
+              nativeTurnId: "unused",
+              prompt: "unused",
+            }).slice(0, 5),
           }),
-      );
-      assert.deepEqual(requests, [
-        {
-          cwd: "/workspace",
-          model: "gpt-5.4",
-          config: {
-            "tools.update_plan.enabled": true,
-            mcp_optional_startup_grace_ms: 10_000,
-            "mcp_servers.t3-code": {
-              url: "http://127.0.0.1:43123/mcp",
-              tool_timeout_sec: 3_900,
-              http_headers: { Authorization: "Bearer secret-codex-token" },
+          () => Effect.void,
+          (method, params) =>
+            Effect.sync(() => {
+              if (method === "thread/start") requests.push(params);
+            }),
+        );
+        assert.deepEqual(requests, [
+          {
+            cwd: "/workspace",
+            model: "gpt-5.4",
+            config: {
+              "tools.update_plan.enabled": true,
+              mcp_optional_startup_grace_ms: 10_000,
+              "mcp_servers.t3-code": {
+                url: "http://127.0.0.1:43123/mcp",
+                tool_timeout_sec: 3_900,
+                http_headers: { Authorization: "Bearer secret-codex-token" },
+              },
+              ...sharedConfig,
             },
           },
-        },
-      ]);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
       ),
-    ),
   );
 
   // regression: #15839 launch-arg MCP servers survive the thread's t3-code server

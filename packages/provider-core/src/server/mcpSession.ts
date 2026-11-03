@@ -5,6 +5,7 @@ import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contr
  * session's own `authorizationHeader`; the upstream credential never leaves T3.
  */
 export interface SharedMcpServer {
+  /** Already namespaced; use it verbatim as the harness entry name. */
   readonly name: string;
   readonly endpoint: string;
 }

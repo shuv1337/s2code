@@ -2763,6 +2763,9 @@ describe("AcpAdapterV2", () => {
         endpoint: "http://127.0.0.1:43123/mcp",
         authorizationHeader: "Bearer target-thread-token",
         browserToolsAvailable: true,
+        sharedMcpServers: [
+          { name: "executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+        ],
       });
       const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
         runtimeMode: "full-access",
@@ -2789,6 +2792,22 @@ describe("AcpAdapterV2", () => {
         modelSelection,
         runtimePolicy,
       });
+      const newSessionEvent = Option.getOrThrow(
+        yield* Stream.fromQueue(protocolEvents).pipe(
+          Stream.filter(
+            (event) => event.direction === "outgoing" && rawProtocolMethod(event) === "session/new",
+          ),
+          Stream.runHead,
+        ),
+      );
+      assert.deepEqual(
+        (
+          rawProtocolRequestParam(newSessionEvent, "mcpServers") as ReadonlyArray<{
+            readonly name: string;
+          }>
+        ).map((server) => server.name),
+        ["t3-code"],
+      );
       const forkedProviderThread = yield* runtime.forkThread({
         sourceProviderThread,
         targetThreadId,
@@ -2825,6 +2844,23 @@ describe("AcpAdapterV2", () => {
             env: [
               { name: "ELECTRON_RUN_AS_NODE", value: "1" },
               { name: "T3_ACP_MCP_ENDPOINT", value: "http://127.0.0.1:43123/mcp" },
+              { name: "T3_ACP_MCP_AUTHORIZATION", value: "Bearer target-thread-token" },
+            ],
+          },
+          {
+            type: "stdio",
+            name: "executor",
+            command: process.execPath,
+            args: [
+              process.argv[1] === undefined ? "t3" : NodePath.resolve(process.argv[1]),
+              "acp-mcp-bridge",
+            ],
+            env: [
+              { name: "ELECTRON_RUN_AS_NODE", value: "1" },
+              {
+                name: "T3_ACP_MCP_ENDPOINT",
+                value: "http://127.0.0.1:43123/mcp/servers/executor",
+              },
               { name: "T3_ACP_MCP_AUTHORIZATION", value: "Bearer target-thread-token" },
             ],
           },
@@ -3283,6 +3319,9 @@ describe("AcpAdapterV2", () => {
         endpoint: "http://127.0.0.1:43124/mcp",
         authorizationHeader: "Bearer rollback-target-token",
         browserToolsAvailable: false,
+        sharedMcpServers: [
+          { name: "executor", endpoint: "http://127.0.0.1:43124/mcp/servers/executor" },
+        ],
       });
       const runtimeInputs: Array<AcpAdapterV2RuntimeInput> = [];
       const makeRuntime = makeMockRuntime({
@@ -3376,6 +3415,14 @@ describe("AcpAdapterV2", () => {
         runtimeInputs[1]?.processEnvironment?.T3_ACP_MCP_AUTHORIZATION,
         "Bearer rollback-target-token",
       );
+      assert.equal(
+        runtimeInputs[1]?.processEnvironment?.T3_ACP_MCP_ENDPOINT,
+        "http://127.0.0.1:43124/mcp",
+      );
+      assert.deepEqual(runtimeInputs[1]?.acpMcpServers, [
+        { type: "acp", name: "t3-code", serverId: "t3-code" },
+        { type: "acp", name: "executor", serverId: "executor" },
+      ]);
       const replacementMcpServer = runtimeInputs[1]?.mcpServers[0];
       const replacementMcpEnvironment =
         replacementMcpServer !== undefined &&

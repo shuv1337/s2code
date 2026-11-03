@@ -10,6 +10,7 @@ import {
   SecretProviderId,
   ServerSettings,
   ServerSettingsPatch,
+  McpServerId,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -1300,6 +1301,13 @@ it.layer(NodeServices.layer)("server settings", (it) => {
               enabled: true,
             },
           },
+          mcpServers: {
+            [McpServerId.make("executor")]: {
+              url: "https://executor.example.test/mcp",
+              bearerToken: "mcp-secret",
+              enabled: true,
+            },
+          },
           easDeviceHosts: [
             {
               kind: "eas",
@@ -1319,6 +1327,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           "bitbucket-secret",
           "gitcafe-secret",
           "quota-secret",
+          "mcp-secret",
           "expo-secret",
         ];
         const client = ServerSettingsModule.redactServerSettingsForClient(saved);
@@ -1334,6 +1343,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           providerInstances: client.providerInstances,
           sourceControlHosts: client.sourceControlHosts,
           usageLimitSources: client.usageLimitSources,
+          mcpServers: client.mcpServers,
           easDeviceHosts: client.easDeviceHosts,
         });
         for (const value of values) assert.include(JSON.stringify(echoed), value);
@@ -1384,6 +1394,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           }),
           sourceControlHostSecretName({ kind: "gitcafe", field: "token", serverHost: null }),
           "usage-limit-source-aHVi",
+          "mcp-server-ZXhlY3V0b3I-YmVhcmVyVG9rZW4",
         ];
         for (const name of secretNames) {
           assert.isTrue(Option.isSome(yield* store.get(name)), name);
@@ -1417,11 +1428,54 @@ it.layer(NodeServices.layer)("server settings", (it) => {
             gitcafe: { token: "" },
           },
           usageLimitSources: { [UsageLimitSourceId.make("hub")]: null },
+          mcpServers: { [McpServerId.make("executor")]: null },
         });
         for (const name of secretNames) {
           assert.isTrue(Option.isNone(yield* store.get(name)));
         }
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("never lets a saved MCP server token follow the server to a new URL", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const id = McpServerId.make("executor");
+      const secretName = "mcp-server-ZXhlY3V0b3I-YmVhcmVyVG9rZW4";
+      const original = {
+        label: "Executor",
+        url: "https://executor.example.test/mcp",
+        bearerToken: "mcp-secret",
+        enabled: true,
+      };
+      yield* service.updateSettings({ mcpServers: { [id]: original } });
+      const echo = (changes: Partial<typeof original>) =>
+        service.getSettings.pipe(
+          Effect.flatMap((settings) =>
+            service.updateSettings({
+              mcpServers: {
+                [id]: {
+                  ...ServerSettingsModule.redactServerSettingsForClient(settings).mcpServers[id]!,
+                  ...changes,
+                },
+              },
+            }),
+          ),
+        );
+
+      const relabeled = yield* echo({ label: "Renamed" });
+      assert.equal(relabeled.mcpServers[id]?.bearerToken, "mcp-secret");
+
+      const moved = yield* echo({ url: "https://elsewhere.example.test/mcp" });
+      assert.equal(moved.mcpServers[id]?.bearerToken, "");
+      assert.isTrue(Option.isNone(yield* store.get(secretName)));
+
+      const replaced = yield* echo({
+        url: "https://executor.example.test/mcp",
+        bearerToken: "new-secret",
+      });
+      assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
   it.effect("moves saved provider credentials to the secret store when settings load", () =>

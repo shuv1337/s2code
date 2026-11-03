@@ -593,7 +593,7 @@ interface AcpMcpContext {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly processEnvironment?: NodeJS.ProcessEnv;
-  readonly endpoint?: string;
+  readonly endpoints?: ReadonlyMap<string, string>;
   readonly authorization?: string;
 }
 
@@ -604,22 +604,25 @@ function acpMcpContext(
   if (session === undefined) {
     return { servers: [], acpServers: [] };
   }
+  const bridged = [
+    { name: "t3-code", endpoint: session.endpoint },
+    ...(session.sharedMcpServers ?? []),
+  ];
   // codex-acp 1.2.0 and pi-acp drop injected HTTP servers; bridge through stdio instead.
+  // Agents inherit processEnvironment, so each entry's env must name its own endpoint.
   return {
-    servers: [
-      {
-        name: "t3-code",
-        command: self.command,
-        args: [...selfInvocationArgs(self, ["acp-mcp-bridge"])],
-        env: [
-          { name: "ELECTRON_RUN_AS_NODE", value: "1" },
-          { name: "T3_ACP_MCP_ENDPOINT", value: session.endpoint },
-          { name: "T3_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
-        ],
-      },
-    ],
-    acpServers: [{ type: "acp", name: "t3-code", serverId: "t3-code" }],
-    endpoint: session.endpoint,
+    servers: bridged.map(({ name, endpoint }) => ({
+      name,
+      command: self.command,
+      args: [...selfInvocationArgs(self, ["acp-mcp-bridge"])],
+      env: [
+        { name: "ELECTRON_RUN_AS_NODE", value: "1" },
+        { name: "T3_ACP_MCP_ENDPOINT", value: endpoint },
+        { name: "T3_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
+      ],
+    })),
+    acpServers: bridged.map(({ name }) => ({ type: "acp" as const, name, serverId: name })),
+    endpoints: new Map(bridged.map(({ name, endpoint }) => [name, endpoint])),
     authorization: session.authorizationHeader,
     processEnvironment: {
       T3_ACP_MCP_ENDPOINT: session.endpoint,
@@ -6148,10 +6151,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   handlerGeneration,
                   Effect.gen(function* () {
                     const context = yield* activeContext;
+                    const mcpSession = yield* mcpSessions.read(context.input.threadId);
                     const disposition = acpMcpToolApprovalElicitationDisposition(
                       context.input.runtimePolicy,
                       params,
                       transportRequestId,
+                      (mcpSession?.sharedMcpServers?.length ?? 0) > 0,
                     );
                     if (disposition === undefined || disposition === "ask") {
                       return disposition;
@@ -6350,11 +6355,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           mcpContext: AcpMcpContext,
           scope: Scope.Scope,
         ) {
-          if (mcpContext.endpoint === undefined || mcpContext.authorization === undefined) {
+          if (mcpContext.endpoints === undefined || mcpContext.authorization === undefined) {
             return undefined;
           }
           const mcpBridge = yield* makeAcpMcpOverAcpBridge({
-            endpoint: mcpContext.endpoint,
+            endpoints: mcpContext.endpoints,
             authorization: mcpContext.authorization,
             allocateConnectionId: crypto.randomUUIDv4().pipe(Effect.orDie),
           });
@@ -7189,7 +7194,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
-            hasT3Mcp: acpMcpContext(mcpSession, self).servers.length > 0,
+            hasT3Mcp: mcpSession !== undefined,
             hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
           } satisfies T3AcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);

@@ -509,9 +509,15 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     },
   } as const;
 
+  const SHARED_MCP_SERVERS = [
+    { name: "executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+    { name: "docs", endpoint: "http://127.0.0.1:43123/mcp/servers/docs" },
+  ];
+
   const mcpSessionFor = (
     threadId: ThreadId,
     authorizationHeader = "Bearer secret-claude-token",
+    sharedMcpServers?: McpProviderSession.McpProviderSessionConfig["sharedMcpServers"],
   ): McpProviderSession.McpProviderSessionConfig => ({
     environmentId: EnvironmentId.make(`environment-${threadId}`),
     threadId,
@@ -520,28 +526,60 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     endpoint: "http://127.0.0.1:43123/mcp",
     authorizationHeader,
     browserToolsAvailable: true,
+    ...(sharedMcpServers === undefined ? {} : { sharedMcpServers }),
   });
 
-  it("pre-approves only read-only t3-code tools in a read-only sandbox", () => {
-    const threadId = ThreadId.make("thread-claude-mcp-read-only");
-    const mcpSession = mcpSessionFor(threadId);
-    const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
-      mcpSession,
+  it.each([
+    {
+      label: "only read-only t3-code tools in a read-only sandbox",
       readOnlySandbox: true,
-      allowedTools: [...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS],
-    });
+      baseAllowedTools: ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+      t3AllowedTools: ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+    },
+    {
+      label: "every t3-code tool outside a read-only sandbox",
+      readOnlySandbox: false,
+      baseAllowedTools: ["Read"],
+      t3AllowedTools: [ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD],
+    },
+  ])(
+    "pre-approves $label and never shared MCP servers",
+    ({ readOnlySandbox, baseAllowedTools, t3AllowedTools }) => {
+      const threadId = ThreadId.make("thread-claude-mcp-pre-approval");
+      for (const [sharedMcpServers, sharedEntries] of [
+        [undefined, {}],
+        [[], {}],
+        [
+          SHARED_MCP_SERVERS,
+          {
+            executor: {
+              type: "http",
+              url: "http://127.0.0.1:43123/mcp/servers/executor",
+              headers: { Authorization: "Bearer secret-claude-token" },
+            },
+            docs: {
+              type: "http",
+              url: "http://127.0.0.1:43123/mcp/servers/docs",
+              headers: { Authorization: "Bearer secret-claude-token" },
+            },
+          },
+        ],
+      ] as const) {
+        const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+          mcpSession: mcpSessionFor(threadId, undefined, sharedMcpServers),
+          readOnlySandbox,
+          allowedTools: [...baseAllowedTools],
+        });
 
-    assert.deepEqual(overrides, {
-      allowedTools: [
-        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
-      ],
-      mcpServers: T3_MCP_SERVERS,
-    });
-    assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
-  });
+        assert.deepEqual(overrides, {
+          allowedTools: [...baseAllowedTools, ...t3AllowedTools],
+          mcpServers: { ...T3_MCP_SERVERS, ...sharedEntries },
+        });
+      }
+    },
+  );
 
-  it("invalidates live-query reuse when MCP credentials rotate", () => {
+  it("invalidates live-query reuse when MCP credentials rotate or shared servers change", () => {
     const threadId = ThreadId.make("thread-claude-mcp-credential-rotation");
     const mcpSession = mcpSessionFor(threadId);
     const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
@@ -564,6 +602,15 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       }),
     );
     assert.notEqual(rotatedKey, initialKey);
+
+    const sharedKey = ClaudeAdapterV2.claudeEffectiveQueryPolicyKey(
+      queryPolicy,
+      ClaudeAdapterV2.claudeMcpQueryOverrides({
+        mcpSession: mcpSessionFor(threadId, undefined, SHARED_MCP_SERVERS),
+        readOnlySandbox: false,
+      }),
+    );
+    assert.notEqual(sharedKey, initialKey);
   });
 
   it("matches the read-only allowlist to the orchestrator toolkit annotations", () => {
