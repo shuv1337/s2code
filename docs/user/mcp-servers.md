@@ -20,8 +20,7 @@ environment in **Settings** and choose **MCP servers**.
   to agents or other devices. It is only ever sent to the URL it was saved
   with: changing the URL removes it, so enter it again for the new address.
 
-**Test connection** connects the way an agent would and lists the server's
-tools. Adding, changing, or removing servers needs permission to manage
+**Test** connects the way an agent would and lists the server's tools. Adding, changing, or removing servers needs permission to manage
 providers.
 
 ## How agents use it
