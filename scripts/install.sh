@@ -39,6 +39,14 @@ S2CODE_IMPORT_UPSTREAM="$(product_setting "${S2CODE_IMPORT_UPSTREAM:-}" "${SHUV2
 repo="shuv1337/s2code"
 base_url="${S2CODE_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
 t3_home="${S2CODE_HOME:-$HOME/.s2code-v2}"
+case "$t3_home" in
+  /*) ;;
+  *)
+    # Preserve cwd's trailing newlines; trim only pwd's newline and the sentinel.
+    t3_cwd="$(pwd -P && printf .)"
+    t3_home="${t3_cwd%??}/$t3_home"
+    ;;
+esac
 bin_dir="${S2CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 
 fail() {
@@ -50,10 +58,20 @@ fail() {
 if [ -n "${T3CODE_HOME:-}" ] && [ -z "${S2CODE_HOME:-}" ]; then
   printf '%s\n' "s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home." >&2
 fi
+# Command substitution would drop a component's trailing newline, so walk up with expansions.
 canonical_dir() (
-  if [ -d "$1" ]; then cd -P "$1" && pwd -P
-  else printf '%s/%s\n' "$(canonical_dir "$(dirname "$1")")" "$(basename "$1")"
-  fi
+  path=$1 suffix=
+  while case "$path" in ?*/) true ;; *) false ;; esac; do path="${path%/}"; done
+  while [ ! -d "$path" ]; do
+    case "$path" in
+      */*) suffix="/${path##*/}$suffix"; path="${path%/*}"; [ -n "$path" ] || path=/ ;;
+      *) suffix="/$path$suffix"; path=. ;;
+    esac
+  done
+  resolved="$(cd -P -- "$path" && pwd -P && printf .)"
+  resolved="${resolved%??}"
+  [ "$resolved" != / ] || [ -z "$suffix" ] || resolved=
+  printf '%s%s\n' "$resolved" "$suffix"
 )
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
@@ -162,11 +180,14 @@ case "$(uname -m)" in
   x86_64 | amd64) arch="x64" ;;
   *) fail "unsupported architecture $(uname -m)" ;;
 esac
+if [ "${platform}-${arch}" = darwin-x64 ]; then
+  fail "there is no t3 CLI for Intel Macs. Install the desktop app from https://t3.codes/download, or run a server from source: https://github.com/${repo}/blob/main/docs/user/install.md#intel-macs"
+fi
 command -v tar >/dev/null 2>&1 || fail "tar is required"
 if command -v sha256sum >/dev/null 2>&1; then
-  checksum() { sha256sum "$1" | cut -d' ' -f1; }
+  checksum() { sha256sum < "$1" | cut -d' ' -f1; }
 elif command -v shasum >/dev/null 2>&1; then
-  checksum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+  checksum() { shasum -a 256 < "$1" | cut -d' ' -f1; }
 else
   fail "sha256sum or shasum is required"
 fi
@@ -391,6 +412,6 @@ grep -qxF "$launcher" "$launchers" 2>/dev/null || printf '%s\n' "$launcher" >> "
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled s2code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %s%s%s to get started.\n\n' "$bold" "$command_name" "$reset" ;;
+  *":${bin_dir}:"*) printf '  Run %s%s%s to use S2Code here, or %s%s up%s to use it from your other devices.\n\n' "$bold" "$command_name" "$reset" "$bold" "$command_name" "$reset" ;;
   *) printf '  Add %s to your PATH, then run %s%s%s.\n\n' "$bin_dir" "$bold" "$command_name" "$reset" ;;
 esac

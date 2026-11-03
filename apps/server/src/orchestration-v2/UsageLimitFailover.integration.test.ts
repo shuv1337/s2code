@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, describe, it } from "@effect/vitest";
 import {
   CommandId,
@@ -98,7 +99,7 @@ const sentinelPool: Record<string, PoolMember> = {
 const selection = (instanceId: ProviderInstanceId): ModelSelection => ({ instanceId, model });
 
 const layerPlatform = Layer.merge(
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
   Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
     resolveLink: () => Effect.die("unused title link"),
   }),
@@ -965,7 +966,7 @@ describe("usage limit failover through the real runtime", () => {
           }),
         boot,
       );
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
   it.live("retries a failure seen before provider probes finish", () =>
@@ -1045,6 +1046,6 @@ describe("usage limit failover through the real runtime", () => {
         sentinelSource,
         sentinelTarget,
       ]);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 });

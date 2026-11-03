@@ -9,7 +9,7 @@ export class McpToolCaller extends Context.Service<
       input: typeof McpSchema.CallTool.payloadSchema.Type,
     ) => Effect.Effect<
       McpSchema.CallToolResult,
-      McpSchema.InternalError | McpSchema.InvalidParams,
+      McpSchema.McpErrorBase | McpSchema.InternalError | McpSchema.InvalidParams,
       McpSchema.McpServerClient
     >;
   }

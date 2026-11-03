@@ -118,8 +118,9 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
     readonly path?: string;
     readonly env?: Record<string, string>;
     readonly executable?: boolean;
+    readonly args?: ReadonlyArray<string>;
   }) =>
-    resolveRootCliCommand("browser setup").pipe(
+    resolveRootCliCommand("browser setup", input.args).pipe(
       Effect.provideService(HostProcess.ExecutablePath, input.node),
       Effect.provideService(HostProcess.Arguments, [input.node, input.entry]),
       Effect.provideService(HostProcess.IsExecutable, input.executable ?? false),
@@ -158,6 +159,25 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("keeps the arguments, so root runs setup on the same T3 home", () =>
+    Effect.gen(function* () {
+      const args = ["--base-dir", "/srv/t3 home"];
+      expect(
+        yield* rootCommand({
+          node: "/home/theo/.local/node/bin/node",
+          entry: "/home/theo/.local/lib/node_modules/t3/dist/bin.mjs",
+          path: yield* pathWithT3,
+          args,
+        }),
+      ).toBe(
+        `sudo env "PATH=$PATH" /home/theo/.local/node/bin/node /home/theo/.local/lib/node_modules/t3/dist/bin.mjs browser setup --base-dir '/srv/t3 home'`,
+      );
+      expect(
+        yield* rootCommand({ node: "/opt/t3/t3", entry: "/opt/t3/t3", executable: true, args }),
+      ).toBe("sudo /opt/t3/t3 browser setup --base-dir '/srv/t3 home'");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("names this install's launcher when t3 is not on PATH", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -177,6 +197,7 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       };
       expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
 
+      // An unrelated `t3` on PATH, such as an older npm global, is another install's CLI.
       expect(yield* rootCommand({ ...desktop, path: yield* pathWithT3 })).toBe(
         `sudo '${shim}' browser setup`,
       );

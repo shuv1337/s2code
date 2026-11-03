@@ -8,6 +8,7 @@ import {
   WatchPairingTokenResponse,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -66,7 +67,7 @@ const restriction = {
   projectIds: [ProjectId.make("project-1")],
 };
 
-it.layer(NodeServices.layer)("WatchPairingStore", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("WatchPairingStore", (it) => {
   it.effect("hands out a restricted watch credential exactly once after approval", () =>
     Effect.gen(function* () {
       const pairing = yield* WatchPairingStore.WatchPairingStore;

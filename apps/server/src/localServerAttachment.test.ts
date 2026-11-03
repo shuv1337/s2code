@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -46,7 +47,7 @@ it.effect(
       Effect.provide(
         Layer.provideMerge(
           ServerConfig.layerTest(process.cwd(), { prefix: "attachment-test-" }),
-          NodeServices.layer,
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         ),
       ),
     ),

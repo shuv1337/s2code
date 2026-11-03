@@ -8,6 +8,7 @@ import {
 import {
   CLI_RELEASE_BASE_URL_ENV,
   CLI_RELEASE_CHANNELS,
+  cliReleaseChannelOf,
   cliReleaseIndexPageUrl,
   newestCliReleaseVersion,
   type CliReleaseChannel,
@@ -31,9 +32,13 @@ import {
   pinnedRuntimeCommand,
   PinnedRuntimeInstallError,
   pinnedRuntimePaths,
+  pinnedRuntimeVersionsDir,
   prunePinnedRuntimes,
+  recordPinnedRuntimeLauncher,
 } from "../cloud/pinnedRuntime.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import { managedUpdateRefusal } from "../policy/managedUpdates.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
@@ -147,11 +152,12 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
 
 /**
  * Only a launcher that already points into this home's `runtime/versions` tree is touched; a
- * plain copy of the executable, or a launcher for some other install, is left alone.
+ * plain copy of the executable, or a launcher for some other install, is left alone. It is
+ * recorded before it moves, so prune never meets a repointed launcher it does not know about.
  */
 export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function* (input: {
   readonly launchedAs: string | undefined;
-  readonly versionsDir: string;
+  readonly baseDir: string;
   readonly targetEntryPath: string;
   readonly currentVersion?: string;
 }) {
@@ -159,8 +165,15 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
-  const ownsTarget = (candidate: string) =>
-    launcherOwnsVersionsDir(path, input.versionsDir, candidate);
+  const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
+  const ownsTarget = (candidate: string) => launcherOwnsVersionsDir(path, versionsDir, candidate);
+  const remember = (launcher: string) =>
+    recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher }).pipe(
+      Effect.mapError(
+        () =>
+          new CliUpdateError({ reason: `Could not record the s2code launcher at ${launcher}.` }),
+      ),
+    );
   const launcher =
     platform === "win32"
       ? yield* findWindowsShim(input.launchedAs, input.currentVersion)
@@ -182,6 +195,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   for (const alias of aliases) {
     const existing = yield* readLauncherTarget(alias, version);
     if (existing === undefined || !ownsTarget(existing.target)) continue;
+    yield* remember(alias);
     if (existing.forwarder) {
       // Unix keeps the symlink. Windows rewrites the bytes in place so a shim
       // from before the repair still points at the legacy command, not the exe.
@@ -323,7 +337,12 @@ export const updateCommand = Command.make("update", {
         assumeYes: flags.yes,
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(CliService.layer(config), ProcessRunner.layer, FetchHttpClient.layer),
+          Layer.mergeAll(
+            CliService.layer(config),
+            ProcessRunner.layer,
+            FetchHttpClient.layer,
+            ManagedPolicy.layer,
+          ),
         ),
       );
     }),
@@ -396,6 +415,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const environment = yield* HostProcess.Environment;
   const httpClient = yield* HttpClient.HttpClient;
   const service = yield* BootService.BootService;
+  const policy = yield* ManagedPolicy.ManagedPolicy;
 
   const currentVersion = input.currentVersion ?? packageJson.version;
   if (
@@ -404,6 +424,13 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   )
     return yield* new CliUpdateError({ reason: SEPARATE_CHANNEL_INSTALL_MESSAGE });
   const channel = input.channel ?? resolveChannelIdentity(currentVersion).channel;
+  const refusal = managedUpdateRefusal(
+    policy.document,
+    input.requestedVersion === undefined ? channel : cliReleaseChannelOf(input.requestedVersion),
+  );
+  if (refusal !== undefined) {
+    return yield* new CliUpdateError({ reason: refusal });
+  }
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {
     return yield* new CliUpdateError({
       reason: `'${input.requestedVersion}' is not an exact s2code version.`,
@@ -552,7 +579,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const repointed = yield* repointLauncher({
     currentVersion,
     launchedAs,
-    versionsDir: path.dirname(runtime.versionDir),
+    baseDir: input.baseDir,
     targetEntryPath: runtime.entryPath,
   });
 

@@ -26,6 +26,7 @@ const flags: CliServerFlags = {
   mode: Option.none(),
   port: Option.none(),
   host: Option.none(),
+  lan: Option.none(),
   baseDir: Option.none(),
   cwd: Option.none(),
   devUrl: Option.none(),

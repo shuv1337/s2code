@@ -8,13 +8,15 @@ to keep a terminal open.
 Install the fork CLI first ([Install S2Code](./install.md#command-line)), then
 run these commands on the machine that will host S2Code:
 
-| Task                            | Command                    |
-| ------------------------------- | -------------------------- |
-| Install and start               | `s2code service install`   |
-| Inspect status and log location | `s2code service status`    |
-| Move to a newer release         | `s2code update`            |
-| Restart                         | `s2code service restart`   |
-| Stop and remove from startup    | `s2code service uninstall` |
+| Task                                  | Command                    |
+| ------------------------------------- | -------------------------- |
+| Set up access from your other devices | `s2code up`                |
+| See how your other devices reach it   | `s2code status`            |
+| Install and start                     | `s2code service install`   |
+| Inspect status and log location       | `s2code service status`    |
+| Move to a newer release               | `s2code update`            |
+| Restart                               | `s2code service restart`   |
+| Stop and remove from startup          | `s2code service uninstall` |
 
 Examples use stable. Existing installations may retain the legacy service name;
 use the service and log paths printed by `s2code service status`. Nightly uses `s2code-nightly`; preview uses
@@ -49,15 +51,21 @@ Preview builds do not update automatically.
 `s2code uninstall` removes only that channel's background service, launcher, and
 downloaded versions after showing you the list and asking once. Your projects,
 threads, and settings under the fork channel's home (stable: `~/.s2code-v2/userdata`) are kept,
-along with `service.env` in that home. Pass `--yes` from a script.
+along with `service.env` in that home, minus its `S2CODE_LAN` and `S2CODE_HOST` settings, so a
+new install answers only on this machine. Pass `--yes` from a script.
 
 ## Local network access
 
-The service listens on your local network and Tailscale addresses, so the
-desktop and mobile apps on the same network connect directly. The service does
-not answer on public addresses, and every device still needs to pair. To keep
-the service reachable from this machine only, set `SHUV2CODE_HOST=127.0.0.1` in
-`service.env` (below). Any `SHUV2CODE_HOST` value replaces this default.
+A new service answers only on this machine. Other devices reach it once you
+choose the local network in `s2code up` (or run `s2code up --lan`, which sets
+`S2CODE_LAN=true` in `service.env`). It then listens on your local network and
+Tailscale addresses, so the desktop and mobile apps on the same network connect
+directly. It still does not answer on public addresses. Anyone on the same
+network can reach the port, so a pairing code is all that keeps them out.
+
+A service installed before `S2CODE_LAN` existed keeps listening on the local
+network. `s2code status` says so, and `s2code up --no-lan` turns it off. Any
+`S2CODE_HOST` value replaces this setting.
 
 ## Configure the service environment
 
@@ -95,9 +103,13 @@ Mac logged in and awake for unattended remote access. Installing over SSH while
 nobody is logged in at the Mac's screen can fail at the final start step; the
 service is still installed and will start at the next login.
 
-Windows background services are not supported.
+Windows background services are not supported. To keep a Windows host available
+through T3 Connect, leave the desktop app running with its local environment
+enabled, or keep `s2code serve` running in a terminal. Minimize the desktop app rather
+than closing its last window, which stops its local server. Linking T3 Connect
+does not configure automatic startup at Windows sign-in.
 
-T3 Connect can offer service installation during setup, but the two are managed
+`s2code up` installs the service when you set up T3 Connect, but the two are managed
 separately. Signing out of T3 Connect does not stop or uninstall the service.
 
 ## Linux agent memory budget

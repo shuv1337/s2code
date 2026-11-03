@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -44,6 +45,7 @@ import { consumeCloudReplayGuards } from "./CloudLink.ts";
 import { pendingServiceUpdateExists } from "./updateHandoff.ts";
 import { managedTunnelStartupAction } from "./managedTunnelStartup.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 
 const storeFailure = (tag: "AlreadyExists" | "PermissionDenied") =>
   new ServerSecretStore.SecretStorePersistError({
@@ -146,6 +148,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     /** The mint key pinned beside that relay. */
     readonly cloudMintPublicKey?: string | undefined;
     readonly getExisting?: CliTokenManager.CloudCliTokenManager["Service"]["getExisting"];
+    readonly latestReachability?: ConnectReachability.ConnectReachability["Service"]["latest"];
   }
 
   const writeLauncherState = (update: ServiceUpdateRecord) =>
@@ -166,12 +169,12 @@ describe("releaseManagedTunnelOnShutdown", () => {
     (harness: ReleaseHarness) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       effect.pipe(
-        Effect.provide(CloudLink.layer),
+        Effect.provide(CloudLink.layer.pipe(Layer.provide(ManagedPolicy.layerTest()))),
         Effect.provideService(
           ConnectReachability.ConnectReachability,
           ConnectReachability.ConnectReachability.of({
             check: Effect.die("unused"),
-            latest: Effect.succeedNone,
+            latest: harness.latestReachability ?? Effect.succeedNone,
           }),
         ),
         Effect.provideService(HttpServer.HttpServer, {
@@ -243,7 +246,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
 
         Effect.provide(
           ServerConfigModule.layerTest("/", { prefix: "t3-http-release-test-" }).pipe(
-            Layer.provideMerge(NodeServices.layer),
+            Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
           ),
         ),
         Effect.provideService(
@@ -1135,6 +1138,59 @@ describe("releaseManagedTunnelOnShutdown", () => {
         requests,
         cloudMintPublicKey:
           "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMY09Vo5CzEA6aEkhB/0h27t4Qs71SHS1fTSI4K0KvZQ=\n-----END PUBLIC KEY-----\n",
+      }),
+    );
+  });
+
+  it.effect("does not report a not-linked check once the managed tunnel config is stored", () => {
+    const { store } = makeMemorySecretStore(managedLinkSecrets);
+    const notLinked = ConnectReachability.classifyReachability(
+      {
+        managedTunnelConfigured: false,
+        connector: null,
+        endpoint: null,
+        edgeReachable: null,
+        exitNode: null,
+      },
+      "2026-10-29T00:00:00.000Z",
+    );
+
+    return Effect.gen(function* () {
+      const state = yield* (yield* CloudLink.CloudLink).linkState();
+
+      expect(state.managedTunnelActive).toBe(true);
+      expect(state.reachability?.status === "unreachable" && state.reachability.cause).not.toBe(
+        "not_linked",
+      );
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests: [],
+        latestReachability: Effect.succeedSome(notLinked),
+      }),
+    );
+  });
+
+  it.effect("reports a check that ran after the managed tunnel config was stored", () => {
+    const { store } = makeMemorySecretStore(managedLinkSecrets);
+    const reachable = {
+      status: "reachable" as const,
+      checkedAt: "2026-10-29T00:00:00.000Z",
+      readyConnections: 4,
+      protocol: "quic",
+    };
+
+    return Effect.gen(function* () {
+      const state = yield* (yield* CloudLink.CloudLink).linkState();
+
+      expect(state.reachability).toEqual(reachable);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls: [],
+        requests: [],
+        latestReachability: Effect.succeedSome(reachable),
       }),
     );
   });

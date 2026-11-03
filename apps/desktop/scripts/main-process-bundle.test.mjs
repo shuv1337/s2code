@@ -115,25 +115,16 @@ it("loads the emitted packaged boot entry and backend cache preload", async () =
   const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-desktop-boot-"));
   try {
     const entries = ["src/boot.ts", "src/compileCache.ts"];
-    await NodeFSP.mkdir(NodePath.join(directory, "src"));
-    // The copied boot entry needs the same fork workspace dependency as the real build.
-    await NodeFSP.mkdir(NodePath.join(directory, "node_modules/@t3tools"), { recursive: true });
-    await NodeFSP.symlink(
-      NodeURL.fileURLToPath(new URL("../../../packages/shared", import.meta.url)),
-      NodePath.join(directory, "node_modules/@t3tools/shared"),
-      "junction",
-    );
-    await Promise.all(
-      entries.map((entry) =>
-        NodeFSP.copyFile(new URL(`../${entry}`, import.meta.url), NodePath.join(directory, entry)),
-      ),
-    );
     assert.ok(Array.isArray(desktopConfig.pack));
     for (const packConfig of desktopConfig.pack) {
       if (!Array.isArray(packConfig.entry)) continue;
       if (!packConfig.entry.some((entry) => entries.includes(entry))) continue;
       await build({
         ...packConfig,
+        entry: packConfig.entry.map((entry) =>
+          NodeURL.fileURLToPath(new URL(`../${entry}`, import.meta.url)),
+        ),
+        outDir: NodePath.join(directory, "dist-electron"),
         config: false,
         cwd: directory,
         tsconfig: false,

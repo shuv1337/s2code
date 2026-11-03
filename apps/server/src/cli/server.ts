@@ -8,7 +8,6 @@ import * as CliError from "effect/cli/CliError";
 
 import * as ServerConfig from "../config.ts";
 import { awaitLauncherLoss } from "../launcherWatch.ts";
-import { runServer } from "../server.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
 import { forkCliCommand } from "./invocation.ts";
 
@@ -29,6 +28,8 @@ const runServerCommand = Effect.fn("server.runServerCommand")(function* (
     readonly rejectRunningServer?: boolean;
   },
 ) {
+  // Before config resolution, which claims a port and creates directories.
+  const { runServer } = yield* Effect.promise(() => import("../server.ts"));
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveServerConfig(flags, logLevel, options);
   const run = runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config));
@@ -70,13 +71,15 @@ export const runDefaultServerCommand = Effect.fn("server.runDefaultServerCommand
 });
 
 export const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the s2code server."),
+  Command.withDescription("Same as `s2code`."),
+  Command.unlisted,
   Command.withHandler((flags) => runServerCommand(flags, { rejectRunningServer: true })),
 );
 
 export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
+  Command.withShortDescription("Run T3 Code in this terminal, with no browser."),
   Command.withDescription(
-    "Run the s2code server without opening a browser and print headless pairing details.",
+    "Run S2Code in this terminal without opening a browser, and print pairing details. The background service runs this. To set up access from your other devices, run `s2code up`.",
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {

@@ -8,13 +8,14 @@ import {
   type WatchPairingTokenResponse,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import { WatchRestriction } from "./WatchAuth.ts";
@@ -144,17 +145,14 @@ const normalizeWatchPairingUserCode = (input: string): string | undefined => {
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
   const pairingGrants = yield* PairingGrantStore.PairingGrantStore;
 
-  const randomBytes = (size: number) =>
-    crypto.randomBytes(size).pipe(Effect.mapError(storageError));
+  const randomBytes = random.randomBytes;
   // Only the hash is stored, so a database read never yields a pollable device code.
   const hashDeviceCode = (deviceCode: string) =>
-    crypto.digest("SHA-256", new TextEncoder().encode(deviceCode)).pipe(
-      Effect.map((digest) => Buffer.from(digest).toString("hex")),
-      Effect.mapError(storageError),
-    );
+    digest.digestHex(Digest.sha256, new TextEncoder().encode(deviceCode));
 
   const generateUserCode = randomBytes(USER_CODE_LENGTH).pipe(
     Effect.map((bytes) => {

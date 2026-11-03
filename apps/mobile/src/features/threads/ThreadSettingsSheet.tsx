@@ -65,6 +65,7 @@ import { IconButton } from "../../components/ui/IconButton";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
+import { useReduceMotionEnabled } from "../../lib/appState";
 import {
   buildModelOptions,
   groupByProvider,
@@ -116,6 +117,8 @@ import { ModelRow, ChoiceRow } from "./ThreadSettingsRows";
 import {
   compatibleRuntimeModeForChoices,
   runtimeModeChoicesForSupportedModes,
+  withManagedRuntimeModeLimits,
+  type RuntimeModeChoice,
   selectableChoices,
 } from "./thread-settings-options";
 import {
@@ -305,7 +308,7 @@ type ThreadSettingsSessionValue = {
   readonly manageHidden: boolean;
   readonly setManageHidden: (value: boolean) => void;
   readonly runtimeMode: RuntimeMode;
-  readonly runtimeModeChoices: ReturnType<typeof runtimeModeChoicesForSupportedModes>;
+  readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
@@ -512,8 +515,9 @@ function ThreadSettingsSessionProvider(
     pendingModel ??
     props.providerGroups.flatMap((group) => group.models).find((option) => isApplied(option)) ??
     null;
-  const runtimeModeChoices = runtimeModeChoicesForSupportedModes(
-    displayedModel?.supportedRuntimeModes,
+  const runtimeModeChoices = withManagedRuntimeModeLimits(
+    runtimeModeChoicesForSupportedModes(displayedModel?.supportedRuntimeModes),
+    [config?.managedPolicy],
   );
   const compatibleRuntimeMode = compatibleRuntimeModeForChoices(
     props.runtimeMode,
@@ -561,12 +565,10 @@ function ThreadSettingsSessionProvider(
           props.onPromptChange(change.prompt);
         }
       }
-      if (!("modelOptions" in change)) return;
     }
-    const next =
-      change && "modelOptions" in change
-        ? (change.modelOptions ?? [])
-        : applyProviderOptionSelection(displayedDescriptors, { id, value });
+    const next = change
+      ? (change.modelOptions ?? [])
+      : applyProviderOptionSelection(displayedDescriptors, { id, value });
     if (!next) {
       return;
     }
@@ -948,7 +950,8 @@ function ThreadSettingsMainContent(props: {
   const [listLoaded, setListLoaded] = useState(false);
   // Android can drop the first frame of a reduced-motion fade, leaving rows invisible.
   const reducedMotion = useReducedMotion();
-  const animationsReady = listLoaded && !reducedMotion;
+  const reduceMotionEnabled = useReduceMotionEnabled();
+  const animationsReady = listLoaded && !reducedMotion && !reduceMotionEnabled;
   const catalogItems = buildThreadSettingsCatalogItems(session);
   const hasActiveCatalogFilter =
     session.providerFilter !== null || session.searchQuery.trim().length > 0;
@@ -1102,7 +1105,8 @@ function ThreadSettingsChoiceContent(props: {
           rows: session.runtimeModeChoices.map((choice) => ({
             id: choice.mode,
             label: choice.label,
-            description: choice.description,
+            description: choice.disabledReason ?? choice.description,
+            disabled: choice.disabledReason !== undefined,
             selected: choice.mode === session.runtimeMode,
             onPress: () => {
               void Haptics.selectionAsync();
@@ -1117,6 +1121,7 @@ function ThreadSettingsChoiceContent(props: {
               id: choice.id,
               label: choice.label,
               description: choice.description,
+              disabled: false,
               selected:
                 choice.id ===
                 (session.promptTraits.ultrathinkPromptControlled &&
@@ -1174,6 +1179,7 @@ function ThreadSettingsChoiceContent(props: {
             isLast={index === submenuContent.rows.length - 1}
             label={row.label}
             selected={row.selected}
+            disabled={row.disabled}
             onPress={row.onPress}
           />
         ))}

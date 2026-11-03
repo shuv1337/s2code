@@ -2,26 +2,18 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
-import * as Console from "effect/Console";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Terminal from "effect/Terminal";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
 import { afterEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
-import * as ServerConfig from "../config.ts";
-import { formatCliCommand, formatCliHomeFlag, resolveCliCommand } from "./invocation.ts";
-import {
-  formatServiceStatus,
-  offerServiceDuringOnboarding,
-  recoverServiceOnboardingOffer,
-  serviceCommand,
-} from "./service.ts";
+import { formatServiceStatus, serviceCommand } from "./service.ts";
+import { runUninstall } from "./uninstall.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -168,6 +160,111 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       }),
   );
 
+  it.effect.each<{
+    readonly label: string;
+    readonly installed: boolean;
+    readonly before?: "service uninstall" | "full uninstall";
+    readonly env: string;
+    readonly expected: string;
+  }>([
+    { label: "a fresh home", installed: false, env: "", expected: "S2CODE_LAN=false\n" },
+    // Services installed before S2CODE_LAN existed keep listening on the local network.
+    { label: "a reinstall over an older service", installed: true, env: "", expected: "" },
+    {
+      label: "a reinstall after `service uninstall`",
+      installed: false,
+      before: "service uninstall",
+      env: "",
+      expected: "",
+    },
+    {
+      label: "an earlier LAN choice after `service uninstall`",
+      installed: false,
+      before: "service uninstall",
+      env: "S2CODE_LAN=false\n",
+      expected: "S2CODE_LAN=false\n",
+    },
+    {
+      label: "a home after a full uninstall",
+      installed: false,
+      before: "full uninstall",
+      env: "",
+      expected: "S2CODE_LAN=false\n",
+    },
+    {
+      label: "a saved LAN choice after a full uninstall",
+      installed: false,
+      before: "full uninstall",
+      env: "S2CODE_PORT=4000\nS2CODE_LAN=true\n",
+      expected: "S2CODE_PORT=4000\nS2CODE_LAN=false\n",
+    },
+    {
+      label: "a set host",
+      installed: false,
+      env: "S2CODE_HOST=::\n",
+      expected: "S2CODE_HOST=::\n",
+    },
+    {
+      label: "a legacy host",
+      installed: false,
+      env: "SHUV2CODE_HOST=::\n",
+      expected: "SHUV2CODE_HOST=::\n",
+    },
+    // The fork ignores upstream names in service.env, so they set no host.
+    {
+      label: "an upstream host",
+      installed: false,
+      env: "T3CODE_HOST=::\n",
+      expected: "T3CODE_HOST=::\nS2CODE_LAN=false\n",
+    },
+  ])("install keeps $label off the local network only when it is new", (input) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+      yield* fs.writeFileString(`${baseDir}/.product-identity`, "s2code\n");
+      yield* fs.writeFileString(`${baseDir}/service.env`, input.env);
+      const { service } = makeTestService({
+        ...status,
+        installed: input.installed,
+        current: false,
+      });
+      if (input.before !== undefined) {
+        // What `service install` left behind; the unit itself is already gone.
+        yield* fs.makeDirectory(`${baseDir}/runtime/versions/1.0.0`, { recursive: true });
+        yield* fs.writeFileString(`${baseDir}/runtime/versions/1.0.0/t3`, "");
+        yield* fs.writeFileString(`${baseDir}/runtime/service-state.json`, "{}\n");
+      }
+      if (input.before === "full uninstall") {
+        yield* runUninstall({ baseDir, assumeYes: true }).pipe(
+          Effect.provideService(BootService.BootService, service),
+          Effect.provideService(HostProcess.IsExecutable, false),
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provide(Layer.fresh(TestConsole.layer)),
+        );
+        expect(yield* fs.readFileString(`${baseDir}/service.env`)).not.toContain("LAN=");
+      }
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(BootService.BootService, service),
+      );
+
+      yield* Command.runWith(serviceCommand, { version: packageJson.version })([
+        "install",
+        "--base-dir",
+        baseDir,
+      ]).pipe(
+        Effect.provideService(HostProcess.Environment, {}),
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            Layer.fresh(TestConsole.layer),
+          ),
+        ),
+      );
+      expect(yield* fs.readFileString(`${baseDir}/service.env`)).toBe(input.expected);
+    }),
+  );
+
   it.effect("protect refuses root before creating any T3 directories", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -237,96 +334,3 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       }),
   );
 });
-
-it.effect("leaves a newer service unchanged during onboarding without prompting", () =>
-  Effect.gen(function* () {
-    const { service, installOptions } = makeTestService(newerServiceStatus);
-    const terminal = Terminal.make({
-      columns: Effect.succeed(80),
-      rows: Effect.succeed(24),
-      readInput: Effect.die("Onboarding must not prompt to replace a newer service."),
-      readLine: Effect.die("Onboarding must not prompt to replace a newer service."),
-      display: () => Effect.die("Onboarding must not prompt to replace a newer service."),
-    });
-
-    const ready = yield* offerServiceDuringOnboarding.pipe(
-      Effect.provideService(BootService.BootService, service),
-      Effect.provideService(Terminal.Terminal, terminal),
-      Effect.provide(
-        ServerConfig.layerTest("/test", { prefix: "service-onboarding-" }).pipe(
-          Layer.provideMerge(NodeServices.layer),
-        ),
-      ),
-    );
-
-    expect(ready).toBe("skipped");
-    expect(installOptions).toEqual([]);
-  }),
-);
-
-it.effect.each([
-  {
-    entry: "/fork source/apps/server/src/bin.ts",
-    prefix: "/runtime/node '/fork source/apps/server/src/bin.ts'",
-  },
-  { entry: "/home/me/.npm/_npx/fixture/node_modules/shuv2code/dist/bin.mjs", prefix: null },
-])(
-  "keeps onboarding repair instructions on the launching invocation and custom home ($entry)",
-  ({ entry, prefix }) =>
-    Effect.gen(function* () {
-      const config = yield* ServerConfig.ServerConfig;
-      const { service, installOptions } = makeTestService({
-        ...newerServiceStatus,
-        problems: ["service-disabled", "service-stopped", "restart-pending"],
-      });
-      const warnings: string[] = [];
-      const ready = yield* offerServiceDuringOnboarding.pipe(
-        Effect.provideService(BootService.BootService, service),
-        Effect.provideService(Console.Console, {
-          ...globalThis.console,
-          warn: (...args) => {
-            warnings.push(args.join(" "));
-          },
-        }),
-      );
-      const actualPrefix = (yield* resolveCliCommand("")).trimEnd();
-      expect(actualPrefix).toBe(
-        prefix ??
-          formatCliCommand({
-            entryPath: entry,
-            version: packageJson.version,
-            subcommand: "",
-          }).trimEnd(),
-      );
-      expect(warnings).toHaveLength(3);
-      expect(warnings[0]).toContain(
-        `\`${actualPrefix} service install ${formatCliHomeFlag(config.baseDir)}\``,
-      );
-      expect(warnings[1]).toContain(
-        `\`${actualPrefix} service install ${formatCliHomeFlag(config.baseDir)}\``,
-      );
-      expect(warnings[2]).toContain(
-        `\`${actualPrefix} service restart ${formatCliHomeFlag(config.baseDir)}\``,
-      );
-      expect(ready).toBe("skipped");
-      expect(installOptions).toEqual([]);
-    }).pipe(
-      Effect.provide(ServerConfig.layerTest("/fork source", { prefix: "custom service home " })),
-      Effect.provideService(HostProcess.Arguments, ["/runtime/node", entry]),
-      Effect.provideService(HostProcess.ExecutablePath, "/runtime/node"),
-      Effect.provideService(HostProcess.InvokedAs, ""),
-      Effect.provideService(HostProcess.IsExecutable, false),
-      Effect.provideService(HostProcess.Environment, {}),
-      Effect.provide(NodeServices.layer),
-    ),
-);
-
-// regression: #9602 diagnose incomplete headless server setup
-it.effect("keeps the manual-server fallback when background prerequisites fail", () =>
-  Effect.gen(function* () {
-    const ready = yield* recoverServiceOnboardingOffer(
-      Effect.fail(new BootService.BootServicePrerequisiteError({ problem: "linger-disabled" })),
-    );
-    expect(ready).toBe("skipped");
-  }),
-);

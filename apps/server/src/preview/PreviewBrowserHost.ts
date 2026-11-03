@@ -73,7 +73,7 @@ export class PreviewBrowserRootError extends Schema.TaggedError<PreviewBrowserRo
   {},
 ) {
   override get message(): string {
-    return "Chrome will not start its sandbox as root, so T3's browser cannot run while the T3 server runs as root. Run the server as a nonroot user (for example `User=` in its systemd service), or set `T3CODE_SERVER_BROWSER_SANDBOX=0` to run the browser unsandboxed as root.";
+    return "S2Code server is running as root; Chrome's sandbox cannot start. Run S2Code as a nonroot user. Otherwise set `S2CODE_SERVER_BROWSER_SANDBOX=0` in the S2Code server's environment and restart the server; this disables Chrome's sandbox. Manual: `S2CODE_SERVER_BROWSER_SANDBOX=0 s2code serve`. Systemd: add `Environment=S2CODE_SERVER_BROWSER_SANDBOX=0` under `[Service]`, reload systemd, then restart the service. `s2code browser setup` cannot fix root sandboxing.";
   }
 }
 

@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   EnvironmentId,
   ProviderDriverKind,
@@ -87,6 +88,7 @@ const dependencies = (
 ) =>
   Layer.mergeAll(
     NodeServices.layer,
+    NodeCrypto.layer,
     ServerSettings.layerTest(),
     Layer.mock(ThreadManagementService.ThreadManagementService)({}),
     Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
