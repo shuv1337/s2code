@@ -1,9 +1,12 @@
 name: CI Full
 
-# Manual full suite. The required pull-request check stays the lightweight CI
-# workflow. Runners are GitHub-hosted; this fork has no Blacksmith access.
+# Full suite, nightly and on demand. The required pull-request check stays the
+# lightweight CI workflow. Runners are GitHub-hosted; this fork has no
+# Blacksmith access.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *"
 
 permissions:
   contents: read

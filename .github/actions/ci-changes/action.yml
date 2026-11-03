@@ -40,6 +40,11 @@ runs:
           decide
         }
 
+        # Nightly and manual runs have no change to diff: they run every job.
+        if [[ "$EVENT_NAME" == workflow_dispatch || "$EVENT_NAME" == schedule ]]; then
+          decide
+        fi
+
         # Reads the change from git rather than the REST API: every job that
         # runs this shares the repository's 1,000 requests/hour GITHUB_TOKEN quota.
         if [[ "$EVENT_NAME" == pull_request ]]; then
