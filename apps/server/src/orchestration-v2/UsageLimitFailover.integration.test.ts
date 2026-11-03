@@ -28,9 +28,11 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -45,6 +47,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -69,6 +72,7 @@ const sentinelSource = instance("codex_sentinel_source");
 const sentinelTarget = instance("codex_sentinel_target");
 
 interface PoolMember {
+  readonly continuationKey?: string;
   readonly driver: ProviderDriverKind;
   readonly usedPercent: number;
   readonly enabled?: boolean;
@@ -116,6 +120,8 @@ const makeProviderInstance = (
   instanceId: ProviderInstanceId,
   member: PoolMember,
   startedTurns: Ref.Ref<ReadonlyArray<ProviderInstanceId>>,
+  deliveries: Ref.Ref<ReadonlyArray<ProviderAdapter.ProviderAdapterV2TurnInput>>,
+  resumes: Ref.Ref<ReadonlyArray<ProviderInstanceId>>,
 ): ProviderInstance => {
   const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
     instanceId,
@@ -167,10 +173,12 @@ const makeProviderInstance = (
               createdAt: now,
               updatedAt: now,
             }),
-          resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
+          resumeThread: ({ providerThread }) =>
+            Ref.update(resumes, (ids) => [...ids, instanceId]).pipe(Effect.as(providerThread)),
           compactThread: unused,
           startTurn: (turnInput) =>
             Effect.gen(function* () {
+              yield* Ref.update(deliveries, (inputs) => [...inputs, turnInput]);
               yield* Ref.update(startedTurns, (started) => [...started, instanceId]);
               if (member.gate !== undefined) yield* Deferred.await(member.gate);
               const at = yield* DateTime.now;
@@ -252,7 +260,10 @@ const makeProviderInstance = (
   return {
     instanceId,
     driverKind: member.driver,
-    continuationIdentity: { driverKind: member.driver, continuationKey: `account:${instanceId}` },
+    continuationIdentity: {
+      driverKind: member.driver,
+      continuationKey: member.continuationKey ?? `account:${instanceId}`,
+    },
     displayName: undefined,
     enabled: true,
     snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
@@ -292,6 +303,7 @@ const serverProvider = (
 
 /** One server boot; a restart is another boot over the same database file. */
 interface Boot {
+  readonly probesReady?: SubscriptionRef.SubscriptionRef<boolean>;
   readonly databasePath?: string;
   readonly startedTurns?: Ref.Ref<ReadonlyArray<ProviderInstanceId>>;
   /** A boot without a worker stands for a server that went down before it acted. */
@@ -307,12 +319,18 @@ const runPool = <A, E, R>(
   pool: Record<string, PoolMember>,
   body: (input: {
     readonly startedTurns: Ref.Ref<ReadonlyArray<ProviderInstanceId>>;
+    readonly deliveries: Ref.Ref<ReadonlyArray<ProviderAdapter.ProviderAdapterV2TurnInput>>;
+    readonly resumes: Ref.Ref<ReadonlyArray<ProviderInstanceId>>;
   }) => Effect.Effect<A, E, R>,
   boot: Boot = {},
 ) =>
   Effect.gen(function* () {
     const startedTurns =
       boot.startedTurns ?? (yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]));
+    const deliveries = yield* Ref.make<ReadonlyArray<ProviderAdapter.ProviderAdapterV2TurnInput>>(
+      [],
+    );
+    const resumes = yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]);
     const members = Object.entries({ ...pool, ...sentinelPool }).map(
       ([name, member]) => [instance(name), member] as const,
     );
@@ -321,10 +339,14 @@ const runPool = <A, E, R>(
         Effect.succeed(
           members
             .filter(([id]) => id === instanceId)
-            .map(([id, member]) => makeProviderInstance(id, member, startedTurns))[0],
+            .map(([id, member]) =>
+              makeProviderInstance(id, member, startedTurns, deliveries, resumes),
+            )[0],
         ),
       listInstances: Effect.succeed(
-        members.map(([id, member]) => makeProviderInstance(id, member, startedTurns)),
+        members.map(([id, member]) =>
+          makeProviderInstance(id, member, startedTurns, deliveries, resumes),
+        ),
       ),
       listUnavailable: Effect.succeed([]),
       streamChanges: Stream.empty,
@@ -347,10 +369,23 @@ const runPool = <A, E, R>(
       ServerSettings.ServerSettingsService.use((settings) =>
         Effect.succeed(
           Layer.mock(ProviderRegistry.ProviderRegistry)({
+            streamChanges: boot.probesReady
+              ? SubscriptionRef.changes(boot.probesReady).pipe(Stream.map(() => []))
+              : Stream.empty,
             getProviders: settings.getSettings.pipe(
-              Effect.map(({ providerInstances }) =>
-                members.map(([id, member]) =>
-                  serverProvider(id, member, providerInstances[id]?.enabled !== false),
+              Effect.flatMap(({ providerInstances }) =>
+                Effect.map(
+                  boot.probesReady ? SubscriptionRef.get(boot.probesReady) : Effect.succeed(true),
+                  (ready) =>
+                    members.map(([id, member]) =>
+                      !ready && id === fresh
+                        ? {
+                            ...serverProvider(id, member, true),
+                            auth: { status: "unknown" as const },
+                            models: [],
+                          }
+                        : serverProvider(id, member, providerInstances[id]?.enabled !== false),
+                    ),
                 ),
               ),
               Effect.orDie,
@@ -363,6 +398,7 @@ const runPool = <A, E, R>(
       RuntimeLayer.layer,
       RuntimeLayer.layerEventSink,
       ProjectStore.layer,
+      CommandReceiptStore.layer,
       boot.failoverWorker === false
         ? Layer.empty
         : UsageLimitFailoverWorker.layer.pipe(
@@ -394,7 +430,7 @@ const runPool = <A, E, R>(
     return yield* Effect.gen(function* () {
       // Production starts the daemon from server startup, not from the runtime layer.
       if (boot.effectWorker !== false) yield* EffectWorker.runDaemon.pipe(Effect.forkScoped);
-      return yield* body({ startedTurns });
+      return yield* body({ startedTurns, deliveries, resumes });
     }).pipe(Effect.provide(layerRuntime));
   }).pipe(Effect.scoped);
 
@@ -703,42 +739,64 @@ describe("usage limit failover through the real runtime", () => {
     }),
   );
 
-  it.live("starts a queued run on a pooled peer once its instance spent its quota", () =>
-    Effect.gen(function* () {
-      const gate = yield* Deferred.make<void>();
-      yield* runPool(
-        {
-          [spent]: { driver: cursor, usedPercent: 50, gate },
-          [fresh]: { driver: cursor, usedPercent: 10 },
-        },
-        () =>
-          Effect.gen(function* () {
-            const threadId = yield* startThread("queued", spent);
-            yield* send(threadId, "queued:next", "Then this.", { queue: true });
-            // Another thread spends the shared quota while this one still works.
-            assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
-            yield* Deferred.succeed(gate, undefined);
+  it.live.each([false, true])(
+    "starts a queued run on a fresh pooled thread (resume compatible: %s)",
+    (compatible) =>
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<void>();
+        yield* runPool(
+          {
+            [spent]: {
+              driver: cursor,
+              usedPercent: 50,
+              gate,
+              continuationKey: compatible ? "shared" : `account:${spent}`,
+            },
+            [fresh]: {
+              driver: cursor,
+              usedPercent: 10,
+              continuationKey: compatible ? "shared" : `account:${fresh}`,
+            },
+          },
+          ({ deliveries, resumes }) =>
+            Effect.gen(function* () {
+              const threadId = yield* startThread("queued", spent);
+              yield* send(threadId, "queued:next", "Then this.", { queue: true });
+              // Another thread spends the shared quota while this one still works.
+              assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              yield* Deferred.succeed(gate, undefined);
 
-            const thread = yield* awaitThread(threadId, settled(2));
-            const queued = thread.runs[1]!;
-            const providerThread = thread.providerThreads.find(
-              (entry) => entry.id === queued.providerThreadId,
-            );
-            assert.equal(providerThread?.providerInstanceId, fresh);
-            assert.equal(providerThread?.nativeThreadRef?.nativeId, `${fresh}:${threadId}`);
-            assert.isTrue(
-              thread.contextHandoffs.some((handoff) => handoff.strategy === "full_thread_summary"),
-            );
-            assert.deepEqual(
-              thread.runs.map((run) => [run.providerInstanceId, run.status]),
-              [
-                [spent, "completed"],
-                [fresh, "completed"],
-              ],
-            );
-          }),
-      );
-    }),
+              const thread = yield* awaitThread(threadId, settled(2));
+              const queued = thread.runs[1]!;
+              const providerThread = thread.providerThreads.find(
+                (entry) => entry.id === queued.providerThreadId,
+              );
+              assert.equal(providerThread?.providerInstanceId, fresh);
+              assert.equal(providerThread?.nativeThreadRef?.nativeId, `${fresh}:${threadId}`);
+              assert.isTrue(
+                thread.contextHandoffs.some(
+                  (handoff) =>
+                    handoff.strategy === "full_thread_summary" &&
+                    handoff.toProviderThreadId === queued.providerThreadId,
+                ),
+              );
+              assert.notInclude(yield* Ref.get(resumes), fresh);
+              const delivered = (yield* Ref.get(deliveries)).filter(
+                (input) => input.runId === queued.id,
+              );
+              assert.lengthOf(delivered, 1);
+              const context = JSON.stringify(delivered[0]);
+              assert.equal(context.split(`Partial work from ${spent}`).length - 1, 1);
+              assert.deepEqual(
+                thread.runs.map((run) => [run.providerInstanceId, run.status]),
+                [
+                  [spent, "completed"],
+                  [fresh, "completed"],
+                ],
+              );
+            }),
+        );
+      }),
   );
 
   it.live("holds spent queued work despite a project enabled override", () =>
@@ -805,7 +863,7 @@ describe("usage limit failover through the real runtime", () => {
     ),
   );
 
-  it.live("does not revive a declined failure after reboot and quota reset", () =>
+  it.live("preserves a declined receipt after reboot but fails over a new run", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-failover-declined-" });
@@ -821,6 +879,22 @@ describe("usage limit failover through the real runtime", () => {
           startThread("declined", spent, workspaceRoot).pipe(
             Effect.andThen((id) => awaitThread(id, settled(1))),
             Effect.andThen(awaitFailoverWorkerCaughtUp),
+            Effect.andThen(
+              Effect.gen(function* () {
+                const thread = yield* Orchestrator.OrchestratorV2.use((o) =>
+                  o.getThreadProjection(threadId),
+                );
+                const receipt = yield* CommandReceiptStore.CommandReceiptStoreV2.use((r) =>
+                  r.getByCommandId(CommandId.make(`usage-limit-failover:${thread.runs[0]!.id}`)),
+                );
+                assert.isTrue(Option.isSome(receipt));
+                if (Option.isSome(receipt)) {
+                  assert.equal(receipt.value.status, "rejected");
+                  assert.equal(receipt.value.threadId, threadId);
+                  assert.equal(receipt.value.error, "Automatic usage-limit failover declined.");
+                }
+              }),
+            ),
           ),
         boot,
       );
@@ -837,10 +911,62 @@ describe("usage limit failover through the real runtime", () => {
             );
             assert.lengthOf(thread.runs, 1);
             assert.equal(thread.runs[0]?.status, "failed");
+            yield* ServerSettings.ServerSettingsService.use((settings) =>
+              Effect.gen(function* () {
+                const current = yield* settings.getSettings;
+                yield* settings.updateSettings({
+                  providerInstances: {
+                    ...current.providerInstances,
+                    [spent]: { driver: cursor, enabled: true, disableOnUsageLimit: true },
+                  },
+                });
+              }),
+            );
+            yield* send(threadId, "declined:new-run", "Do new work.", {
+              modelSelection: selection(spent),
+            });
+            const retried = yield* awaitThread(threadId, settled(3));
+            assert.deepEqual(
+              retried.runs.map((run) => [run.providerInstanceId, run.status]),
+              [
+                [spent, "failed"],
+                [spent, "failed"],
+                [fresh, "completed"],
+              ],
+            );
+            assert.equal(retried.runs[2]?.failoverChainId, retried.runs[1]?.id);
           }),
         boot,
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("retries a failure seen before provider probes finish", () =>
+    Effect.gen(function* () {
+      const probesReady = yield* SubscriptionRef.make(false);
+      yield* runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 100, failure: quotaSpent },
+          [fresh]: { driver: cursor, usedPercent: 0 },
+        },
+        ({ startedTurns }) =>
+          Effect.gen(function* () {
+            const threadId = yield* startThread("probes", spent);
+            const failed = (yield* awaitThread(threadId, settled(1))).runs[0]!;
+            yield* awaitFailoverWorkerCaughtUp;
+            const receipt = yield* CommandReceiptStore.CommandReceiptStoreV2.use((r) =>
+              r.getByCommandId(CommandId.make(`usage-limit-failover:${failed.id}`)),
+            );
+            assert.isTrue(Option.isNone(receipt));
+            yield* SubscriptionRef.set(probesReady, true);
+            const thread = yield* awaitThread(threadId, settled(2));
+            assert.equal(thread.runs[1]?.providerInstanceId, fresh);
+            assert.equal(thread.runs[1]?.status, "completed");
+            assert.equal((yield* Ref.get(startedTurns)).filter((id) => id === fresh).length, 1);
+          }),
+        { probesReady },
+      );
+    }),
   );
 
   it.live("fails over a failure the server missed while down, once across restarts", () =>

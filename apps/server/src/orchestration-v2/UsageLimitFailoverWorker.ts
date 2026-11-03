@@ -35,6 +35,7 @@ const RETRY_SWEEP_DELAY = Duration.seconds(30);
 /**
  * Continues a thread whose latest run spent a pooled instance's quota on the healthiest pool
  * member. A run in a failover chain never fails over again, so a chain switches at most once.
+ * Undefined defers the decision until provider probes finish; null records a decline.
  */
 export function usageLimitFailoverCommand(input: {
   readonly projection: ProjectionRecords<"runs" | "turnItems" | "runtimeRequests">;
@@ -42,7 +43,7 @@ export function usageLimitFailoverCommand(input: {
   readonly providers: readonly ServerProvider[];
   readonly settings: ServerSettingsValue;
   readonly now: number;
-}): OrchestrationV2Command | null {
+}): OrchestrationV2Command | null | undefined {
   const { thread, runs, turnItems, runtimeRequests } = input.projection;
   const run = latestExecutedRun(runs);
   if (
@@ -68,7 +69,26 @@ export function usageLimitFailoverCommand(input: {
     projectId: thread.projectId,
     now: input.now,
   });
-  if (modelSelection === null) return null;
+  if (modelSelection === null) {
+    const source = input.settings.providerInstances[run.providerInstanceId];
+    // Startup snapshots cannot rule out a healthy peer until its authentication probe finishes.
+    if (
+      source?.disableOnUsageLimit === true &&
+      Object.entries(input.settings.providerInstances).some(([id, peer]) => {
+        if (
+          id === run.providerInstanceId ||
+          peer.driver !== source.driver ||
+          peer.enabled === false ||
+          peer.disableOnUsageLimit !== true
+        )
+          return false;
+        const provider = input.providers.find((entry) => entry.instanceId === id);
+        return provider === undefined || provider.auth.status === "unknown";
+      })
+    )
+      return;
+    return null;
+  }
   const id = `${FAILOVER_ID_PREFIX}${run.id}`;
   return {
     type: "message.dispatch",
@@ -105,13 +125,16 @@ export const layer = Layer.effectDiscard(
         ["runs", "turnItems", "runtimeRequests"],
         { turnItemTypes: ["error"], turnItemRunIds: [runId] },
       );
+      const providers = yield* registry.getProviders;
+      const serverSettings = yield* settings.getSettings;
       const command = usageLimitFailoverCommand({
         projection,
         runId,
-        providers: yield* registry.getProviders,
-        settings: yield* settings.getSettings,
+        providers,
+        settings: serverSettings,
         now: yield* Clock.currentTimeMillis,
       });
+      if (command === undefined) return;
       if (command?.type !== "message.dispatch") {
         yield* eventSink.commitRejectedCommand({
           commandId,
@@ -165,6 +188,7 @@ export const layer = Layer.effectDiscard(
           : Effect.void,
       ),
     );
+    yield* forkParked(Stream.runForEach(registry.streamChanges, () => sweepSafely));
     // Failures that landed while the server was down, or before the subscription, fail over now.
     yield* forkParked(sweepSafely);
   }),
