@@ -425,7 +425,14 @@ describe("applyRecord", () => {
       pooled({ enabled: false }),
       auth("work@example.test"),
       work,
+      work,
+    ],
+    [
+      "turned off for this account, then its note gone",
+      pooled({ enabled: false }),
+      auth("work@example.test"),
       "off",
+      undefined,
     ],
     [
       "off for another account",

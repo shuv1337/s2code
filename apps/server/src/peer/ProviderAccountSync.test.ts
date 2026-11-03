@@ -364,6 +364,15 @@ it.effect("an apply leaves what the user saved while it was deciding, except the
       usageLimitDisabled: { ...spentNote(), reportedBy: "Host A" },
     });
     expect(yield* b.instance("cursor_b2")).toEqual({ ...pooled, enabled: false });
+
+    // The user turned it off, not the apply, so it is checked again when turned on.
+    yield* b.records;
+    yield* b.write("cursor_b2", pooled);
+    yield* b.records;
+    expect(yield* b.instance("cursor_b2")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "Host A" },
+    });
   }),
 );
 

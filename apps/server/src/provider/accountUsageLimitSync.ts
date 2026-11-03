@@ -208,11 +208,15 @@ export const applyRecord = (input: {
       instance.enabled === false || provider === undefined || provider.auth.status === "unknown"
         ? undefined
         : providerAccountKey(provider);
+    // Off only by its note, so turning it back on also stamps the reset that supersedes this.
     const kept =
-      instance.enabled === false &&
-      (instance.usageLimitDisabled?.account === record.account || previous === record.account)
-        ? TURNED_OFF
-        : (account ?? previous);
+      instance.enabled !== false
+        ? (account ?? previous)
+        : instance.usageLimitDisabled?.account === record.account
+          ? TURNED_OFF
+          : previous === TURNED_OFF
+            ? undefined
+            : previous;
     if (kept !== undefined) checked[instanceId] = kept;
     if (account === undefined) continue;
     if (previous === TURNED_OFF || previous === account || account !== record.account) continue;

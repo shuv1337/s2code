@@ -114,8 +114,9 @@ Unlinking on the linking side only forgets the token.
   other re-enable as the user's only while the stored state is spent. A reset
   is applied once, but a spent state is checked again whenever a pool member's
   signed-in account changes, remembering per member what it was checked as. A
-  member off for that account and then on again is the user's and stays on;
-  that re-enable also stamps the reset that supersedes the state. Applies write
+  member off under a quota note for that account and then on again is the
+  user's and stays on; that re-enable also stamps the reset that supersedes
+  the state. Applies write
   through `modifyProviderInstance`, so an edit saved while one decides is kept.
 
 **Work a link paired below full access starts stays within that link.** The

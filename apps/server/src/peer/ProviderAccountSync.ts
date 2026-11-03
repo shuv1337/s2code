@@ -188,14 +188,16 @@ const make = Effect.gen(function* () {
           yield* Effect.gen(function* () {
             const instances = (yield* settings.getSettings).providerInstances;
             const providers = yield* registry.getProviders;
-            const { changes, checked } = applyRecord({
+            const before = checkedOf(row);
+            const application = applyRecord({
               record,
               self: here,
               instances,
               providers,
-              checked: checkedOf(row),
+              checked: before,
             });
-            for (const { instanceId, change } of changes) {
+            let checked = application.checked;
+            for (const { instanceId, change } of application.changes) {
               let cleared: string | undefined;
               const wrote = yield* settings.modifyProviderInstance(instanceId, (current) => {
                 cleared = current?.usageLimitDisabled?.at;
@@ -203,6 +205,12 @@ const make = Effect.gen(function* () {
               });
               if (wrote && change === "enable" && cleared !== undefined) {
                 appliedEnables.add(enableKey(instanceId, cleared));
+              }
+              if (!wrote && change === "disable") {
+                // Left as the user saved it, so it is checked again rather than counted as seen.
+                const { [instanceId]: _decided, ...rest } = checked;
+                const prior = before[instanceId];
+                checked = prior === undefined ? rest : { ...rest, [instanceId]: prior };
               }
             }
             const checkedJson = encodeChecked(checked);
