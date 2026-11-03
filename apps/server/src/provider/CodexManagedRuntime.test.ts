@@ -172,15 +172,21 @@ it.live.each(
               );
               return { stdout, stderr, code: Number(code) };
             }).pipe(Effect.scoped);
+            const ignoredHomeWarning =
+              "s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home.\n";
             assert.deepEqual(yield* runHelper, {
               stdout: "dummy-owned-access",
-              stderr: "",
+              stderr: ignoredHomeWarning,
               code: 0,
             });
             const saved = Option.getOrThrow(yield* runtime.auth.read);
             const expired = yield* encodeJson({ ...saved, expiresAt: 0 });
             yield* store.set(new TextEncoder().encode(expired));
-            assert.deepEqual(yield* runHelper, { stdout: "renewed-access", stderr: "", code: 0 });
+            assert.deepEqual(yield* runHelper, {
+              stdout: "renewed-access",
+              stderr: ignoredHomeWarning,
+              code: 0,
+            });
             assert.equal(renewals, 1);
             assert.equal(
               Option.getOrThrow(yield* runtime.auth.read).refreshToken,
