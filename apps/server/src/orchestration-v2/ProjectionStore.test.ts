@@ -247,6 +247,24 @@ it.effect("SQL queue readiness skips held runs without bypassing active work", (
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("SQL run existence is scoped to the thread and counts settled runs", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const withRuns = yield* addRolledBackRecoveryCandidate("has-runs");
+    const { thread } = yield* store.getThreadProjection(withRuns);
+    const runless = ThreadId.make("thread:has-runs:runless");
+    yield* store.apply({
+      id: EventId.make("event:has-runs:runless-created"),
+      type: "thread.created",
+      threadId: runless,
+      occurredAt: yield* DateTime.now,
+      payload: { ...thread, id: runless, lineage: { ...thread.lineage, rootThreadId: runless } },
+    });
+    assert.isTrue(yield* store.hasRuns(withRuns));
+    assert.isFalse(yield* store.hasRuns(runless));
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("SQL shells flag only an active turn blocked solely on T3 thread waits", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;

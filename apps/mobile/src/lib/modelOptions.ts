@@ -437,6 +437,26 @@ export function buildModelOptions(
   return [...options.values()];
 }
 
+/** Pickers offer a usage-limit pool as one member; a selection on a hidden member reads as it. */
+export function resolveUsageLimitPoolSelection(
+  config: T3ServerConfig | null | undefined,
+  selection: ModelSelection,
+  projectId: ProjectId | null,
+): ModelSelection {
+  const settings = config?.settings;
+  const pool = settings ? usageLimitPoolDriver(settings, selection.instanceId) : null;
+  if (!settings || pool === null) return selection;
+  const shown = buildModelOptions(config, selection, undefined, projectId).find(
+    (option) =>
+      !option.isUnavailable &&
+      option.selection.model === selection.model &&
+      usageLimitPoolDriver(settings, option.selection.instanceId) === pool,
+  );
+  return shown === undefined || shown.selection.instanceId === selection.instanceId
+    ? selection
+    : { ...selection, instanceId: shown.selection.instanceId };
+}
+
 export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyArray<ProviderGroup> {
   const groups = new Map<
     string,

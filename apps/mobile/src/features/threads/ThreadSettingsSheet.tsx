@@ -68,6 +68,7 @@ import { cn } from "../../lib/cn";
 import {
   buildModelOptions,
   groupByProvider,
+  resolveUsageLimitPoolSelection,
   type ModelOption,
   type ProviderGroup,
 } from "../../lib/modelOptions";
@@ -1521,7 +1522,11 @@ export function ExistingThreadSettingsRouteScreen({
   }
 
   const serverConfig = selectedEnvironmentRuntime?.serverConfig ?? null;
-  const modelSelection = draftSettings.modelSelection ?? selectedThread.modelSelection;
+  const modelSelection = resolveUsageLimitPoolSelection(
+    serverConfig,
+    draftSettings.modelSelection ?? selectedThread.modelSelection,
+    selectedThread.projectId,
+  );
   const lockedProviderInstanceId = threadAllowsProviderSwitch({
     thread: selectedThread,
     projection: structure?.projection,

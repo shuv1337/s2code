@@ -18,6 +18,7 @@ import {
   resolveDefaultableModelSelection,
   resolveNewTaskModelSelection,
   resolveSelectableModelSelection,
+  resolveUsageLimitPoolSelection,
   type ModelOption,
 } from "./modelOptions";
 
@@ -569,6 +570,51 @@ describe("mobile model options", () => {
         modelOptions: [unavailable],
       }),
     ).toBeNull();
+  });
+
+  it("shows a selection on an auto-disabled pool member as the pool's shown member", () => {
+    const cursor = ProviderDriverKind.make("cursor");
+    const spent = ProviderInstanceId.make("cursor_spent");
+    const fresh = ProviderInstanceId.make("cursor_fresh");
+    const model = {
+      slug: "composer-max",
+      name: "Composer Max",
+      isCustom: false,
+      capabilities: null,
+    };
+    const config = {
+      providers: [spent, fresh].map((instanceId) => ({
+        instanceId,
+        driver: cursor,
+        enabled: instanceId === fresh,
+        installed: true,
+        auth: { status: "authenticated" },
+        models: [model],
+      })),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          [spent]: {
+            driver: cursor,
+            enabled: false,
+            disableOnUsageLimit: true,
+            usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+          },
+          [fresh]: { driver: cursor, enabled: true, disableOnUsageLimit: true },
+        },
+      },
+    } as unknown as ServerConfig;
+    const onSpent = { instanceId: spent, model: model.slug };
+
+    const shown = resolveUsageLimitPoolSelection(config, onSpent, null);
+    expect(shown).toEqual({ instanceId: fresh, model: model.slug });
+    expect(
+      groupByProvider(buildModelOptions(config, shown, undefined, null)).map((group) => [
+        group.providerKey,
+        group.providerLabel,
+      ]),
+    ).toEqual([[fresh, "Cursor pool"]]);
+    expect(resolveUsageLimitPoolSelection(config, shown, null)).toBe(shown);
   });
 
   describe("project-aware enablement", () => {

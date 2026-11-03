@@ -116,7 +116,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         (activePool != null && entry.usageLimitPool === activePool),
     ) ?? null;
 
-  const activeInstanceId = props.activeInstanceId;
+  const activeInstanceId = activeEntry?.instanceId ?? props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
   const selectedModel =
     resolveModelPickerSelectedModel({
