@@ -107,7 +107,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
           Effect.provideService(HostProcess.Environment, {}),
         );
         expect(descriptor.capabilities.serverInstallation).toEqual(
-          mode === "web" ? { kind: "npm-global", prefix: yield* fs.realPath(prefix) } : undefined,
+          mode === "web"
+            ? { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "shuv2code" }
+            : undefined,
         );
         expect(descriptor.capabilities.serverSelfUpdate).toBe(
           mode === "web" ? undefined : "desktop-managed",
