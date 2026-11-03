@@ -162,7 +162,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
   it.effect.each([
     { label: "a new service", installed: false, env: "", expected: "S2CODE_LAN=false\n" },
     // Services installed before S2CODE_LAN existed keep listening on the local network.
-    { label: "an older service", installed: true, env: "", expected: "" },
+    { label: "a reinstall over an older service", installed: true, env: "", expected: "" },
     {
       label: "a set host",
       installed: false,

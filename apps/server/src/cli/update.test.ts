@@ -143,6 +143,97 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
   );
 });
 
+it.layer(NodeServices.layer)("t3 update over an installed service", (it) => {
+  it.effect("keeps a service from before S2CODE_LAN on the local network", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-update-lan-" });
+      const currentVersion = "1.2.0-nightly.20261020.1";
+      const targetVersion = "1.2.0-nightly.20261028.1";
+      yield* fs.writeFileString(path.join(baseDir, ".product-identity"), "s2code\n");
+      const target = path.join(baseDir, "runtime", "versions", targetVersion);
+      yield* fs.makeDirectory(target, { recursive: true });
+      yield* fs.writeFileString(path.join(target, "t3"), "");
+      yield* fs.writeFileString(path.join(target, ".install-product"), "s2code\n");
+      yield* fs.writeFileString(path.join(target, ".install-complete"), `${targetVersion}\n`);
+      const serviceEnv = path.join(baseDir, "service.env");
+      yield* fs.writeFileString(serviceEnv, "# my settings\n");
+      const installs: Array<{ readonly allowDowngrade?: boolean; readonly start?: boolean }> = [];
+      const service = BootService.BootService.of({
+        status: Effect.succeed({
+          supported: true,
+          installed: true,
+          current: true,
+          installedVersion: currentVersion,
+          installedBaseDir: baseDir,
+          unitPath: path.join(baseDir, "s2code-v2-nightly.service"),
+          logPath: path.join(baseDir, "service.log"),
+        }),
+        install: (options) =>
+          Effect.sync(() => {
+            installs.push(options ?? {});
+            return {
+              program: [path.join(target, "t3"), "__service-launcher"],
+              baseDir,
+              logPath: path.join(baseDir, "service.log"),
+              unitPath: path.join(baseDir, "s2code-v2-nightly.service"),
+            };
+          }),
+        restart: Effect.die("unexpected restart"),
+        withStopped: () => Effect.die("unexpected stop"),
+        uninstall: Effect.die("unexpected uninstall"),
+      });
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(BootService.BootService, service),
+      );
+
+      yield* runUpdate({
+        baseDir,
+        logsDir: path.join(baseDir, "logs"),
+        serverRuntimeStatePath: path.join(baseDir, "server-runtime.json"),
+        channel: undefined,
+        requestedVersion: targetVersion,
+        currentVersion,
+        allowDowngrade: false,
+        assumeYes: true,
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ManagedPolicy.layerTest(),
+            Layer.succeed(BootService.BootService, service),
+            Layer.succeed(
+              ProcessRunner.ProcessRunner,
+              ProcessRunner.ProcessRunner.of({
+                run: (input) =>
+                  input.args?.includes("--version")
+                    ? unrelatedLsof
+                        .run(input)
+                        .pipe(
+                          Effect.map((result) => ({ ...result, stdout: `v${targetVersion}\n` })),
+                        )
+                    : unrelatedLsof.run(input),
+              }),
+            ),
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make(() => Effect.die("unexpected download")),
+            ),
+          ),
+        ),
+        Effect.provideService(HostProcess.Platform, "linux"),
+        Effect.provideService(HostProcess.Environment, {}),
+        Effect.provideService(HostProcess.HomeDirectory, baseDir),
+        Effect.provideService(HostProcess.IsExecutable, false),
+      );
+
+      assert.deepStrictEqual(installs, [{ allowDowngrade: false, start: true }]);
+      // A running service with no S2CODE_LAN keeps listening, so an update must not record off.
+      assert.equal(yield* fs.readFileString(serviceEnv), "# my settings\n");
+    }),
+  );
+});
+
 it.layer(NodeServices.layer)("t3 update launcher", (it) => {
   it.effect.each(["linux", "win32"] as const)(
     "updates same-home direct aliases and preserves the old-updater bridge on %s",

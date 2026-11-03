@@ -270,6 +270,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       restarts: 0,
       envAfter: "S2CODE_LAN=true\n",
     },
+    {
+      label: "a reinstall over an older service keeps the old default",
+      installed: true,
+      status: { current: false },
+      env: "",
+      args: ["--yes"],
+      installs: 1,
+      restarts: 0,
+      envAfter: "S2CODE_LAN=true\n",
+    },
   ])("restarts the service only when it must: $label", (input) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
