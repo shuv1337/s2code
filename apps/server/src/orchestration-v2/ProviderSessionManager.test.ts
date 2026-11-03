@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import {
   EnvironmentId,
+  McpServerId,
   type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
@@ -18,6 +19,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -2218,6 +2220,14 @@ it.effect(
       const mcpConfigs = yield* Ref.make<
         ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
       >([]);
+      const settings = Context.get(
+        yield* Layer.build(
+          ServerSettings.layerTest({
+            mcpServers: { [McpServerId.make("executor")]: { url: "https://executor.test/mcp" } },
+          }),
+        ),
+        ServerSettings.ServerSettingsService,
+      );
       const effect = Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -2243,10 +2253,23 @@ it.effect(
 
         const original = (yield* Ref.get(mcpConfigs)).at(-1);
         assert.isDefined(original);
+        assert.deepEqual(original?.sharedMcpServers, [
+          { name: "shared-executor", endpoint: "http://127.0.0.1:43123/mcp/servers/executor" },
+        ]);
         const originalToken = original?.authorizationHeader.replace(/^Bearer\s+/, "");
         assert.isDefined(originalToken);
 
         yield* manager.detach({ providerSessionId, threadId, detail: "Workspace changed." });
+        yield* settings.updateSettings({
+          mcpServers: {
+            [McpServerId.make("executor")]: null,
+            [McpServerId.make("docs")]: {
+              url: "https://docs.test/mcp",
+              bearerToken: "",
+              enabled: true,
+            },
+          },
+        });
         assert.equal(
           (yield* registry.resolve(originalToken!))?.thread.threadId,
           threadId,
@@ -2264,6 +2287,9 @@ it.effect(
           original?.providerSessionId,
           "re-attach must reuse the existing credential, not rotate it",
         );
+        assert.deepEqual((yield* mcpSessions.read(threadId))?.sharedMcpServers, [
+          { name: "shared-docs", endpoint: "http://127.0.0.1:43123/mcp/servers/docs" },
+        ]);
         assert.equal((yield* registry.resolve(originalToken!))?.thread.threadId, threadId);
 
         yield* manager.close(providerSessionId);
@@ -2276,6 +2302,7 @@ it.effect(
             state,
             idleTimeoutMs: 1_000,
             mcpConfigs,
+            serverSettingsLayer: Layer.succeed(ServerSettings.ServerSettingsService, settings),
           }),
         ),
       );

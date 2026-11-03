@@ -1,8 +1,12 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Secret names are derived synchronously while mapping settings.
+import * as NodeCrypto from "node:crypto";
+
 import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   EasDeviceHostConfig,
+  McpServerConfig,
   type ServerSettings,
   SimlockDeviceHostConfig,
   UsageLimitSourceConfig,
@@ -33,9 +37,14 @@ const providerSecretFields = new Map([
   ),
 ]);
 const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
+const mcpServerSecretFields = secretSettingsFields(McpServerConfig);
 const easDeviceHostSecretFields = secretSettingsFields(EasDeviceHostConfig);
 const simlockDeviceHostSecretFields = secretSettingsFields(SimlockDeviceHostConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
+
+/** Keyed by URL too, so no race, echo, or hand edit can pair the token with another server. */
+export const mcpServerSecretName = (id: string, url: string, field = "bearerToken") =>
+  `mcp-server-${encode(id)}-${encode(field)}-${NodeCrypto.createHash("sha256").update(url).digest("base64url").slice(0, 16)}`;
 
 export interface SettingsSecret {
   readonly secretName: string;
@@ -149,6 +158,19 @@ export function mapSettingsSecrets(
     ]),
   ) as ServerSettings["usageLimitSources"];
 
+  const mcpServers = Object.fromEntries(
+    Object.entries(settings.mcpServers).map(([id, server]) => [
+      id,
+      mapFields(
+        server,
+        mcpServerSecretFields,
+        (field, serverHost) =>
+          mcpServerSecretName(id, server.url, field) +
+          (serverHost === null ? "" : `-${encode(serverHost)}`),
+      ),
+    ]),
+  ) as ServerSettings["mcpServers"];
+
   const easDeviceHosts = settings.easDeviceHosts.map(
     (host) =>
       mapFields(
@@ -177,6 +199,7 @@ export function mapSettingsSecrets(
     providerInstances,
     sourceControlHosts,
     usageLimitSources,
+    mcpServers,
     easDeviceHosts,
     simlockDeviceHosts,
   };

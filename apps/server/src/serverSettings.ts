@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  type McpServerId,
   ModelSelection,
   ProjectId,
   ProjectScript,
@@ -950,6 +951,31 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  // The token's secret is keyed by URL, so an echoed marker after a move would claim a token it no longer has.
+  const forgetMovedMcpServerTokens = (
+    current: ServerSettings,
+    next: ServerSettings,
+  ): ServerSettings => {
+    let changed = false;
+    const mcpServers = Object.fromEntries(
+      Object.entries(next.mcpServers).map(([id, server]) => {
+        const previous = Object.hasOwn(current.mcpServers, id)
+          ? current.mcpServers[id as McpServerId]
+          : undefined;
+        if (
+          previous === undefined ||
+          previous.url === server.url ||
+          server.bearerToken !== SECRET_REDACTED
+        ) {
+          return [id, server];
+        }
+        changed = true;
+        return [id, { ...server, bearerToken: "" }];
+      }),
+    ) as ServerSettings["mcpServers"];
+    return changed ? { ...next, mcpServers } : next;
+  };
+
   const persistSettingsSecrets = (current: ServerSettings, next: ServerSettings) =>
     Effect.sync(() => {
       const previous = new Map<string, SettingsSecret>();
@@ -1096,7 +1122,7 @@ const make = Effect.gen(function* () {
             cause: parseFailure.value,
           });
         }
-        const updated = yield* update(current);
+        const updated = forgetMovedMcpServerTokens(current, yield* update(current));
         const persisted = yield* persistSettingsSecrets(current, updated);
         const next = yield* normalizeServerSettings(persisted.settings);
         const materializedNext = yield* Effect.uninterruptibleMask(() =>

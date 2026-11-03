@@ -323,6 +323,8 @@ import {
   ServerConfigStreamEvent,
   DesktopUpdateCommitInput,
   OtlpEndpointCheckInput,
+  McpServerTestInput,
+  McpServerTestResult,
   ServerPrepareTriageError,
   ServerPrepareTriageInput,
   ServerPrepareTriageResult,
@@ -544,6 +546,7 @@ export const WS_METHODS = {
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
   serverRetryResourceTelemetry: "server.retryResourceTelemetry",
   serverCheckOtlpEndpoint: "server.checkOtlpEndpoint",
+  serverTestMcpServer: "server.testMcpServer",
   serverPrepareTriage: "server.prepareTriage",
   serverSignalProcess: "server.signalProcess",
   serverReportClientActivity: "server.reportClientActivity",
@@ -989,6 +992,12 @@ const WsServerRetryResourceTelemetryRpc = Rpc.make(WS_METHODS.serverRetryResourc
 const WsServerCheckOtlpEndpointRpc = Rpc.make(WS_METHODS.serverCheckOtlpEndpoint, {
   payload: OtlpEndpointCheckInput,
   success: OtlpEndpointCheckResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerTestMcpServerRpc = Rpc.make(WS_METHODS.serverTestMcpServer, {
+  payload: McpServerTestInput,
+  success: McpServerTestResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2063,6 +2072,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerCheckOtlpEndpointRpc,
+  WsServerTestMcpServerRpc,
   WsServerPrepareTriageRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,

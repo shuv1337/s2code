@@ -40,11 +40,13 @@ import { TestClock } from "effect/testing";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
   OPENCODE_2_STILL_STOPPING,
   OPENCODE_PROVIDER,
+  sharedMcpServerName,
   t3McpServerName,
 } from "@t3tools/provider-opencode/testing";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -197,7 +199,8 @@ const directoryModels = (directory: string): ReadonlyArray<ProviderReplayEntry> 
 ];
 
 const bigPickle: ModelSelection = { instanceId, model: "opencode/big-pickle" };
-const policy = (runtimeMode: "full-access" | "approval-required" = "full-access") => ({
+type RuntimeMode = "full-access" | "approval-required" | "auto" | "auto-accept-edits";
+const policy = (runtimeMode: RuntimeMode = "full-access") => ({
   runtimeMode,
   interactionMode: "default" as const,
   cwd: WORK,
@@ -224,7 +227,7 @@ const providerThread = (now: DateTime.Utc): OrchestrationV2ProviderThread => ({
 const turnInput = (
   thread: OrchestrationV2ProviderThread,
   modelSelection: ModelSelection = bigPickle,
-  runtimeMode: "full-access" | "approval-required" = "full-access",
+  runtimeMode: RuntimeMode = "full-access",
 ) => ({
   appThread: { title: TITLE } as OrchestrationV2AppThread,
   threadId,
@@ -2376,6 +2379,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         endpoint: "http://127.0.0.1:3773/mcp",
         authorizationHeader: "Bearer thread-credential",
         browserToolsAvailable: false,
+        sharedMcpServers: [],
       });
       yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
       const server = "t3-code-thread_opencode2-adapter";
@@ -2417,6 +2421,111 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         assert.equal((yield* Fiber.join(terminal))?.status, "completed");
       }
     }).pipe(Effect.scoped),
+  );
+
+  it.effect.each([
+    { runtimeMode: "full-access" as const, effect: "allow" },
+    { runtimeMode: "approval-required" as const, effect: "ask" },
+    { runtimeMode: "auto" as const, effect: "ask" },
+    { runtimeMode: "auto-accept-edits" as const, effect: "ask" },
+  ])(
+    "registers shared MCP servers per thread under $effect rules and survives one failing",
+    ({ runtimeMode, effect }) =>
+      Effect.gen(function* () {
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        yield* mcpSessions.set({
+          environmentId: EnvironmentId.make("environment:opencode2-adapter"),
+          threadId,
+          providerSessionId: "mcp:opencode2-adapter",
+          providerInstanceId: instanceId,
+          endpoint: "http://127.0.0.1:3773/mcp",
+          authorizationHeader: "Bearer thread-credential",
+          browserToolsAvailable: false,
+          sharedMcpServers: [
+            { name: "executor", endpoint: "http://127.0.0.1:3773/mcp/servers/executor" },
+            { name: "docs", endpoint: "http://127.0.0.1:3773/mcp/servers/docs" },
+          ],
+        });
+        yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
+        const t3 = "t3-code-thread_opencode2-adapter";
+        const executor = "executor_thread_opencode2-adapter";
+        const docs = "docs_thread_opencode2-adapter";
+        const sharedRules = [
+          { action: "executor_*", resource: "*", effect: "deny" },
+          { action: `${executor}_*`, resource: "*", effect },
+          { action: "docs_*", resource: "*", effect: "deny" },
+          { action: `${docs}_*`, resource: "*", effect },
+        ];
+        const supervised = runtimeMode !== "full-access";
+        const add = (server: string, url: string) =>
+          out("mcp.add", {
+            server,
+            "location[directory]": WORK,
+            config: {
+              type: "remote",
+              url,
+              headers: { Authorization: "Bearer thread-credential" },
+              oauth: false,
+            },
+          });
+        const remove = (server: string) =>
+          out("mcp.remove", { server, "location[directory]": WORK });
+        const runtime = yield* openCode2ReplayRuntime([
+          ...opening,
+          out("session.get", { sessionID: SESSION }),
+          replyData("session.get", sessionInfo()),
+          ...noOpenRequests,
+          ...(supervised ? [out("agent.list", "<any>"), reply("agent.list", agentList)] : []),
+          out("session.update", {
+            sessionID: SESSION,
+            permissions: supervised
+              ? [
+                  supervisedRules[0],
+                  {
+                    ...supervisedRules[1],
+                    effect: runtimeMode === "auto-accept-edits" ? "allow" : "ask",
+                  },
+                  supervisedRules[2],
+                  ...sharedRules,
+                  ...supervisedRules.slice(3),
+                ]
+              : [t3Rules[0], ...sharedRules, ...mcpRules],
+          }),
+          reply("session.update", null),
+          add(t3, "http://127.0.0.1:3773/mcp"),
+          reply("mcp.add", null),
+          add(executor, "http://127.0.0.1:3773/mcp/servers/executor"),
+          reply("mcp.add", { status: 500, body: { message: "Upstream unreachable" } }),
+          add(docs, "http://127.0.0.1:3773/mcp/servers/docs"),
+          reply("mcp.add", null),
+          out("session.instructions.entry.put", {
+            sessionID: SESSION,
+            key: "t3-code",
+            value: [
+              buildRuntimeInstructions({ harness: "OpenCode", model: bigPickle.model }),
+              t3OrchestrationSystemPrompt(true, false),
+            ].join("\n\n"),
+          }),
+          reply("session.instructions.entry.put", null),
+          out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+          promptAccepted,
+          event("session.execution.succeeded", { sessionID: SESSION }),
+          remove(t3),
+          reply("mcp.remove", null),
+          remove(docs),
+          reply("mcp.remove", null),
+        ]);
+        const thread = yield* runtime.resumeThread({
+          providerThread: providerThread(yield* DateTime.now),
+          threadId,
+          modelSelection: bigPickle,
+          runtimePolicy: policy(runtimeMode),
+        });
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        yield* runtime.startTurn(turnInput(thread, bigPickle, runtimeMode));
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+        yield* runtime.unloadThread!({ providerThread: thread });
+      }).pipe(Effect.scoped),
   );
 
   it.effect("registers a long thread id's MCP server under a name OpenCode accepts", () =>
@@ -2496,6 +2605,11 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       assert.deepEqual(yield* Effect.forEach(ids, t3McpServerName), names);
       assert.equal(names[0], "t3-code-63abb5df2b188bdd");
       assert.equal(yield* t3McpServerName(threadId), "t3-code-thread_opencode2-adapter");
+      const server = "abcdefghijklmnopqrstuvwx";
+      const shared = yield* Effect.forEach(ids, (id) => sharedMcpServerName(server, id));
+      for (const name of shared) assert.match(name, new RegExp(`^${server}_[A-Za-z0-9_-]{1,39}$`));
+      assert.equal(new Set(shared).size, ids.length);
+      assert.equal(shared[0], `${server}_63abb5df2b188bdd`);
     }).pipe(Effect.provide(NodeCrypto.layer)),
   );
 

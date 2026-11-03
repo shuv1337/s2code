@@ -12,6 +12,7 @@ const SETTINGS_SEARCH_TERMS = {
     "add environment",
     "remote",
     "tailscale",
+    "mcp servers",
   ],
   SettingsNotifications: ["push", "alerts", "live activity", "agent activity"],
   SettingsAppearance: [

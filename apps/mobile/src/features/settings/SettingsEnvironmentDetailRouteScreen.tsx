@@ -38,6 +38,7 @@ import { ConnectionEnvironmentRow } from "../connection/ConnectionEnvironmentRow
 import { EnvironmentRoutesSection } from "./EnvironmentRoutesSection";
 import { OutdatedServerUpdateSection } from "./OutdatedServerUpdateSection";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
+import { SettingsRow } from "./components/SettingsRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import {
@@ -462,6 +463,17 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                       </View>
                     ))}
                 </SettingsSection>
+                {config.environment.capabilities.sharedMcpServers === true ? (
+                  <SettingsSection title="Agents">
+                    <SettingsRow
+                      icon="point.3.connected.trianglepath.dotted"
+                      label="MCP servers"
+                      value={`${Object.keys(config.settings.mcpServers).length}`}
+                      valuePosition="trailing"
+                      onPress={() => navigation.navigate("SettingsMcpServers", { environmentId })}
+                    />
+                  </SettingsSection>
+                ) : null}
               </>
             ) : null}
           </>

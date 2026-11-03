@@ -1,5 +1,15 @@
 import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 
+/**
+ * A remote MCP server from Settings, reached through T3's proxy with the
+ * session's own `authorizationHeader`; the upstream credential never leaves T3.
+ */
+export interface SharedMcpServer {
+  /** Already namespaced; use it verbatim as the harness entry name. */
+  readonly name: string;
+  readonly endpoint: string;
+}
+
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -11,6 +21,8 @@ export interface McpProviderSessionConfig {
   readonly browserToolsAvailable: boolean;
   readonly capabilities?: ReadonlySet<string>;
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  /** Each needs its own harness server entry: T3's pre-approvals must not cover its tools. */
+  readonly sharedMcpServers?: ReadonlyArray<SharedMcpServer>;
 }
 
 export function withAgentDeviceEnvironment(
