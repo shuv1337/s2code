@@ -289,6 +289,31 @@ test("the workflows wire the queue watch, shared concurrency group and keychain 
   );
   assert.match(
     desktop,
-    /Delete temporary signing keychain\n {8}if: always\(\) && inputs\.platform == 'mac'[\s\S]*security delete-keychain/,
+    /Delete temporary signing keychains and keys\n {8}if: always\(\) && inputs\.platform == 'mac'[\s\S]*security delete-keychain[\s\S]*\*\.p8[\s\S]*\*\.provisionprofile/,
   );
+  assert.ok(desktop.includes("APP_BUILDER_TMP_DIR: ${{ runner.temp }}"));
+});
+
+test("the self-hosted job is allowlisted, starts clean, and never holds Azure secrets on the Mac", () => {
+  assert.ok(
+    desktop.includes(
+      `contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main'`,
+    ),
+  );
+  assert.equal(desktop.includes("github.event_name != 'pull_request'"), false);
+  const checkout = desktop.indexOf("      - name: Checkout\n");
+  const clean = desktop.indexOf("      - name: Clean workspace\n");
+  assert.ok(clean !== -1 && clean < checkout);
+  // Every Azure secret passed to a step is gated to Windows, except the Windows-only steps.
+  const azure = desktop
+    .split("\n")
+    .filter((line) => /^\s+AZURE_[A-Z_]+: \$\{\{ secrets\./.test(line));
+  const gated = desktop
+    .split("\n")
+    .filter((line) =>
+      /^\s+AZURE_[A-Z_]+: \$\{\{ inputs\.platform == 'win' && secrets\./.test(line),
+    );
+  assert.equal(gated.length, 20);
+  // Left ungated: the Windows-only "Prepare Azure Trusted Signing" step's seven secrets.
+  assert.equal(azure.length, 7);
 });

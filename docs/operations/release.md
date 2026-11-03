@@ -52,9 +52,11 @@ its availability, Xcode installs and maintenance. If shuvbot has not picked the 
 10 minutes, a hosted `macos-26` build starts and cancels the queued one (they share a concurrency
 group). Retries 2-6 also use hosted `macos-26`.
 The job pins Xcode 27.1 through `DEVELOPER_DIR` and fails on a beta, because the runner's
-default Xcode is a beta. It runs only on `main`, never on `pull_request`; a dispatch from another
-branch is refused. `scripts/fork-release.ts` likewise accepts the runner only for
-`schedule` or `workflow_dispatch` on `refs/heads/main`.
+default Xcode is a beta. It runs only for `schedule` or `workflow_dispatch` on `main` (an
+allowlist, so `pull_request` and every other event are refused). The macOS job never receives the
+Azure Trusted Signing secrets, empties the workspace before checkout, and deletes its signing
+keychains, keys and profiles from `RUNNER_TEMP` at the end. npm publishing stays on GitHub-hosted
+runners: `scripts/fork-release.ts` refuses any other runner.
 
 To go back to hosted runners, change `FORK_MACOS_ARM64_SELF_HOSTED_RUNNER` in
 `scripts/lib/fork-release.ts` to `"macos-26"`. macOS x64 stays on `macos-15-intel`.
