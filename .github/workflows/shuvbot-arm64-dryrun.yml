@@ -58,12 +58,6 @@ jobs:
       - name: Install desktop dependencies
         run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin
-
       - name: Build unsigned macOS arm64 DMG
         shell: bash
         run: vp run dist:desktop:artifact --platform mac --target dmg --arch arm64 --build-version "0.0.0-dryrun.${GITHUB_RUN_ID}" --verbose
