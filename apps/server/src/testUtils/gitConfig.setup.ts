@@ -1,4 +1,9 @@
-// Override inherited autocrlf, signing and init-branch settings through env so every git child gets stable fixtures.
+import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
+
+// Drops inherited repository selectors and GIT_CONFIG_* first, then overrides autocrlf, signing and
+// init-branch settings through env so every git child gets stable fixtures.
+isolateGitEnv();
+
 const entries: ReadonlyArray<readonly [key: string, value: string]> = [
   ["core.autocrlf", "false"],
   ["core.filemode", "false"],
@@ -8,9 +13,8 @@ const entries: ReadonlyArray<readonly [key: string, value: string]> = [
   ["init.defaultBranch", "main"],
 ];
 
-const existing = Number(process.env.GIT_CONFIG_COUNT ?? "0");
-process.env.GIT_CONFIG_COUNT = String(existing + entries.length);
+process.env.GIT_CONFIG_COUNT = String(entries.length);
 entries.forEach(([key, value], index) => {
-  process.env[`GIT_CONFIG_KEY_${existing + index}`] = key;
-  process.env[`GIT_CONFIG_VALUE_${existing + index}`] = value;
+  process.env[`GIT_CONFIG_KEY_${index}`] = key;
+  process.env[`GIT_CONFIG_VALUE_${index}`] = value;
 });

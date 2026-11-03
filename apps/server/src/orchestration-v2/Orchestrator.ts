@@ -1568,10 +1568,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const queuedMessage = projection.messages.find(
         (candidate) => candidate.id === storedQueuedRun.userMessageId,
       );
+      const requestedSelection = queuedRunModelSelection(projection, storedQueuedRun);
       const modelSelection = yield* resolveSpentInstance(
-        queuedRunModelSelection(projection, storedQueuedRun),
+        requestedSelection,
         projection.thread.projectId,
       );
+      const movedOffSpentInstance = modelSelection.instanceId !== requestedSelection.instanceId;
       const queuedRun = {
         ...storedQueuedRun,
         modelSelection,
@@ -1765,8 +1767,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 ),
               )
           : null;
+      // Work moved off a spent pool account starts a fresh pooled thread with a handoff.
       const canResumeAcrossInstances =
-        !instanceChanged &&
+        !movedOffSpentInstance &&
         switchPlan?.instanceChanged === true &&
         switchPlan.transition.type === "restart_and_resume" &&
         activeProviderThread !== undefined &&

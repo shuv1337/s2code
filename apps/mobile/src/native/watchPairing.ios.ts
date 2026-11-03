@@ -4,14 +4,7 @@ import type { WatchCompanionStatus, WatchPairingOffer } from "./watchPairing";
 
 type WatchPairingNativeModule = {
   getWatchCompanionStatus(): Promise<WatchCompanionStatus>;
-  offerWatchPairing(
-    origin: string,
-    credential: string,
-    mode: WatchPairingOffer["mode"],
-    label: string,
-    issuedAt: string,
-    expiresAt: string,
-  ): Promise<"paired" | "queued">;
+  offerWatchPairing(offer: WatchPairingOffer): Promise<"paired" | "queued">;
 };
 
 function nativeModule(): WatchPairingNativeModule | null {
@@ -25,12 +18,5 @@ export async function getWatchCompanionStatus(): Promise<WatchCompanionStatus | 
 export async function offerWatchPairing(offer: WatchPairingOffer): Promise<"paired" | "queued"> {
   const module = nativeModule();
   if (!module) throw new Error("Apple Watch pairing is unavailable in this app build.");
-  return module.offerWatchPairing(
-    offer.origin,
-    offer.credential,
-    offer.mode,
-    offer.label,
-    offer.issuedAt,
-    offer.expiresAt,
-  );
+  return module.offerWatchPairing(offer);
 }

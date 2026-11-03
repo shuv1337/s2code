@@ -2027,7 +2027,11 @@ describe("UsageService", () => {
     () =>
       Effect.gen(function* () {
         const { home, settings } = yield* setup;
-        const dir = NodePath.join(home, "codex", "sessions");
+        const dir = NodePath.join(
+          yield* Effect.promise(() => NodeFSP.realpath(home)),
+          "codex",
+          "sessions",
+        );
         const transcript = NodePath.join(dir, "rollout.jsonl");
         const usage = (input: number, output: number) => ({
           input_tokens: input,
@@ -2541,6 +2545,8 @@ describe("UsageService", () => {
   it.live("reports saved usage of a removed directory only for windows it reaches", () =>
     Effect.gen(function* () {
       const { transcript, settings, home } = yield* setup;
+      // Saved usage is pruned after the retention window, so pin "now" near the write.
+      yield* TestClock.setTime(Date.parse("2026-08-15T00:00:00Z"));
       yield* Effect.promise(async () => {
         await NodeFSP.writeFile(transcript, claudeLine(1, 5));
         const lastWrite = Date.parse("2026-08-01T10:00:00Z") / 1000;
@@ -2566,7 +2572,7 @@ describe("UsageService", () => {
       assert.deepStrictEqual(later.buckets, []);
       assert.strictEqual(later.sources[0]?.status, "missing");
       assert.strictEqual(later.sources[0]?.scannedFiles, 0);
-    }).pipe(Effect.scoped),
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
   it.live("does not share an in-flight scan after custom prices change", () =>

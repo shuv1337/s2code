@@ -54,3 +54,7 @@ jobs:
 
       - name: Check fork identity and release invariants
         run: vp test run packages/shared/src/channelIdentity.test.ts packages/shared/src/productIdentity.test.ts scripts/lib/fork-release.test.ts
+
+      # Usage-limit pool failover is fork-only; no other server suite runs in this lane.
+      - name: Test usage-limit failover
+        run: vp test run --reporter=verbose --silent=passed-only apps/server/src/orchestration-v2/UsageLimitFailover.integration.test.ts

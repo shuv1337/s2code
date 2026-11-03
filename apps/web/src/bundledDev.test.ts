@@ -26,7 +26,13 @@ it("initializes React refresh before a shared UI chunk runs in bundled dev", asy
   try {
     await NodeFSP.mkdir(NodePath.join(root, "src/lib"), { recursive: true });
     await NodeFSP.writeFile(NodePath.join(root, "package.json"), '{"type":"module"}');
-    for (const file of ["index.html", "src/bootstrap.ts", "src/lib/bootError.ts"]) {
+    for (const file of [
+      "index.html",
+      "src/bootstrap.ts",
+      "src/lib/bootError.ts",
+      "src/branding.ts",
+      "src/branding.logic.ts",
+    ]) {
       await NodeFSP.copyFile(new URL(`../${file}`, import.meta.url), NodePath.join(root, file));
     }
     await NodeFSP.writeFile(
@@ -45,7 +51,12 @@ export const startup = Promise.resolve().then(() => globalThis.onStarted(Shared(
       publicDir: NodeURL.fileURLToPath(new URL("../public", import.meta.url)),
       logLevel: "silent",
       resolve: {
-        alias: { react: NodePath.dirname(NodeURL.fileURLToPath(import.meta.resolve("react"))) },
+        alias: {
+          react: NodePath.dirname(NodeURL.fileURLToPath(import.meta.resolve("react"))),
+          "@t3tools/shared": NodePath.dirname(
+            NodeURL.fileURLToPath(import.meta.resolve("@t3tools/shared/productIdentity")),
+          ),
+        },
       },
       experimental: { bundledDev: true },
       plugins: [
