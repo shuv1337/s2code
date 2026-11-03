@@ -500,8 +500,11 @@ jobs:
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
-    runs-on: macos-26
+    # Lint only; the app itself needs the Xcode 27.1 SDK, which no hosted image
+    # has, so EAS builds it. Intel because hosted macOS arm64 jobs often go
+    # unacquired; scheduled runs skip this lint instead of failing on capacity.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.mobile_native != 'false' }}
+    runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -580,17 +583,19 @@ jobs:
       - name: Require every job to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           # A job may skip only when `changes` said every gate it represents was
-          # not needed. Gates are keyed by job name, except merged Build and the
-          # macOS lint.
-          echo "$RESULTS" | jq -e '.changes.outputs as $gates
+          # not needed, or when it is the macOS lint on a scheduled run. Gates
+          # are keyed by job name, except merged Build and the macOS lint.
+          echo "$RESULTS" | jq -e --arg event "$EVENT_NAME" '.changes.outputs as $gates
             | {build: ["build", "typecheck"], mobile_native_static_analysis: ["mobile_native"]} as $renamed
             | all(to_entries[];
                 .value.result == "success"
                 or (.value.result == "skipped"
-                  and (($renamed[.key] // [.key]) | all(.[]; $gates[.] == "false"))))' > /dev/null
+                  and ((($renamed[.key] // [.key]) | all(.[]; $gates[.] == "false"))
+                    or (.key == "mobile_native_static_analysis" and $event == "schedule"))))' > /dev/null
 
       # thread-transfer-report.yml reads this artifact after CI, so a run whose
       # server tests ran must have produced it.
