@@ -7,10 +7,13 @@ const test = require("node:test");
 const {
   HOSTED_FALLBACK_RUNNER,
   MAC_ARM64_CALLERS,
+  QUEUE_FALLBACK_CALLER,
+  QUEUE_TIMEOUT_SECONDS,
   NOT_ACQUIRED_ANNOTATION,
   SUCCESS_AFTER_MISS_NOTICE,
   buildJobName,
   classifyAttempts,
+  classifyQueue,
   splitDesktopMatrix,
 } = require("./macos-arm64-runner-retry.cjs");
 
@@ -214,5 +217,78 @@ test("the Xcode guard accepts only the pinned stable Xcode, whatever its path sa
       developerDir: `${root}/Xcode-27.2.0-Beta.2.app/Contents/Developer`,
     }).status,
     1,
+  );
+});
+
+test("a shuvbot attempt still queued after the timeout triggers the hosted fallback", () => {
+  const queued = { name: buildJobName(MAC_ARM64_CALLERS[0]), status: "queued" };
+  assert.equal(QUEUE_TIMEOUT_SECONDS, 600);
+  assert.equal(classifyQueue([], 0), "waiting");
+  assert.equal(classifyQueue([queued], QUEUE_TIMEOUT_SECONDS - 1), "waiting");
+  assert.equal(classifyQueue([queued], QUEUE_TIMEOUT_SECONDS), "timeout");
+  assert.equal(classifyQueue([], QUEUE_TIMEOUT_SECONDS), "timeout");
+  for (const status of ["in_progress", "completed"])
+    assert.equal(classifyQueue([{ ...queued, status }], QUEUE_TIMEOUT_SECONDS * 2), "picked-up");
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "macos-arm64-queue-"));
+  const jobs = path.join(root, "jobs.jsonl");
+  fs.writeFileSync(jobs, `${JSON.stringify(queued)}\n`);
+  const state = (seconds) =>
+    spawnSync(
+      process.execPath,
+      [path.join(__dirname, "macos-arm64-runner-retry.cjs"), "queue-state", jobs, String(seconds)],
+      { encoding: "utf8" },
+    ).stdout.trim();
+  assert.equal(state(30), "waiting");
+  assert.equal(state(QUEUE_TIMEOUT_SECONDS), "timeout");
+});
+
+test("the attempt the queue fallback cancelled is superseded, not retried or a failure", () => {
+  const cancelledByFallback = {
+    name: buildJobName(MAC_ARM64_CALLERS[0]),
+    conclusion: "cancelled",
+    runner_id: 0,
+    steps: [],
+  };
+  const fallback = (conclusion) => ({
+    name: buildJobName(QUEUE_FALLBACK_CALLER),
+    conclusion,
+    runner_id: 7,
+    steps: [{ name: "Checkout" }],
+  });
+  const ok = classifyAttempts([cancelledByFallback, fallback("success")]);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.attempts[0].reason, "superseded");
+  assert.equal(ok.attempts[0].retry, false);
+  // Without the fallback, the same job is a runner miss and retries.
+  assert.equal(classifyAttempts([cancelledByFallback]).attempts[0].retry, true);
+  const failed = classifyAttempts([cancelledByFallback, fallback("failure")]);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, "failure");
+  // A first attempt that finished stays a success even if the fallback also started.
+  assert.equal(
+    classifyAttempts([
+      { ...cancelledByFallback, conclusion: "success", runner_id: 3, steps: [{ name: "x" }] },
+      fallback("cancelled"),
+    ]).ok,
+    true,
+  );
+});
+
+test("the workflows wire the queue watch, shared concurrency group and keychain cleanup", () => {
+  assert.match(
+    workflow,
+    /desktop_mac_arm64_queue_fallback:\n {4}name: Desktop \(macOS arm64 queue fallback\)/,
+  );
+  assert.match(workflow, /needs\.mac_arm64_queue_watch\.outputs\.fallback == 'true'/);
+  assert.match(workflow, /queue-state "\$RUNNER_TEMP\/jobs\.jsonl"/);
+  assert.match(workflow, /\n {8}desktop_mac_arm64_queue_fallback,\n/);
+  assert.match(
+    desktop,
+    /concurrency:\n {6}group: release-desktop-\$\{\{ github\.run_id \}\}-\$\{\{ inputs\.platform \}\}-\$\{\{ inputs\.arch \}\}\n {6}cancel-in-progress: true/,
+  );
+  assert.match(
+    desktop,
+    /Delete temporary signing keychain\n {8}if: always\(\) && inputs\.platform == 'mac'[\s\S]*security delete-keychain/,
   );
 });

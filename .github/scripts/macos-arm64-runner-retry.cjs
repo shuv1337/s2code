@@ -5,6 +5,10 @@ const FS = require("node:fs");
 // receives a runner after about 15 minutes; timeout-minutes does not extend that wait,
 // and a later job is a new request.
 const HOSTED_FALLBACK_RUNNER = "macos-26";
+// If shuvbot has not picked the first attempt up by then, release.yml starts a hosted
+// attempt, which cancels the queued one through their shared concurrency group.
+const QUEUE_TIMEOUT_SECONDS = 600;
+const QUEUE_FALLBACK_CALLER = "Desktop (macOS arm64 queue fallback)";
 const MAC_ARM64_CALLERS = [
   "Desktop (macOS arm64)",
   "Desktop (macOS arm64 retry 2)",
@@ -12,6 +16,7 @@ const MAC_ARM64_CALLERS = [
   "Desktop (macOS arm64 retry 4)",
   "Desktop (macOS arm64 retry 5)",
   "Desktop (macOS arm64 retry 6)",
+  QUEUE_FALLBACK_CALLER,
 ];
 
 const buildJobName = (callerName) => `${callerName} / Build macOS arm64`;
@@ -75,17 +80,30 @@ function classifyAttempt(job) {
   return { retry: false, ok: false, reason: job.conclusion || "failed" };
 }
 
+const queueFallbackStarted = (jobs) =>
+  jobs.some((job) => job.name === buildJobName(QUEUE_FALLBACK_CALLER));
+
+// "waiting" until the first attempt has a runner; "timeout" once the wait is over.
+function classifyQueue(jobs, elapsedSeconds) {
+  const job = jobs.find((entry) => entry.name === buildJobName(MAC_ARM64_CALLERS[0]));
+  if (job && (job.status === "in_progress" || job.status === "completed")) return "picked-up";
+  return elapsedSeconds >= QUEUE_TIMEOUT_SECONDS ? "timeout" : "waiting";
+}
+
 function classifyCaller(jobs, callerName) {
-  return {
-    callerName,
-    ...classifyAttempt(jobs.find((job) => job.name === buildJobName(callerName))),
-  };
+  const attempt = classifyAttempt(jobs.find((job) => job.name === buildJobName(callerName)));
+  // The queue fallback cancelled the first attempt; its cancellation is not a runner miss.
+  if (callerName === MAC_ARM64_CALLERS[0] && !attempt.ok && queueFallbackStarted(jobs))
+    return { callerName, retry: false, ok: false, reason: "superseded" };
+  return { callerName, ...attempt };
 }
 
 function classifyAttempts(jobs, callerNames = MAC_ARM64_CALLERS) {
   const attempts = callerNames.map((callerName) => classifyCaller(jobs, callerName));
   if (attempts.some((attempt) => attempt.ok)) return { ok: true, reason: "success", attempts };
-  const realFailure = attempts.find((attempt) => !attempt.retry && attempt.reason !== "missing");
+  const realFailure = attempts.find(
+    (attempt) => !attempt.retry && attempt.reason !== "missing" && attempt.reason !== "superseded",
+  );
   if (realFailure) return { ok: false, reason: realFailure.reason, attempts };
   if (attempts.some((attempt) => attempt.retry))
     return { ok: false, reason: "not-acquired", attempts };
@@ -113,6 +131,10 @@ function main() {
     return;
   }
   const jobs = readJobsJsonl(process.argv[3]);
+  if (command === "queue-state") {
+    console.log(classifyQueue(jobs, Number(process.argv[4])));
+    return;
+  }
   if (command === "attempt") {
     const callerName = process.env.CALLER_NAME;
     if (!callerName) throw new Error("CALLER_NAME is required.");
@@ -143,11 +165,15 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  throw new Error("Use split-matrix, attempt <jobs.jsonl>, or gate <jobs.jsonl>.");
+  throw new Error(
+    "Use split-matrix, attempt <jobs.jsonl>, gate <jobs.jsonl>, or queue-state <jobs.jsonl> <seconds>.",
+  );
 }
 
 module.exports = {
   HOSTED_FALLBACK_RUNNER,
+  QUEUE_FALLBACK_CALLER,
+  QUEUE_TIMEOUT_SECONDS,
   MAC_ARM64_CALLERS,
   NOT_ACQUIRED_ANNOTATION,
   SUCCESS_AFTER_MISS_NOTICE,
@@ -155,6 +181,7 @@ module.exports = {
   classifyAttempt,
   classifyAttempts,
   classifyCaller,
+  classifyQueue,
   neverAssignedHostedRunner,
   readJobsJsonl,
   splitDesktopMatrix,

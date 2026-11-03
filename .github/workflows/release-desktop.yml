@@ -144,6 +144,12 @@ jobs:
       (!startsWith(inputs.runner, '[') ||
       (github.event_name != 'pull_request' && github.ref == 'refs/heads/main'))
     name: Build ${{ inputs.label }}
+    # Every macOS arm64 attempt of a run shares this group, so the hosted queue
+    # fallback in release.yml cancels a shuvbot attempt that is still queued.
+    # Other targets are alone in their group.
+    concurrency:
+      group: release-desktop-${{ github.run_id }}-${{ inputs.platform }}-${{ inputs.arch }}
+      cancel-in-progress: true
     runs-on: ${{ startsWith(inputs.runner, '[') && fromJSON(inputs.runner) || inputs.runner }}
     # Windows waits for the Linux CLI archive inside its own budget (see
     # "Wait for Linux CLI archive"), so it gets that wait on top of the usual 30.
@@ -916,6 +922,18 @@ jobs:
           name: resource-monitor-${{ inputs.resource_key }}
           path: resource-monitor-publish/${{ inputs.resource_key }}/*
           if-no-files-found: error
+
+      # A persistent runner keeps RUNNER_TEMP across jobs; do not leave the
+      # signing keychain or certificate behind, even when the build fails.
+      - name: Delete temporary signing keychain
+        if: always() && inputs.platform == 'mac'
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/t3-cli-signing.keychain-db"
+          if [[ -e "$keychain" ]]; then
+            security delete-keychain "$keychain" || true
+          fi
+          rm -f "$keychain" "$RUNNER_TEMP/t3-cli-signing.p12"
 
   verify:
     name: Verify

@@ -48,7 +48,9 @@ canonical platform packages, preserving upgrades for existing npm installs.
 
 The macOS arm64 desktop build runs first on `shuvbot-macos`, a self-hosted Apple Silicon
 runner (labels `self-hosted, macOS, ARM64, shuvbot-macos`) that Fleet Ops owns. Ask Fleet Ops about
-its availability, Xcode installs and maintenance. Retries 2-6 fall back to hosted `macos-26`.
+its availability, Xcode installs and maintenance. If shuvbot has not picked the build up within
+10 minutes, a hosted `macos-26` build starts and cancels the queued one (they share a concurrency
+group). Retries 2-6 also use hosted `macos-26`.
 The job pins Xcode 27.1 through `DEVELOPER_DIR` and fails on a beta, because the runner's
 default Xcode is a beta. It runs only on `main`, never on `pull_request`; a dispatch from another
 branch is refused. `scripts/fork-release.ts` likewise accepts the runner only for

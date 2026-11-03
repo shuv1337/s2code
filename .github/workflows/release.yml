@@ -213,6 +213,72 @@ jobs:
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
+  # A queued shuvbot job cannot be cancelled on its own, but job-level
+  # concurrency can. The hosted fallback below shares attempt 1's group (see
+  # release-desktop.yml), so starting it cancels attempt 1 while it is still
+  # queued. This watcher starts it when shuvbot has not picked the job up in
+  # QUEUE_TIMEOUT_SECONDS (macos-arm64-runner-retry.cjs). It is skipped when the
+  # matrix uses a hosted runner.
+  mac_arm64_queue_watch:
+    name: macOS arm64 shuvbot queue watch
+    needs: [preflight, build_bundle]
+    if: needs.preflight.outputs.due == 'true' && startsWith(fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner, '[')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      fallback: ${{ steps.watch.outputs.fallback }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          while true; do
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+            state="$(node .github/scripts/macos-arm64-runner-retry.cjs queue-state "$RUNNER_TEMP/jobs.jsonl" "$((SECONDS - started))")"
+            echo "shuvbot queue: $state after $((SECONDS - started))s"
+            case "$state" in
+              picked-up)
+                echo "fallback=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              timeout)
+                echo "::notice::shuvbot did not pick up the macOS arm64 build in time. Starting a hosted macos-26 build, which cancels the queued job."
+                echo "fallback=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+            sleep 15
+          done
+
+  desktop_mac_arm64_queue_fallback:
+    name: Desktop (macOS arm64 queue fallback)
+    needs: [preflight, build_bundle, mac_arm64_queue_watch]
+    if: needs.mac_arm64_queue_watch.outputs.fallback == 'true'
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with: &mac_arm64_fallback_build
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64_fallback).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
   mac_arm64_after_1:
     name: macOS arm64 runner check 1
     needs: [preflight, desktop_mac_arm64]
@@ -242,23 +308,7 @@ jobs:
     if: always() && !cancelled() && needs.mac_arm64_after_1.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
-    with: &mac_arm64_fallback_build
-      label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
-      runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64_fallback).runner }}
-      platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
-      target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).target }}
-      arch: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).arch }}
-      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).rust_target }}
-      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).resource_key }}
-      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).cli_archive }}
-      ref: ${{ needs.preflight.outputs.ref }}
-      version: ${{ needs.preflight.outputs.version }}
-      release_channel: ${{ needs.preflight.outputs.release_channel }}
-      relay_client_tracing: false
-      release_publication: true
-      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
-      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
-      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+    with: *mac_arm64_fallback_build
 
   mac_arm64_after_2:
     name: macOS arm64 runner check 2
@@ -346,6 +396,7 @@ jobs:
       [
         preflight,
         desktop_mac_arm64,
+        desktop_mac_arm64_queue_fallback,
         desktop_mac_arm64_retry_2,
         desktop_mac_arm64_retry_3,
         desktop_mac_arm64_retry_4,
