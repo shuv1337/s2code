@@ -11,7 +11,11 @@ import {
   rememberModelOptions,
   withRememberedModelOptions,
 } from "../../state/use-model-option-memory";
-import { canCommitPendingModel, pendingModelAfterPress } from "./thread-settings-sheet-state";
+import {
+  applySavedModelOptions,
+  canCommitPendingModel,
+  pendingModelAfterPress,
+} from "./thread-settings-sheet-state";
 
 function modelOption(
   model: string,
@@ -131,6 +135,16 @@ describe("thread settings sheet state", () => {
       { id: "effort", value: "medium" },
       { id: "serviceTier", value: "default" },
     ]);
+  });
+
+  it("keeps an option edit on the saved pool member, not the member the sheet shows", () => {
+    const saved = { instanceId: ProviderInstanceId.make("cursor_spent"), model: "composer-max" };
+    const shown = { ...saved, instanceId: ProviderInstanceId.make("cursor_fresh") };
+    const options = [{ id: "effort", value: "high" }];
+
+    expect(applySavedModelOptions(saved, options)).toEqual({ ...saved, options });
+    expect(withRememberedModelOptions(saved)).toEqual({ ...saved, options });
+    expect(withRememberedModelOptions(shown)).toBe(shown);
   });
 
   // regression: #16816 sync model favorites and visibility across clients
