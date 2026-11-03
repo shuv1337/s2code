@@ -746,15 +746,16 @@ describe("usage limit failover through the real runtime", () => {
         const gate = yield* Deferred.make<void>();
         yield* runPool(
           {
+            // Most headroom, so the pooled thread starts here rather than on "cursor_fresh".
             [spent]: {
               driver: cursor,
-              usedPercent: 50,
+              usedPercent: 10,
               gate,
               continuationKey: compatible ? "shared" : `account:${spent}`,
             },
             [fresh]: {
               driver: cursor,
-              usedPercent: 10,
+              usedPercent: 50,
               continuationKey: compatible ? "shared" : `account:${fresh}`,
             },
           },

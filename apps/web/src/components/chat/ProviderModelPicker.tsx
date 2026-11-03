@@ -116,8 +116,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         (activePool != null && entry.usageLimitPool === activePool),
     ) ?? null;
 
-  const activeInstanceId = props.activeInstanceId;
-  const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
+  // The pool's shown member owns navigation; the selection's own catalog still names its model.
+  const pickerInstanceId = activeEntry?.instanceId ?? props.activeInstanceId;
+  const selectedInstanceOptions = props.modelOptionsByInstance.get(props.activeInstanceId) ?? [];
   const selectedModel =
     resolveModelPickerSelectedModel({
       driverKind: activeEntry?.driverKind,
@@ -299,7 +300,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <ModelPickerContent
           searchInputRef={searchInputRef}
           environmentId={props.environmentId}
-          activeInstanceId={activeInstanceId}
+          activeInstanceId={pickerInstanceId}
           model={props.model}
           {...(props.selectedModels !== undefined ? { selectedModels: props.selectedModels } : {})}
           {...(props.onToggleModel
