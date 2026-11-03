@@ -92,6 +92,8 @@ describe("supersedes", () => {
       false,
     ],
     ["identical", record(), record(), false],
+    ["an unreadable time", record({ changedAt: "soon" }), undefined, false],
+    ["over an unreadable time", record({ changedAt: T0 }), record({ changedAt: "soon" }), true],
     [
       "newer beats a larger origin",
       record({ changedAt: T2 }),
@@ -370,12 +372,7 @@ describe("applyRecord", () => {
         { instanceId: id("work_a"), change: "disable" },
         { instanceId: id("work_b"), change: "disable" },
       ],
-      checked: {
-        [id("work_a")]: work,
-        [id("work_b")]: work,
-        [id("work_off")]: "off",
-        [id("personal")]: personal,
-      },
+      checked: { [id("work_a")]: work, [id("work_b")]: work, [id("personal")]: personal },
     });
   });
 
@@ -391,7 +388,7 @@ describe("applyRecord", () => {
     ).toEqual({ changes: [], checked: {} });
   });
 
-  it("checks a member once its sign-in probe has finished", () => {
+  it("checks a member once its sign-in probe has finished, and forgets removed members", () => {
     expect(
       applyRecord({
         record: record(),
@@ -405,20 +402,65 @@ describe("applyRecord", () => {
           snapshot("probing", { status: "unknown" }),
           snapshot("ready", auth("work@example.test")),
         ],
-        checked: {},
+        checked: { probing: "off", removed: "off" },
       }),
     ).toEqual({
       changes: [{ instanceId: id("ready"), change: "disable" }],
-      checked: { ready: work },
+      checked: { probing: "off", ready: work },
     });
+  });
+
+  it.each<
+    [string, ProviderInstanceConfig, ServerProviderAuth, string | undefined, string | undefined]
+  >([
+    [
+      "off for this account",
+      pooled({ enabled: false, usageLimitDisabled: { at: T0, message: "Spent.", account: work } }),
+      auth("work@example.test"),
+      undefined,
+      "off",
+    ],
+    [
+      "checked as this account, then off",
+      pooled({ enabled: false }),
+      auth("work@example.test"),
+      work,
+      "off",
+    ],
+    [
+      "off for another account",
+      pooled({
+        enabled: false,
+        usageLimitDisabled: { at: T0, message: "Spent.", account: personal },
+      }),
+      auth("work@example.test"),
+      personal,
+      personal,
+    ],
+    [
+      "off by hand and never checked",
+      pooled({ enabled: false }),
+      auth("work@example.test"),
+      undefined,
+      undefined,
+    ],
+    ["signed in without an account", pooled(), { status: "authenticated" }, personal, personal],
+  ])("what it remembers of a member %s", (_name, instance, providerAuth, previous, expected) => {
+    const result = applyRecord({
+      record: record(),
+      self,
+      instances: { [id("a")]: instance },
+      providers: [snapshot("a", providerAuth)],
+      checked: previous === undefined ? {} : { a: previous },
+    });
+    expect(result).toEqual({ changes: [], checked: expected === undefined ? {} : { a: expected } });
   });
 
   it.each([
     ["never checked", undefined, true],
     ["already checked as this account", work, false],
     ["checked as another account, then signed in to this one", personal, true],
-    ["checked while signed in without an account", "", true],
-    ["off when checked, then turned on by the user", "off", false],
+    ["off for this account, then turned on by the user", "off", false],
   ] as const)("a spent account and a member %s", (_name, previous, disabled) => {
     const result = applyRecord({
       record: record(),

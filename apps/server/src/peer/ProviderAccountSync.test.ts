@@ -327,7 +327,13 @@ it.effect("a spent account turns off only that account's pool members on the lin
     expect(yield* b.instance("cursor_unpooled")).toEqual({ driver: cursor, enabled: true });
     expect(yield* b.instance("cursor_off")).toEqual({ ...pooled, enabled: false });
 
-    // Turning on an instance the user had turned off is not fought by later syncs.
+    // Turned on while its account is spent, it is turned off; turned on again, it is the user's.
+    yield* b.write("cursor_off", pooled);
+    yield* b.records;
+    expect(yield* b.instance("cursor_off")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "Host A" },
+    });
     yield* b.write("cursor_off", pooled);
     yield* a.sync.syncNow;
     yield* a.sync.syncNow;
@@ -362,7 +368,7 @@ it.effect("an apply leaves what the user saved while it was deciding, except the
 );
 
 it.effect(
-  "a pool member signed in to a spent account later, or added later, is turned off unless the user turns it on",
+  "a pool member signed in to a spent account later, added later, or turned on later is turned off",
   () =>
     Effect.gen(function* () {
       const { a, b } = yield* linkedHosts({
@@ -393,7 +399,7 @@ it.effect(
       yield* b.records;
       yield* b.write("cursor_mine", pooled);
       yield* b.records;
-      expect(yield* b.instance("cursor_mine")).toEqual(pooled);
+      expect(yield* b.instance("cursor_mine")).toMatchObject(reported);
     }),
 );
 

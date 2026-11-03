@@ -17,9 +17,11 @@ export const supersedes = (
   next: ProviderAccountUsageLimitRecord,
   current: ProviderAccountUsageLimitRecord | undefined,
 ): boolean => {
-  if (current === undefined) return true;
+  // An unreadable time compares false against everything, so stored it could never be replaced.
   const nextMs = Date.parse(next.changedAt);
-  const currentMs = Date.parse(current.changedAt);
+  if (!Number.isFinite(nextMs)) return false;
+  const currentMs = current === undefined ? Number.NaN : Date.parse(current.changedAt);
+  if (current === undefined || !Number.isFinite(currentMs)) return true;
   return nextMs !== currentMs
     ? nextMs > currentMs
     : next.origin.environmentId > current.origin.environmentId;
@@ -161,10 +163,7 @@ export const applyToInstance = (
   };
 };
 
-/**
- * The account each pool member was last checked against a spent record as: its key, "" when it
- * is signed in without one, or `TURNED_OFF`.
- */
+/** The account each pool member was last checked against a spent record as, or `TURNED_OFF`. */
 export type CheckedAccounts = Readonly<Record<string, string>>;
 const TURNED_OFF = "off";
 
@@ -179,7 +178,7 @@ export interface RecordApplication {
 /**
  * A reset turns back on what a quota note for it turned off. A spent account turns off each
  * enabled pool member newly signed in to it, as a local quota failure would; a member that was
- * off when checked and is on again was turned on by the user, and stays on.
+ * off for this account and is on again was turned on by the user, and stays on.
  */
 export const applyRecord = (input: {
   readonly record: ProviderAccountUsageLimitRecord;
@@ -191,7 +190,8 @@ export const applyRecord = (input: {
   const { record } = input;
   const changes: Array<RecordApplication["changes"][number]> = [];
   if (record.origin.environmentId === input.self) return { changes, checked: input.checked };
-  const checked: Record<string, string> = { ...input.checked };
+  // Rebuilt from current members only, so an id reused after a removal starts unchecked.
+  const checked: Record<string, string> = {};
   for (const [key, instance] of Object.entries(input.instances)) {
     const instanceId = key as ProviderInstanceId;
     if (!record.spent) {
@@ -201,16 +201,20 @@ export const applyRecord = (input: {
       continue;
     }
     if (instance.driver !== record.driver || instance.disableOnUsageLimit !== true) continue;
-    if (instance.enabled === false) {
-      checked[instanceId] = TURNED_OFF;
-      continue;
-    }
-    // Checked once its sign-in probe has finished.
-    const provider = input.providers.find((entry) => entry.instanceId === instanceId);
-    if (provider === undefined || provider.auth.status === "unknown") continue;
-    const account = providerAccountKey(provider) ?? "";
     const previous = input.checked[instanceId];
-    checked[instanceId] = account;
+    const provider = input.providers.find((entry) => entry.instanceId === instanceId);
+    // A disabled member's probe reports no account, and an unfinished probe none yet.
+    const account =
+      instance.enabled === false || provider === undefined || provider.auth.status === "unknown"
+        ? undefined
+        : providerAccountKey(provider);
+    const kept =
+      instance.enabled === false &&
+      (instance.usageLimitDisabled?.account === record.account || previous === record.account)
+        ? TURNED_OFF
+        : (account ?? previous);
+    if (kept !== undefined) checked[instanceId] = kept;
+    if (account === undefined) continue;
     if (previous === TURNED_OFF || previous === account || account !== record.account) continue;
     if (applyToInstance(record, "disable", instance) !== undefined) {
       changes.push({ instanceId, change: "disable" });
