@@ -6,16 +6,20 @@ to upstream T3 Code's endpoint at `ingest.t3.codes`, associated with a hashed ac
 uses, the server also sends hashed account identifiers: your T3 Connect account, your OpenAI and
 Claude accounts when you are signed in, and a random identifier for each device that connects. The endpoint keeps a copy of each
 event and forwards events to PostHog. Events include the provider, model, reasoning effort,
-permission mode, turn result, duration, release channel, and main-agent token totals when
-available.
+permission mode, turn and request results, duration, release channel, and token counts when
+available. Child-agent token counts are reported separately from the main agent's. Model names
+are sent only when they appear in a provider's public model list.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
-raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
+raw provider events, or child-agent output.
 
 Relay tracing goes to S2Code's own relay and stays on unless you set
 `S2CODE_TELEMETRY_ENABLED=false`. It also stops when `S2CODE_OTEL_SDK_DISABLED` or
 `OTEL_SDK_DISABLED` turns OpenTelemetry export off. The web app in a browser, including one the
 `s2code` CLI opens, does not read these variables.
+
+An administrator can turn product events and relay tracing off for every user on a machine with
+a [managed policy](./managed-policy.md#other-capabilities).
 
 The desktop app reads `S2CODE_TELEMETRY_ENABLED` from your shell profile (for example `~/.zshrc`) on macOS and
 Linux, so export it there and restart the app. On Windows, set it as a user environment variable.

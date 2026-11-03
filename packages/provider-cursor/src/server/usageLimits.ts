@@ -16,12 +16,11 @@ import {
   makeUnavailableUsageLimits,
   makeUsageLimits,
 } from "@t3tools/provider-core/server/usageLimits";
+import { DEFAULT_CURSOR_API_ENDPOINT, exchangeCursorApiKey } from "./apiKey.ts";
 import * as CursorKeychain from "./CursorKeychain.ts";
 
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });
-const DEFAULT_CURSOR_API_ENDPOINT = "https://api2.cursor.sh";
 const decodeCredentials = Schema.decodeEffect(Schema.fromJsonString(CursorCredentials));
-const CursorApiKeyExchange = Schema.Struct({ accessToken: Schema.String });
 const CursorUsageResponse = Schema.Struct({
   billingCycleEnd: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   planUsage: Schema.optional(
@@ -87,31 +86,24 @@ export const readCursorUsageLimits = Effect.fn("readCursorUsageLimits")(function
     const client = yield* HttpClient.HttpClient;
     let token = environment.CURSOR_AUTH_TOKEN?.trim();
     const apiKey = environment.CURSOR_API_KEY?.trim();
-    // An API key names its own account, so never fall back to the stored login for it.
-    if (!token && apiKey) {
-      const exchanged = yield* client
-        .execute(
-          HttpClientRequest.post(`${endpoint}/auth/exchange_user_api_key`).pipe(
-            HttpClientRequest.bearerToken(apiKey),
-            HttpClientRequest.bodyJsonUnsafe({}),
-          ),
-        )
-        .pipe(
-          Effect.flatMap(HttpClientResponse.filterStatusOk),
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(CursorApiKeyExchange)),
-        );
-      token = exchanged.accessToken.trim();
-      if (!token) return probeFailed(checkedAt);
-    }
     const credentialStore = environment.AGENT_CLI_CREDENTIAL_STORE;
-    if (!token && credentialStore === "memory") {
+    // An API key can name a different account from the stored login, so read the key's own.
+    if (!token && apiKey) {
+      if (endpoint !== DEFAULT_CURSOR_API_ENDPOINT) {
+        return makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message: "Cursor usage for an API key requires the default Cursor endpoint.",
+        });
+      }
+      token = yield* exchangeCursorApiKey(apiKey);
+    } else if (!token && credentialStore === "memory") {
       return makeUnavailableUsageLimits({
         checkedAt,
         reason: "unsupported",
         message: "Cursor usage requires a CLI login or CURSOR_AUTH_TOKEN.",
       });
-    }
-    if (!token && platform === "darwin" && credentialStore !== "file") {
+    } else if (!token && platform === "darwin" && credentialStore !== "file") {
       if (!allowKeychain) {
         return makeUnavailableUsageLimits({
           checkedAt,

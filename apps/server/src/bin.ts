@@ -6,6 +6,7 @@
  */
 import { isEntrypoint } from "./entrypoint.ts";
 import { applyProductEnvironment } from "@t3tools/shared/productIdentity";
+import { enableCliCompileCache } from "./cliCompileCache.ts";
 
 if (
   isEntrypoint({
@@ -37,10 +38,15 @@ if (
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
     await runAcpMcpCliFastPath(command, process.argv.slice(3));
   } else {
+    enableCliCompileCache();
     // Windows desktop launches without stdin; attach before reading, except on fast paths using pipes.
     const { attachConsoleStdin } = await import("./cli/consoleStdin.ts");
     attachConsoleStdin();
+    const importStart = performance.now();
     const { runCli } = await import("./binCli.ts");
+    if (process.env.T3CODE_STARTUP_PROFILE_DIR) {
+      performance.measure("server.import.binCli", { start: importStart });
+    }
     runCli();
   }
 }

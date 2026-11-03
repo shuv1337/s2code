@@ -21,13 +21,20 @@ Sharing & access**, sign in, and enable **T3 Connect** for that environment.
 For a command-line host, run:
 
 ```bash
-s2code connect
+s2code up
 ```
 
-Follow the sign-in instructions. Setup offers a
-[background service](./background-service.md); if you decline it, start the
-server with `s2code serve`. Saving your sign-in alone does not make the machine
-reachable.
+It asks how your other devices reach the machine: T3 Connect, the local network,
+or both. Choose T3 Connect and follow the sign-in instructions. On Linux and
+macOS, it then runs S2Code as a [background service](./background-service.md).
+`s2code connect` is the same as `s2code up --connect`. Run `s2code up` again to change your
+choice, and `s2code status` to see it.
+
+The background service is not available on Windows, so there `s2code up` prints the
+`s2code serve` command to keep running in a terminal. You can also keep the desktop
+app running with its local environment enabled. Closing the desktop app's last
+window stops its local server. Saving your sign-in alone does not start a server
+or make the machine reachable.
 
 On your other device, sign in to the same T3 Connect account and choose the
 environment. On the app.t3.codes home page with no computer added yet, signing
@@ -40,6 +47,19 @@ T3 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not
 disconnect an otherwise healthy conversation.
+
+### Scripts and agents
+
+`s2code up` asks nothing when you name a choice: `--connect`, `--lan`, or their
+`--no-` forms. Choices you do not name keep their settings, and `--yes` takes
+the defaults. Without a terminal:
+
+- T3 Connect sign-in prints a URL and a code. Approve it on any device.
+- A needed restart runs without asking, and stops running agent turns.
+- With nothing set up and no choice named, `s2code up` stops and names the flags.
+
+`s2code status --json` prints the settings. `s2code up --help` lists every flag with
+examples.
 
 ### More machines with T3 Chat
 
@@ -61,12 +81,15 @@ On a desktop host, open **Settings → Sharing & access**, enable **Network acce
 then create a pairing link using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
-For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
-address:
+For a command-line host, choose the local network in `s2code up`, or run:
 
 ```bash
-s2code serve --host <private-ip>
+s2code up --lan
 ```
+
+For a server in a terminal, run `s2code serve --lan`. Either way, S2Code then
+accepts connections from your local network and tailnet, so a pairing code is
+all that keeps other devices on them out.
 
 If a server is already running, generate a fresh link without restarting it:
 
@@ -111,8 +134,9 @@ machine's current LAN and Tailscale addresses and adds them as routes, so
 pairing once through T3 Connect is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
-address to be learned. The [background service](./background-service.md#local-network-access)
-allows it on private networks by default. You can reorder a learned route, but not remove it; it
+address to be learned: **Network access** in the desktop app, or the
+[local network](./background-service.md#local-network-access) choice in `s2code up`.
+You can reorder a learned route, but not remove it; it
 goes away with the route it was learned through, or when the machine stops
 reporting that address.
 
@@ -175,7 +199,7 @@ The mapping created by `pair --tailscale` persists across restarts. Remove its
 default-port mapping with:
 
 ```bash
-tailscale serve --https=443 off
+tailscale serve --https=443 --set-path=/ off
 ```
 
 If that port is already in use, choose another with
@@ -249,6 +273,19 @@ On a phone, tap the floating preview's corner dot to show its controls, then
 **Pop into separate window** to keep watching in picture-in-picture over other
 apps.
 
+### Local servers
+
+The browser lists ports held by processes your terminals and agents started.
+S2Code reads which process holds each port and never connects to it, so a
+listed port opens as `http://localhost:<port>` and might not be a web page. For
+an HTTPS server or a specific path, set the **Preview URL** on the project
+script that starts it; S2Code checks that address and opens it as written.
+
+To stop listing ports, set `S2CODE_PORT_DISCOVERY=0` in the environment that
+starts the S2Code server, such as
+[`service.env`](./background-service.md#configure-the-service-environment) for
+the background service, and restart it. Script preview URLs still appear.
+
 ### Browser host setup
 
 macOS, Windows, and Linux desktops run the browser as is. Some Linux hosts need
@@ -271,8 +308,22 @@ any missing libraries and system fonts with apt; pages that load without text
 can mean the host has no fonts. It is safe to run again. Without `sudo`, it
 only reports what it would change.
 
-The browser always runs in Chrome's sandbox. Where you cannot change the host,
-set `S2CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
+The browser runs in Chrome's sandbox by default. Chrome cannot start that sandbox
+as root. If your S2Code server runs as root, run it as a nonroot user to keep
+sandboxing enabled. `s2code browser setup` does not fix this root restriction.
+
+If you need to run as root, or cannot enable the sandbox on your host, set
+`S2CODE_SERVER_BROWSER_SANDBOX=0` in the **S2Code server's environment** and restart
+the server. This disables Chrome's sandbox. For a manual launch:
+
+```sh
+S2CODE_SERVER_BROWSER_SANDBOX=0 s2code serve
+```
+
+For a systemd service, add `Environment=S2CODE_SERVER_BROWSER_SANDBOX=0` under
+`[Service]` in its configuration, run `sudo systemctl daemon-reload`, then restart
+your S2Code service. Setting the variable in an agent's terminal does not change the
+environment of an already running S2Code server.
 
 ## Connect an outside agent
 
@@ -387,7 +438,8 @@ shows that it was removed from T3 Connect. To link it again, turn on
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `s2code connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on
-that device; it stays registered to your account.
+that device and doesn't change your T3 Connect account. A device keeps a saved
+environment after it's deregistered until you remove it from that device.
 
 When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
 tunnel after it stays offline for several minutes. The environment stays linked

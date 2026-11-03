@@ -70,6 +70,7 @@ Setting `S2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 | ------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | Start the server and open the web app            | `s2code-nightly`                                                                    |
 | Start the server without a browser               | `s2code-nightly serve`                                                              |
+| Use it from your other devices                   | `s2code-nightly up` ([details](./remote-access.md))                                 |
 | Keep it running in the background (macOS, Linux) | `s2code-nightly service install` ([details](./background-service.md))               |
 | Move to the newest release                       | `s2code-nightly update`                                                             |
 | Reclaim database space                           | `s2code-nightly doctor` ([details](./background-service.md#reclaim-database-space)) |
@@ -219,6 +220,7 @@ computer.
 | Claude      | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`.                                                              |
 | Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                                                                                     |
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                                                                                        |
+| Kiro        | Install [Kiro CLI](https://kiro.dev/docs/cli/), then run `kiro-cli login`.                                                                                |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                                                  |
 | Antigravity | Install and sign in with Google from S2Code's provider settings.                                                                                          |
 | Pi          | Install [Pi](./providers-pi.md#set-up-pi) with Node.js 22.19 or newer, then run `pi` and `/login`.                                                        |
@@ -241,9 +243,10 @@ When a provider CLI is behind its latest release, its provider card shows the
 available version. **Update now** runs the installer that owns the CLI
 (Homebrew, or a global npm, pnpm, Yarn, Bun, Volta, or Vite+ install), or the
 CLI's own update command when S2Code cannot tell. Update a CLI installed with
-mise through mise. Cursor and Antigravity update with S2Code. Homebrew installs
-compare against the version Homebrew offers, which can trail the npm release by
-a few hours.
+mise through mise. Cursor and Antigravity update with S2Code. Homebrew and
+Chocolatey installs compare against the version their package manager offers,
+which can trail the npm release; update Claude installed with Chocolatey
+through Chocolatey.
 
 Add another provider instance for a separate account or configuration. Each
 instance can have its own environment variables, such as API keys or a custom
@@ -252,8 +255,8 @@ their original values.
 
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Claude](./providers-claude.md), [OpenCode](./providers-opencode.md),
-[Antigravity](./providers-antigravity.md), [Pi](./providers-pi.md),
-[Muse Code](./providers-muse.md), and [fx](./providers-fx.md).
+[Antigravity](./providers-antigravity.md), [Kiro](./providers-kiro.md),
+[Pi](./providers-pi.md), [Muse Code](./providers-muse.md), and [fx](./providers-fx.md).
 
 ## Next steps
 
@@ -262,3 +265,4 @@ For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 - [Remote access](./remote-access.md): connect from another device.
 - [Running in the background](./background-service.md): keep a Linux or macOS host available.
 - [Updating S2Code](./updating.md): update the app and connected servers.
+- [Managed policy](./managed-policy.md): configure S2Code for everyone on a machine.

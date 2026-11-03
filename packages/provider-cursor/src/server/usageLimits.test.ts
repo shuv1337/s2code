@@ -182,16 +182,13 @@ describe("Cursor usage limits", () => {
     }),
   );
 
-  it.effect("reads an API key's own account through the key exchange, never a stored login", () =>
+  it.effect("reads an API key's own account instead of a stored login", () =>
     Effect.gen(function* () {
-      const requests: Array<{ readonly url: string; readonly authorization?: string }> = [];
-      const usage = (accessToken: string) =>
-        withNodeServices(
-          readCursorUsageLimits(
-            { apiEndpoint: "" },
-            { CURSOR_API_KEY: "account-key", AGENT_CLI_CREDENTIAL_STORE: "file" },
-            true,
-          ).pipe(
+      for (const platform of ["linux", "darwin"] as const) {
+        const requests: Array<readonly [string, string | undefined]> = [];
+        const limits = yield* withNodeServices(
+          readCursorUsageLimits({ apiEndpoint: "" }, { CURSOR_API_KEY: "api-key" }, true).pipe(
+            Effect.provideService(HostProcess.Platform, platform),
             Effect.provideService(
               FileSystem.FileSystem,
               FileSystem.makeNoop({
@@ -201,37 +198,30 @@ describe("Cursor usage limits", () => {
             Effect.provideService(
               HttpClient.HttpClient,
               HttpClient.make((request) => {
-                requests.push({
-                  url: request.url,
-                  ...(request.headers.authorization
-                    ? { authorization: request.headers.authorization }
-                    : {}),
-                });
-                const body = request.url.endsWith("/auth/exchange_user_api_key")
-                  ? { accessToken }
-                  : { planUsage: { totalPercentUsed: 87 } };
-                return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(body)));
+                requests.push([request.url, request.headers.authorization]);
+                return Effect.succeed(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    Response.json(
+                      request.url.endsWith("/auth/exchange_user_api_key")
+                        ? { accessToken: "api-key-access-token" }
+                        : { planUsage: { totalPercentUsed: 37 } },
+                    ),
+                  ),
+                );
               }),
             ),
           ),
         );
-
-      const limits = yield* usage("exchanged-token");
-      expect(limits.windows[0]?.usedPercent).toBe(87);
-      expect(requests).toEqual([
-        {
-          url: "https://api2.cursor.sh/auth/exchange_user_api_key",
-          authorization: "Bearer account-key",
-        },
-        {
-          url: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
-          authorization: "Bearer exchanged-token",
-        },
-      ]);
-
-      requests.length = 0;
-      expect((yield* usage("  ")).unavailable?.reason).toBe("probeFailed");
-      expect(requests).toHaveLength(1);
+        expect(requests).toEqual([
+          ["https://api2.cursor.sh/auth/exchange_user_api_key", "Bearer api-key"],
+          [
+            "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+            "Bearer api-key-access-token",
+          ],
+        ]);
+        expect(limits.windows[0]?.usedPercent).toBe(37);
+      }
     }),
   );
 
@@ -285,13 +275,14 @@ describe("Cursor usage limits", () => {
     }),
   );
 
-  it.effect("does not read Keychain or send its token to a custom endpoint", () =>
+  it.effect("does not send a Keychain login or API key to a custom endpoint", () =>
     Effect.gen(function* () {
       for (const [apiEndpoint, environment] of [
         ["http://localhost:3000", {}],
         ["", { CURSOR_API_ENDPOINT: "http://localhost:3000" }],
         ["https://cursor-proxy.example", {}],
         ["", { CURSOR_API_ENDPOINT: "https://cursor-proxy.example" }],
+        ["https://cursor-proxy.example", { CURSOR_API_KEY: "api-key" }],
       ] as const) {
         const limits = yield* withNodeServices(
           readCursorUsageLimits({ apiEndpoint }, environment, true).pipe(

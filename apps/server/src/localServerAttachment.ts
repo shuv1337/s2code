@@ -4,7 +4,7 @@ import {
 } from "@t3tools/shared/localServerAttachment";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as Effect from "effect/Effect";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -19,8 +19,8 @@ export const withLocalDesktopBootstrap = Effect.fn("withLocalDesktopBootstrap")(
   config: ServerConfig.ServerConfig["Service"],
 ) {
   if (config.desktopBootstrapSecret || config.desktopBootstrapToken) return config;
-  const crypto = yield* Crypto.Crypto;
-  return { ...config, desktopBootstrapSecret: Hex.encode(yield* crypto.randomBytes(32)) };
+  const random = yield* SecureRandom.SecureRandom;
+  return { ...config, desktopBootstrapSecret: Hex.encode(yield* random.randomBytes(32)) };
 });
 
 export const persistLocalServerAttachment = Effect.fn("persistLocalServerAttachment")(function* (
