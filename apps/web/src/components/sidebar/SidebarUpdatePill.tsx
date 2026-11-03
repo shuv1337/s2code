@@ -134,6 +134,7 @@ const toastUpdateError: ReportLocalUpdateError = (title, description) => {
   toastManager.add(stackedThreadToast({ type: "error", title, description }));
 };
 
+/** @public Upstream's track-switch dialog calls this; the nightly-only fork has no caller. */
 export async function downloadLocalUpdate(
   bridge: DesktopBridge,
   {
@@ -160,6 +161,7 @@ export async function downloadLocalUpdate(
   }
 }
 
+/** @public Upstream's track-switch dialog calls this; the nightly-only fork has no caller. */
 export async function installLocalUpdate(
   bridge: DesktopBridge,
   reportError: ReportLocalUpdateError = toastUpdateError,
