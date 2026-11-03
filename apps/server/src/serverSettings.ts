@@ -251,6 +251,15 @@ export class ServerSettingsService extends Context.Service<
       patch?: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /**
+     * Replaces one instance with `update(current)` under the write lock, so no other write lands
+     * between the read and the write. Returns false, writing nothing, when `update` returns undefined.
+     */
+    readonly modifyProviderInstance: (
+      instanceId: ProviderInstanceId,
+      update: (current: ProviderInstanceConfig | undefined) => ProviderInstanceConfig | undefined,
+    ) => Effect.Effect<boolean, ServerSettingsError>;
+
     readonly withSettingsSnapshot: <A, E, R>(
       use: (settings: ServerSettings) => Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | ServerSettingsError, R>;
@@ -309,6 +318,21 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
           yield* ensureProviderInstanceMutationAllowed(currentSettings, mutation, "test settings");
           const patched = applyServerSettingsPatch(currentSettings, patch);
           return applyProviderInstanceMutation(patched, mutation);
+        }),
+      ),
+    modifyProviderInstance: (instanceId, update) =>
+      writeSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(currentSettingsRef);
+          const instance = update(current.providerInstances[instanceId]);
+          if (instance === undefined) return false;
+          const mutation = { operation: "upsert", instanceId, instance } as const;
+          yield* ensureProviderInstanceMutationAllowed(current, mutation, "test settings");
+          yield* Ref.set(
+            currentSettingsRef,
+            yield* normalizeServerSettings(applyProviderInstanceMutation(current, mutation)),
+          );
+          return true;
         }),
       ),
     withSettingsSnapshot: (use) =>
@@ -1109,44 +1133,74 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /** The settings on disk, for a write about to replace them. Callers hold `writeSemaphore`. */
+  const readForUpdate = Effect.gen(function* () {
+    const { settings: current, parseFailure } = yield* reloadSettings;
+    if (Option.isSome(parseFailure)) {
+      return yield* new ServerSettingsError({
+        settingsPath,
+        operation: "read-file",
+        cause: parseFailure.value,
+      });
+    }
+    return current;
+  });
+
+  /** Writes `updated` over `current`. Callers hold `writeSemaphore`. */
+  const persistUpdate = Effect.fn("serverSettings.persistUpdate")(function* (
+    current: ServerSettings,
+    requested: ServerSettings,
+  ) {
+    const updated = forgetMovedMcpServerTokens(current, requested);
+    const persisted = yield* persistSettingsSecrets(current, updated);
+    const next = yield* normalizeServerSettings(persisted.settings);
+    const materializedNext = yield* Effect.uninterruptibleMask(() =>
+      Effect.gen(function* () {
+        yield* invalidateMaterialized;
+        const rollbackSecretChanges = yield* applySettingsSecretChanges(persisted.changes);
+        const materializedExit = yield* Effect.exit(materializeSettingsSecrets(next));
+        if (Exit.isFailure(materializedExit)) {
+          yield* rollbackSecretChanges;
+          return yield* Effect.failCause(materializedExit.cause);
+        }
+        const writeExit = yield* Effect.exit(writeSettingsAtomically(next));
+        if (Exit.isFailure(writeExit)) {
+          yield* rollbackSecretChanges;
+          return yield* Effect.failCause(writeExit.cause);
+        }
+        return materializedExit.value;
+      }).pipe(Effect.ensuring(invalidateMaterialized)),
+    );
+    yield* Cache.set(settingsCache, cacheKey, { settings: next, parseFailure: Option.none() });
+    const resolved = resolveTextGenerationProvider(materializedNext);
+    materialized = { source: next, value: resolved };
+    yield* emitChange(next);
+    return resolved;
+  });
+
   const updateAndPersistSettings = (
     update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
-        const { settings: current, parseFailure } = yield* reloadSettings;
-        if (Option.isSome(parseFailure)) {
-          return yield* new ServerSettingsError({
-            settingsPath,
-            operation: "read-file",
-            cause: parseFailure.value,
-          });
-        }
-        const updated = forgetMovedMcpServerTokens(current, yield* update(current));
-        const persisted = yield* persistSettingsSecrets(current, updated);
-        const next = yield* normalizeServerSettings(persisted.settings);
-        const materializedNext = yield* Effect.uninterruptibleMask(() =>
-          Effect.gen(function* () {
-            yield* invalidateMaterialized;
-            const rollbackSecretChanges = yield* applySettingsSecretChanges(persisted.changes);
-            const materializedExit = yield* Effect.exit(materializeSettingsSecrets(next));
-            if (Exit.isFailure(materializedExit)) {
-              yield* rollbackSecretChanges;
-              return yield* Effect.failCause(materializedExit.cause);
-            }
-            const writeExit = yield* Effect.exit(writeSettingsAtomically(next));
-            if (Exit.isFailure(writeExit)) {
-              yield* rollbackSecretChanges;
-              return yield* Effect.failCause(writeExit.cause);
-            }
-            return materializedExit.value;
-          }).pipe(Effect.ensuring(invalidateMaterialized)),
-        );
-        yield* Cache.set(settingsCache, cacheKey, { settings: next, parseFailure: Option.none() });
-        const resolved = resolveTextGenerationProvider(materializedNext);
-        materialized = { source: next, value: resolved };
-        yield* emitChange(next);
-        return resolved;
+        const current = yield* readForUpdate;
+        return yield* persistUpdate(current, yield* update(current));
+      }),
+    );
+
+  const modifyProviderInstance: ServerSettingsService["Service"]["modifyProviderInstance"] = (
+    instanceId,
+    update,
+  ) =>
+    writeSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* readForUpdate;
+        const instance = update(current.providerInstances[instanceId]);
+        if (instance === undefined) return false;
+        const mutation = { operation: "upsert", instanceId, instance } as const;
+        yield* ensureProviderInstanceMutationAllowed(current, mutation, settingsPath);
+        yield* persistUpdate(current, applyProviderInstanceMutation(current, mutation));
+        return true;
       }),
     );
 
@@ -1272,6 +1326,7 @@ const make = Effect.gen(function* () {
           return applyProviderInstanceMutation(patched, mutation);
         }),
       ),
+    modifyProviderInstance,
     withSettingsSnapshot,
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));

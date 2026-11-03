@@ -85,7 +85,16 @@ export const ProviderInstanceConfig = Schema.Struct({
   disableOnUsageLimit: Schema.optionalKey(Schema.Boolean),
   /** Why the server turned the instance off; cleared when it is enabled again. */
   usageLimitDisabled: Schema.optionalKey(
-    Schema.Struct({ at: IsoDateTime, message: TrimmedNonEmptyString }),
+    Schema.Struct({
+      at: IsoDateTime,
+      message: TrimmedNonEmptyString,
+      /** Opaque key of the spent account, so linked environments can turn off theirs too. */
+      account: Schema.optionalKey(TrimmedNonEmptyString),
+      /** The linked environment that reported the spent quota; absent when it was seen here. */
+      reportedBy: Schema.optionalKey(TrimmedNonEmptyString),
+      /** When the provider said the quota resets, if it did. */
+      resetAt: Schema.optionalKey(IsoDateTime),
+    }),
   ),
   config: Schema.optionalKey(Schema.Unknown),
 });

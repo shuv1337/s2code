@@ -48,6 +48,8 @@ export interface ResolvedPeerLink {
   /** The first address that answered as this peer. */
   readonly url: string;
   readonly token: string;
+  /** What the peer said it supports when it answered at `url`. */
+  readonly capabilities: ExecutionEnvironmentCapabilities;
 }
 
 export const LINKED_ENVIRONMENTS_OFF =
@@ -75,6 +77,8 @@ export class PeerLinks extends Context.Service<
       Option.Option<{ readonly environmentId: EnvironmentId; readonly label: string }>
     >;
     readonly list: Effect.Effect<ReadonlyArray<PeerLinkSummary>, PeerLinkError>;
+    /** Every stored link, without asking the peers whether they answer. */
+    readonly stored: Effect.Effect<ReadonlyArray<PeerLink>, PeerLinkError>;
     /** The stored link, without asking the peer whether it answers. */
     readonly get: (
       environmentId: EnvironmentId,
@@ -500,8 +504,12 @@ const make = Effect.gen(function* () {
           ),
         );
 
+  const stored: PeerLinks["Service"]["stored"] = readRows.pipe(
+    Effect.flatMap((rows) => Effect.forEach(rows, toLink)),
+  );
+
   const list: PeerLinks["Service"]["list"] = Effect.gen(function* () {
-    const links = yield* Effect.forEach(yield* readRows, toLink);
+    const links = yield* stored;
     const now = yield* DateTime.now;
     return yield* Effect.forEach(
       links,
@@ -558,12 +566,12 @@ const make = Effect.gen(function* () {
       }
       // The token goes only to an address that proves it is this peer, so a
       // reused LAN address or a moved hostname never receives it.
-      let fenced = true;
+      let capabilities: ExecutionEnvironmentCapabilities = { repositoryIdentity: false };
       const url = yield* Effect.findFirst(link.urls, (candidate) =>
         describe(candidate).pipe(
           Effect.map((found) => {
             if (Option.isNone(found) || found.value.environmentId !== environmentId) return false;
-            fenced = linkLimitsHold(found.value);
+            capabilities = found.value.capabilities;
             return true;
           }),
         ),
@@ -576,13 +584,18 @@ const make = Effect.gen(function* () {
       }
       // A link made before the peer had to fence linked work, or a peer moved
       // back to such a version, would carry work past those limits.
-      if (!fenced) {
+      if (!linkLimitsHold({ capabilities })) {
         return yield* new PeerLinkError({
           reason: "incompatible",
           message: `${link.label} runs a T3 Code version that cannot keep a linked agent's limits. Update it, then link again.`,
         });
       }
-      return { link, url: url.value, token: new TextDecoder().decode(stored.value) };
+      return {
+        link,
+        url: url.value,
+        token: new TextDecoder().decode(stored.value),
+        capabilities,
+      };
     },
   );
 
@@ -609,6 +622,7 @@ const make = Effect.gen(function* () {
     link,
     describe: describeUrl,
     list,
+    stored,
     get,
     unlink,
     resolve,

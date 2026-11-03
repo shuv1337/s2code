@@ -448,6 +448,38 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
       assert.equal(afterProviderSave.responseStreamingMode, "paragraph");
       assert.equal(afterProviderSave.providerInstances[instanceId]?.displayName, "Kilo");
+
+      // A modify decides on the instance as it is on disk, and keeps the rest of the edit.
+      yield* writeFileStringAtomically({
+        filePath: config.settingsPath,
+        contents: JSON.stringify({
+          responseStreamingMode: "turn",
+          providerInstances: {
+            [instanceId]: {
+              ...afterProviderSave.providerInstances[instanceId],
+              displayName: "Kilo (edited)",
+            },
+          },
+        }),
+      });
+      const seen: Array<string | undefined> = [];
+      assert.isTrue(
+        yield* serverSettings.modifyProviderInstance(instanceId, (current) => {
+          seen.push(current?.displayName);
+          return current === undefined ? undefined : { ...current, enabled: false };
+        }),
+      );
+      assert.deepEqual(seen, ["Kilo (edited)"]);
+      const afterModify = yield* fs.readFileString(config.settingsPath);
+      const modified = yield* decodeServerSettingsJson(afterModify);
+      assert.equal(modified.responseStreamingMode, "turn");
+      assert.deepInclude(modified.providerInstances[instanceId], {
+        displayName: "Kilo (edited)",
+        enabled: false,
+      });
+
+      assert.isFalse(yield* serverSettings.modifyProviderInstance(instanceId, () => undefined));
+      assert.equal(yield* fs.readFileString(config.settingsPath), afterModify);
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
@@ -469,6 +501,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.equal(error.operation, "read-file");
       assert.equal(error.settingsPath, config.settingsPath);
       assert.instanceOf(error.cause, Error);
+      assert.equal(yield* fs.readFileString(config.settingsPath), raw);
+
+      let decided = false;
+      const modifyError = yield* Effect.flip(
+        serverSettings.modifyProviderInstance(ProviderInstanceId.make("codex"), (current) => {
+          decided = true;
+          return current;
+        }),
+      );
+      assert.equal(modifyError.operation, "read-file");
+      assert.isFalse(decided);
       assert.equal(yield* fs.readFileString(config.settingsPath), raw);
     }).pipe(Effect.provide(layerServerSettings())),
   );
