@@ -34,8 +34,9 @@ import {
 
 const UPDATE_RESTART_DELAY_MS = 5_000;
 
-/** Servers this desktop app runs; they update with it. */
-function isHostedByThisApp(
+/** Servers this desktop app runs; they update with it.
+ * @public Upstream's settings panels and track-switch dialog call this; the nightly-only fork has no caller. */
+export function isHostedByThisApp(
   environment: ReturnType<typeof useEnvironments>["environments"][number],
 ) {
   return (

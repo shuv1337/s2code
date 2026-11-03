@@ -560,8 +560,9 @@ export function launcherOwnsVersionsDir(
   return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-/** The executable a `t3.cmd` shim written by the install script or `t3 update` runs. */
-const windowsShimTarget = (contents: string) => /^"([^"]+)"/m.exec(contents)?.[1];
+/** The executable a `t3.cmd` shim written by the install script or `t3 update` runs.
+ * @public Upstream's `t3 update` and `t3 uninstall` call this; the nightly-only fork has no caller. */
+export const windowsShimTarget = (contents: string) => /^"([^"]+)"/m.exec(contents)?.[1];
 
 /** Where the `t3` launchers written by the install scripts and `t3 update` point. */
 const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targets")(function* (
