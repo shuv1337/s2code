@@ -110,7 +110,8 @@ Unlinking on the linking side only forgets the token.
   account's state is last-writer-wins, and a change made locally is stamped
   just after the state it replaces, so a user's re-enable beats the state they
   saw whatever the clocks say. Applying a received state never stamps a new
-  one; a re-enable counts as the user's only while the stored state is spent.
+  one: the settings watcher skips the re-enables an apply made, and counts any
+  other re-enable as the user's only while the stored state is spent.
 
 **Work a link paired below full access starts stays within that link.** The
 receiving environment knows a session is a peer link because the linking side

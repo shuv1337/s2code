@@ -376,8 +376,10 @@ export const ProviderAccountUsageLimitRecord = Schema.Struct({
 });
 export type ProviderAccountUsageLimitRecord = typeof ProviderAccountUsageLimitRecord.Type;
 
+export const PROVIDER_ACCOUNT_SYNC_MAX_RECORDS = 1_000;
+
 const ProviderAccountUsageLimitRecords = Schema.Array(ProviderAccountUsageLimitRecord).check(
-  Schema.isMaxLength(1_000),
+  Schema.isMaxLength(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS),
 );
 
 export const ProviderAccountSyncInput = Schema.Struct({

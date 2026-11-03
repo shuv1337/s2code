@@ -40,11 +40,12 @@ export const localChangeTime = (
   );
 
 export interface LocalTransition {
+  readonly instanceId: ProviderInstanceId;
   readonly account: string;
   readonly driver: ProviderDriverKind;
   readonly spent: boolean;
-  /** When this environment turned the instance off; absent for a re-enable. */
-  readonly at?: string;
+  /** When the quota note this transition wrote, or for a re-enable cleared, was stamped. */
+  readonly at: string;
   readonly message?: string;
 }
 
@@ -61,12 +62,13 @@ const localNote = (instance: ProviderInstanceConfig) => {
  * the previous run recorded it; the caller records one only when nothing newer is known.
  */
 export const localSpentNotes = (instances: ProviderInstanceConfigMap): LocalTransition[] =>
-  Object.values(instances).flatMap((instance) => {
+  Object.entries(instances).flatMap(([instanceId, instance]) => {
     const note = localNote(instance);
     return note === undefined
       ? []
       : [
           {
+            instanceId: instanceId as ProviderInstanceId,
             account: note.account,
             driver: instance.driver,
             spent: true,
@@ -85,12 +87,14 @@ export const localTransitions = (
   previous: ProviderInstanceConfigMap,
   next: ProviderInstanceConfigMap,
 ): LocalTransition[] =>
-  Object.entries(next).flatMap(([instanceId, instance]): LocalTransition[] => {
-    const before = previous[instanceId as ProviderInstanceId]?.usageLimitDisabled;
+  Object.entries(next).flatMap(([key, instance]): LocalTransition[] => {
+    const instanceId = key as ProviderInstanceId;
+    const before = previous[instanceId]?.usageLimitDisabled;
     const note = localNote(instance);
     if (note !== undefined && (before?.at !== note.at || before.account !== note.account)) {
       return [
         {
+          instanceId,
           account: note.account,
           driver: instance.driver,
           spent: true,
@@ -104,7 +108,15 @@ export const localTransitions = (
       instance.usageLimitDisabled === undefined &&
       instance.enabled !== false
     ) {
-      return [{ account: before.account, driver: instance.driver, spent: false }];
+      return [
+        {
+          instanceId,
+          account: before.account,
+          driver: instance.driver,
+          spent: false,
+          at: before.at,
+        },
+      ];
     }
     return [];
   });

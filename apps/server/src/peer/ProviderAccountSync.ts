@@ -1,4 +1,5 @@
 import {
+  PROVIDER_ACCOUNT_SYNC_MAX_RECORDS,
   ProviderAccountSyncResult,
   ProviderAccountUsageLimitRecord,
   type PeerLink,
@@ -89,17 +90,27 @@ const make = Effect.gen(function* () {
   // Merges, local records and applies each read a record before replacing it.
   const lock = yield* Semaphore.make(1);
   const syncRequested = yield* Queue.sliding<void>(1);
+  // Instance and cleared-note pairs an apply turned back on, so the watcher does not take them
+  // for the user's re-enable. Read and written under `lock`.
+  const appliedEnables = new Set<string>();
+  const enableKey = (instanceId: string, noteAt: string) => `${instanceId}\n${noteAt}`;
 
   const self = environment.getDescriptor.pipe(
     Effect.map((descriptor) => ({
       environmentId: descriptor.environmentId,
-      label: clip(descriptor.label, MAX_LABEL_LENGTH),
+      label: clip(descriptor.label, MAX_LABEL_LENGTH) || descriptor.environmentId,
     })),
   );
 
   const readRows = (where: "all" | "pending") =>
     (where === "all"
-      ? sql<UsageLimitRow>`SELECT * FROM provider_account_usage_limits ORDER BY account`
+      ? // A peer refuses more, and the oldest states have long converged.
+        sql<UsageLimitRow>`
+          SELECT * FROM (
+            SELECT * FROM provider_account_usage_limits
+            ORDER BY changed_at DESC LIMIT ${PROVIDER_ACCOUNT_SYNC_MAX_RECORDS}
+          ) ORDER BY account
+        `
       : sql<UsageLimitRow>`
           SELECT * FROM provider_account_usage_limits WHERE applied = 0 ORDER BY account
         `
@@ -173,7 +184,11 @@ const make = Effect.gen(function* () {
               providers,
             });
             for (const write of writes) {
+              const cleared = current.providerInstances[write.instanceId]?.usageLimitDisabled;
               yield* settings.updateProviderInstance({ operation: "upsert", ...write });
+              if (!record.spent && cleared !== undefined) {
+                appliedEnables.add(enableKey(write.instanceId, cleared.at));
+              }
             }
             if (!settled) return;
             // Only the record that was applied; a newer one merged since stays pending.
@@ -212,7 +227,7 @@ const make = Effect.gen(function* () {
         for (const transition of transitions) {
           const current = yield* readOne(transition.account);
           let changedAt: string;
-          if (transition.spent && transition.at !== undefined) {
+          if (transition.spent) {
             // A note from before this run is recorded as it was, unless something newer is known.
             if (
               startup &&
@@ -226,6 +241,7 @@ const make = Effect.gen(function* () {
               : localChangeTime(Date.parse(transition.at), current);
           } else {
             // Only a user turning on what a quota turned off resets it; applied resets do not.
+            if (appliedEnables.delete(enableKey(transition.instanceId, transition.at))) continue;
             if (current?.spent !== true) continue;
             changedAt = localChangeTime(nowMs, current);
           }
@@ -286,10 +302,15 @@ const make = Effect.gen(function* () {
   );
 
   const syncNow: ProviderAccountSync["Service"]["syncNow"] = Effect.gen(function* () {
-    const enabled = yield* settings.getSettings.pipe(
-      Effect.map((current) => current.linkedEnvironmentsEnabled),
+    const current = yield* settings.getSettings;
+    if (!current.linkedEnvironmentsEnabled) return;
+    // Without a pool or a state to pass on, an exchange could change nothing on either side.
+    const pooled = Object.values(current.providerInstances).some(
+      (instance) => instance.disableOnUsageLimit === true,
     );
-    if (!enabled) return;
+    if (!pooled && (yield* sql`SELECT 1 FROM provider_account_usage_limits LIMIT 1`).length === 0) {
+      return;
+    }
     const now = yield* DateTime.now;
     const stored = yield* links.stored;
     yield* Effect.forEach(

@@ -1267,7 +1267,7 @@ export function ProviderInstanceCard({
             description={
               instance.usageLimitDisabled.reportedBy === undefined
                 ? instance.usageLimitDisabled.message
-                : `${instance.usageLimitDisabled.message} Reported by ${instance.usageLimitDisabled.reportedBy}.`
+                : `Reported by ${instance.usageLimitDisabled.reportedBy}: ${instance.usageLimitDisabled.message}`
             }
           />
         ) : null}

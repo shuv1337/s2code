@@ -143,19 +143,46 @@ describe("localTransitions", () => {
       "a quota note written here",
       pooled(),
       spentHere,
-      [{ account: work, driver: cursor, spent: true, at: T1, message: "Usage limit reached." }],
+      [
+        {
+          instanceId: instance,
+          account: work,
+          driver: cursor,
+          spent: true,
+          at: T1,
+          message: "Usage limit reached.",
+        },
+      ],
     ],
     [
       "a quota note on a new instance",
       undefined,
       spentHere,
-      [{ account: work, driver: cursor, spent: true, at: T1, message: "Usage limit reached." }],
+      [
+        {
+          instanceId: instance,
+          account: work,
+          driver: cursor,
+          spent: true,
+          at: T1,
+          message: "Usage limit reached.",
+        },
+      ],
     ],
     [
       "a newer quota note for the same instance",
       spentHere,
       pooled({ ...spentHere, usageLimitDisabled: { ...spentHere.usageLimitDisabled!, at: T2 } }),
-      [{ account: work, driver: cursor, spent: true, at: T2, message: "Usage limit reached." }],
+      [
+        {
+          instanceId: instance,
+          account: work,
+          driver: cursor,
+          spent: true,
+          at: T2,
+          message: "Usage limit reached.",
+        },
+      ],
     ],
     ["the same quota note again", spentHere, spentHere, []],
     ["a note another environment reported", pooled(), spentElsewhere, []],
@@ -175,13 +202,13 @@ describe("localTransitions", () => {
       "re-enabled after a local quota note",
       spentHere,
       pooled(),
-      [{ account: work, driver: cursor, spent: false }],
+      [{ instanceId: instance, account: work, driver: cursor, spent: false, at: T1 }],
     ],
     [
       "re-enabled after a reported quota note",
       spentElsewhere,
       pooled(),
-      [{ account: work, driver: cursor, spent: false }],
+      [{ instanceId: instance, account: work, driver: cursor, spent: false, at: T1 }],
     ],
     [
       "re-enabled after a note without an account",
@@ -206,7 +233,14 @@ describe("localTransitions", () => {
         [id("d")]: pooled(),
       }),
     ).toEqual([
-      { account: work, driver: cursor, spent: true, at: T1, message: "Usage limit reached." },
+      {
+        instanceId: id("a"),
+        account: work,
+        driver: cursor,
+        spent: true,
+        at: T1,
+        message: "Usage limit reached.",
+      },
     ]);
   });
 });

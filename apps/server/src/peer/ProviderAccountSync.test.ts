@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   OrchestratorMcpFailure,
   type PeerLink,
+  PROVIDER_ACCOUNT_SYNC_MAX_RECORDS,
   ProviderAccountSyncInput,
   type ProviderAccountUsageLimitRecord,
   ProviderDriverKind,
@@ -14,6 +15,7 @@ import {
 import { providerAccountKey } from "@t3tools/shared/providerAccount";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -87,6 +89,7 @@ const makeHost = Effect.fn(function* (input: {
   const online = yield* Ref.make(input.online ?? true);
   const providers = yield* Ref.make(input.providers);
   const providerChanges = yield* PubSub.unbounded<ReadonlyArray<ServerProvider>>({ replay: 1 });
+  const watched = yield* Latch.make(true);
 
   const layerSettings = Layer.effect(
     ServerSettingsModule.ServerSettingsService,
@@ -105,7 +108,11 @@ const makeHost = Effect.fn(function* (input: {
         updateProviderInstance: (mutation, patch) =>
           published(base.updateProviderInstance(mutation, patch)),
         streamChanges: Stream.fromPubSub(changes),
-        subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
+        subscribeChanges: PubSub.subscribe(changes).pipe(
+          Effect.map((subscription) =>
+            Stream.fromSubscription(subscription).pipe(Stream.tap(() => watched.await)),
+          ),
+        ),
       });
     }),
   ).pipe(
@@ -231,6 +238,9 @@ const makeHost = Effect.fn(function* (input: {
     calls: Ref.get(calls),
     resolves: Ref.get(resolves),
     setOnline: (value: boolean) => Ref.set(online, value),
+    /** Holds settings changes back from the service's watcher until `releaseWatcher`. */
+    holdWatcher: watched.close,
+    releaseWatcher: watched.open,
     records: sync.exchange([]),
   };
 });
@@ -359,6 +369,49 @@ it.effect("a re-enable on the linked host turns the account back on here, and th
   }),
 );
 
+it.effect("an applied re-enable is not the user's, even when a newer spent state lands first", () =>
+  Effect.gen(function* () {
+    const { a, b } = yield* linkedHosts({
+      a: { cursor_a: pooled, cursor_marker: pooled },
+      aProviders: [
+        providerFor("cursor_a"),
+        providerFor("cursor_marker", { status: "authenticated", email: OTHER_EMAIL }),
+      ],
+      b: { cursor_b: pooled },
+      bProviders: [providerFor("cursor_b")],
+    });
+    yield* spendOn(a, "cursor_a");
+    yield* a.nextExchange;
+    yield* b.write("cursor_b", pooled);
+    yield* b.nextSync;
+
+    // A applies B's re-enable, then B's next spent state, before A's watcher sees either write.
+    yield* a.holdWatcher;
+    yield* a.sync.syncNow;
+    yield* a.nextExchange;
+    expect((yield* a.instance("cursor_a"))?.enabled).toBe(true);
+    yield* spendOn(b, "cursor_b", POOL_EMAIL, "2026-11-03T11:00:00.000Z");
+    yield* b.nextSync;
+    yield* a.sync.syncNow;
+    yield* a.nextExchange;
+    expect(yield* a.instance("cursor_a")).toMatchObject({
+      enabled: false,
+      usageLimitDisabled: { reportedBy: "Host B" },
+    });
+    yield* a.releaseWatcher;
+
+    yield* spendOn(a, "cursor_marker", OTHER_EMAIL);
+    yield* a.nextExchange;
+    expect(yield* a.records).toMatchObject(
+      [
+        { account: accountOf(POOL_EMAIL), spent: true, origin: { environmentId: "env-b" } },
+        { account: accountOf(OTHER_EMAIL), spent: true, origin: { environmentId: "env-a" } },
+      ].toSorted((left, right) => left.account.localeCompare(right.account)),
+    );
+    expect((yield* b.instance("cursor_b"))?.enabled).toBe(false);
+  }),
+);
+
 it.effect("the newest record wins, and a tie goes to the larger environment id", () =>
   Effect.gen(function* () {
     const host = yield* makeHost({
@@ -392,6 +445,27 @@ it.effect("the newest record wins, and a tie goes to the larger environment id",
     expect(yield* host.sync.exchange([tieWinner])).toEqual([tieWinner]);
     const newer = recordFrom("env-a", "2026-11-03T11:00:00.000Z", true);
     expect(yield* host.sync.exchange([newer])).toEqual([newer]);
+  }),
+);
+
+it.effect("hands out only as many of the newest records as a peer accepts", () =>
+  Effect.gen(function* () {
+    const host = yield* makeHost({ id: "env-m", label: "Host M", instances: {}, providers: [] });
+    const records = Array.from(
+      { length: PROVIDER_ACCOUNT_SYNC_MAX_RECORDS + 1 },
+      (_, index): ProviderAccountUsageLimitRecord => ({
+        account: `account-${index}`,
+        driver: cursor,
+        spent: true,
+        changedAt: DateTime.formatIso(DateTime.makeUnsafe(Date.parse(SPENT_AT) + index * 1_000)),
+        origin: { environmentId: EnvironmentId.make("env-k"), label: "Host K" },
+      }),
+    );
+    yield* host.sync.exchange(records.slice(0, PROVIDER_ACCOUNT_SYNC_MAX_RECORDS));
+    const known = yield* host.sync.exchange(records.slice(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS));
+
+    expect(known).toHaveLength(PROVIDER_ACCOUNT_SYNC_MAX_RECORDS);
+    expect(known.map((record) => record.account)).not.toContain("account-0");
   }),
 );
 
