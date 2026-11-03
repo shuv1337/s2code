@@ -186,6 +186,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+      yield* fs.writeFileString(`${baseDir}/.product-identity`, "s2code\n");
       yield* fs.writeFileString(`${baseDir}/service.env`, input.env);
       const { service } = makeTestService({
         ...status,

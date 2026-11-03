@@ -407,19 +407,23 @@ it.layer(NodeServices.layer)("server self update", (it) => {
 
   it.effect("lets a user start an update, but only to stable without nightly", () =>
     Effect.gen(function* () {
-      const { selfUpdate, order } = yield* makeHarness({
-        policy: {
-          schemaVersion: 1,
-          organization: "Example Corp",
-          limits: { updates: { mode: "auto", allowNightly: false } },
-        },
-      });
+      const policy = {
+        schemaVersion: 1,
+        organization: "Example Corp",
+        limits: { updates: { mode: "auto", allowNightly: false } },
+      } as const;
+      // Channels are separate installs, so only a nightly install can request a nightly.
+      const nightly = yield* makeHarness({ policy, currentVersion: "1.0.0-nightly.20261014.1" });
       expect(
-        (yield* selfUpdate.update({ targetVersion: "1.2.0-nightly.20261028.1" }).pipe(Effect.flip))
-          .reason,
+        (yield* nightly.selfUpdate
+          .update({ targetVersion: "1.2.0-nightly.20261028.1" })
+          .pipe(Effect.flip)).reason,
       ).toBe("Example Corp manages T3 Code updates. Only stable releases can be installed.");
-      expect(order).toEqual([]);
-      expect((yield* selfUpdate.update({ targetVersion: "1.1.0" })).updateId).toBe("launcher-id");
+      expect(nightly.order).toEqual([]);
+      const stable = yield* makeHarness({ policy });
+      expect((yield* stable.selfUpdate.update({ targetVersion: "1.1.0" })).updateId).toBe(
+        "launcher-id",
+      );
     }),
   );
 

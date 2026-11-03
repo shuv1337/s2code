@@ -80,7 +80,11 @@ it.effect("authenticates each release page until the requested channel is found"
 it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
   const runWithPolicy = (
     updates: ManagedUpdatesPolicy,
-    input: { readonly channel?: "stable" | "nightly"; readonly requestedVersion?: string } = {},
+    input: {
+      readonly channel?: "stable" | "nightly";
+      readonly requestedVersion?: string;
+      readonly currentVersion?: string;
+    } = {},
   ) =>
     runUpdate({
       baseDir: "/unused",
@@ -88,6 +92,7 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
       serverRuntimeStatePath: "/unused",
       channel: input.channel,
       requestedVersion: input.requestedVersion,
+      ...(input.currentVersion ? { currentVersion: input.currentVersion } : {}),
       allowDowngrade: false,
       assumeYes: true,
     }).pipe(
@@ -119,13 +124,14 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
 
   it.effect("refuses nightly releases when the policy disallows them", () =>
     Effect.gen(function* () {
+      // Channels are separate installs, so a nightly install updates within nightly.
       const byChannel = yield* runWithPolicy(
         { mode: "auto", allowNightly: false },
-        { channel: "nightly" },
+        { currentVersion: "1.2.0-nightly.20261020.1" },
       );
       const byVersion = yield* runWithPolicy(
         { mode: "auto", allowNightly: false },
-        { channel: "stable", requestedVersion: "1.2.0-nightly.20261028.1" },
+        { currentVersion: "1.2.0", requestedVersion: "1.2.0-nightly.20261028.1" },
       );
       for (const error of [byChannel, byVersion]) {
         assert.equal(
@@ -321,6 +327,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       );
       const bin = path.join(root, "bin");
       yield* fs.makeDirectory(bin);
+      yield* fs.makeDirectory(path.join(root, "runtime"));
       const content = `@echo off\r\n"${oldExe}" %*`;
       const stableShim = path.join(bin, "s2code.cmd");
       const shim = path.join(bin, `s2code-${channel}.cmd`);

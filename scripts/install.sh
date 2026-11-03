@@ -58,10 +58,20 @@ fail() {
 if [ -n "${T3CODE_HOME:-}" ] && [ -z "${S2CODE_HOME:-}" ]; then
   printf '%s\n' "s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home." >&2
 fi
+# Command substitution would drop a component's trailing newline, so walk up with expansions.
 canonical_dir() (
-  if [ -d "$1" ]; then cd -P "$1" && pwd -P
-  else printf '%s/%s\n' "$(canonical_dir "$(dirname "$1")")" "$(basename "$1")"
-  fi
+  path=$1 suffix=
+  while case "$path" in ?*/) true ;; *) false ;; esac; do path="${path%/}"; done
+  while [ ! -d "$path" ]; do
+    case "$path" in
+      */*) suffix="/${path##*/}$suffix"; path="${path%/*}"; [ -n "$path" ] || path=/ ;;
+      *) suffix="/$path$suffix"; path=. ;;
+    esac
+  done
+  resolved="$(cd -P -- "$path" && pwd -P && printf .)"
+  resolved="${resolved%??}"
+  [ "$resolved" != / ] || [ -z "$suffix" ] || resolved=
+  printf '%s%s\n' "$resolved" "$suffix"
 )
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.

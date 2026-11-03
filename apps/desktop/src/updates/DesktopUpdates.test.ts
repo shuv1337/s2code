@@ -954,7 +954,11 @@ describe("DesktopUpdates under a managed policy", () => {
   });
 
   it.effect("refuses the nightly channel without nightly", () => {
-    const harness = makeHarness({ policy: managed({ allowNightly: false }) });
+    // Channels are separate installs, so only a nightly install can request nightly.
+    const harness = makeHarness({
+      appVersion: "1.2.3-nightly.20261028.1",
+      policy: managed({ allowNightly: false }),
+    });
 
     return Effect.scoped(
       Effect.gen(function* () {
@@ -962,7 +966,7 @@ describe("DesktopUpdates under a managed policy", () => {
         yield* updates.configure;
         const error = yield* updates.setChannel("nightly").pipe(Effect.flip);
         assert.equal(error._tag, "DesktopUpdateChannelManagedError");
-        assert.equal((yield* updates.getState).channel, "latest");
+        assert.equal(harness.checkCount(), 0);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -985,7 +989,7 @@ describe("DesktopUpdates under a managed policy", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("holds a nightly install until its user switches to stable", () => {
+  it.effect("holds a nightly install and points its user at a separate stable install", () => {
     const harness = makeHarness({
       appVersion: "1.2.3-nightly.20261028.1",
       // A managed app ignores the mock feed, so give it a real one.
@@ -1002,15 +1006,15 @@ describe("DesktopUpdates under a managed policy", () => {
         assert.equal(held.channel, "nightly");
         assert.equal(held.status, "disabled");
         assert.include(held.message ?? "", message);
+        assert.include(held.message ?? "", "Install the stable channel separately");
         assert.isTrue(held.channelBlockedByPolicy);
         assert.isFalse((yield* updates.check("menu")).checked);
         assert.equal(harness.checkCount(), 0);
 
-        const stable = yield* updates.setChannel("latest");
-        assert.equal(stable.channel, "latest");
-        assert.isTrue(stable.enabled);
-        assert.isUndefined(stable.channelBlockedByPolicy);
-        assert.equal(harness.checkCount(), 1);
+        const error = yield* updates.setChannel("latest").pipe(Effect.flip);
+        assert.equal(error._tag, "DesktopUpdateChannelOwnershipError");
+        assert.equal((yield* updates.getState).channel, "nightly");
+        assert.equal(harness.checkCount(), 0);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

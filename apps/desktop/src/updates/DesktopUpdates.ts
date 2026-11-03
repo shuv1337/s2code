@@ -492,12 +492,12 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  // Without nightly, an install on that channel stays put until its user picks stable: moving it
-  // silently would be a downgrade nobody asked for, and checking nightly would break the policy.
+  // Without nightly, an install on that channel stays put: channels are separate installs, so
+  // moving it would replace another app, and checking nightly would break the policy.
   const channelBlockedReason = (channel: DesktopUpdateChannel): Option.Option<string> =>
     channel === "nightly" && !policy.allowNightly
       ? Option.some(
-          `${policy.message ?? "Nightly updates are turned off on this machine."} Switch to the stable channel to keep getting updates.`,
+          `${policy.message ?? "Nightly updates are turned off on this machine."} Install the stable channel separately to keep getting updates.`,
         )
       : Option.none();
 

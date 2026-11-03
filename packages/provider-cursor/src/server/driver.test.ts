@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -375,7 +376,10 @@ it.layer(layerTest)("CursorDriver", (it) => {
       const explicitWindow = yield* startTurn("500k");
       const unknownWindow = yield* startTurn("max");
       failUser = true;
-      expect((yield* instance.snapshot.refresh).status).toBe("error");
+      // A 5xx retries with backoff before the snapshot reports the error.
+      const failedRefresh = yield* Effect.forkChild(instance.snapshot.refresh);
+      yield* TestClock.adjust("10 seconds");
+      expect((yield* Fiber.join(failedRefresh)).status).toBe("error");
       const retainedDefault = yield* startTurn();
 
       expect(openedModels).toEqual([

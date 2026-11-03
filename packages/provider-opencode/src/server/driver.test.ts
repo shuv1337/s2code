@@ -780,9 +780,21 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
         });
         versionOutput.current = "shuvcode v2.0.28-shuv.1\n";
         const instance = yield* create({ binaryPath, serverUrl: "http://127.0.0.1:4096" }, http);
-        const refreshAndReadEnriched = Effect.gen(function* () {
+        // A host npm answers the latest-version lookup itself, bypassing the registry stub.
+        const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+        for (const key of ProviderMaintenance.latestProviderVersionCacheKeys(
+          yield* instance.snapshot.resolveMaintenance({ fresh: true }),
+        )) {
+          yield* latestVersions.cached(key, Effect.succeed("2.0.30-shuv.1"), { fresh: true });
+        }
+        // Re-enrichment can republish the previous snapshot, so wait for this step's versions.
+        const refreshAndReadEnriched = Effect.fn(function* (running: string, installed: string) {
           const enriched = yield* instance.snapshot.streamChanges.pipe(
-            Stream.filter((snapshot) => snapshot.versionAdvisory !== undefined),
+            Stream.filter(
+              (snapshot) =>
+                snapshot.version === running &&
+                snapshot.versionAdvisory?.currentVersion === installed,
+            ),
             Stream.take(1),
             Stream.runCollect,
             Effect.forkChild,
@@ -792,11 +804,11 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
           return Array.from(yield* Fiber.join(enriched))[0]!;
         });
 
-        const outdated = yield* refreshAndReadEnriched;
+        const outdated = yield* refreshAndReadEnriched("2.0.28-shuv.1", "2.0.28-shuv.1");
         assert.strictEqual(outdated.versionAdvisory?.status, "behind_latest");
 
         versionOutput.current = "shuvcode v2.0.30-shuv.1\n";
-        const restartPending = yield* refreshAndReadEnriched;
+        const restartPending = yield* refreshAndReadEnriched("2.0.28-shuv.1", "2.0.30-shuv.1");
         const maintenance = yield* instance.snapshot.resolveMaintenance({ fresh: true });
         assert.strictEqual(maintenance.installedVersion, "2.0.30-shuv.1");
         assert.strictEqual(restartPending.version, "2.0.28-shuv.1");
@@ -804,7 +816,7 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
         assert.include(restartPending.versionAdvisory?.message ?? "", "after it restarts");
 
         serverVersion = "2.0.30-shuv.1";
-        const restarted = yield* refreshAndReadEnriched;
+        const restarted = yield* refreshAndReadEnriched("2.0.30-shuv.1", "2.0.30-shuv.1");
         assert.strictEqual(restarted.version, "2.0.30-shuv.1");
         assert.isNull(restarted.versionAdvisory?.message);
       }).pipe(Effect.scoped),

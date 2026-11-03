@@ -106,7 +106,10 @@ describe("CursorSdkCatalog", () => {
           ),
         );
         expect(sdkLoad).not.toHaveBeenCalled();
-        const result = yield* catalog.read("test-key").pipe(Effect.exit);
+        // A 5xx retries with backoff before it reports the error.
+        const read = yield* Effect.forkChild(catalog.read("test-key").pipe(Effect.exit));
+        yield* TestClock.adjust("10 seconds");
+        const result = yield* Fiber.join(read);
         expect(requests).toContain(`https://api.cursor.com/v1/${route}`);
         if (expected === "ready" || expected === "no-user") {
           expect(Exit.isSuccess(result)).toBe(true);

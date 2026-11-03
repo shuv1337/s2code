@@ -356,11 +356,15 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           refreshedProviders,
           (refreshedProvider) =>
             enrichProviderSnapshotWithVersionAdvisory(
-              {
-                ...refreshedProvider,
-                version:
-                  refreshedProvider.versionAdvisory?.currentVersion ?? refreshedProvider.version,
-              },
+              // After an update, an external server's advisory names the installed binary.
+              phase === "post-update"
+                ? {
+                    ...refreshedProvider,
+                    version:
+                      refreshedProvider.versionAdvisory?.currentVersion ??
+                      refreshedProvider.version,
+                  }
+                : refreshedProvider,
               maintenanceCapabilities,
             ).pipe(
               Effect.provideService(HttpClient.HttpClient, httpClient),

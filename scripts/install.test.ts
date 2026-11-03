@@ -130,13 +130,15 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
       await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-home-")),
     );
     const root = NodePath.join(temporaryRoot, "cwd\n");
-    const homeName = "-custom home\\home\n";
+    // Product settings are trimmed, so only the cwd keeps its trailing newline.
+    const homeName = "-custom home\\home";
     const home = NodePath.join(root, homeName);
     const version = "1.2.3";
     const target = NodePath.join(home, "runtime/versions", version);
     const launcher = NodePath.join(root, "bin/s2code");
     try {
       await NodeFSP.mkdir(target, { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(home, ".product-identity"), "s2code\n");
       await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), `${version}\n`);
       await NodeFSP.writeFile(NodePath.join(target, ".install-product"), "s2code\n");
       await NodeFSP.writeFile(NodePath.join(target, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
@@ -266,7 +268,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
         const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-checksum-"));
         const home = NodePath.join(root, homeName);
         const version = "1.2.3";
-        const stem = `t3-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+        const stem = `s2code-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
         const archiveName = `${stem}.tar.gz`;
         const server = NodeHttp.createServer();
         try {
@@ -285,6 +287,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
             "rm",
             "mv",
             "ln",
+            "sed",
+            "tr",
+            "head",
+            "dirname",
+            "basename",
             checksumTool,
           ]) {
             const executable = NodeChildProcess.execFileSync(
@@ -323,10 +330,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
                   env: {
                     ...process.env,
                     PATH: tools,
-                    T3CODE_VERSION: version,
-                    T3CODE_HOME: home,
-                    T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
-                    T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+                    S2CODE_VERSION: version,
+                    S2CODE_HOME: home,
+                    S2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+                    S2CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
                   },
                   stdio: ["ignore", "pipe", "pipe"],
                 },
@@ -345,14 +352,14 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
               await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
             ).toBe("1.2.3\n");
             expect(
-              NodeChildProcess.execFileSync(NodePath.join(root, "bin/t3"), ["--version"], {
+              NodeChildProcess.execFileSync(NodePath.join(root, "bin/s2code"), ["--version"], {
                 encoding: "utf8",
               }).trim(),
             ).toBe("t3 v1.2.3");
           } else {
             expect(code).not.toBe(0);
             expect(output).toContain("checksum mismatch");
-            expect(output).not.toContain("Installed T3 Code");
+            expect(output).not.toContain("Installed s2code");
             expect(await NodeFSP.readdir(versions)).toEqual([]);
           }
         } finally {
