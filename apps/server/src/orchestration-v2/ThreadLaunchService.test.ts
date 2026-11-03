@@ -553,6 +553,60 @@ it.effect.each(["a launch", "an unbound automation"] as const)(
   },
 );
 
+it.effect("starts a pooled thread on the member with the most headroom and keeps it there", () => {
+  const spare = { ...modelSelection, instanceId: ProviderInstanceId.make("codex_spare") };
+  const pooled = { driver: adapter.driver, disableOnUsageLimit: true, enabled: true };
+  const member = (instanceId: ProviderInstanceId, usedPercent: number) => ({
+    instanceId,
+    driver: adapter.driver,
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready" as const,
+    auth: { status: "authenticated" as const },
+    checkedAt: "2026-11-02T00:00:00.000Z",
+    models: [{ slug: spare.model, name: "Codex", isCustom: false, capabilities: null }],
+    slashCommands: [],
+    skills: [],
+    usageLimits: {
+      checkedAt: "2026-11-02T00:00:00.000Z",
+      windows: [{ id: "five_hour", kind: "session" as const, label: "Session", usedPercent }],
+    },
+  });
+  const harness = makeHarness({
+    adapters: [adapter, { ...adapter, instanceId: spare.instanceId }],
+    serverSettings: {
+      providerInstances: { [modelSelection.instanceId]: pooled, [spare.instanceId]: pooled },
+    },
+    providers: [member(modelSelection.instanceId, 80), member(spare.instanceId, 10)],
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { threadId } = yield* launches.launch(
+      launchInput({ command: "command:pool-start", thread: "thread:pool-start", message: "Start" }),
+    );
+    yield* threads.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("command:pool-start:follow-up"),
+      threadId,
+      messageId: MessageId.make("message:pool-start:follow-up"),
+      createdBy: "user",
+      creationSource: "web",
+      text: "Next",
+      attachments: [],
+      dispatchMode: { type: "queue_after_active" },
+      modelSelection,
+    });
+    const projection = yield* threads.getThreadProjection(threadId);
+    // A turn after the start never rebalances, even onto a busier member the user picked.
+    assert.deepStrictEqual(
+      projection.runs.map((run) => run.providerInstanceId),
+      [spare.instanceId, modelSelection.instanceId],
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("retains automation and sender attribution while a message waits in the queue", () => {
   const harness = makeHarness({ runSetup: () => Effect.never });
   return Effect.gen(function* () {

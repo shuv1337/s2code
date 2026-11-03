@@ -6,6 +6,8 @@ import {
   resolveProjectProviderInstanceEnabled,
   type UsageLimitsReport,
   type ProviderInstanceId,
+  type ProviderDriverKind,
+  PROVIDER_DISPLAY_NAMES,
   type ProviderConsumeResetCreditInput,
   type ServerProviderSlashCommand,
   isProviderAvailable,
@@ -115,17 +117,28 @@ export function resolveNewThreadModelSelection(input: {
   };
 }
 
-/**
- * Instances of one driver that opt into `disableOnUsageLimit` form a pool; a spent member's work
- * moves to the member with the most headroom. Unknown usage ranks last, never as unused.
- */
-export function pickUsageLimitReplacement(input: {
+type UsageLimitPoolInput = {
   readonly selection: ModelSelection;
   readonly providers: readonly ServerProvider[];
   readonly settings: ServerSettings;
   readonly projectId: ProjectId | null;
   readonly now: number;
-}): ModelSelection | null {
+};
+
+/**
+ * Instances of one driver that opt into `disableOnUsageLimit` form a pool; a spent member's work
+ * moves to the member with the most headroom. Unknown usage ranks last, never as unused.
+ */
+export function pickUsageLimitReplacement(input: UsageLimitPoolInput): ModelSelection | null {
+  return pickPoolMember(input, false);
+}
+
+/** The pool member a new thread starts on: the one with the most headroom, the selected included. */
+export function pickUsageLimitPoolStart(input: UsageLimitPoolInput): ModelSelection | null {
+  return pickPoolMember(input, true);
+}
+
+function pickPoolMember(input: UsageLimitPoolInput, includeSelected: boolean) {
   const pooled = (instanceId: ProviderInstanceId) =>
     Object.hasOwn(input.settings.providerInstances, instanceId)
       ? input.settings.providerInstances[instanceId]
@@ -141,7 +154,7 @@ export function pickUsageLimitReplacement(input: {
   const [best] = input.providers
     .filter(
       (provider) =>
-        provider.instanceId !== input.selection.instanceId &&
+        (includeSelected || provider.instanceId !== input.selection.instanceId) &&
         provider.driver === source.driver &&
         pooled(provider.instanceId)?.disableOnUsageLimit === true &&
         provider.enabled &&
@@ -155,7 +168,61 @@ export function pickUsageLimitReplacement(input: {
     .sort(
       (left, right) => rank(left) - rank(right) || left.instanceId.localeCompare(right.instanceId),
     );
-  return best === undefined ? null : { ...input.selection, instanceId: best.instanceId };
+  if (best === undefined) return null;
+  return best.instanceId === input.selection.instanceId
+    ? input.selection
+    : { ...input.selection, instanceId: best.instanceId };
+}
+
+/** A driver's opted-in instances read as one pool once there are two of them. */
+export function usageLimitPoolDriver(
+  settings: Pick<ServerSettings, "providerInstances">,
+  instanceId: ProviderInstanceId,
+): ProviderDriverKind | null {
+  const instance = Object.hasOwn(settings.providerInstances, instanceId)
+    ? settings.providerInstances[instanceId]
+    : undefined;
+  if (instance?.disableOnUsageLimit !== true) return null;
+  const members = Object.values(settings.providerInstances).filter(
+    (candidate) => candidate.driver === instance.driver && candidate.disableOnUsageLimit === true,
+  );
+  return members.length > 1 ? instance.driver : null;
+}
+
+export function usageLimitPoolLabel(driver: ProviderDriverKind): string {
+  return `${PROVIDER_DISPLAY_NAMES[driver] ?? driver} pool`;
+}
+
+/**
+ * Pickers show each pool as one member: the first eligible preferred id in it, else its first
+ * eligible candidate, else its first. Returns the members to hide.
+ */
+export function hiddenUsageLimitPoolMembers(
+  candidates: ReadonlyArray<{
+    readonly instanceId: ProviderInstanceId;
+    readonly pool: ProviderDriverKind | null;
+    readonly eligible: boolean;
+  }>,
+  preferred: ReadonlyArray<ProviderInstanceId | undefined>,
+): ReadonlySet<ProviderInstanceId> {
+  const kept = new Map<ProviderDriverKind, ProviderInstanceId>();
+  const keep = (candidate: (typeof candidates)[number] | undefined) => {
+    if (candidate?.pool != null && !kept.has(candidate.pool)) {
+      kept.set(candidate.pool, candidate.instanceId);
+    }
+  };
+  for (const id of preferred) {
+    keep(candidates.find((candidate) => candidate.instanceId === id && candidate.eligible));
+  }
+  for (const candidate of candidates) if (candidate.eligible) keep(candidate);
+  for (const candidate of candidates) keep(candidate);
+  return new Set(
+    candidates
+      .filter(
+        (candidate) => candidate.pool !== null && kept.get(candidate.pool) !== candidate.instanceId,
+      )
+      .map((candidate) => candidate.instanceId),
+  );
 }
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/#settings/Usage";
