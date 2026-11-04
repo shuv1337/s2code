@@ -290,7 +290,9 @@ export function assertForkNpmManifest(value: unknown, version: string) {
       Object.keys(manifest.optionalDependencies ?? {}).length !== expected.length ||
       expected.some((name) => manifest.optionalDependencies?.[name] !== version)
     )
-      throw new Error("Launcher must depend on all five exact matching fork platform versions.");
+      throw new Error(
+        `Launcher must depend on all ${expected.length} exact matching fork platform versions.`,
+      );
   }
   return manifest as {
     name: string;
@@ -305,7 +307,9 @@ export function assertForkNpmSet(manifests: ReadonlyArray<unknown>, version: str
     checked.length !== FORK_NPM_PACKAGES.length ||
     new Set(checked.map((manifest) => manifest.name)).size !== FORK_NPM_PACKAGES.length
   )
-    throw new Error("All five platform packages, the launcher and its legacy bridge are required.");
+    throw new Error(
+      `All ${CLI_ARCHIVE_PLATFORM_KEYS.length} platform packages, the launcher and its legacy bridge are required.`,
+    );
   return checked;
 }
 export function assertForkDistTag(version: string, tag: string) {

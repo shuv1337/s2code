@@ -27,6 +27,7 @@ import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { isCommandAvailable } from "@t3tools/shared/shell";
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
+import { packDeterministicTarball } from "./lib/npm-tarball.ts";
 import { windowsSystemTar } from "./lib/windows-tar.ts";
 
 export const NPM_PLATFORM_PACKAGE_SCOPE = "@s2code";
@@ -59,6 +60,15 @@ export class NpmPackagesArchivesMissingError extends Schema.TaggedError<NpmPacka
 ) {
   override get message(): string {
     return `${this.archivesDir} lacks archives for ${this.missing.join(", ")}. A launcher published without them would silently skip those platforms; pass --allow-missing for a deliberately partial build.`;
+  }
+}
+
+export class NpmPackagesPackError extends Schema.TaggedError<NpmPackagesPackError>()(
+  "NpmPackagesPackError",
+  { tarball: Schema.String, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return `Packing ${this.tarball} failed.`;
   }
 }
 
@@ -270,14 +280,11 @@ const extractArchive = Effect.fn("extractArchive")(function* (archive: string, i
   return path.join(into, root);
 });
 
-/** Tar to build npm tarballs with; see build-cli-archive.ts for why Windows names bsdtar by path. */
-const hostTar = Effect.map(HostProcess.Platform, (platform) =>
-  platform === "win32" ? windowsSystemTar() : "tar",
-);
-
 /**
  * Writes `stageDir/package` as a gzipped npm tarball and then moves the tree
- * to `packageDir` so the contents stay inspectable beside the tarball.
+ * to `packageDir` so the contents stay inspectable beside the tarball. The
+ * bytes are reproducible, so a publish rerun that rebuilds them still matches
+ * the integrity of versions an earlier attempt already published.
  */
 const packAndPlace = Effect.fn("packAndPlace")(function* (input: {
   readonly stageDir: string;
@@ -286,10 +293,10 @@ const packAndPlace = Effect.fn("packAndPlace")(function* (input: {
 }) {
   const fs = yield* FileSystem.FileSystem;
   yield* fs.remove(input.tarball, { force: true });
-  yield* runCommand(
-    ChildProcess.make(yield* hostTar, ["-czf", input.tarball, "-C", input.stageDir, "package"]),
-    `tar (${input.tarball})`,
-  );
+  yield* Effect.tryPromise({
+    try: () => packDeterministicTarball(input.stageDir, "package", input.tarball),
+    catch: (cause) => new NpmPackagesPackError({ tarball: input.tarball, cause }),
+  });
   yield* fs.remove(input.packageDir, { recursive: true, force: true });
   yield* fs.rename(`${input.stageDir}/package`, input.packageDir);
 });

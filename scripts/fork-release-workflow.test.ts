@@ -79,7 +79,28 @@ describe("fork workflow gates", () => {
     expect(publish).toContain("needs.due.outputs.allowed_ref == 'true'");
     expect(publish).toContain("github.event.repository.default_branch");
     expect(publish).not.toContain("refs/tags/");
-    expect(publish).toContain("needs.prepare.result == 'success'");
+    expect(workflow).not.toContain("\n  prepare:\n");
+    expect(publish).toContain("needs: [due, preflight, desktop, mac_arm64_ready]");
+    for (const gate of ["desktop", "mac_arm64_ready"])
+      expect(publish).toContain(`needs.${gate}.result == 'success'`);
+    // Folding prepare in must not widen what the publisher's steps can reach.
+    const publishJob = publish.split("    steps:\n")[0]!;
+    expect(publishJob).toContain("    environment: fork-release\n");
+    expect(publishJob.split("    permissions:\n")[1]!.trimEnd().split("\n")).toEqual([
+      "      contents: write",
+      "      actions: read",
+      "      id-token: write",
+      "    env:",
+      "      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}",
+      "      GH_TOKEN: ${{ github.token }}",
+      "      S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}",
+      "      FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}",
+      '      NPM_TOKEN: ""',
+      '      NODE_AUTH_TOKEN: ""',
+    ]);
+    expect(publish.indexOf("node scripts/fork-release.ts prepare")).toBeLessThan(
+      publish.indexOf("node scripts/fork-release.ts publish --execute"),
+    );
   });
   it("leaves preview signing outside the release environment and supplies the packager's existing config names", () => {
     expect(desktop).not.toContain("environment: fork-release");

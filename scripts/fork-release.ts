@@ -9,7 +9,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
-import { NPM_PACKAGE_NAME } from "@t3tools/shared/productIdentity";
 import {
   FORK_RELEASE_REPOSITORY,
   FORK_RELEASE_INDEX_BRANCH,
@@ -445,7 +444,7 @@ async function registryVersion(
   assertForkNpmManifest(value, version);
   if (value.dist?.integrity !== pkg.integrity)
     throw new Error(
-      "Existing npm version differs from this run's immutable package bytes; recover the original prepared artifact or use a new version.",
+      "Existing npm version differs from this run's immutable package bytes; rerun publish only against the same run's build artifacts, or use a new version.",
     );
   return true;
 }
@@ -614,9 +613,24 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (!plan.npm) return;
     for (const pkg of packages)
       if (!(await publishedVersion(pkg)).published)
-        throw new Error("All seven exact npm versions must exist before release exposure.");
+        throw new Error("Every exact npm version must exist before release exposure.");
   };
-  const publishPackage = async (pkg: (typeof packages)[number]) => {
+  const isPlatform = (pkg: (typeof packages)[number]) =>
+    pkg.manifest.name.startsWith("@s2code/t3-");
+  const settleAll = async <T>(
+    items: ReadonlyArray<T>,
+    operation: (item: T) => Promise<void>,
+    failure: string,
+  ) => {
+    const results = await Promise.allSettled(items.map(operation));
+    const reasons = results.flatMap((result) =>
+      result.status === "rejected"
+        ? [result.reason instanceof Error ? result.reason.message : "Unknown failure."]
+        : [],
+    );
+    if (reasons.length) throw new Error(`${failure} ${reasons.join(" ")}`);
+  };
+  const uploadPackage = async (pkg: (typeof packages)[number]) => {
     // A transient answer must never read as "absent" here: publishing over an
     // existing immutable version is refused by npm, not retried.
     if (!(await publishedVersion(pkg)).published)
@@ -629,14 +643,41 @@ async function publishPrepared(plan: ForkReleasePlan) {
         "--tag",
         plan.stagingTag,
       ]);
-    // npm reviews each new version before it becomes installable, which took
-    // up to about fifteen minutes for these packages. Wait well past that.
-    await pollRegistry({
+  };
+  // npm reviews each new version before it becomes installable, which took
+  // up to about fifteen minutes for these packages. Wait well past that.
+  const awaitReview = (pkg: (typeof packages)[number]) =>
+    pollRegistry({
       attempts: NPM_REVIEW_POLLS,
       read: async () => (await registryVersion(pkg, plan.version)) || undefined,
       exhausted: "npm publication is not yet verifiable; the draft remains unavailable.",
       waiting: `Waiting for npm to finish reviewing ${pkg.manifest.name}@${plan.version}.`,
-    });
+    }).then(() => undefined);
+  const promote = async (pkg: (typeof packages)[number]) => {
+    await assertTagNotBackwards(pkg.manifest.name);
+    const tags = await readTags(pkg.manifest.name);
+    for (const tag of plan.distTags) {
+      // The channel tag refuses to move backwards above; an alias such as
+      // nightly's `latest` yields to a newer published version instead of
+      // failing a release that is otherwise complete.
+      if (
+        tag !== plan.distTag &&
+        tags[tag] &&
+        compareSemverVersions(tags[tag]!, plan.version) > 0
+      ) {
+        console.log(
+          `Leaving ${pkg.manifest.name}@${tag} on ${tags[tag]}; it is newer than ${plan.version}.`,
+        );
+        continue;
+      }
+      await runAsync("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, tag]);
+      await pollRegistry({
+        attempts: NPM_TAG_POLLS,
+        read: async () =>
+          (await readTags(pkg.manifest.name))[tag] === plan.version ? true : undefined,
+        exhausted: "Fork dist-tag promotion is not yet verifiable; rerun the publish job.",
+      });
+    }
   };
   await publishForkReleaseSequence({
     ensureDraft: async () => {
@@ -688,16 +729,20 @@ async function publishPrepared(plan: ForkReleasePlan) {
       verifyAssets(names.filter((name) => !plan.feedAssets.includes(name))),
     publishNpm: async () => {
       if (!plan.npm) return;
-      const results = await Promise.allSettled(
-        packages.filter((pkg) => pkg.manifest.name.startsWith("@s2code/t3-")).map(publishPackage),
+      // Launchers publish only once npm has accepted every platform upload, so
+      // a refused platform never strands an immutable launcher version. Nobody
+      // installs the staging tag, so they need not wait for platform review.
+      await settleAll(
+        packages.filter(isPlatform),
+        uploadPackage,
+        "A fork platform package failed publication; launcher publication was skipped.",
       );
-      const failures = results.filter((result) => result.status === "rejected");
-      if (failures.length)
-        throw new Error(
-          `A fork platform package failed publication/verification; launcher publication was skipped. ${failures.map((result) => (result.reason instanceof Error ? result.reason.message : "Unknown publication failure.")).join(" ")}`,
-        );
-      await publishPackage(packages.find((pkg) => pkg.manifest.name === NPM_PACKAGE_NAME)!);
-      await publishPackage(packages.find((pkg) => pkg.manifest.name === "shuv2code")!);
+      await settleAll(
+        packages.filter((pkg) => !isPlatform(pkg)),
+        uploadPackage,
+        "A fork launcher failed publication.",
+      );
+      await settleAll(packages, awaitReview, "A fork npm package failed verification.");
     },
     verifyNpm,
     uploadFeeds: async () => upload(plan.feedAssets),
@@ -719,33 +764,17 @@ async function publishPrepared(plan: ForkReleasePlan) {
     },
     promoteNpmTags: async () => {
       if (!plan.npm) return;
-      for (const pkg of packages) {
-        await assertTagNotBackwards(pkg.manifest.name);
-        const tags = await readTags(pkg.manifest.name);
-        for (const tag of plan.distTags) {
-          // The channel tag refuses to move backwards above; an alias such as
-          // nightly's `latest` yields to a newer published version instead of
-          // failing a release that is otherwise complete.
-          if (
-            tag !== plan.distTag &&
-            tags[tag] &&
-            compareSemverVersions(tags[tag]!, plan.version) > 0
-          ) {
-            console.log(
-              `Leaving ${pkg.manifest.name}@${tag} on ${tags[tag]}; it is newer than ${plan.version}.`,
-            );
-            continue;
-          }
-          run("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, tag]);
-          await pollRegistry({
-            attempts: NPM_TAG_POLLS,
-            read: async () =>
-              (await readTags(pkg.manifest.name))[tag] === plan.version ? true : undefined,
-            exhausted:
-              "Fork dist-tag promotion is not yet verifiable; retry with the original prepared artifact.",
-          });
-        }
-      }
+      // A failed platform wave leaves every launcher tag on the previous release.
+      await settleAll(
+        packages.filter(isPlatform),
+        promote,
+        "Fork platform dist-tag promotion failed; launchers were not promoted.",
+      );
+      await settleAll(
+        packages.filter((pkg) => !isPlatform(pkg)),
+        promote,
+        "Fork launcher dist-tag promotion failed.",
+      );
     },
     publishIndex: async () => {
       if (plan.channel === "preview") return;
