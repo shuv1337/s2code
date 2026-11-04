@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
@@ -29,6 +30,9 @@ import {
   forkNpmPublishingReady,
 } from "../../../scripts/lib/fork-release.ts";
 import { ServerCliPublishGuardError } from "./cliErrors.ts";
+
+const decodeLauncherManifest = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeLauncherVersion = Schema.decodeUnknownOption(Schema.Struct({ version: Schema.String }));
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
@@ -204,10 +208,12 @@ const publishCmd = Command.make(
       const manifestText = yield* spawner.string(
         ChildProcess.make("tar", ["-xOf", launcherTarball, "package/package.json"]),
       );
+      const manifest = yield* decodeLauncherManifest(manifestText).pipe(
+        Effect.mapError((cause) => new ServerCliPublishGuardError({ cause })),
+      );
+      const version = Option.getOrUndefined(decodeLauncherVersion(manifest))?.version;
       yield* Effect.try({
         try: () => {
-          const manifest = JSON.parse(manifestText) as { version?: string };
-          const version = manifest.version;
           if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
             throw new Error("Invalid fork package version.");
           assertForkNpmSet([manifest], version);
