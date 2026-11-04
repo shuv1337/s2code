@@ -39,8 +39,8 @@ look for that exact directory. The internal executable remains `t3`. That does n
 publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the public npm endpoints are `s2code` and
-`@s2code/t3-<platform>` for those five CLI targets. Platform packages publish and verify first; the launcher follows only
-when all five are verifiable, with exact matching optional dependency versions.
+`@s2code/t3-<platform>` for those five CLI targets. Platform packages publish first; the launchers follow only
+once npm has accepted all five, with exact matching optional dependency versions.
 The `shuv2code` bridge launcher publishes the same version and depends on those
 canonical platform packages, preserving upgrades for existing npm installs.
 
@@ -101,14 +101,15 @@ npm publication is optional. It requires both `S2CODE_NPM_TRUSTED_PUBLISHING_REA
 for the six canonical names and `FORK_NPM_TRUSTED_PUBLISHING_READY` for the legacy
 bridge to be `true`. Otherwise the GitHub release still publishes and `release.json`
 lists no npm packages. When both are ready, all seven packages publish under a temporary
-non-default dist-tag with `npm publish --provenance`, and their names, versions,
-repository and tarball integrity are verified before the release is exposed.
+non-default dist-tag with `npm publish --provenance`: the five platform packages at once,
+then both launchers at once. Their names, versions, repository and tarball integrity are
+verified before the release is exposed.
 npm reviews each new version before it can be installed, which took up to about
-fifteen minutes for these packages; publish waits up to thirty minutes per package.
-Answers the registry could not give (429, 5xx, timeouts) are retried within that
-budget; a mismatched tarball or a package outside the allowlist fails at once.
-After the release publishes, the `nightly` dist-tag is promoted, platform
-packages first and the launcher last. A nightly moves `latest` as well, so
+fifteen minutes for these packages. The seven reviews are awaited together, each for up
+to thirty minutes. Answers the registry could not give (429, 5xx, timeouts) are retried
+within that budget; a mismatched tarball or a package outside the allowlist fails at once.
+After the release publishes, the `nightly` dist-tag is promoted in two concurrent
+waves: every platform package, then both launchers. A nightly moves `latest` as well, so
 `npx @s2code/cli` installs the newest nightly instead of the placeholder version
 that trusted publishing required; `nightly` refuses to move backwards, while
 `latest` is left alone with a log line when a newer version already holds it.
@@ -178,11 +179,15 @@ The publisher uses a GitHub-hosted runner, `id-token: write`, npm 11.21.0 and no
 
 ## Recovery and human smoke evidence
 
-Rerun failed jobs using the **original immutable `fork-release-prepared` artifact**.
+Use **Re-run failed jobs** on the same workflow run, never **Re-run all jobs**, which
+rebuilds the signed desktops as different bytes. The `publish` job prepares again from
+that run's immutable build artifacts, and the npm tarballs are byte-reproducible for
+the same archives and the Node version `package.json` pins, so the rebuilt bytes
+match any npm versions an earlier attempt already published.
 Already uploaded assets and npm versions are reused only when their digests match.
 Do not rebuild different signed bytes under an immutable version, overwrite public
-release assets or move a dist-tag backwards. If the original prepared bytes are
-lost, use a new version. Rolling index/tag repair may be retried after a fully
+release assets or move a dist-tag backwards. If the run's build artifacts have
+expired or the builds must be redone, use a new version. Rolling index/tag repair may be retried after a fully
 verified release; inspect all seven endpoints and the release before doing so.
 
 Before claiming delivery, a human must run the protected workflow with real fork
