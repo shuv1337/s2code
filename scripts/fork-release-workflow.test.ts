@@ -16,6 +16,46 @@ const desktop = NodeFS.readFileSync(
   "utf8",
 );
 const due = workflow.split("  due:\n")[1]!.split("\n  preflight:")[0]!;
+const publishSection = workflow.split("  publish:\n")[1]!.split("\n  promote:\n")[0]!;
+const promoteSection = workflow.split("\n  promote:\n")[1]!.split("\n  windows_missing:")[0]!;
+/** A step's shell script, from a block or a one-line `run:`. */
+const stepScript = (job: string, name: string) => {
+  const step = job.split(`      - name: ${name}\n`)[1]!.split("\n      - ")[0]!;
+  const block = step.split("        run: |\n")[1];
+  return block === undefined
+    ? step.split("        run: ")[1]!.split("\n")[0]!
+    : block.replace(/^ {10}/gm, "");
+};
+/** Runs a step with GitHub's default shell for run steps. */
+const runStep = (
+  job: string,
+  name: string,
+  root: string,
+  bin: string,
+  env: Record<string, string>,
+) =>
+  NodeChildProcess.spawnSync(
+    "bash",
+    ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript(job, name)],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${bin}${NodePath.delimiter}${process.env.PATH}`,
+        GITHUB_REPOSITORY: "shuv1337/s2code",
+        ...env,
+      },
+    },
+  );
+/** Permissions and env of a job, split on `env:`. */
+const jobAccess = (job: string) => {
+  const [permissions, env] = job
+    .split("    permissions:\n")[1]!
+    .split("    steps:\n")[0]!
+    .split("    env:\n");
+  return { permissions: permissions!.trimEnd().split("\n"), env: env!.trimEnd().split("\n") };
+};
 
 describe("fork workflow gates", () => {
   it("checks a not-due nightly without entering a protected environment", async () => {
@@ -104,6 +144,23 @@ describe("fork workflow gates", () => {
     expect(publish).toContain(
       "WINDOWS_BUILT: ${{ steps.windows.outputs.built }}\n        run: node scripts/fork-release.ts publish --execute",
     );
+    // Promote-only moves dist-tags with the publisher's OIDC identity; contents: write
+    // only claims its Discord follow-up.
+    const promote = promoteSection;
+    expect(due).toContain("&& !inputs.promote_version");
+    expect(promote).toContain(
+      "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+    );
+    expect(promote).toContain("    environment: fork-release\n");
+    expect(jobAccess(promote)).toEqual({
+      permissions: [
+        "      # Only for the Discord claim ref; the tags move through OIDC.",
+        "      contents: write",
+        "      id-token: write",
+      ],
+      env: jobAccess(publishSection).env,
+    });
+    expect(promote).toContain("run: node scripts/fork-release.ts promote --execute");
   });
   it.each([true, false])(
     "decides from the Windows installer what ships, builds npm and announces it (installer present: %s)",
@@ -138,55 +195,32 @@ describe("fork workflow gates", () => {
         // The Windows job uploads its CLI archive before it can fail.
         const strayArchive = NodePath.join(assets, `s2code-${version}-win32-x64.zip`);
         NodeFS.writeFileSync(strayArchive, "archive");
-        const publish = workflow.split("  publish:\n")[1]!;
         const output = NodePath.join(root, "github-output");
-        const runStep = (name: string, env: Record<string, string>) => {
-          const step = publish.split(`      - name: ${name}\n`)[1]!.split("\n      - ")[0]!;
-          // GitHub's default shell for run steps.
-          return NodeChildProcess.spawnSync(
-            "bash",
-            [
-              "--noprofile",
-              "--norc",
-              "-eo",
-              "pipefail",
-              "-c",
-              step.split("        run: |\n")[1]!.replace(/^ {10}/gm, ""),
-            ],
-            {
-              cwd: root,
-              encoding: "utf8",
-              env: {
-                ...process.env,
-                PATH: `${bin}${NodePath.delimiter}${process.env.PATH}`,
-                RELEASE_VERSION: version,
-                GITHUB_OUTPUT: output,
-                GITHUB_REPOSITORY: "shuv1337/s2code",
-                ...env,
-              },
-            },
-          );
-        };
-        const check = runStep("Check whether Windows x64 built", {});
+        const step = (name: string, env: Record<string, string>) =>
+          runStep(publishSection, name, root, bin, {
+            RELEASE_VERSION: version,
+            GITHUB_OUTPUT: output,
+            ...env,
+          });
+        const check = step("Check whether Windows x64 built", {});
         expect(check.status, check.stderr).toBe(0);
         expect(NodeFS.readFileSync(output, "utf8")).toBe(`built=${present}\n`);
         expect(NodeFS.existsSync(strayArchive)).toBe(present);
 
-        const build = runStep(
-          "Build the shuv2code npm launcher from the verified-source archives",
-          {
-            WINDOWS_BUILT: String(present),
-          },
-        );
+        const build = step("Build the shuv2code npm launcher from the verified-source archives", {
+          WINDOWS_BUILT: String(present),
+        });
         expect(build.status, build.stderr).toBe(0);
         const nodeArgs = NodeFS.readFileSync(NodePath.join(root, "node-args"), "utf8").split("\n");
         expect(nodeArgs[0]).toBe("scripts/build-npm-launcher.ts");
         expect(nodeArgs.includes("--allow-missing")).toBe(!present);
 
-        const announce = runStep("Announce the release on Discord", {
+        const announce = step("Announce the release on Discord", {
           WINDOWS_BUILT: String(present),
           DISCORD_RELEASE_WEBHOOK_URL: "https://discord.invalid/fixture",
           FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
+          // Covers both npm outcomes across the two cases.
+          NPM_STATUS: present ? "promoted" : "pending",
         });
         expect(announce.status, announce.stderr).toBe(0);
         const content = (
@@ -202,11 +236,94 @@ describe("fork workflow gates", () => {
             "windows: not built; npx shuv2code is unavailable on Windows for this version",
           ),
         ).toBe(!present);
+        expect(
+          content.includes(
+            "npm: pending review; the dist-tags stay on the previous version until it is promoted",
+          ),
+        ).toBe(!present);
       } finally {
         NodeFS.rmSync(root, { recursive: true, force: true });
       }
     },
   );
+  it("posts one npm follow-up once the dist-tags move, from a publish re-run or a promotion", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-npm-followup-"));
+    try {
+      const version = "1.2.3-nightly.20261014.1";
+      const bin = NodePath.join(root, "bin");
+      NodeFS.mkdirSync(bin);
+      NodeFS.mkdirSync(NodePath.join(root, ".github/scripts"), { recursive: true });
+      for (const script of ["notify-discord-release.sh", "announce-npm-promotion.sh"])
+        NodeFS.copyFileSync(
+          new URL(`../.github/scripts/${script}`, import.meta.url),
+          NodePath.join(root, ".github/scripts", script),
+        );
+      const refs = NodePath.join(root, "refs");
+      const posts = NodePath.join(root, "posts");
+      for (const [name, body] of [
+        // Like GitHub, a claim ref can be created once.
+        [
+          "gh",
+          `ref=""; for a in "$@"; do case "$a" in ref=*) ref="\${a#ref=}";; esac; done
+if [ -f "${refs}" ] && grep -qxF "$ref" "${refs}"; then echo '{"message":"Reference already exists"}' >&2; exit 1; fi
+echo "$ref" >> "${refs}"`,
+        ],
+        ["git", "echo 0000000000000000000000000000000000000000"],
+        [
+          "curl",
+          `while [ $# -gt 0 ]; do if [ "$1" = --data ]; then printf '%s\\n' "$2" >> "${posts}"; fi; shift; done; printf 204`,
+        ],
+      ])
+        NodeFS.writeFileSync(NodePath.join(bin, name!), `#!/bin/sh\n${body}\n`, { mode: 0o700 });
+      const env = {
+        DISCORD_RELEASE_WEBHOOK_URL: "https://discord.invalid/fixture",
+        FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
+        WINDOWS_BUILT: "true",
+        RELEASE_VERSION: version,
+        PROMOTE_VERSION: version,
+      };
+      const run = (job: string, name: string, extra: Record<string, string> = {}) => {
+        const result = runStep(job, name, root, bin, { ...env, ...extra });
+        expect(result.status, result.stderr).toBe(0);
+      };
+      const sent = () =>
+        NodeFS.existsSync(posts)
+          ? NodeFS.readFileSync(posts, "utf8")
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => (JSON.parse(line) as { content: string }).content)
+          : [];
+      // The registry answered only errors, so the release post carries the last one.
+      run(publishSection, "Announce the release on Discord", {
+        NPM_STATUS: "failed",
+        NPM_ERROR: "GET https://registry.npmjs.org/shuv2code/fixture failed (HTTP 503).",
+      });
+      expect(sent()).toHaveLength(1);
+      expect(sent()[0]).toContain(
+        "npm: check failed (GET https://registry.npmjs.org/shuv2code/fixture failed (HTTP 503).); the dist-tags stay on the previous version until it is promoted",
+      );
+      // A publish re-run that promotes posts the follow-up; the release post is not repeated.
+      run(publishSection, "Announce the release on Discord", { NPM_STATUS: "promoted" });
+      run(publishSection, "Announce the npm promotion on Discord");
+      expect(sent()).toHaveLength(2);
+      expect(sent()[1]).toContain(`**S2Code npm v${version}** is out`);
+      expect(sent()[1]).toContain(`/shuv2code/v/${version}`);
+      // A later promotion of the same version stays quiet.
+      run(promoteSection, "Announce the npm promotion on Discord");
+      expect(sent()).toHaveLength(2);
+      expect(NodeFS.readFileSync(refs, "utf8").split("\n").filter(Boolean)).toEqual([
+        `refs/discord-announced/v${version}`,
+        `refs/discord-announced/v${version}-npm`,
+      ]);
+      // A release post that already says npm is live claims the follow-up too.
+      NodeFS.rmSync(refs);
+      run(publishSection, "Announce the release on Discord", { NPM_STATUS: "promoted" });
+      run(promoteSection, "Announce the npm promotion on Discord");
+      expect(sent()).toHaveLength(3);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("turns the run red without blocking publish when Windows did not build", () => {
     const job = workflow.split("\n  windows_missing:\n")[1]!;
     expect(job).toContain("    needs: publish\n");

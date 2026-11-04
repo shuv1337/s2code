@@ -17,6 +17,7 @@ import {
   assertForkDistTag,
   forkReleaseIndex,
   publishForkReleaseSequence,
+  type NpmCheck,
   desktopAssetGroups,
   publishAtomicReleaseIndex,
   FORK_RELEASE_INDEX_URL,
@@ -305,44 +306,53 @@ describe("fork release contract", () => {
     expect(nightlyRecipe).toContain('_appimage="S2Code-${_release_version}-x86_64.AppImage"');
     expect(desktopAssetGroups("1.2.3").flat()).toContain("S2Code-1.2.3-x86_64.AppImage");
   });
-  it("exposes feeds and release/index only after binary and npm verification", async () => {
+  it("makes the release public before npm, and promotes only a version npm shows", async () => {
     const order: string[] = [];
     const steps = [
       "ensureDraft",
       "uploadBinaries",
       "verifyBinaries",
-      "publishNpm",
-      "verifyNpm",
       "uploadFeeds",
       "verifyCompleteRelease",
       "publishRelease",
-      "promoteNpmTags",
       "publishIndex",
+      "publishNpm",
+      "checkNpm",
+      "promoteNpmTags",
     ] as const;
-    const operations = Object.fromEntries(
-      steps.map((step) => [
-        step,
-        async () => {
-          order.push(step);
-        },
-      ]),
-    ) as Parameters<typeof publishForkReleaseSequence>[0];
-    await publishForkReleaseSequence(operations);
+    const operations = (check: NpmCheck = { status: "visible" }) =>
+      Object.fromEntries(
+        steps.map((step) => [
+          step,
+          async () => {
+            order.push(step);
+            return step === "checkNpm" ? check : undefined;
+          },
+        ]),
+      ) as Parameters<typeof publishForkReleaseSequence>[0];
+    expect(await publishForkReleaseSequence(operations())).toEqual({ status: "promoted" });
     expect(order).toEqual(steps);
-    for (const blocked of ["verifyBinaries", "publishNpm", "verifyNpm", "verifyCompleteRelease"]) {
+    for (const check of [
+      { status: "pending" },
+      { status: "failed", error: "GET fixture failed (HTTP 503)." },
+    ] as const) {
+      order.length = 0;
+      expect(await publishForkReleaseSequence(operations(check))).toEqual(check);
+      expect(order).toEqual(steps.slice(0, -1));
+    }
+    for (const blocked of ["verifyBinaries", "verifyCompleteRelease", "publishRelease"]) {
       order.length = 0;
       await expect(
         publishForkReleaseSequence({
-          ...operations,
+          ...operations(),
           [blocked]: async () => {
             order.push(blocked);
             throw new Error("fixture failure");
           },
         }),
       ).rejects.toThrow("fixture failure");
-      expect(order).not.toContain("publishRelease");
+      expect(order).not.toContain("publishNpm");
       expect(order).not.toContain("promoteNpmTags");
-      expect(order).not.toContain("publishIndex");
     }
   });
 });

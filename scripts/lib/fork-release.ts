@@ -313,6 +313,13 @@ export function assertForkDistTag(version: string, tag: string) {
       "npm dist-tag must match the fork installation channel or its private release staging tag.",
     );
 }
+/** What a promote-only run moves: the channel dist-tags of one published version. */
+export function forkPromotionPlan(version: string) {
+  if (!/^\d+\.\d+\.\d+(?:-(?:nightly|preview)\.\d{8}\.\d+)?$/.test(version))
+    throw new Error("Invalid fork release version.");
+  const distTags = forkDistTags(resolveChannelIdentity(version).channel);
+  return { version, tag: `v${version}`, distTag: distTags[0]!, distTags };
+}
 /**
  * The release feed consumes this tag_name/draft shape. Preview and incomplete/draft
  * releases never enter it, and neither does a release missing a platform feed,
@@ -351,26 +358,41 @@ export function forkReleaseIndex(
     })
     .map((release) => ({ tag_name: release.tag_name, draft: false }));
 }
+/**
+ * What a short look at npm found: the version, nothing yet (a 404, as while npm
+ * reviews it), or only registry errors, with the last one.
+ */
+export type NpmCheck =
+  | { status: "visible" }
+  | { status: "pending" }
+  | { status: "failed"; error: string };
+/**
+ * The launcher downloads its CLI archive from the GitHub release, so the release,
+ * its feeds and the index go public before npm is touched. npm then never holds the
+ * release back: a version still in npm's review leaves the dist-tags where they were.
+ */
 export async function publishForkReleaseSequence(operations: {
   ensureDraft: () => Promise<void>;
   uploadBinaries: () => Promise<void>;
   verifyBinaries: () => Promise<void>;
-  publishNpm: () => Promise<void>;
-  verifyNpm: () => Promise<void>;
   uploadFeeds: () => Promise<void>;
   verifyCompleteRelease: () => Promise<void>;
   publishRelease: () => Promise<void>;
-  promoteNpmTags: () => Promise<void>;
   publishIndex: () => Promise<void>;
-}) {
+  publishNpm: () => Promise<void>;
+  checkNpm: () => Promise<NpmCheck>;
+  promoteNpmTags: () => Promise<void>;
+}): Promise<Exclude<NpmCheck, { status: "visible" }> | { status: "promoted" }> {
   await operations.ensureDraft();
   await operations.uploadBinaries();
   await operations.verifyBinaries();
-  await operations.publishNpm();
-  await operations.verifyNpm();
   await operations.uploadFeeds();
   await operations.verifyCompleteRelease();
   await operations.publishRelease();
-  await operations.promoteNpmTags();
   await operations.publishIndex();
+  await operations.publishNpm();
+  const check = await operations.checkNpm();
+  if (check.status !== "visible") return check;
+  await operations.promoteNpmTags();
+  return { status: "promoted" };
 }

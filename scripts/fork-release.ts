@@ -32,8 +32,10 @@ import {
   assertForkNpmSet,
   assertForkNpmManifest,
   forkReleaseIndex,
+  forkPromotionPlan,
   publishForkReleaseSequence,
   type ForkReleasePlan,
+  type NpmCheck,
 } from "./lib/fork-release.ts";
 import { parseUpdateManifest, serializeUpdateManifest } from "./lib/update-manifest.ts";
 const FS = NodeFS;
@@ -81,6 +83,14 @@ const run = (command: string, args: string[], cwd?: string) => {
     throw releaseCommandError(command, args, error);
   }
 };
+/** A failed command; `stderr` stays out of the message so logs never carry response bodies. */
+class CommandError extends Error {
+  readonly stderr: string;
+  constructor(message: string, stderr: string) {
+    super(message);
+    this.stderr = stderr;
+  }
+}
 const runAsync = (command: string, args: string[]) =>
   new Promise<void>((resolve, reject) => {
     CP.execFile(
@@ -88,7 +98,10 @@ const runAsync = (command: string, args: string[]) =>
       args,
       { encoding: "utf8", maxBuffer: COMMAND_MAX_BUFFER },
       (error, _stdout, stderr) => {
-        if (error) reject(releaseCommandError(command, args, error, stderr));
+        if (error)
+          reject(
+            new CommandError(releaseCommandError(command, args, error, stderr).message, stderr),
+          );
         else resolve();
       },
     );
@@ -139,7 +152,12 @@ function assertPublishContext(npm: boolean) {
     throw new Error("Use OIDC, not inherited npm publish tokens.");
 }
 
-export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
+export function prepareForkAssets(
+  plan: ForkReleasePlan,
+  directory: string,
+  /** What promote-only later checks npm against: exactly these launcher bytes. */
+  npmPackages: ReadonlyArray<{ name: string; integrity: string }> = [],
+) {
   // A Windows build that failed after uploading its CLI archive leaves that archive behind.
   if (!plan.windows)
     for (const key of CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => key.startsWith("win32-")))
@@ -243,7 +261,7 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   );
   writeJson(Path.join(directory, "release.json"), {
     ...plan,
-    npmPackages: plan.npm ? FORK_NPM_PACKAGES : [],
+    npmPackages,
     signing: { ...plan.signing, linux: "checksum-only" },
   });
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
@@ -287,8 +305,11 @@ const NPM_POLL_MS =
  * them.
  */
 const pollsWithin = (budgetMs: number) => Math.max(1, Math.ceil(budgetMs / 15_000));
-/** npm holds each new version in review before it is installable: ~15 minutes. */
-const NPM_REVIEW_POLLS = pollsWithin(30 * 60_000);
+/**
+ * A version npm holds for review stays hidden for many minutes, so this is a short
+ * look, not a wait: an unseen version is reported pending and promoted later.
+ */
+const NPM_VISIBLE_POLLS = pollsWithin(3 * 60_000);
 /** Registry propagation for a dist-tag write, or one answer that did not arrive. */
 const NPM_TAG_POLLS = pollsWithin(60_000);
 
@@ -297,6 +318,18 @@ const RELEASE_LIST_POLLS = 4;
 const RELEASE_LIST_POLL_MS = Math.min(5_000, NPM_POLL_MS);
 /** A registry answer that says nothing about the package, so it can be retried. */
 class TransientRegistryError extends Error {}
+/** The poll budget ran out without an answer. */
+class RegistryExhaustedError extends Error {
+  /** The last attempt's registry failure, when it had one. */
+  readonly lastFailure: string | undefined;
+  /** Whether any attempt got a real answer rather than a failure. */
+  readonly answered: boolean;
+  constructor(message: string, lastFailure: string | undefined, answered: boolean) {
+    super(message);
+    this.lastFailure = lastFailure;
+    this.answered = answered;
+  }
+}
 /** GET a registry endpoint, separating "no answer" from a real verdict. */
 async function registryFetch(url: string) {
   let response: Response;
@@ -319,77 +352,215 @@ async function pollRegistry<T>(input: {
   readonly attempts: number;
   readonly read: () => Promise<T | undefined>;
   readonly exhausted: string;
-  readonly waiting?: string;
 }): Promise<T> {
   let transient: string | undefined;
+  let answered = false;
   for (let attempt = 1; attempt <= input.attempts; attempt++) {
     try {
       const answer = await input.read();
       if (answer !== undefined) return answer;
       transient = undefined;
+      answered = true;
     } catch (error) {
       if (!(error instanceof TransientRegistryError)) throw error;
       transient = error.message;
     }
     if (attempt === input.attempts) break;
-    if (input.waiting && attempt % 4 === 0) console.log(input.waiting);
     await Effect.runPromise(Effect.sleep(Duration.millis(NPM_POLL_MS)));
   }
-  throw new Error(
+  throw new RegistryExhaustedError(
     transient ? `${input.exhausted} Last registry failure: ${transient}` : input.exhausted,
+    transient,
+    answered,
   );
 }
-async function registryVersion(
-  pkg: { manifest: { name: string }; integrity: string },
-  version: string,
-) {
-  const url = `https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)}`;
+/** Whether npm serves the version, which must be exactly the launcher bytes `integrity` names. */
+async function registryVersion(name: string, version: string, integrity: string) {
+  const url = `https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
   const response = await registryFetch(url);
   if (response.status === 404) return false;
   if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
   const value = (await response.json()) as { dist?: { integrity?: string } };
   assertForkNpmManifest(value, version);
-  if (value.dist?.integrity !== pkg.integrity)
+  if (value.dist?.integrity !== integrity)
     throw new Error(
-      "Existing npm version differs from this run's immutable package bytes; rerun publish only against the same run's build artifacts, or use a new version.",
+      `npm serves ${name}@${version} with bytes other than the release's immutable package bytes; it is never promoted or republished. Rerun publish only against the same run's build artifacts, or use a new version.`,
     );
   return true;
+}
+/** Every registry read polls, so a registry that did not answer is never read as "absent". */
+const npmPublished = (name: string, version: string, integrity: string) =>
+  pollRegistry({
+    attempts: NPM_TAG_POLLS,
+    read: async () => ({ published: await registryVersion(name, version, integrity) }),
+    exhausted: `The npm registry did not answer for ${name}@${version}.`,
+  }).then((answer) => answer.published);
+/**
+ * A short look for the version. A version npm still reviews answers 404; a
+ * registry that answered nothing but errors is a failed check, not a review.
+ */
+async function npmVisible(name: string, version: string, integrity: string): Promise<NpmCheck> {
+  try {
+    await pollRegistry({
+      attempts: NPM_VISIBLE_POLLS,
+      read: async () => (await registryVersion(name, version, integrity)) || undefined,
+      exhausted: `npm does not show ${name}@${version} yet.`,
+    });
+    return { status: "visible" };
+  } catch (error) {
+    if (!(error instanceof RegistryExhaustedError)) throw error;
+    console.log(error.message);
+    return error.answered || !error.lastFailure
+      ? { status: "pending" }
+      : { status: "failed", error: error.lastFailure };
+  }
+}
+/** The first package that is not visible decides what the run reports. */
+const combineChecks = (checks: ReadonlyArray<NpmCheck>): NpmCheck =>
+  checks.find((check) => check.status === "failed") ??
+  checks.find((check) => check.status === "pending") ?? { status: "visible" };
+async function readTags(name: string) {
+  // `/<name>/dist-tags` would be read as a version named "dist-tags".
+  const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
+  const answer = await pollRegistry({
+    attempts: NPM_TAG_POLLS,
+    read: async () => {
+      const response = await registryFetch(url);
+      // A name nobody has published answers 404 unscoped and 401 scoped on
+      // this unauthenticated public GET. Neither is an ownership or
+      // readiness check.
+      if (response.status === 404 || response.status === 401)
+        return { tags: {} as Record<string, string> };
+      if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
+      return { tags: (await response.json()) as Record<string, string> };
+    },
+    exhausted: `The npm registry did not answer dist-tags for ${name}.`,
+  });
+  return answer.tags;
+}
+type Promotion = Pick<ForkReleasePlan, "version" | "distTag" | "distTags">;
+async function assertTagNotBackwards(name: string, promotion: Promotion) {
+  const tags = await readTags(name);
+  if (
+    tags[promotion.distTag] &&
+    compareSemverVersions(tags[promotion.distTag]!, promotion.version) > 0
+  )
+    throw new Error("Refusing to move a fork release/dist-tag backwards.");
+  return tags;
+}
+async function promoteTags(name: string, promotion: Promotion, read?: Record<string, string>) {
+  const tags = read ?? (await assertTagNotBackwards(name, promotion));
+  for (const tag of promotion.distTags) {
+    if (tags[tag] === promotion.version) continue;
+    // The channel tag refuses to move backwards above; an alias such as
+    // nightly's `latest` yields to a newer published version instead of
+    // failing a release that is otherwise complete.
+    if (
+      tag !== promotion.distTag &&
+      tags[tag] &&
+      compareSemverVersions(tags[tag]!, promotion.version) > 0
+    ) {
+      console.log(`Leaving ${name}@${tag} on ${tags[tag]}; it is newer than ${promotion.version}.`);
+      continue;
+    }
+    await runAsync("npm", ["dist-tag", "add", `${name}@${promotion.version}`, tag]);
+    await pollRegistry({
+      attempts: NPM_TAG_POLLS,
+      read: async () => ((await readTags(name))[tag] === promotion.version ? true : undefined),
+      exhausted: "Fork dist-tag promotion is not yet verifiable; rerun the promotion.",
+    });
+  }
+}
+type NpmStatus = "skipped" | Exclude<NpmCheck, { status: "visible" }> | { status: "promoted" };
+/** One line for the log, the run summary and the step outputs the Discord post reads. */
+function reportNpm(result: NpmStatus, promotion: Promotion) {
+  const spec = `${FORK_NPM_PACKAGES.join(", ")}@${promotion.version}`;
+  const status = result === "skipped" ? result : result.status;
+  const promote = `gh workflow run release.yml --ref main -f promote_version=${promotion.version}`;
+  // Workflow commands and step outputs are line-based.
+  const error =
+    result !== "skipped" && result.status === "failed" ? result.error.replace(/\s+/g, " ") : "";
+  const line =
+    status === "pending"
+      ? `npm pending review: ${spec} is published, but npm does not show it yet, so the dist-tags stay on the previous version. Once npm shows it, run: ${promote}`
+      : status === "failed"
+        ? `npm check failed: the registry answered only errors for ${spec}, so the dist-tags stay on the previous version. Last error: ${error} Once the registry answers, run: ${promote}`
+        : status === "promoted"
+          ? `npm: ${spec} is on ${promotion.distTags.join(", ")}.`
+          : "npm: not published (FORK_NPM_TRUSTED_PUBLISHING_READY is not true).";
+  console.log(status === "pending" || status === "failed" ? `::warning::${line}` : line);
+  if (process.env.GITHUB_OUTPUT)
+    FS.appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `npm=${status}\n${error ? `npm_error=${error}\n` : ""}`,
+    );
+  if (process.env.GITHUB_STEP_SUMMARY)
+    FS.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
+}
+/** Move the dist-tags of a version an earlier run published; builds and uploads nothing. */
+async function promotePublished(version: string) {
+  assertPublishContext(true);
+  const promotion = forkPromotionPlan(version);
+  // The launcher downloads from the release, and the tags endpoint never returns drafts.
+  const release = JSON.parse(
+    run("gh", [
+      "api",
+      `repos/${FORK_RELEASE_REPOSITORY}/releases/tags/${promotion.tag}`,
+      "--jq",
+      '{draft, manifest: ([.assets[] | select(.name == "release.json") | .id][0])} | tojson',
+    ]),
+  ) as { draft: boolean; manifest: number | null };
+  if (release.draft !== false || typeof release.manifest !== "number")
+    throw new Error(`Release ${promotion.tag} is not a public fork release.`);
+  // Only the exact launcher bytes this release recorded may be promoted.
+  const recorded = (
+    JSON.parse(
+      run("gh", [
+        "api",
+        "-H",
+        "Accept: application/octet-stream",
+        `repos/${FORK_RELEASE_REPOSITORY}/releases/assets/${release.manifest}`,
+      ]),
+    ) as { npmPackages?: unknown }
+  ).npmPackages;
+  const packages = FORK_NPM_PACKAGES.map((name) => {
+    const entry = (Array.isArray(recorded) ? recorded : []).find(
+      (item: { name?: unknown }) => item?.name === name,
+    ) as { integrity?: unknown } | undefined;
+    if (typeof entry?.integrity !== "string" || !entry.integrity.startsWith("sha512-"))
+      throw new Error(
+        `Release ${promotion.tag} recorded no ${name} launcher bytes, so it published nothing to npm that could be promoted.`,
+      );
+    return { name, integrity: entry.integrity };
+  });
+  const tags = [];
+  const checks = [];
+  for (const pkg of packages) {
+    tags.push(await assertTagNotBackwards(pkg.name, promotion));
+    checks.push(await npmVisible(pkg.name, version, pkg.integrity));
+  }
+  const check = combineChecks(checks);
+  if (check.status !== "visible") return reportNpm(check, promotion);
+  for (const [index, pkg] of packages.entries())
+    await promoteTags(pkg.name, promotion, tags[index]);
+  reportNpm({ status: "promoted" }, promotion);
 }
 async function publishPrepared(plan: ForkReleasePlan) {
   assertPublishContext(plan.npm);
   if (run("git", ["rev-parse", "HEAD"]) !== plan.sha)
     throw new Error("Publisher checkout differs from the resolved source.");
   const assets = "prepared/release-assets";
-  prepareForkAssets(plan, assets);
+  // Before shaping, which adds alias copies of the archives the launcher pins.
+  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan, assets) : [];
+  prepareForkAssets(
+    plan,
+    assets,
+    packages.map((pkg) => ({ name: pkg.manifest.name, integrity: pkg.integrity })),
+  );
   // Shaping copies every CLI archive twice; show the disk that publishing starts from.
   console.log(CP.spawnSync("df", ["-h", "/"], { encoding: "utf8" }).stdout ?? "");
   const names = FS.readdirSync(assets);
-  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan, assets) : [];
-  const readTags = async (name: string) => {
-    // `/<name>/dist-tags` would be read as a version named "dist-tags".
-    const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
-    const answer = await pollRegistry({
-      attempts: NPM_TAG_POLLS,
-      read: async () => {
-        const response = await registryFetch(url);
-        // A name nobody has published answers 404 unscoped and 401 scoped on
-        // this unauthenticated public GET. Neither is an ownership or
-        // readiness check.
-        if (response.status === 404 || response.status === 401)
-          return { tags: {} as Record<string, string> };
-        if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
-        return { tags: (await response.json()) as Record<string, string> };
-      },
-      exhausted: `The npm registry did not answer dist-tags for ${name}.`,
-    });
-    return answer.tags;
-  };
-  const assertTagNotBackwards = async (name: string) => {
-    const tags = await readTags(name);
-    if (tags[plan.distTag] && compareSemverVersions(tags[plan.distTag]!, plan.version) > 0)
-      throw new Error("Refusing to move a fork release/dist-tag backwards.");
-  };
-  if (plan.npm) for (const pkg of packages) await assertTagNotBackwards(pkg.manifest.name);
+  if (plan.npm) for (const pkg of packages) await assertTagNotBackwards(pkg.manifest.name, plan);
   const gh = (...args: string[]) => run("gh", args);
   const verifyTag = async (required: boolean) => {
     const response = await releaseFetch(
@@ -511,20 +682,6 @@ async function publishPrepared(plan: ForkReleasePlan) {
       );
     }
   };
-  // Every registry read goes through pollRegistry, so a registry that did not
-  // answer is never mistaken for a verdict about the package.
-  const publishedVersion = (pkg: (typeof packages)[number]) =>
-    pollRegistry({
-      attempts: NPM_TAG_POLLS,
-      read: async () => ({ published: await registryVersion(pkg, plan.version) }),
-      exhausted: `The npm registry did not answer for ${pkg.manifest.name}@${plan.version}.`,
-    });
-  const verifyNpm = async () => {
-    if (!plan.npm) return;
-    for (const pkg of packages)
-      if (!(await publishedVersion(pkg)).published)
-        throw new Error("Every exact npm version must exist before release exposure.");
-  };
   const settleAll = async <T>(
     items: ReadonlyArray<T>,
     operation: (item: T) => Promise<void>,
@@ -539,9 +696,9 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (reasons.length) throw new Error(`${failure} ${reasons.join(" ")}`);
   };
   const uploadPackage = async (pkg: (typeof packages)[number]) => {
-    // A transient answer must never read as "absent" here: publishing over an
-    // existing immutable version is refused by npm, not retried.
-    if (!(await publishedVersion(pkg)).published)
+    // A transient answer must never read as "absent" here.
+    if (await npmPublished(pkg.manifest.name, plan.version, pkg.integrity)) return;
+    try {
       await runAsync("npm", [
         "publish",
         pkg.file,
@@ -551,43 +708,20 @@ async function publishPrepared(plan: ForkReleasePlan) {
         "--tag",
         plan.stagingTag,
       ]);
-  };
-  // npm reviews each new version before it becomes installable, which took
-  // up to about fifteen minutes for these packages. Wait well past that.
-  const awaitReview = (pkg: (typeof packages)[number]) =>
-    pollRegistry({
-      attempts: NPM_REVIEW_POLLS,
-      read: async () => (await registryVersion(pkg, plan.version)) || undefined,
-      exhausted: "npm publication is not yet verifiable; the draft remains unavailable.",
-      waiting: `Waiting for npm to finish reviewing ${pkg.manifest.name}@${plan.version}.`,
-    }).then(() => undefined);
-  const promote = async (pkg: (typeof packages)[number]) => {
-    await assertTagNotBackwards(pkg.manifest.name);
-    const tags = await readTags(pkg.manifest.name);
-    for (const tag of plan.distTags) {
-      // The channel tag refuses to move backwards above; an alias such as
-      // nightly's `latest` yields to a newer published version instead of
-      // failing a release that is otherwise complete.
+    } catch (error) {
+      // A version still in review reads as absent, so a re-run publishes it again
+      // and npm refuses. The visibility check still verifies its bytes.
       if (
-        tag !== plan.distTag &&
-        tags[tag] &&
-        compareSemverVersions(tags[tag]!, plan.version) > 0
-      ) {
-        console.log(
-          `Leaving ${pkg.manifest.name}@${tag} on ${tags[tag]}; it is newer than ${plan.version}.`,
-        );
-        continue;
-      }
-      await runAsync("npm", ["dist-tag", "add", `${pkg.manifest.name}@${plan.version}`, tag]);
-      await pollRegistry({
-        attempts: NPM_TAG_POLLS,
-        read: async () =>
-          (await readTags(pkg.manifest.name))[tag] === plan.version ? true : undefined,
-        exhausted: "Fork dist-tag promotion is not yet verifiable; rerun the publish job.",
-      });
+        !(error instanceof CommandError) ||
+        !/EPUBLISHCONFLICT|cannot publish over the previously published version/i.test(error.stderr)
+      )
+        throw error;
+      console.log(
+        `npm already has ${pkg.manifest.name}@${plan.version}, presumably still in review; checking it instead.`,
+      );
     }
   };
-  await publishForkReleaseSequence({
+  const npm = await publishForkReleaseSequence({
     ensureDraft: async () => {
       await verifyTag(false);
       let existing = await settleRelease();
@@ -635,14 +769,6 @@ async function publishPrepared(plan: ForkReleasePlan) {
     uploadBinaries: async () => upload(names.filter((name) => !plan.feedAssets.includes(name))),
     verifyBinaries: async () =>
       verifyAssets(names.filter((name) => !plan.feedAssets.includes(name))),
-    publishNpm: async () => {
-      if (!plan.npm) return;
-      // The staging tag installs nothing, so the launcher may publish while its
-      // release is still a draft whose archives it cannot download yet.
-      await settleAll(packages, uploadPackage, "The fork launcher failed publication.");
-      await settleAll(packages, awaitReview, "The fork launcher failed verification.");
-    },
-    verifyNpm,
     uploadFeeds: async () => upload(plan.feedAssets),
     verifyCompleteRelease: async () => verifyAssets(names),
     publishRelease: async () => {
@@ -659,11 +785,6 @@ async function publishPrepared(plan: ForkReleasePlan) {
         );
       await verifyTag(true);
       if (getRelease().draft) throw new Error("GitHub release publication is not yet verifiable.");
-    },
-    promoteNpmTags: async () => {
-      if (!plan.npm) return;
-      // Runs after the release is public, so a promoted launcher can always download.
-      await settleAll(packages, promote, "Fork launcher dist-tag promotion failed.");
     },
     publishIndex: async () => {
       if (plan.channel === "preview") return;
@@ -754,7 +875,26 @@ async function publishPrepared(plan: ForkReleasePlan) {
         },
       });
     },
+    // The release is public by now, so the launcher can always download its archive.
+    // It publishes under a staging tag that installs nothing until promotion.
+    publishNpm: async () => {
+      if (plan.npm)
+        await settleAll(packages, uploadPackage, "The fork launcher failed publication.");
+    },
+    checkNpm: async () =>
+      combineChecks(
+        await Promise.all(
+          packages.map((pkg) => npmVisible(pkg.manifest.name, plan.version, pkg.integrity)),
+        ),
+      ),
+    promoteNpmTags: async () =>
+      settleAll(
+        packages,
+        (pkg) => promoteTags(pkg.manifest.name, plan),
+        "Fork launcher dist-tag promotion failed.",
+      ),
   });
+  reportNpm(plan.npm ? npm : "skipped", plan);
 }
 
 async function main() {
@@ -861,7 +1001,9 @@ async function main() {
         "The Windows x64 build failed: this release leaves out the Windows assets, and the npm launcher has no Windows build.",
       );
     await publishPrepared(plan);
-  } else throw new Error("Use preflight, signing or publish --execute.");
+  } else if (mode === "promote") {
+    await promotePublished(process.env.PROMOTE_VERSION ?? "");
+  } else throw new Error("Use preflight, signing, publish --execute or promote --execute.");
 }
 if (process.argv[1] && import.meta.url === URL.pathToFileURL(Path.resolve(process.argv[1])).href)
   main().catch((error) => {

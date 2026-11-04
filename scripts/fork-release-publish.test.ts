@@ -18,7 +18,10 @@ const file=process.env.FIXTURE_STATE; const s=JSON.parse(fs.readFileSync(file,'u
 const [command,...args]=process.argv.slice(2);
 // npm runs concurrently, so it appends to its own log instead of rewriting the state.
 if(command==='npm') {
- fs.appendFileSync(process.env.FIXTURE_NPM_LOG,JSON.stringify({args,draft:s.release.draft})+'\\n');
+ // Like npm, a second publish of a version is refused, even while review hides it.
+ const again=args[0]==='publish' && fs.readFileSync(process.env.FIXTURE_NPM_LOG,'utf8').split('\\n').filter(Boolean).some(line=>{const e=JSON.parse(line); return e.args?.[0]==='publish' && e.args[1]===args[1]});
+ fs.appendFileSync(process.env.FIXTURE_NPM_LOG,JSON.stringify({args,draft:s.release.draft,assets:s.release.assets.map(a=>a.name)})+'\\n');
+ if(again) { process.stderr.write('npm error code E403\\nnpm error 403 403 Forbidden - PUT https://registry.npmjs.org/shuv2code - You cannot publish over the previously published versions: '+s.release.tag_name.slice(1)+'. PRIVATE_RESPONSE_BODY'); process.exit(1); }
  if(args[0]==='dist-tag' || (args[0]==='publish' && s.mode.startsWith('fresh'))) process.exit(0);
  process.stderr.write('fixture failure (HTTP 401) PRIVATE_RESPONSE_BODY'); process.exit(1);
 }
@@ -37,7 +40,7 @@ if(command==='git' && args.join(' ')==='rev-parse HEAD') { save(); console.log(s
 else if(command==='gh') {
  const endpoint=args.find(a=>a.startsWith('repos/')||a.startsWith('https://uploads.github.com/'));
  if(args[0]==='release') fail(422); // An existing draft must never be recreated.
- if(endpoint?.includes('/releases/tags/')) fail(404); // Published-only lookup cannot see this draft.
+ if(endpoint?.includes('/releases/tags/')) { if(s.release.draft) fail(404); respond([s.release]); process.exit(0); } // Published-only lookup cannot see a draft.
  if(endpoint?.endsWith('/releases?per_page=100')) {
    if(s.mode==='gh-error') fail(503);
    // Like GitHub, the list can lag a draft created moments ago. In draft-race
@@ -55,8 +58,13 @@ else if(command==='gh') {
  } else if(endpoint?.startsWith('https://uploads.github.com/')) {
    if(!endpoint.includes('/releases/1234/assets?')) fail(404);
    const name=new URL(endpoint).searchParams.get('name'); const bytes=fs.readFileSync(args[args.indexOf('--input')+1]);
-   const asset={name,size:bytes.length,digest:'sha256:'+crypto.createHash('sha256').update(bytes).digest('hex')};
+   const asset={id:s.release.assets.length+1,name,size:bytes.length,digest:'sha256:'+crypto.createHash('sha256').update(bytes).digest('hex')};
+   if(name==='release.json') s.releaseJson=bytes.toString('utf8');
    s.release.assets.push(asset); save(); console.log(JSON.stringify(asset));
+ } else if(endpoint?.includes('/releases/assets/')) {
+   const asset=s.release.assets.find(a=>endpoint.endsWith('/releases/assets/'+a.id));
+   if(!asset || asset.name!=='release.json' || !args.includes('Accept: application/octet-stream')) fail(404);
+   save(); console.log(s.releaseJson);
  } else if(endpoint?.endsWith('/releases/1234')) {
    // fresh-unpublished: GitHub accepts the PATCH but the release never turns public.
    if(args.includes('PATCH')) { if(!args.includes('draft=false')) fail(400); if(s.mode!=='fresh-unpublished') s.release.draft=false; }
@@ -83,11 +91,13 @@ const tagsOf=(s,name)=>{
  return tags;
 };
 // fresh*: nothing is on npm until this run publishes it, and review hides each
-// new version for its first two reads.
+// new version for its first two reads. fresh-pending never finishes review in
+// this run; fresh-reviewed finished it before this run started.
 const reviewed=new Set();
 const freshVersion=(s,name)=>{
  if(!npmLog().some(({args})=>args?.[0]==='publish' && args[1]==='prepared/npm-packages/'+name+'.tgz')) return undefined;
- if(!reviewed.has(name)) {
+ if(s.mode==='fresh-pending') return undefined;
+ if(!reviewed.has(name) && s.mode!=='fresh-reviewed') {
    if((reads['review '+name]=(reads['review '+name]??0)+1)<=2) return undefined;
    reviewed.add(name); fs.appendFileSync(process.env.FIXTURE_NPM_LOG,JSON.stringify({visible:name})+'\\n');
  }
@@ -110,6 +120,8 @@ globalThis.fetch=async input=>{
    if(s.mode==='npm-error') return new Response(null,{status:404});
    if(!s.registry[name]) throw new Error('Unexpected registry package');
    if(s.mode.startsWith('fresh')) {
+     // fresh-down: once this run publishes, the registry answers only errors.
+     if(s.mode==='fresh-down' && npmLog().some(({args})=>args?.[0]==='publish')) return new Response('PRIVATE_RESPONSE_BODY',{status:503});
      const version=freshVersion(s,name);
      return version ? Response.json(version) : new Response(null,{status:404});
    }
@@ -147,6 +159,8 @@ function publishFixture(
   /** Other releases GitHub lists ahead of this one. */
   bulkReleases: ReadonlyArray<unknown> = [],
   runner: Record<string, string> = { RUNNER_ENVIRONMENT: "github-hosted" },
+  /** A second run against the same release and registry, such as a re-run or a promotion. */
+  followUp?: { mode: string; args: string[]; env?: Record<string, string> },
 ) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-publisher-"));
   const plan = forkReleasePlan({
@@ -259,61 +273,104 @@ function publishFixture(
         `#!/bin/sh\nexec "${process.execPath}" "${NodePath.join(root, "shim.mjs")}" ${command} "$@"\n`,
         { mode: 0o700 },
       );
-    const result = NodeChildProcess.spawnSync(
-      process.execPath,
-      [
-        "--import",
-        NodePath.join(root, "http.mjs"),
-        NodePath.resolve(import.meta.dirname, "fork-release.ts"),
-        "publish",
-        "--execute",
-      ],
-      {
-        cwd: root,
-        encoding: "utf8",
-        env: {
-          PATH: root + NodePath.delimiter + process.env.PATH,
-          FIXTURE_STATE: stateFile,
-          FIXTURE_NPM_LOG: npmLogFile,
-          GITHUB_ACTIONS: "true",
-          GITHUB_REPOSITORY: plan.repository,
-          GITHUB_WORKFLOW_REF: `${plan.repository}/.github/workflows/release.yml@${ref}`,
-          GITHUB_REF: ref,
-          GITHUB_DEFAULT_BRANCH: "main",
-          WINDOWS_BUILT: "true",
-          ...runner,
-          ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
-          ...(npm ? { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" } : {}),
-          // Same number of polls as CI, without the fifteen-second waits.
-          FORK_RELEASE_NPM_POLL_MS: "1",
-          FIXTURE_FLAKY_TAGS: String(flaky.tags ?? 0),
-          FIXTURE_FLAKY_VERSIONS: String(flaky.versions ?? 0),
-          GH_TOKEN: "fixture",
+    // A re-run downloads the build artifacts again, before publish shaped them.
+    const unshaped = NodePath.join(root, "unshaped");
+    NodeFS.cpSync(prepared, unshaped, { recursive: true });
+    const output = NodePath.join(root, "github-output");
+    const summary = NodePath.join(root, "step-summary");
+    const runPublisher = (args: string[], env: Record<string, string> = {}) => {
+      NodeFS.writeFileSync(output, "");
+      NodeFS.writeFileSync(summary, "");
+      return NodeChildProcess.spawnSync(
+        process.execPath,
+        [
+          "--import",
+          NodePath.join(root, "http.mjs"),
+          NodePath.resolve(import.meta.dirname, "fork-release.ts"),
+          ...args,
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: {
+            PATH: root + NodePath.delimiter + process.env.PATH,
+            FIXTURE_STATE: stateFile,
+            FIXTURE_NPM_LOG: npmLogFile,
+            GITHUB_ACTIONS: "true",
+            GITHUB_REPOSITORY: plan.repository,
+            GITHUB_WORKFLOW_REF: `${plan.repository}/.github/workflows/release.yml@${ref}`,
+            GITHUB_REF: ref,
+            GITHUB_DEFAULT_BRANCH: "main",
+            GITHUB_OUTPUT: output,
+            GITHUB_STEP_SUMMARY: summary,
+            WINDOWS_BUILT: "true",
+            PROMOTE_VERSION: plan.version,
+            ...runner,
+            ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
+            ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
+            ...(npm ? { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" } : {}),
+            // Same number of polls as CI, without the fifteen-second waits.
+            FORK_RELEASE_NPM_POLL_MS: "1",
+            FIXTURE_FLAKY_TAGS: String(flaky.tags ?? 0),
+            FIXTURE_FLAKY_VERSIONS: String(flaky.versions ?? 0),
+            GH_TOKEN: "fixture",
+            ...env,
+          },
         },
-      },
-    );
+      );
+    };
+    let result = runPublisher(["publish", "--execute"]);
+    let firstRun: typeof result | undefined;
+    // The follow-up reports only its own commands, against the state the first run left.
+    let npmLogStart = 0;
+    if (followUp) {
+      firstRun = result;
+      const first = JSON.parse(NodeFS.readFileSync(stateFile, "utf8")) as { commands: unknown[] };
+      NodeFS.writeFileSync(
+        stateFile,
+        JSON.stringify({ ...first, mode: followUp.mode, commands: [] }),
+      );
+      npmLogStart = NodeFS.readFileSync(npmLogFile, "utf8").split("\n").filter(Boolean).length;
+      NodeFS.rmSync(prepared, { recursive: true });
+      NodeFS.cpSync(unshaped, prepared, { recursive: true });
+      result = runPublisher(followUp.args, followUp.env);
+    }
     const state = JSON.parse(NodeFS.readFileSync(stateFile, "utf8")) as {
       commands: string[][];
       index?: string;
+      releaseJson?: string;
       tags: Record<string, Record<string, string>>;
       release: { draft: boolean; assets: { name: string }[] };
     };
     /** npm invocations, with the release's draft state when each ran, and npm review completions, in order. */
-    const npmLog = NodeFS.readFileSync(npmLogFile, "utf8")
+    const fullNpmLog = NodeFS.readFileSync(npmLogFile, "utf8")
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as { args: string[]; draft: boolean } | { visible: string });
-    for (const entry of npmLog) {
+      .map(
+        (line) =>
+          JSON.parse(line) as
+            | { args: string[]; draft: boolean; assets: string[] }
+            | { visible: string },
+      );
+    const npmLog = fullNpmLog.slice(npmLogStart);
+    for (const [index, entry] of fullNpmLog.entries()) {
       if (!("args" in entry)) continue;
-      state.commands.push(["npm", ...entry.args]);
+      if (index >= npmLogStart) state.commands.push(["npm", ...entry.args]);
       const [subcommand, , spec, tag] = entry.args;
       if (subcommand === "dist-tag")
         (state.tags[spec!.slice(0, spec!.lastIndexOf("@"))] ??= {})[tag!] = spec!.slice(
           spec!.lastIndexOf("@") + 1,
         );
     }
-    return { result, plan, state, npmLog };
+    return {
+      result,
+      firstRun,
+      plan,
+      state,
+      npmLog,
+      output: NodeFS.readFileSync(output, "utf8"),
+      summary: NodeFS.readFileSync(summary, "utf8"),
+    };
   } finally {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }
@@ -601,13 +658,16 @@ describe("fork publication fixtures", () => {
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "stages the launcher, waits for review, and promotes it only once the release is public",
+    "makes the release public with every pinned archive and feed before npm, then promotes",
     () => {
-      const { result, state, plan, npmLog } = publishFixture(
+      const { result, state, plan, npmLog, output, summary } = publishFixture(
         "fresh",
         "refs/heads/main",
         true,
         "nightly",
+        {},
+        {},
+        { mac: true, win: true, unsigned: false },
       );
       expect(result.status, result.stderr).toBe(0);
       const at = (match: (entry: (typeof npmLog)[number]) => boolean) =>
@@ -615,9 +675,9 @@ describe("fork publication fixtures", () => {
       const command = (subcommand: string) =>
         at((entry) => "args" in entry && entry.args[0] === subcommand);
       const publishes = npmLog.flatMap((entry) =>
-        "args" in entry && entry.args[0] === "publish" ? [entry.args] : [],
+        "args" in entry && entry.args[0] === "publish" ? [entry] : [],
       );
-      expect(publishes).toEqual([
+      expect(publishes.map((entry) => entry.args)).toEqual([
         expect.arrayContaining([
           "prepared/npm-packages/shuv2code.tgz",
           "--provenance",
@@ -625,34 +685,208 @@ describe("fork publication fixtures", () => {
           plan.stagingTag,
         ]),
       ]);
+      // The launcher downloads from the release, so it is public, with every
+      // archive the launcher pins and every feed, before npm sees anything.
+      expect(publishes[0]!.draft).toBe(false);
+      expect(publishes[0]!.assets).toEqual(
+        expect.arrayContaining([...plan.cliAssets, ...plan.feedAssets]),
+      );
+      expect(state.index).toBeDefined();
       const reviews = at((entry) => "visible" in entry);
       expect(reviews).toHaveLength(1);
       expect(Math.max(...command("publish"))).toBeLessThan(Math.min(...reviews));
-      // Promotion waits for review and for the public release the launcher downloads from.
       expect(Math.max(...reviews)).toBeLessThan(Math.min(...command("dist-tag")));
-      expect(
-        npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag" && entry.draft),
-      ).toEqual([]);
       expect(command("dist-tag")).toHaveLength(2);
       expect(state.release.draft).toBe(false);
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(output).toBe("npm=promoted\n");
+      expect(summary).toContain(`shuv2code@${plan.version} is on nightly, latest.`);
+      // What promote-only later checks npm against.
+      expect((JSON.parse(state.releaseJson!) as { npmPackages: unknown }).npmPackages).toEqual([
+        { name: "shuv2code", integrity: expect.stringMatching(/^sha512-/) },
+      ]);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "succeeds with the dist-tags left alone while npm still reviews the version",
+    () => {
+      const previous = { nightly: "1.2.2-nightly.20261013.1", latest: "1.2.2-nightly.20261013.1" };
+      const { result, state, plan, npmLog, output, summary } = publishFixture(
+        "fresh-pending",
+        "refs/heads/main",
+        true,
+        "nightly",
+        { shuv2code: previous },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "publish")).toHaveLength(
+        1,
+      );
+      expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag")).toEqual([]);
+      expect(state.tags["shuv2code"]).toEqual(previous);
+      expect(result.stdout).toMatch(/^::warning::npm pending review: /m);
+      expect(output).toBe("npm=pending\n");
+      expect(summary).toContain("npm pending review");
+      expect(summary).toContain(
+        `gh workflow run release.yml --ref main -f promote_version=${plan.version}`,
+      );
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32").each([
-    { mode: "fresh-mismatch", error: "immutable package bytes" },
-    { mode: "fresh-unpublished", error: "HTTP 422" },
+    { name: "a publish re-run", args: ["publish", "--execute"] },
+    { name: "a promote-only run", args: ["promote", "--execute"] },
+  ])("changes nothing but the dist-tags in $name once npm shows the version", ({ args }) => {
+    const { result, firstRun, state, plan, npmLog, output } = publishFixture(
+      "fresh-pending",
+      "refs/heads/main",
+      true,
+      "nightly",
+      {},
+      {},
+      { mac: true, win: true, unsigned: false },
+      [],
+      undefined,
+      { mode: "fresh-reviewed", args },
+    );
+    expect(firstRun!.status, firstRun!.stderr).toBe(0);
+    expect(result.status, result.stderr).toBe(0);
+    // No release create, upload or edit, and no second npm publish.
+    expect(
+      state.commands.filter((command) =>
+        command.some(
+          (arg) => arg === "POST" || arg === "PATCH" || arg.startsWith("https://uploads."),
+        ),
+      ),
+    ).toEqual([]);
+    expect(npmLog.flatMap((entry) => ("args" in entry ? [entry.args.slice(0, 2)] : []))).toEqual([
+      ["dist-tag", "add"],
+      ["dist-tag", "add"],
+    ]);
+    expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
+    expect(output).toBe("npm=promoted\n");
+  });
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "promotes nothing onto a release that is not public",
+    () => {
+      const { result, state } = publishFixture(
+        "fresh-unpublished",
+        "refs/heads/main",
+        true,
+        "nightly",
+        {},
+        {},
+        undefined,
+        [],
+        undefined,
+        { mode: "fresh-reviewed", args: ["promote", "--execute"] },
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/releases\/tags\/.*HTTP 404/);
+      expect(state.commands.some(([command]) => command === "npm")).toBe(false);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32").each([
+    { mode: "fresh", status: "promoted", tags: 2 },
+    { mode: "fresh-pending", status: "pending", tags: 0 },
   ])(
-    "moves no dist-tag unless every package verifies and the release is public ($mode)",
-    ({ mode, error }) => {
+    "re-runs publish while npm still reviews: the refused publish counts as published ($status)",
+    ({ mode, status, tags }) => {
+      const { result, firstRun, state, npmLog, output } = publishFixture(
+        "fresh-pending",
+        "refs/heads/main",
+        true,
+        "nightly",
+        {},
+        {},
+        { mac: true, win: true, unsigned: false },
+        [],
+        undefined,
+        { mode, args: ["publish", "--execute"] },
+      );
+      expect(firstRun!.status, firstRun!.stderr).toBe(0);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("npm already has shuv2code@");
+      expect(`${result.stdout}${result.stderr}`).not.toContain("PRIVATE_RESPONSE_BODY");
+      const commands = npmLog.flatMap((entry) => ("args" in entry ? [entry.args[0]] : []));
+      expect(commands).toEqual(["publish", ...Array<string>(tags).fill("dist-tag")]);
+      expect(output).toBe(`npm=${status}\n`);
+      expect(state.release.draft).toBe(false);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "reports a failed npm check, not a review, when the registry answers only errors",
+    () => {
+      const { result, state, npmLog, output, summary } = publishFixture(
+        "fresh-down",
+        "refs/heads/main",
+        true,
+        "nightly",
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag")).toEqual([]);
+      const warning = result.stdout.split("\n").find((line) => line.startsWith("::warning::"))!;
+      expect(warning).toMatch(/^::warning::npm check failed: .*Last error: GET .*HTTP 503/);
+      expect(warning).not.toContain("pending review");
+      expect(output).toMatch(
+        /^npm=failed\nnpm_error=GET https:\/\/registry\.npmjs\.org\/.*HTTP 503\)\.\n$/,
+      );
+      expect(summary).toContain("npm check failed");
+      expect(summary).toContain("HTTP 503");
+      expect(`${result.stdout}${result.stderr}`).not.toContain("PRIVATE_RESPONSE_BODY");
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32").each([
+    {
+      name: "a release that published no npm package",
+      npm: false,
+      mode: "fresh-reviewed",
+      error: "recorded no shuv2code launcher bytes",
+    },
+    {
+      name: "npm bytes the release did not record",
+      npm: true,
+      mode: "fresh-mismatch",
+      error: "immutable package bytes",
+    },
+  ])("promote-only refuses $name", ({ npm, mode, error }) => {
+    const { result, firstRun, npmLog } = publishFixture(
+      "fresh-pending",
+      "refs/heads/main",
+      npm,
+      "nightly",
+      {},
+      {},
+      { mac: true, win: true, unsigned: false },
+      [],
+      undefined,
+      {
+        mode,
+        args: ["promote", "--execute"],
+        env: { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" },
+      },
+    );
+    expect(firstRun!.status, firstRun!.stderr).toBe(0);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(error);
+    expect(npmLog.filter((entry) => "args" in entry)).toEqual([]);
+  });
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32").each([
+    { mode: "fresh-mismatch", error: "immutable package bytes", published: 1, draft: false },
+    { mode: "fresh-unpublished", error: "HTTP 422", published: 0, draft: true },
+  ])(
+    "moves no dist-tag unless the release is public and npm shows this run's bytes ($mode)",
+    ({ mode, error, published, draft }) => {
       const { result, state, npmLog } = publishFixture(mode, "refs/heads/main", true, "nightly");
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(error);
       expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "publish")).toHaveLength(
-        1,
+        published,
       );
-      expect(npmLog.filter((entry) => "visible" in entry)).toHaveLength(1);
+      expect(npmLog.filter((entry) => "visible" in entry)).toHaveLength(published);
       expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag")).toEqual([]);
-      expect(state.release.draft).toBe(true);
+      expect(state.release.draft).toBe(draft);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -690,7 +924,8 @@ describe("fork publication fixtures", () => {
       // A retried answer would have ended in the poll's exhaustion message.
       expect(result.stderr).not.toContain("Last registry failure");
       expect(state.commands.some(([command]) => command === "npm")).toBe(false);
-      expect(state.release.draft).toBe(true);
+      // npm comes after the release, so the release is already public.
+      expect(state.release.draft).toBe(false);
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
