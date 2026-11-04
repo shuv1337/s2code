@@ -14,6 +14,7 @@ import {
   ProjectCreatePayload,
   ProjectUpdatePayload,
   ProjectId,
+  OrchestratorMcpAllowPoolFailover,
   OrchestratorMcpClientRequestId,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
@@ -124,7 +125,7 @@ const ProjectCloneTool = Tool.make("t3_project_clone", {
 const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   ...shared,
   description:
-    "Create one new top-level thread, bound to its workspace before the agent starts. Task in `message`. Omit `projectId`, model and modes to inherit yours (outside a thread, pass `projectId` or `scratch`); modes cannot exceed yours. After an error or lost reply, retry with the same `clientRequestId`. Follow it with `t3_thread_read` or `t3_thread_wait`. Mention it with its `link`.",
+    "Create one new top-level thread, bound to its workspace before the agent starts. Task in `message`. Omit `projectId`, model and modes to inherit yours (outside a thread, pass `projectId` or `scratch`); modes cannot exceed yours. After an error or lost reply, retry with the same `clientRequestId`. Follow it with `t3_thread_read` or `t3_thread_wait`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     projectId: Schema.optional(ProjectId),
@@ -136,12 +137,9 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
-    allowPoolFailover: Schema.optional(
-      Schema.Boolean.annotate({
-        description:
-          "If the `modelSelection` instance is out of quota or unavailable, use its pool's freest instance instead of failing.",
-      }),
-    ),
+    allowPoolFailover: Schema.optional(OrchestratorMcpAllowPoolFailover),
+    /** `modelSelection` is a default its pool may place, not a named instance (a linked environment's inherited one). */
+    poolStart: Schema.optional(Schema.Boolean),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
     workspaceStrategy: Schema.optional(
@@ -167,6 +165,8 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     modelSelection: ModelSelection,
     runId: Schema.NullOr(RunId),
     status: Schema.NullOr(OrchestrationV2RunStatus),
+    /** A usage problem that did not stop the launch, such as a flag with nothing to act on. */
+    warning: Schema.optional(Schema.String),
   }),
   dependencies: [
     ...shared.dependencies,

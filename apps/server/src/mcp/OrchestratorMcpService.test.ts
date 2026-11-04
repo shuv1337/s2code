@@ -2230,6 +2230,192 @@ describe("OrchestratorMcpService provider resolution", () => {
       ),
   );
 
+  it.live("creates a thread only on an instance that can take it, and reports where it runs", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const altInstanceId = ProviderInstanceId.make("codex-alt");
+        // Registered with the provider registry but with no V2 adapter.
+        const bareInstanceId = ProviderInstanceId.make("codex-bare");
+        const driver = ProviderDriverKind.make("codex");
+        const model = "gpt-5.4";
+        const cwd = yield* checkpointWorkspace("mcp-create-pool");
+        const layerRegistry = ProviderAdapterRegistry.layerFromAdapters(
+          [codexInstanceId, altInstanceId].map((instanceId) => ({
+            instanceId,
+            driver,
+            getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+            planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
+            openSession: () =>
+              Effect.die("These tests exercise committed commands before provider execution."),
+          })),
+        );
+        const usage = new Map<ProviderInstanceId, number>([
+          [codexInstanceId, 10],
+          [altInstanceId, 100],
+          [bareInstanceId, 10],
+        ]);
+        const providers = Effect.sync(() =>
+          [...usage].map(([instanceId, usedPercent]) => ({
+            ...providerSnapshot({ instanceId, driver, model }),
+            usageLimits: {
+              checkedAt: "2026-09-13T00:00:00.000Z",
+              windows: [{ id: "five_hour", kind: "session" as const, label: "5h", usedPercent }],
+            },
+          })),
+        );
+        const layerProviders = Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: providers,
+          refreshInstance: () => providers,
+        });
+        const layerDatabase = SqlitePersistence.layerMemory;
+        const layerOrchestrator = ProviderReplayHarness.layerWithRegistry(
+          { name: "mcp-create-pool", runtimePolicyOverride: { cwd } },
+          layerRegistry,
+          { databaseLayer: layerDatabase, runEffectWorker: false },
+        );
+        const pooled = { driver: "codex", enabled: true, disableOnUsageLimit: true } as const;
+        const layerSettings = ServerSettings.layerTest({
+          providerInstances: {
+            [codexInstanceId]: pooled,
+            [altInstanceId]: pooled,
+            [bareInstanceId]: { driver: "codex", enabled: true },
+          },
+        });
+        const layerThreads = ThreadManagementService.layer.pipe(
+          Layer.provideMerge(layerOrchestrator),
+          Layer.provide(
+            LegacyV1ThreadImporter.layer.pipe(
+              Layer.provide(layerOrchestrator),
+              Layer.provide(layerDatabase),
+            ),
+          ),
+          Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+          Layer.provideMerge(layerSettings),
+          Layer.provide(layerProviders),
+        );
+        const layerTest = layerOrchestratorService.pipe(
+          Layer.provideMerge(layerThreads),
+          Layer.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              NodeCrypto.layer,
+              layerRegistry,
+              layerSettings,
+              layerProviders,
+              Layer.mock(ProjectService.ProjectService)({}),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+              Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+            ),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const settings = yield* ServerSettings.ServerSettingsService;
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make("parent:create"),
+            threadId: parentThreadId,
+            projectId,
+            title: "MCP parent",
+            modelSelection: { instanceId: codexInstanceId, model },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+          });
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make("parent:start"),
+            threadId: parentThreadId,
+            messageId: MessageId.make("parent:message"),
+            text: "Create a thread.",
+            attachments: [],
+            dispatchMode: { type: "start_immediately" },
+          });
+          const threadsBefore = yield* orchestrator.countThreads();
+          const create = (
+            clientRequestId: string,
+            target: {
+              readonly providerInstanceId: ProviderInstanceId;
+              readonly allowPoolFailover?: boolean;
+            },
+            prompt: string | undefined = "Start work.",
+          ) =>
+            service.createThreads(scope, {
+              threads: [
+                { target: { ...target, model }, ...(prompt === undefined ? {} : { prompt }) },
+              ],
+              clientRequestId,
+            });
+          const named = yield* create("named-spent", { providerInstanceId: altInstanceId }).pipe(
+            Effect.flip,
+          );
+          assert.equal(yield* orchestrator.countThreads(), threadsBefore);
+          assert.equal(named.code, "invalid_request");
+          assert.equal(
+            named.message,
+            'Requested provider instance "codex-alt" is out of quota for gpt-5.4; pass allowPoolFailover: true to use another pool instance.',
+          );
+
+          const moved = yield* create("named-failover", {
+            providerInstanceId: altInstanceId,
+            allowPoolFailover: true,
+          });
+          const movedThread = moved.threads[0]!;
+          const movedProjection = yield* orchestrator.getThreadProjection(movedThread.threadId);
+          assert.equal(movedThread.providerInstanceId, codexInstanceId);
+          assert.equal(movedProjection.thread.modelSelection.instanceId, codexInstanceId);
+          assert.equal(movedProjection.runs[0]?.modelSelection.instanceId, codexInstanceId);
+          const threadsAfterMove = yield* orchestrator.countThreads();
+          assert.equal(threadsAfterMove, threadsBefore + 1);
+
+          usage.set(codexInstanceId, 100);
+          const nowhere = yield* create("nowhere", {
+            providerInstanceId: altInstanceId,
+            allowPoolFailover: true,
+          }).pipe(Effect.flip);
+          assert.include(nowhere.message, "no other pool instance can take gpt-5.4");
+          assert.equal(yield* orchestrator.countThreads(), threadsAfterMove);
+          usage.set(codexInstanceId, 10);
+
+          yield* settings.updateSettings({
+            projectSettingsOverrides: {
+              [projectId]: {
+                providerInstances: {
+                  [codexInstanceId]: { enabled: false },
+                  [altInstanceId]: { enabled: false },
+                },
+              },
+            },
+          });
+          // Without a prompt nothing dispatches, so placement alone must refuse it.
+          const disabled = yield* create(
+            "disabled-idle",
+            { providerInstanceId: altInstanceId, allowPoolFailover: true },
+            undefined,
+          ).pipe(Effect.flip);
+          assert.include(disabled.message, "is disabled for this project");
+          assert.equal(yield* orchestrator.countThreads(), threadsAfterMove);
+          yield* settings.updateSettings({ projectSettingsOverrides: {} });
+
+          const bare = yield* create("no-adapter", {
+            providerInstanceId: bareInstanceId,
+            allowPoolFailover: true,
+          }).pipe(Effect.flip);
+          assert.equal(bare.code, "provider_unavailable");
+          assert.include(bare.message, "No V2 provider adapter is registered.");
+          assert.equal(yield* orchestrator.countThreads(), threadsAfterMove);
+        }).pipe(Effect.provide(layerTest));
+      }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+    ),
+  );
+
   it.effect(
     "inherits an available parent instance for driver-only targets and otherwise selects a healthy peer",
     () =>
@@ -2337,6 +2523,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             NodeCrypto.layer,
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               hasReceipt: () => Effect.succeed(false),
+              resolveThreadStartInstance: (input) => Effect.succeed(input.modelSelection),
               assertProviderInstanceEnabled: () => Effect.void,
               isProviderInstanceEnabledForProject: () => Effect.succeed(true),
               getThreadRecords: (threadId) =>
@@ -3080,6 +3267,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             NodeCrypto.layer,
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               hasReceipt: () => Effect.succeed(false),
+              resolveThreadStartInstance: (input) => Effect.succeed(input.modelSelection),
               assertProviderInstanceEnabled: () => Effect.void,
               getThreadRecords: (threadId) =>
                 Effect.succeed(

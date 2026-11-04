@@ -156,6 +156,7 @@ export function usageLimitInstanceIssue(input: UsageLimitPoolInput): string | nu
   if (!provider.installed) return "is not installed";
   if (provider.auth.status === "unauthenticated") return "is signed out";
   if (!isProviderAvailable(provider)) return provider.unavailableReason ?? "is unavailable";
+  if (provider.status === "disabled") return "is disabled";
   if (provider.status === "error") return `is failing: ${provider.message ?? "status error"}`;
   const exhausted = exhaustedUsageWindow(provider, input.now, model);
   if (exhausted === undefined) return null;

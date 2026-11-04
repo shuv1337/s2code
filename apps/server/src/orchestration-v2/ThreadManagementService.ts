@@ -320,14 +320,24 @@ export class ThreadManagementProviderInstanceDisabledError extends Schema.Tagged
   {
     projectId: ProjectId,
     instanceId: ProviderInstanceId,
-    /** Set when the caller named this instance and it cannot take the work, saying why. */
-    reason: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
-    return this.reason === undefined
-      ? `Provider instance "${this.instanceId}" is disabled for project ${this.projectId}.`
-      : `Requested provider instance "${this.instanceId}" ${this.reason}.`;
+    return `Provider instance "${this.instanceId}" is disabled for project ${this.projectId}.`;
+  }
+}
+
+/** A caller named this instance and it cannot take the work now, for the given reason. */
+export class ThreadManagementProviderInstanceUnavailableError extends Schema.TaggedError<ThreadManagementProviderInstanceUnavailableError>()(
+  "ThreadManagementProviderInstanceUnavailableError",
+  {
+    projectId: ProjectId,
+    instanceId: ProviderInstanceId,
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Requested provider instance "${this.instanceId}" ${this.reason}.`;
   }
 }
 
@@ -361,6 +371,7 @@ export const ThreadManagementError = Schema.Union([
   ThreadManagementProjectThreadsListError,
   ThreadManagementDurableRunProjectionError,
   ThreadManagementProviderInstanceDisabledError,
+  ThreadManagementProviderInstanceUnavailableError,
 ]);
 export type ThreadManagementError = typeof ThreadManagementError.Type;
 
@@ -379,11 +390,18 @@ export interface ThreadManagementServiceShape {
   ) => Effect.Effect<void, LegacyV1ThreadImporter.LegacyV1ThreadImportError>;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
-    resolution?: InstanceResolution,
+    /** `threadStart: false` when the caller already placed the thread with `resolveThreadStartInstance`. */
+    resolution?: Pick<InstanceResolution, "threadStart">,
   ) => Effect.Effect<
     Orchestrator.OrchestratorV2DispatchResult,
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
   >;
+  /** The instance a new thread starts on: a named one as asked (or refused), else its pool's pick. */
+  readonly resolveThreadStartInstance: (input: {
+    readonly modelSelection: ModelSelection;
+    readonly projectId: ProjectId;
+    readonly named?: InstanceResolution["named"];
+  }) => Effect.Effect<ModelSelection, ThreadManagementProviderInstanceUnavailableError>;
   readonly getThreadHistoryPage: Orchestrator.OrchestratorV2["Service"]["getThreadHistoryPage"];
   readonly getTimelinePage: Orchestrator.OrchestratorV2["Service"]["getTimelinePage"];
   readonly getMessageCount: Orchestrator.OrchestratorV2["Service"]["getMessageCount"];
@@ -760,7 +778,10 @@ const make = Effect.gen(function* () {
   };
 
   const routeAroundSpentInstance = Effect.fn("ThreadManagementService.routeAroundSpentInstance")(
-    function* (command: OrchestrationV2ServerCommand, resolution: InstanceResolution | undefined) {
+    function* (
+      command: OrchestrationV2ServerCommand,
+      resolution: Pick<InstanceResolution, "threadStart"> | undefined,
+    ) {
       if (command.type !== "message.dispatch" && command.type !== "delegated_task.request") {
         return command;
       }
@@ -783,24 +804,39 @@ const make = Effect.gen(function* () {
         command.type === "message.dispatch"
           ? (command.modelSelection ?? thread.modelSelection)
           : command.modelSelection;
-      const replacement = yield* resolveSpentInstance(selection, thread.projectId, {
+      // Without `named` the resolver never refuses; named refusals come from resolveThreadStartInstance.
+      const replacement = yield* resolveInstance(selection, thread.projectId, {
         threadStart:
           resolution?.threadStart ??
           (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId))),
-        ...(resolution?.named === undefined ? {} : { named: resolution.named }),
-      }).pipe(
-        Effect.mapError(
-          (unavailable) =>
-            new ThreadManagementProviderInstanceDisabledError({
-              projectId: thread.projectId,
-              instanceId: unavailable.instanceId,
-              reason: unavailable.reason,
-            }),
-        ),
-      );
+      }).pipe(Effect.orDie);
       return replacement === selection ? command : { ...command, modelSelection: replacement };
     },
   );
+
+  const resolveInstance = (
+    selection: ModelSelection,
+    projectId: ProjectId,
+    resolution: InstanceResolution,
+  ) =>
+    resolveSpentInstance(selection, projectId, resolution).pipe(
+      Effect.mapError(
+        (unavailable) =>
+          new ThreadManagementProviderInstanceUnavailableError({
+            projectId,
+            instanceId: unavailable.instanceId,
+            reason: unavailable.reason,
+          }),
+      ),
+    );
+
+  const resolveThreadStartInstance: ThreadManagementServiceShape["resolveThreadStartInstance"] = (
+    input,
+  ) =>
+    resolveInstance(input.modelSelection, input.projectId, {
+      threadStart: true,
+      ...(input.named === undefined ? {} : { named: input.named }),
+    });
 
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command, resolution) =>
     ensureCommandTranscripts(command).pipe(
@@ -1585,6 +1621,7 @@ const make = Effect.gen(function* () {
     listOlderSettledThreads: orchestrator.listOlderSettledThreads,
     readShellSnapshot: orchestrator.readShellSnapshot,
     getThreadShell: orchestrator.getThreadShell,
+    resolveThreadStartInstance,
     listAppOwnedChildThreadIds: Effect.fn("ThreadManagementService.listAppOwnedChildThreadIds")(
       function (threadId) {
         return ensureProjectionTranscript(threadId).pipe(

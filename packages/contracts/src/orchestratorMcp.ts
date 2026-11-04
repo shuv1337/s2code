@@ -97,6 +97,12 @@ export const OrchestratorMcpTargetOptions = Schema.Union([
 ]);
 export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.Type;
 
+/**
+ * Opt-in for a named instance: when it cannot take the work, its pool's freest member does. No
+ * description, to keep the tool list small; a refusal names the flag when it would help.
+ */
+export const OrchestratorMcpAllowPoolFailover = Schema.Boolean;
+
 export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(
     ProviderInstanceId.annotate({
@@ -109,16 +115,11 @@ export const OrchestratorMcpTarget = Schema.Struct({
     }),
   ),
   model: Schema.optional(TrimmedNonEmptyString),
-  allowPoolFailover: Schema.optional(
-    Schema.Boolean.annotate({
-      description:
-        "If `providerInstanceId` is out of quota or unavailable, use its pool's freest instance instead of failing.",
-    }),
-  ),
+  allowPoolFailover: Schema.optional(OrchestratorMcpAllowPoolFailover),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
-        "Options from `orchestrator_capabilities`, such as {effort:'max'}. Given values override inherited. [] or {} clears.",
+        "Options from `orchestrator_capabilities`. Given values override inherited. [] or {} clears.",
     }),
   ),
   environmentId: Schema.optional(
@@ -183,7 +184,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "'shared' (default): parent checkout. 'worktree': new prepared checkout from the parent commit, for a separate checkout or PR per child. Uncommitted edits stay out.",
+        "'shared' (default): parent checkout. 'worktree': new prepared checkout from the parent commit. Uncommitted edits stay out.",
     }),
   ),
   mode: Schema.optional(

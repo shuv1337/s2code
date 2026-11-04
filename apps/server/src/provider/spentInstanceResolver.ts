@@ -2,6 +2,7 @@ import {
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
   type ProjectId,
+  type ProviderDriverKind,
   type ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
@@ -13,7 +14,6 @@ import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
@@ -30,6 +30,20 @@ class NamedInstanceUnavailable extends Data.TaggedError("NamedInstanceUnavailabl
   readonly reason: string;
 }> {}
 
+type Registry = ProviderRegistry.ProviderRegistry["Service"];
+
+// Turns live with the server's provider registry, so every resolver on it rotates a pool together.
+const poolTurns = new WeakMap<Registry, Map<ProviderDriverKind, number>>();
+
+const takePoolTurn = (registry: Registry, pool: ProviderDriverKind) =>
+  Effect.sync(() => {
+    const turns = poolTurns.get(registry) ?? new Map<ProviderDriverKind, number>();
+    poolTurns.set(registry, turns);
+    const turn = turns.get(pool) ?? 0;
+    turns.set(pool, turn + 1);
+    return turn;
+  });
+
 /**
  * Moves work off a quota-spent instance, or an unnamed pooled thread start, onto the pool member
  * with the most headroom; later turns stay put until that quota runs out. A named instance is
@@ -39,7 +53,6 @@ class NamedInstanceUnavailable extends Data.TaggedError("NamedInstanceUnavailabl
 export const makeSpentInstanceResolver = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const registry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
-  const poolStarts = yield* Ref.make(0);
   return Effect.fn("SpentInstanceResolver.resolve")(function* (
     selection: ModelSelection,
     projectId: ProjectId | null,
@@ -50,11 +63,12 @@ export const makeSpentInstanceResolver = Effect.gen(function* () {
     const instance = Object.hasOwn(settings.providerInstances, selection.instanceId)
       ? settings.providerInstances[selection.instanceId]
       : undefined;
+    const pool = instance?.disableOnUsageLimit === true ? instance.driver : undefined;
     const spent = instance?.usageLimitDisabled != null;
     const poolStart =
       options?.named === undefined &&
       options?.threadStart === true &&
-      instance?.disableOnUsageLimit === true &&
+      pool !== undefined &&
       resolveProjectProviderInstanceEnabled(settings, projectId, selection.instanceId);
     if (options?.named === undefined && !spent && !poolStart) return selection;
     const input = {
@@ -77,12 +91,12 @@ export const makeSpentInstanceResolver = Effect.gen(function* () {
       if (issue === null) return selection;
       const replacement = options.named.allowPoolFailover ? pickUsageLimitReplacement(input) : null;
       if (replacement === null) {
-        const pooled = instance?.disableOnUsageLimit === true;
-        const reason = options.named.allowPoolFailover
-          ? `${issue}, and no other pool instance can take ${selection.model}`
-          : pooled
-            ? `${issue}; pass allowPoolFailover: true to use another pool instance`
-            : issue;
+        const reason =
+          pool === undefined
+            ? issue
+            : options.named.allowPoolFailover
+              ? `${issue}, and no other pool instance can take ${selection.model}`
+              : `${issue}; pass allowPoolFailover: true to use another pool instance`;
         yield* Effect.logWarning("Requested provider instance is unavailable", {
           requestedInstanceId: selection.instanceId,
           model: selection.model,
@@ -95,11 +109,11 @@ export const makeSpentInstanceResolver = Effect.gen(function* () {
     }
 
     const resolved =
-      (spent
+      (spent || pool === undefined
         ? pickUsageLimitReplacement(input)
         : pickUsageLimitPoolStart({
             ...input,
-            rotation: yield* Ref.getAndUpdate(poolStarts, (count) => count + 1),
+            rotation: yield* takePoolTurn(registry.value, pool),
           })) ?? selection;
     yield* log(resolved, spent ? "requested instance is spent" : "pool start");
     return resolved;

@@ -508,6 +508,27 @@ const finishRun = Effect.fn("cli.thread.finishRun")(function* (
   }
 });
 
+/** `t3_thread_launch` model fields for `thread start`, and a warning for a flag they leave unused. */
+export const launchModelFields = (flags: {
+  readonly provider: Option.Option<string>;
+  readonly model: Option.Option<string>;
+  readonly allowPoolFailover: boolean;
+}) =>
+  Option.isSome(flags.provider) && Option.isSome(flags.model)
+    ? {
+        fields: {
+          modelSelection: { instanceId: flags.provider.value, model: flags.model.value },
+          ...(flags.allowPoolFailover ? { allowPoolFailover: true } : {}),
+        },
+        warning: undefined,
+      }
+    : {
+        fields: {},
+        warning: flags.allowPoolFailover
+          ? "Warning: --allow-pool-failover was ignored: it applies only with --provider."
+          : undefined,
+      };
+
 export const titleFromMessage = (message: string) => {
   const firstLine = message.trim().split("\n")[0]?.trim() ?? "";
   if (firstLine.length <= TITLE_MAX_CHARS) return firstLine;
@@ -640,6 +661,8 @@ const threadStartCommand = Command.make("start", {
       if (Option.isSome(flags.provider) !== Option.isSome(flags.model)) {
         return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
       }
+      const launchModel = launchModelFields(flags);
+      if (launchModel.warning !== undefined) yield* Console.error(launchModel.warning);
       const title = yield* decodeTitle(
         Option.getOrElse(flags.title, () => titleFromMessage(message)),
       ).pipe(Effect.mapError(() => new ThreadUsageError({ detail: "The title is empty." })));
@@ -654,15 +677,7 @@ const threadStartCommand = Command.make("start", {
               title,
               message,
               ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-              ...(Option.isSome(flags.provider) && Option.isSome(flags.model)
-                ? {
-                    modelSelection: {
-                      instanceId: flags.provider.value,
-                      model: flags.model.value,
-                    },
-                    ...(flags.allowPoolFailover ? { allowPoolFailover: true } : {}),
-                  }
-                : {}),
+              ...launchModel.fields,
             },
             ThreadLaunchResult,
           );
