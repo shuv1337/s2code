@@ -227,11 +227,14 @@ export const make = DesktopLifecycle.of({
         return;
       }
       // Startup already acted on the app link that launched it; passing it on replays it.
-      const appLinkPrefix = `${ElectronProtocol.getDesktopScheme(environment.isDevelopment)}:`;
+      const schemes = ElectronProtocol.getPublicDesktopSchemes(false, environment.appVersion);
+      const isAppLink = (arg: string) =>
+        schemes.some((scheme) => arg.toLowerCase().startsWith(`${scheme}:`)) ||
+        ElectronProtocol.isDesktopPromptLink(arg, schemes);
       const args = yield* HostProcess.Arguments;
       yield* electronApp.relaunch({
         execPath: yield* HostProcess.ExecutablePath,
-        args: args.slice(1).filter((arg) => !arg.toLowerCase().startsWith(appLinkPrefix)),
+        args: args.slice(1).filter((arg) => !isAppLink(arg)),
       });
       yield* electronApp.exit(0);
     }).pipe(

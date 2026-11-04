@@ -12,7 +12,6 @@ import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/code
 import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCallback.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
 import { readPairingAppLink } from "@t3tools/shared/remote";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
@@ -237,14 +236,7 @@ export const make = Effect.gen(function* () {
           void runPromise(webLinks.receive(value));
           return true;
         }
-        if (promptLinkAppPath(value) === null) return false;
-        const protocol = new URL(value).protocol;
-        if (
-          protocol !== "http:" &&
-          protocol !== "https:" &&
-          !publicSchemes.includes(protocol.slice(0, -1))
-        )
-          return false;
+        if (!ElectronProtocol.isDesktopPromptLink(value, publicSchemes)) return false;
         void runPromise(webLinks.receive(value));
         return true;
       };

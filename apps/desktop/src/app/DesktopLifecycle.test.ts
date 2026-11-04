@@ -10,7 +10,6 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import type * as Electron from "electron";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
-import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -227,13 +226,50 @@ describe("DesktopLifecycle", () => {
     }),
   );
 
-  it.effect("relaunches without the app link that launched it", () =>
+  const appLinkArgs = (scheme: string) => [
+    `${scheme.toUpperCase()}://pair?token=spent`,
+    `${scheme}://new?prompt=hello`,
+  ];
+  const stable = "0.0.43";
+  const nightly = "0.0.43-nightly.20261104.2428";
+  const preview = "0.0.43-preview.20261104.2428";
+
+  it.effect.each([
+    { name: "stable without s2code: links", appVersion: stable, args: appLinkArgs("s2code") },
+    { name: "stable without shuv2code: links", appVersion: stable, args: appLinkArgs("shuv2code") },
+    {
+      name: "nightly without s2code-nightly: links",
+      appVersion: nightly,
+      args: appLinkArgs("s2code-nightly"),
+    },
+    {
+      name: "nightly without shuv2code-nightly: links",
+      appVersion: nightly,
+      args: appLinkArgs("shuv2code-nightly"),
+    },
+    {
+      name: "preview without s2code-preview: links",
+      appVersion: preview,
+      args: appLinkArgs("s2code-preview"),
+    },
+    {
+      name: "preview without shuv2code-preview: links",
+      appVersion: preview,
+      args: appLinkArgs("shuv2code-preview"),
+    },
+    {
+      name: "without app links but keeps every other argument",
+      appVersion: stable,
+      args: [...appLinkArgs("s2code"), "--open=s2code://x", ...appLinkArgs("shuv2code")],
+      kept: ["--open=s2code://x"],
+    },
+  ])("relaunches $name", ({ appVersion, args, kept = [] }) =>
     Effect.gen(function* () {
       const relaunched = yield* Deferred.make<Electron.RelaunchOptions>();
-      const appLinkScheme = ElectronProtocol.getDesktopScheme(false);
       const layerEnvironment = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
         platform: "linux",
         isDevelopment: false,
+        appVersion,
       } as DesktopEnvironment.DesktopEnvironment["Service"]);
       const layer = DesktopLifecycle.layer.pipe(
         Layer.provideMerge(
@@ -263,12 +299,14 @@ describe("DesktopLifecycle", () => {
         Effect.provideService(HostProcess.Arguments, [
           "/opt/T3 Code/t3code",
           "--no-sandbox",
-          `${appLinkScheme.toUpperCase()}://pair?token=spent`,
-          `${appLinkScheme}://new?prompt=hello`,
+          ...args,
         ]),
       );
 
-      assert.deepEqual(options, { execPath: "/opt/T3 Code/t3code", args: ["--no-sandbox"] });
+      assert.deepEqual(options, {
+        execPath: "/opt/T3 Code/t3code",
+        args: ["--no-sandbox", ...kept],
+      });
     }),
   );
 
