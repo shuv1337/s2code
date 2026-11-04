@@ -67,7 +67,10 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
+import {
+  makeSpentInstanceResolver,
+  type InstanceResolution,
+} from "../provider/spentInstanceResolver.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -317,10 +320,14 @@ export class ThreadManagementProviderInstanceDisabledError extends Schema.Tagged
   {
     projectId: ProjectId,
     instanceId: ProviderInstanceId,
+    /** Set when the caller named this instance and it cannot take the work, saying why. */
+    reason: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Provider instance "${this.instanceId}" is disabled for project ${this.projectId}.`;
+    return this.reason === undefined
+      ? `Provider instance "${this.instanceId}" is disabled for project ${this.projectId}.`
+      : `Requested provider instance "${this.instanceId}" ${this.reason}.`;
   }
 }
 
@@ -372,6 +379,7 @@ export interface ThreadManagementServiceShape {
   ) => Effect.Effect<void, LegacyV1ThreadImporter.LegacyV1ThreadImportError>;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
+    resolution?: InstanceResolution,
   ) => Effect.Effect<
     Orchestrator.OrchestratorV2DispatchResult,
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
@@ -752,7 +760,7 @@ const make = Effect.gen(function* () {
   };
 
   const routeAroundSpentInstance = Effect.fn("ThreadManagementService.routeAroundSpentInstance")(
-    function* (command: OrchestrationV2ServerCommand) {
+    function* (command: OrchestrationV2ServerCommand, resolution: InstanceResolution | undefined) {
       if (command.type !== "message.dispatch" && command.type !== "delegated_task.request") {
         return command;
       }
@@ -777,15 +785,26 @@ const make = Effect.gen(function* () {
           : command.modelSelection;
       const replacement = yield* resolveSpentInstance(selection, thread.projectId, {
         threadStart:
-          command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId)),
-      });
+          resolution?.threadStart ??
+          (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId))),
+        ...(resolution?.named === undefined ? {} : { named: resolution.named }),
+      }).pipe(
+        Effect.mapError(
+          (unavailable) =>
+            new ThreadManagementProviderInstanceDisabledError({
+              projectId: thread.projectId,
+              instanceId: unavailable.instanceId,
+              reason: unavailable.reason,
+            }),
+        ),
+      );
       return replacement === selection ? command : { ...command, modelSelection: replacement };
     },
   );
 
-  const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
+  const dispatch: ThreadManagementServiceShape["dispatch"] = (command, resolution) =>
     ensureCommandTranscripts(command).pipe(
-      Effect.andThen(routeAroundSpentInstance(command)),
+      Effect.andThen(routeAroundSpentInstance(command, resolution)),
       Effect.flatMap((routed) =>
         assertDispatchTargetEnabled(routed).pipe(Effect.andThen(orchestrator.dispatch(routed))),
       ),

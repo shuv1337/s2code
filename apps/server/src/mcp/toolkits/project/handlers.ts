@@ -229,6 +229,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           projectId,
           title: input.title,
           modelSelection,
+          ...(input.modelSelection === undefined || replaying
+            ? {}
+            : { namedInstance: { allowPoolFailover: input.allowPoolFailover === true } }),
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: input.workspaceStrategy ?? { type: "root" },

@@ -268,6 +268,13 @@ function threadManagementFailure(error: unknown): OrchestratorMcpFailure {
   }
 }
 
+/** A target that names an instance is binding at dispatch; one that does not may use its pool. */
+function namedInstance(target: OrchestratorMcpTarget | undefined) {
+  return target?.providerInstanceId === undefined
+    ? undefined
+    : { named: { allowPoolFailover: target.allowPoolFailover === true } };
+}
+
 // Without a reason, a Stop reads as the user's (see RunExecutionService.USER_STOP_REASON).
 function agentStopReason(reason: string | undefined): string {
   return reason === undefined ? "Stopped by an agent" : `Stopped by an agent: ${reason}`;
@@ -1356,6 +1363,7 @@ const make = Effect.gen(function* () {
   }): Effect.fn.Return<ResolvedTarget, OrchestratorMcpFailure> {
     const requestedInstanceId = input.target?.providerInstanceId;
     const requestedDriver = input.target?.driverKind;
+    const failover = input.target?.allowPoolFailover === true;
     const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
     let instanceId = requestedInstanceId;
 
@@ -1421,7 +1429,8 @@ const make = Effect.gen(function* () {
       provider,
       orchestrationCapableInstanceIds.has(provider.instanceId),
     );
-    if (constraints.length > 0) {
+    // With failover allowed, dispatch moves an unusable named instance to its pool or refuses.
+    if (constraints.length > 0 && !(requestedInstanceId !== undefined && failover)) {
       return yield* failure(
         "provider_unavailable",
         `Provider ${instanceId} cannot run a child task: ${constraints.join(" ")}`,
@@ -2549,25 +2558,28 @@ const make = Effect.gen(function* () {
       // type's own enablement check, using the same command id and its
       // receipt-replay exemption, so no separate assert runs here.
       const result = yield* threadManagement
-        .dispatch({
-          type: "delegated_task.request",
-          createdBy: "agent",
-          creationSource: "mcp",
-          commandId,
-          parentThreadId: scope.thread.threadId,
-          parentRunId: parentRun.id,
-          parentNodeId: parentRun.rootNodeId,
-          task: taskPrompt(input),
-          ...(input.title === undefined ? {} : { title: input.title }),
-          modelSelection: target.modelSelection,
-          runtimeMode,
-          interactionMode,
-          ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-          // Async delegations wake the parent on every child terminal; wait
-          // delegations deliver through the blocking tool call, so a wake is
-          // only needed if the parent settled first (timeout, disconnect).
-          completionWake: input.mode === "wait" ? "settled_only" : "always",
-        })
+        .dispatch(
+          {
+            type: "delegated_task.request",
+            createdBy: "agent",
+            creationSource: "mcp",
+            commandId,
+            parentThreadId: scope.thread.threadId,
+            parentRunId: parentRun.id,
+            parentNodeId: parentRun.rootNodeId,
+            task: taskPrompt(input),
+            ...(input.title === undefined ? {} : { title: input.title }),
+            modelSelection: target.modelSelection,
+            runtimeMode,
+            interactionMode,
+            ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
+            // Async delegations wake the parent on every child terminal; wait
+            // delegations deliver through the blocking tool call, so a wake is
+            // only needed if the parent settled first (timeout, disconnect).
+            completionWake: input.mode === "wait" ? "settled_only" : "always",
+          },
+          namedInstance(input.target),
+        )
         .pipe(
           Effect.mapError((error) =>
             error._tag === "ThreadManagementProviderInstanceDisabledError"
@@ -2928,7 +2940,9 @@ const make = Effect.gen(function* () {
                 parent.thread.interactionMode,
                 request.interactionMode,
               );
-              yield* assertTargetEnabledForProject(parent, commandId, target);
+              if (request.target?.allowPoolFailover !== true) {
+                yield* assertTargetEnabledForProject(parent, commandId, target);
+              }
               const title = threadTitle({
                 parentTitle: parent.thread.title,
                 prompt: request.prompt,
@@ -2967,28 +2981,31 @@ const make = Effect.gen(function* () {
                 .pipe(Effect.mapError(threadManagementFailure))).thread.modelSelection;
               if (request.prompt !== undefined) {
                 yield* threadManagement
-                  .dispatch({
-                    type: "message.dispatch",
-                    createdBy: "agent",
-                    creationSource: "mcp",
-                    commandId: stableCommandId({
-                      scope,
-                      requestKey: key,
-                      operation: "dispatch-thread",
-                      index,
-                    }),
-                    threadId,
-                    senderThreadId: scope.thread.threadId,
-                    messageId: stableMessageId({
-                      scope,
-                      requestKey: key,
-                      index,
-                    }),
-                    text: request.prompt,
-                    attachments: [],
-                    modelSelection: resolvedModelSelection,
-                    dispatchMode: { type: "start_immediately" },
-                  })
+                  .dispatch(
+                    {
+                      type: "message.dispatch",
+                      createdBy: "agent",
+                      creationSource: "mcp",
+                      commandId: stableCommandId({
+                        scope,
+                        requestKey: key,
+                        operation: "dispatch-thread",
+                        index,
+                      }),
+                      threadId,
+                      senderThreadId: scope.thread.threadId,
+                      messageId: stableMessageId({
+                        scope,
+                        requestKey: key,
+                        index,
+                      }),
+                      text: request.prompt,
+                      attachments: [],
+                      modelSelection: resolvedModelSelection,
+                      dispatchMode: { type: "start_immediately" },
+                    },
+                    namedInstance(request.target),
+                  )
                   .pipe(
                     Effect.mapError((error) =>
                       error._tag === "ThreadManagementProviderInstanceDisabledError"

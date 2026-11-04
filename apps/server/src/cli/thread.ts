@@ -613,6 +613,12 @@ const threadStartCommand = Command.make("start", {
     Flag.withDescription("Model slug. Defaults to the project's default model."),
     Flag.optional,
   ),
+  allowPoolFailover: Flag.Boolean("allow-pool-failover").pipe(
+    Flag.withDescription(
+      "If --provider is out of quota or unavailable, start on its pool's freest instance instead of failing.",
+    ),
+    Flag.withDefault(false),
+  ),
   worktree: Flag.String("worktree").pipe(
     Flag.withDescription(
       "Run in a new git worktree based on this branch, tag, or commit, instead of the project folder.",
@@ -654,6 +660,7 @@ const threadStartCommand = Command.make("start", {
                       instanceId: flags.provider.value,
                       model: flags.model.value,
                     },
+                    ...(flags.allowPoolFailover ? { allowPoolFailover: true } : {}),
                   }
                 : {}),
             },

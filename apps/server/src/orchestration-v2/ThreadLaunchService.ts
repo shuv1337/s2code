@@ -86,6 +86,8 @@ export interface ThreadLaunchInput {
   readonly title: string;
   readonly generateTitle?: boolean;
   readonly modelSelection: ModelSelection;
+  /** The caller named `modelSelection.instanceId`; see `InstanceResolution.named`. */
+  readonly namedInstance?: { readonly allowPoolFailover: boolean };
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
@@ -848,7 +850,19 @@ const make = Effect.gen(function* () {
         modelSelection: yield* resolveSpentInstance(
           normalized.modelSelection,
           normalized.projectId,
-          { threadStart: true },
+          {
+            threadStart: true,
+            ...(normalized.namedInstance === undefined ? {} : { named: normalized.namedInstance }),
+          },
+        ).pipe(
+          Effect.mapError(
+            (unavailable) =>
+              new ThreadManagement.ThreadManagementProviderInstanceDisabledError({
+                projectId: normalized.projectId,
+                instanceId: unavailable.instanceId,
+                reason: unavailable.reason,
+              }),
+          ),
         ),
       };
       yield* ProjectCloneTracker.rejectCommandsDuringClone(cloneTracker, {
@@ -989,26 +1003,30 @@ const make = Effect.gen(function* () {
               .message({ threadId, ordinal: 1 })
               .pipe(Effect.mapError(mapError(input, "dispatch-message", threadId))));
           const dispatched = yield* threads
-            .dispatch({
-              type: "message.dispatch",
-              commandId: messageCommandId,
-              threadId,
-              messageId,
-              text: input.initialMessage.text,
-              ...(input.initialMessage.scheduledTaskId === undefined
-                ? {}
-                : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
-              ...(input.initialMessage.senderThreadId === undefined
-                ? {}
-                : { senderThreadId: input.initialMessage.senderThreadId }),
-              attachments: input.initialMessage.attachments,
-              ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
-              ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
-              modelSelection: input.modelSelection,
-              dispatchMode: { type: "defer_start", workspaceStrategy },
-              createdBy: input.createdBy,
-              creationSource: input.creationSource,
-            })
+            .dispatch(
+              {
+                type: "message.dispatch",
+                commandId: messageCommandId,
+                threadId,
+                messageId,
+                text: input.initialMessage.text,
+                ...(input.initialMessage.scheduledTaskId === undefined
+                  ? {}
+                  : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
+                ...(input.initialMessage.senderThreadId === undefined
+                  ? {}
+                  : { senderThreadId: input.initialMessage.senderThreadId }),
+                attachments: input.initialMessage.attachments,
+                ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
+                ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
+                modelSelection: input.modelSelection,
+                dispatchMode: { type: "defer_start", workspaceStrategy },
+                createdBy: input.createdBy,
+                creationSource: input.creationSource,
+              },
+              // The launch placed the thread above; the first message must not pick again.
+              { threadStart: false },
+            )
             .pipe(
               // An agent's launch can land on a thread that a replay, or a concurrent
               // launch with the same key, created with broader modes. The orchestrator

@@ -123,6 +123,8 @@ type UsageLimitPoolInput = {
   readonly settings: ServerSettings;
   readonly projectId: ProjectId | null;
   readonly now: number;
+  /** Members tied for the most headroom take turns: the pick is `tied[rotation % tied.length]`. */
+  readonly rotation?: number;
 };
 
 /**
@@ -138,6 +140,30 @@ export function pickUsageLimitPoolStart(input: UsageLimitPoolInput): ModelSelect
   return pickPoolMember(input, true);
 }
 
+/** Why the selected instance cannot take new work for its model now, or null when it can. */
+export function usageLimitInstanceIssue(input: UsageLimitPoolInput): string | null {
+  const { instanceId, model } = input.selection;
+  const config = Object.hasOwn(input.settings.providerInstances, instanceId)
+    ? input.settings.providerInstances[instanceId]
+    : undefined;
+  if (config?.usageLimitDisabled != null) return "was turned off at its usage limit";
+  if (!resolveProjectProviderInstanceEnabled(input.settings, input.projectId, instanceId)) {
+    return "is disabled for this project";
+  }
+  const provider = input.providers.find((entry) => entry.instanceId === instanceId);
+  if (provider === undefined) return null;
+  if (!provider.enabled) return "is disabled";
+  if (!provider.installed) return "is not installed";
+  if (provider.auth.status === "unauthenticated") return "is signed out";
+  if (!isProviderAvailable(provider)) return provider.unavailableReason ?? "is unavailable";
+  if (provider.status === "error") return `is failing: ${provider.message ?? "status error"}`;
+  const exhausted = exhaustedUsageWindow(provider, input.now, model);
+  if (exhausted === undefined) return null;
+  return exhausted.resetsAt
+    ? `is out of quota for ${model} until ${exhausted.resetsAt}`
+    : `is out of quota for ${model}`;
+}
+
 function pickPoolMember(input: UsageLimitPoolInput, includeSelected: boolean) {
   const pooled = (instanceId: ProviderInstanceId) =>
     Object.hasOwn(input.settings.providerInstances, instanceId)
@@ -151,23 +177,24 @@ function pickPoolMember(input: UsageLimitPoolInput, includeSelected: boolean) {
     );
     return used.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...used);
   };
-  const [best] = input.providers
+  const ranked = input.providers
     .filter(
       (provider) =>
         (includeSelected || provider.instanceId !== input.selection.instanceId) &&
         provider.driver === source.driver &&
         pooled(provider.instanceId)?.disableOnUsageLimit === true &&
-        provider.enabled &&
-        provider.installed &&
-        provider.auth.status !== "unauthenticated" &&
-        isProviderAvailable(provider) &&
         provider.models.some((model) => model.slug === input.selection.model) &&
-        !exhaustedUsageWindow(provider, input.now, input.selection.model) &&
-        resolveProjectProviderInstanceEnabled(input.settings, input.projectId, provider.instanceId),
+        usageLimitInstanceIssue({
+          ...input,
+          selection: { ...input.selection, instanceId: provider.instanceId },
+        }) === null,
     )
+    .map((provider) => ({ instanceId: provider.instanceId, rank: rank(provider) }))
     .sort(
-      (left, right) => rank(left) - rank(right) || left.instanceId.localeCompare(right.instanceId),
+      (left, right) => left.rank - right.rank || left.instanceId.localeCompare(right.instanceId),
     );
+  const tied = ranked.filter((member) => member.rank === ranked[0]?.rank);
+  const best = tied[(input.rotation ?? 0) % Math.max(tied.length, 1)];
   if (best === undefined) return null;
   return best.instanceId === input.selection.instanceId
     ? input.selection

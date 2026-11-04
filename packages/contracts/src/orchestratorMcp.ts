@@ -109,6 +109,12 @@ export const OrchestratorMcpTarget = Schema.Struct({
     }),
   ),
   model: Schema.optional(TrimmedNonEmptyString),
+  allowPoolFailover: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "If `providerInstanceId` is out of quota or unavailable, use its pool's freest instance instead of failing.",
+    }),
+  ),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:

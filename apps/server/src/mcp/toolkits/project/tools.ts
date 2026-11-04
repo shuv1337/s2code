@@ -136,6 +136,12 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
+    allowPoolFailover: Schema.optional(
+      Schema.Boolean.annotate({
+        description:
+          "If the `modelSelection` instance is out of quota or unavailable, use its pool's freest instance instead of failing.",
+      }),
+    ),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
     workspaceStrategy: Schema.optional(
