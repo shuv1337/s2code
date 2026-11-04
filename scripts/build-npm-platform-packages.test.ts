@@ -292,6 +292,50 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
   );
 
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "the release workflow's tree cleanup keeps every tarball and removes every extracted tree",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixture = yield* makeFakeArchives();
+        const outputs = yield* buildNpmPlatformPackages({
+          ...fixture,
+          outputDir: path.join(fixture.root, "prepared/npm-packages"),
+          version: VERSION,
+          allowMissing: true,
+        });
+        const workflow = yield* fs.readFileString(
+          yield* path.fromFileUrl(new URL("../.github/workflows/release.yml", import.meta.url)),
+        );
+        const body = workflow
+          .split("- name: Drop the extracted npm package trees, keeping the tarballs\n")[1]!
+          .split("        run: |\n")[1]!
+          .split("\n");
+        const end = body.findIndex((line) => !line.startsWith("          "));
+        const script = body
+          .slice(0, end)
+          .map((line) => line.slice(10))
+          .join("\n");
+        const cleanup = yield* run("bash", ["-c", script], {
+          cwd: fixture.root,
+          env: { PATH: "/usr/bin:/bin" },
+        });
+        assert.equal(cleanup.exitCode, 0, cleanup.stderr);
+        for (const output of outputs) {
+          assert.isTrue(yield* fs.exists(output.tarball), output.tarball);
+          assert.isFalse(yield* fs.exists(output.packageDir), output.packageDir);
+        }
+        const left = yield* fs.readDirectory(path.join(fixture.root, "prepared/npm-packages"), {
+          recursive: true,
+        });
+        assert.deepStrictEqual(
+          left.sort(),
+          ["@s2code", ...outputs.map((output) => `${output.name}.tgz`)].sort(),
+        );
+      }),
+  );
+
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "packs the same tree to identical bytes whatever its mtimes, modes and creation order",
     () =>
       Effect.gen(function* () {

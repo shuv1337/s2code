@@ -467,6 +467,13 @@ jobs:
       NPM_TOKEN: ""
       NODE_AUTH_TOKEN: ""
     steps:
+      # The desktop artifacts (about 6 GB) and the npm builds share this disk.
+      - name: Free runner disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          df -h /
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
@@ -496,8 +503,28 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
+      # Publish reads only the .tgz files. The extracted trees beside them duplicate
+      # every platform binary. The release assets stay: publish uploads and re-hashes them.
+      - name: Drop the extracted npm package trees, keeping the tarballs
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          cd prepared/npm-packages
+          # Each tree sits beside its tarball (<name>/ and <name>.tgz), never around it.
+          tarballs=(*.tgz @s2code/*.tgz)
+          [ "${#tarballs[@]}" -gt 0 ]
+          for tgz in "${tarballs[@]}"; do
+            echo "Removing extracted tree ${tgz%.tgz}"
+            rm -rf "${tgz%.tgz}"
+            test -f "$tgz"
+          done
+          echo "Kept tarballs:"
+          ls -l "${tarballs[@]}"
+          df -h /
       - name: Verify complete matrix, source/WSL receipts, feeds and package allowlist
         run: node scripts/fork-release.ts prepare
+      - name: Log disk before publish
+        run: df -h /
       - name: Draft, verify, publish npm when ready, expose feeds and index last
         run: node scripts/fork-release.ts publish --execute
       # Runs only after the publish step succeeds; a Discord failure never fails the release.
