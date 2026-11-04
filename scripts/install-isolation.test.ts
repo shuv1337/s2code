@@ -246,6 +246,19 @@ describe
       }
     },
   );
+  it
+    .skipIf(kind !== "pwsh" || !hasPwsh)
+    .each([
+      { PROCESSOR_ARCHITECTURE: "ARM64" },
+      { PROCESSOR_ARCHITECTURE: "x86", PROCESSOR_ARCHITEW6432: "ARM64" },
+    ])("refuses Windows on ARM before downloading anything (%o)", (architecture) => {
+    Object.assign(env, architecture);
+    const result = runInstaller(kind);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("no longer built for Windows on ARM");
+    expect(NodeFS.existsSync(env.FIXTURE_REQUESTS!)).toBe(false);
+    expect(NodeFS.existsSync(env.S2CODE_INSTALL_BIN_DIR!)).toBe(false);
+  });
   it.skipIf(kind !== "pwsh" || !hasPwsh)(
     "upgrades a canonical command that still has an older forwarder body",
     () => {

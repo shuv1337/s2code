@@ -1,10 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import {
-  mergeUpdateManifests,
-  parseUpdateManifest,
-  serializeUpdateManifest,
-} from "./update-manifest.ts";
+import { parseUpdateManifest, serializeUpdateManifest } from "./update-manifest.ts";
 
 // Shape electron-builder writes for a Linux AppImage feed.
 const linuxFeed = `version: 0.0.46-nightly.20261016.37
@@ -35,17 +31,5 @@ describe("update manifests", () => {
       "linux",
     );
     expect(roundTripped).toEqual(manifest);
-  });
-
-  it("rejects merging entries that disagree on blockMapSize", () => {
-    const manifest = parseUpdateManifest(linuxFeed, "a.yml", "linux");
-    const changed = parseUpdateManifest(
-      linuxFeed.replace("blockMapSize: 211644", "blockMapSize: 1"),
-      "b.yml",
-      "linux",
-    );
-    expect(() => mergeUpdateManifests(manifest, changed, "linux")).toThrow(
-      "conflicting file entry",
-    );
   });
 });

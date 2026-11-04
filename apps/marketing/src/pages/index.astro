@@ -420,7 +420,7 @@ const mobileEndorsementRows = [
     return null;
   }
 
-  // Browser architecture hints are unreliable; serve arm64 and let Intel users choose on /download.
+  // Browser architecture hints are unreliable; serve arm64; Intel Macs are no longer built.
   function pickAsset(assets: ReleaseAsset[], platform: Platform): string | null {
     if (platform.os === "win") {
       return assets.find((a) => a.name.endsWith("-x64.exe"))?.browser_download_url ?? null;

@@ -200,62 +200,6 @@ export function parseUpdateManifest(
   };
 }
 
-function mergeExtras(
-  primary: Readonly<Record<string, UpdateManifestScalar>>,
-  secondary: Readonly<Record<string, UpdateManifestScalar>>,
-  platformLabel: string,
-): Record<string, UpdateManifestScalar> {
-  const merged: Record<string, UpdateManifestScalar> = { ...primary };
-
-  for (const [key, value] of Object.entries(secondary)) {
-    const existing = merged[key];
-    if (existing !== undefined && existing !== value) {
-      throw new Error(
-        `Cannot merge ${platformLabel} update manifests: conflicting '${key}' values ('${existing}' vs '${value}').`,
-      );
-    }
-    merged[key] = value;
-  }
-
-  return merged;
-}
-
-export function mergeUpdateManifests(
-  primary: UpdateManifest,
-  secondary: UpdateManifest,
-  platformLabel: string,
-): UpdateManifest {
-  if (primary.version !== secondary.version) {
-    throw new Error(
-      `Cannot merge ${platformLabel} update manifests with different versions (${primary.version} vs ${secondary.version}).`,
-    );
-  }
-
-  const filesByUrl = new Map<string, UpdateManifestFile>();
-  for (const file of [...primary.files, ...secondary.files]) {
-    const existing = filesByUrl.get(file.url);
-    if (
-      existing &&
-      (existing.sha512 !== file.sha512 ||
-        existing.size !== file.size ||
-        existing.blockMapSize !== file.blockMapSize)
-    ) {
-      throw new Error(
-        `Cannot merge ${platformLabel} update manifests: conflicting file entry for ${file.url}.`,
-      );
-    }
-    filesByUrl.set(file.url, file);
-  }
-
-  return {
-    version: primary.version,
-    releaseDate:
-      primary.releaseDate >= secondary.releaseDate ? primary.releaseDate : secondary.releaseDate,
-    files: [...filesByUrl.values()],
-    extras: mergeExtras(primary.extras, secondary.extras, platformLabel),
-  };
-}
-
 function quoteYamlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }

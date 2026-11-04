@@ -23,8 +23,8 @@ retry.
 
 For a source install, use the repository's normal dependency installation. The
 `ffmpeg-static` install script must be allowed; `pnpm-workspace.yaml` grants it.
-It is an optional dependency because it publishes no win32-arm64 binary and its
-install script fails there; every other target must still retain it.
+It is an optional dependency so a source install on a platform with no binary (Windows on
+Arm) can still install; every released target must retain it.
 Packaged installations must retain `sherpa-onnx-node`, the target's matching native
 package, and `ffmpeg-static` with its target-specific executable. They are runtime
 externals in the shared CLI packaging list. Do not copy a Mac `node_modules` tree

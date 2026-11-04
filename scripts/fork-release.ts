@@ -30,11 +30,7 @@ import {
   publishForkReleaseSequence,
   type ForkReleasePlan,
 } from "./lib/fork-release.ts";
-import {
-  parseUpdateManifest,
-  mergeUpdateManifests,
-  serializeUpdateManifest,
-} from "./lib/update-manifest.ts";
+import { parseUpdateManifest, serializeUpdateManifest } from "./lib/update-manifest.ts";
 const FS = NodeFS;
 const Path = NodePath;
 const URL = NodeURL;
@@ -132,7 +128,7 @@ function assertPublishContext(npm: boolean) {
     throw new Error("GitHub-hosted OIDC with id-token: write is required.");
   if (!forkNpmPublishingReady(process.env))
     throw new Error(
-      "S2CODE_NPM_TRUSTED_PUBLISHING_READY must attest the six new publishers and FORK_NPM_TRUSTED_PUBLISHING_READY the shuv2code bridge, including publish and dist-tag permissions for release.yml. These flags are not authentication tests.",
+      "S2CODE_NPM_TRUSTED_PUBLISHING_READY must attest the five new publishers and FORK_NPM_TRUSTED_PUBLISHING_READY the shuv2code bridge, including publish and dist-tag permissions for release.yml. These flags are not authentication tests.",
     );
   if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN)
     throw new Error("Use OIDC, not inherited npm publish tokens.");
@@ -191,27 +187,21 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
     throw new Error("Preview releases cannot carry automatic updater metadata.");
   if (plan.channel !== "preview") {
     const prefix = plan.channel === "stable" ? "latest" : "nightly";
-    for (const [platform, primary, secondary, output] of [
-      ["mac", `${prefix}-mac.yml`, `${prefix}-mac-x64.yml`, `${prefix}-mac.yml`],
-      ["win", `${prefix}-win-x64.yml`, `${prefix}-win-arm64.yml`, `${prefix}.yml`],
+    for (const [platform, primary, output] of [
+      ["mac", `${prefix}-mac.yml`, `${prefix}-mac.yml`],
+      ["win", `${prefix}-win-x64.yml`, `${prefix}.yml`],
     ]) {
       const first = Path.join(directory, primary!);
-      const second = Path.join(directory, secondary!);
       // An unsigned platform has no feed in the plan: electron-builder still
-      // wrote per-arch manifests, so drop them instead of merging.
+      // wrote a per-arch manifest, so drop it instead of renaming.
       if (plan.feedAssets.includes(output!)) {
-        const merged = mergeUpdateManifests(
-          parseUpdateManifest(FS.readFileSync(first, "utf8"), primary!, platform!),
-          parseUpdateManifest(FS.readFileSync(second, "utf8"), secondary!, platform!),
-          platform!,
-        );
+        const manifest = parseUpdateManifest(FS.readFileSync(first, "utf8"), primary!, platform!);
         FS.writeFileSync(
           Path.join(directory, output!),
-          serializeUpdateManifest(merged, { platformLabel: platform! }),
+          serializeUpdateManifest(manifest, { platformLabel: platform! }),
         );
       }
       if (primary !== output || !plan.feedAssets.includes(output!)) FS.unlinkSync(first);
-      FS.unlinkSync(second);
     }
     for (const name of plan.feedAssets) {
       const manifest = parseUpdateManifest(

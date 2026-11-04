@@ -162,7 +162,7 @@ Step "Finding your release..."
 $rawArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $arch = switch ($rawArch) {
   "AMD64" { "x64" }
-  "ARM64" { "arm64" }
+  "ARM64" { Fail "S2Code is no longer built for Windows on ARM, so there is nothing to install. To run a server from source, see https://github.com/shuv1337/s2code/blob/main/docs/user/install.md#windows-on-arm" }
   default { Fail "unsupported architecture $rawArch" }
 }
 

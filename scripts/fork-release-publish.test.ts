@@ -311,9 +311,7 @@ describe("fork publication fixtures", () => {
     expect(body.includes("are signed and notarized")).toBe(mac);
     expect(body.includes("WARNING: The macOS desktop apps are unsigned")).toBe(!mac);
     expect(body.includes("### Windows\n\nThe Windows installers are unsigned.")).toBe(!win);
-    expect(body.includes("### Windows\n\nThe Windows installers (arm64 and x64) are signed.")).toBe(
-      win,
-    );
+    expect(body.includes("### Windows\n\nThe Windows installers are signed.")).toBe(win);
     expect(state.release.draft).toBe(false);
   });
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -559,7 +557,7 @@ describe("fork publication fixtures", () => {
       const publishes = npmLog.flatMap((entry) =>
         "args" in entry && entry.args[0] === "publish" ? [entry.args] : [],
       );
-      expect(publishes).toHaveLength(7);
+      expect(publishes).toHaveLength(6);
       for (const args of publishes)
         expect(args).toEqual(expect.arrayContaining(["--provenance", "--tag", plan.stagingTag]));
       expect(Math.max(...command("publish", true))).toBeLessThan(
@@ -567,7 +565,7 @@ describe("fork publication fixtures", () => {
       );
       // Launchers went up while every platform package was still in review.
       const reviews = at((entry) => "visible" in entry);
-      expect(reviews).toHaveLength(7);
+      expect(reviews).toHaveLength(6);
       expect(Math.max(...command("publish"))).toBeLessThan(Math.min(...reviews));
       // Promotion waits for every package to verify and for the public release.
       expect(Math.max(...reviews)).toBeLessThan(Math.min(...command("dist-tag")));
@@ -577,7 +575,7 @@ describe("fork publication fixtures", () => {
       expect(Math.max(...command("dist-tag", true))).toBeLessThan(
         Math.min(...command("dist-tag", false)),
       );
-      expect(command("dist-tag")).toHaveLength(14);
+      expect(command("dist-tag")).toHaveLength(12);
       expect(state.release.draft).toBe(false);
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
     },
@@ -592,9 +590,9 @@ describe("fork publication fixtures", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(error);
       expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "publish")).toHaveLength(
-        7,
+        6,
       );
-      expect(npmLog.filter((entry) => "visible" in entry)).toHaveLength(7);
+      expect(npmLog.filter((entry) => "visible" in entry)).toHaveLength(6);
       expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag")).toEqual([]);
       expect(state.release.draft).toBe(true);
     },
