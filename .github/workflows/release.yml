@@ -507,8 +507,19 @@ jobs:
       # every platform binary. The release assets stay: publish uploads and re-hashes them.
       - name: Drop the extracted npm package trees, keeping the tarballs
         run: |
-          find prepared/npm-packages -mindepth 1 -maxdepth 2 -type d ! -name '@s2code' -exec rm -rf {} +
-          find prepared/npm-packages -type f -name '*.tgz'
+          set -euo pipefail
+          shopt -s nullglob
+          cd prepared/npm-packages
+          # Each tree sits beside its tarball (<name>/ and <name>.tgz), never around it.
+          tarballs=(*.tgz @s2code/*.tgz)
+          [ "${#tarballs[@]}" -gt 0 ]
+          for tgz in "${tarballs[@]}"; do
+            echo "Removing extracted tree ${tgz%.tgz}"
+            rm -rf "${tgz%.tgz}"
+            test -f "$tgz"
+          done
+          echo "Kept tarballs:"
+          ls -l "${tarballs[@]}"
           df -h /
       - name: Verify complete matrix, source/WSL receipts, feeds and package allowlist
         run: node scripts/fork-release.ts prepare
