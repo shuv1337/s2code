@@ -168,6 +168,8 @@ function publishFixture(
     NodeFS.writeFileSync(NodePath.join(root, "release-plan.json"), JSON.stringify(plan));
     // What the build jobs upload, before publish shapes it.
     const windows = runner.WINDOWS_BUILT !== "false";
+    // What build-npm-platform-packages writes, with --allow-missing when Windows did not build.
+    const npmKeys = CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => windows || !key.startsWith("win32-"));
     const desktops = desktopAssetGroups(plan.version, windows).map((group) => group[0]!);
     for (const name of [...desktops, ...forkReleasePlan({ ...plan, windows }).cliAssets])
       NodeFS.writeFileSync(NodePath.join(assetDir, name), `immutable fixture bytes ${name}`);
@@ -202,9 +204,9 @@ function publishFixture(
     const packageDir = NodePath.join(root, "package");
     NodeFS.mkdirSync(packageDir);
     for (const manifest of [
-      ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => npmPlatformPackageManifest(key, plan.version, {})),
-      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS),
-      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS, "shuv2code"),
+      ...npmKeys.map((key) => npmPlatformPackageManifest(key, plan.version, {})),
+      npmLauncherPackageManifest(plan.version, npmKeys),
+      npmLauncherPackageManifest(plan.version, npmKeys, "shuv2code"),
     ]) {
       const file = NodePath.join(prepared, "npm-packages", manifest.name + ".tgz");
       NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
@@ -494,7 +496,7 @@ describe("fork publication fixtures", () => {
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "publishes without Windows or npm when the Windows build failed, and says so",
+    "publishes npm without the Windows package when the Windows build failed, and says so",
     () => {
       const { result, state } = publishFixture(
         "new-release",
@@ -509,7 +511,19 @@ describe("fork publication fixtures", () => {
       );
       expect(result.status, result.stderr).toBe(0);
       expect(state.release.draft).toBe(false);
-      expect(state.commands.some(([command]) => command === "npm")).toBe(false);
+      // Every other package still moves to this version, launchers included.
+      const promoted = new Set(
+        state.commands
+          .filter(([command, subcommand]) => command === "npm" && subcommand === "dist-tag")
+          .map((args) => args[3]!.slice(0, args[3]!.lastIndexOf("@"))),
+      );
+      expect([...promoted].sort()).toEqual([
+        "@s2code/cli",
+        "@s2code/t3-darwin-arm64",
+        "@s2code/t3-linux-arm64",
+        "@s2code/t3-linux-x64",
+        "shuv2code",
+      ]);
       const names = state.release.assets.map((asset) => asset.name);
       expect(names).toContain("nightly-mac.yml");
       expect(
@@ -521,6 +535,7 @@ describe("fork publication fixtures", () => {
         .find((args) => args.includes("POST"))!
         .find((arg) => arg.startsWith("body="))!;
       expect(body).toContain("### Windows\n\nThe Windows x64 build failed");
+      expect(body).toContain("`npx @s2code/cli` is unavailable on Windows for this version.");
       // A release without Windows is not a complete index entry.
       expect(JSON.parse(state.index!)).toEqual([]);
     },

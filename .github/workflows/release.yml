@@ -119,7 +119,7 @@ jobs:
       - name: Verify release logic
         run: |
           node --test .github/scripts/macos-arm64-runner-retry.test.cjs
-          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
+          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@v7
         with:
           name: release-plan
@@ -193,10 +193,10 @@ jobs:
       # environment, so the team id comes from preflight rather than `vars`.
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
-  # Publish does not require this job: a failed Windows build leaves Windows out
-  # of the release, and npm with it (see the publish job). GitHub refuses
-  # continue-on-error on a job that calls a reusable workflow, so the build job
-  # in release-desktop.yml carries it.
+  # Publish does not require this job: a failed Windows build leaves the Windows
+  # assets and npm package out of the release (see the publish job). GitHub
+  # refuses continue-on-error on a job that calls a reusable workflow, so
+  # win_optional sets it on the build job in release-desktop.yml.
   desktop_win_x64:
     name: Desktop (Windows x64)
     needs: [preflight, build_bundle]
@@ -211,6 +211,7 @@ jobs:
       rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).rust_target }}
       resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).resource_key }}
       cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).cli_archive }}
+      win_optional: true
       ref: ${{ needs.preflight.outputs.ref }}
       version: ${{ needs.preflight.outputs.version }}
       release_channel: ${{ needs.preflight.outputs.release_channel }}
@@ -361,6 +362,8 @@ jobs:
     environment: fork-release
     # npm reviews each new version before it is installable; publish waits for it.
     timeout-minutes: 90
+    outputs:
+      windows_built: ${{ steps.windows.outputs.built }}
     permissions:
       contents: write
       actions: read
@@ -405,8 +408,8 @@ jobs:
           pattern: cli-*
           merge-multiple: true
           path: prepared/release-assets
-      # The Windows build uploads its installer only after its launch and
-      # signature checks pass, so the installer decides whether Windows ships.
+      # The Windows build uploads its installer only after its launch, signature
+      # and WSL payload checks pass, so the installer decides whether Windows ships.
       - name: Check whether Windows x64 built
         id: windows
         env:
@@ -415,19 +418,23 @@ jobs:
           if [ -f "prepared/release-assets/S2Code-${RELEASE_VERSION}-x64.exe" ]; then
             echo "built=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::The Windows x64 build failed. This release leaves out Windows and publishes no npm packages."
+            echo "::warning::The Windows x64 build failed. This release leaves out the Windows assets and the Windows npm platform package."
+            # A CLI archive uploaded before the failure must not become an npm package.
+            rm -f "prepared/release-assets/s2code-${RELEASE_VERSION}-win32-x64.zip"
             echo "built=false" >> "$GITHUB_OUTPUT"
           fi
-      # Every launcher depends on the Windows platform package, so npm needs Windows.
-      - name: Build the six public packages once from the verified-source archives
-        if: steps.windows.outputs.built == 'true'
+      # Without Windows, the launchers list only the platforms that built.
+      - name: Build the public npm packages once from the verified-source archives
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
+          WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
+        run: |
+          args=()
+          if [ "$WINDOWS_BUILT" != "true" ]; then args=(--allow-missing); fi
+          node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages "${args[@]}"
       # Publish reads only the .tgz files. The extracted trees beside them duplicate
       # every platform binary. The release assets stay: publish uploads and re-hashes them.
       - name: Drop the extracted npm package trees, keeping the tarballs
-        if: steps.windows.outputs.built == 'true'
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -467,13 +474,26 @@ jobs:
             if grep -q 'Reference already exists' claim.err; then echo "${tag} was already announced; skipping."; else echo "Could not record the announcement claim; skipping."; fi
             exit 0
           fi
-          npm_args=()
-          if [ "$S2CODE_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$WINDOWS_BUILT" = "true" ]; then npm_args=(--npm s2code); fi
+          extra_args=()
+          if [ "$S2CODE_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then extra_args=(--npm s2code); fi
+          if [ "$WINDOWS_BUILT" != "true" ]; then extra_args+=(--link "windows: not built; npx @s2code/cli is unavailable on Windows for this version"); fi
           status=0
           bash .github/scripts/notify-discord-release.sh \
             --project S2Code \
             --version "$tag" \
-            "${npm_args[@]}" \
+            "${extra_args[@]}" \
             --link "release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
             || status=$?
           exit "$status"
+
+  # Publish does not wait on Windows, but a release without it must not look green.
+  windows_missing:
+    name: Windows x64 left out of the release
+    needs: publish
+    if: always() && needs.publish.outputs.windows_built == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "::error::The Windows x64 build failed, so this release has no Windows installer, Windows CLI archive or Windows npm platform package."
+          exit 1

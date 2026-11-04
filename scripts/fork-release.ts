@@ -19,7 +19,8 @@ import {
   FORK_RELEASE_INDEX_BRANCH,
   publishAtomicReleaseIndex,
   FORK_DESKTOP_MATRIX,
-  FORK_NPM_PACKAGES,
+  forkNpmPackages,
+  forkCliPlatformKeys,
   forkNpmPublishingReady,
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
@@ -243,22 +244,22 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   );
   writeJson(Path.join(directory, "release.json"), {
     ...plan,
-    npmPackages: plan.npm ? FORK_NPM_PACKAGES : [],
+    npmPackages: plan.npm ? forkNpmPackages(plan.windows) : [],
     signing: { ...plan.signing, linux: "checksum-only" },
   });
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
 }
 
-export function inspectForkNpmPackages(directory: string, version: string) {
+export function inspectForkNpmPackages(directory: string, version: string, windows: boolean) {
   const tarballs = [
-    ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@s2code", `t3-${key}.tgz`)),
+    ...forkCliPlatformKeys(windows).map((key) => Path.join(directory, "@s2code", `t3-${key}.tgz`)),
     Path.join(directory, "@s2code", "cli.tgz"),
     Path.join(directory, "shuv2code.tgz"),
   ];
   const manifests = tarballs.map(
     (file) => JSON.parse(run("tar", ["-xOf", file, "package/package.json"])) as unknown,
   );
-  const checked = assertForkNpmSet(manifests, version);
+  const checked = assertForkNpmSet(manifests, version, windows);
   return tarballs.map((file, index) => ({
     file,
     manifest: checked[index]!,
@@ -331,13 +332,14 @@ async function pollRegistry<T>(input: {
 async function registryVersion(
   pkg: { manifest: { name: string }; integrity: string },
   version: string,
+  windows: boolean,
 ) {
   const url = `https://registry.npmjs.org/${encodeURIComponent(pkg.manifest.name)}/${encodeURIComponent(version)}`;
   const response = await registryFetch(url);
   if (response.status === 404) return false;
   if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
   const value = (await response.json()) as { dist?: { integrity?: string } };
-  assertForkNpmManifest(value, version);
+  assertForkNpmManifest(value, version, windows);
   if (value.dist?.integrity !== pkg.integrity)
     throw new Error(
       "Existing npm version differs from this run's immutable package bytes; rerun publish only against the same run's build artifacts, or use a new version.",
@@ -351,9 +353,11 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const assets = "prepared/release-assets";
   prepareForkAssets(plan, assets);
   // Shaping copies every CLI archive twice; show the disk that publishing starts from.
-  console.log(CP.spawnSync("df", ["-h", "."], { encoding: "utf8" }).stdout ?? "");
+  console.log(CP.spawnSync("df", ["-h", "/"], { encoding: "utf8" }).stdout ?? "");
   const names = FS.readdirSync(assets);
-  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan.version) : [];
+  const packages = plan.npm
+    ? inspectForkNpmPackages("prepared/npm-packages", plan.version, plan.windows)
+    : [];
   const readTags = async (name: string) => {
     // `/<name>/dist-tags` would be read as a version named "dist-tags".
     const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
@@ -505,7 +509,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const publishedVersion = (pkg: (typeof packages)[number]) =>
     pollRegistry({
       attempts: NPM_TAG_POLLS,
-      read: async () => ({ published: await registryVersion(pkg, plan.version) }),
+      read: async () => ({ published: await registryVersion(pkg, plan.version, plan.windows) }),
       exhausted: `The npm registry did not answer for ${pkg.manifest.name}@${plan.version}.`,
     });
   const verifyNpm = async () => {
@@ -548,7 +552,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const awaitReview = (pkg: (typeof packages)[number]) =>
     pollRegistry({
       attempts: NPM_REVIEW_POLLS,
-      read: async () => (await registryVersion(pkg, plan.version)) || undefined,
+      read: async () => (await registryVersion(pkg, plan.version, plan.windows)) || undefined,
       exhausted: "npm publication is not yet verifiable; the draft remains unavailable.",
       waiting: `Waiting for npm to finish reviewing ${pkg.manifest.name}@${plan.version}.`,
     }).then(() => undefined);
@@ -868,7 +872,7 @@ async function main() {
     const plan = forkReleasePlan({ ...readPlan(), windows: windows === "true" });
     if (!plan.windows)
       console.log(
-        "The Windows x64 build failed: this release leaves out Windows and publishes no npm packages.",
+        "The Windows x64 build failed: this release leaves out the Windows assets and the Windows npm platform package.",
       );
     await publishPrepared(plan);
   } else throw new Error("Use preflight, signing or publish --execute.");

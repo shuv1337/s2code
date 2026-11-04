@@ -10,7 +10,7 @@ import {
   npmPlatformPackageManifest,
   npmLauncherPackageManifest,
 } from "./build-npm-platform-packages.ts";
-import { forkReleasePlan, desktopAssetGroups } from "./lib/fork-release.ts";
+import { forkReleasePlan, desktopAssetGroups, forkNpmPackages } from "./lib/fork-release.ts";
 import { cliArchiveFileName, CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
 import { serializeUpdateManifest, parseUpdateManifest } from "./lib/update-manifest.ts";
 const FS = NodeFS;
@@ -117,7 +117,7 @@ describe("complete fork release assets", () => {
         NodeChildProcess.execFileSync("tar", ["-czf", file, "-C", directory, "package"]);
       };
       for (const manifest of manifests) pack(manifest.name, manifest);
-      const checked = inspectForkNpmPackages(directory, "1.2.3");
+      const checked = inspectForkNpmPackages(directory, "1.2.3", true);
       expect(checked.map((pkg) => pkg.manifest.name)).toEqual(
         manifests.map((manifest) => manifest.name),
       );
@@ -126,7 +126,7 @@ describe("complete fork release assets", () => {
           `sha512-${NodeCrypto.createHash("sha512").update(NodeFS.readFileSync(pkg.file)).digest("base64")}`,
         );
       pack(manifests[0]!.name, { ...manifests[0], name: "t3" });
-      expect(() => inspectForkNpmPackages(directory, "1.2.3")).toThrow("allowlist");
+      expect(() => inspectForkNpmPackages(directory, "1.2.3", true)).toThrow("allowlist");
     } finally {
       NodeFS.rmSync(directory, { recursive: true, force: true });
     }
@@ -238,7 +238,8 @@ describe("complete fork release assets", () => {
           FS.readFileSync(Path.join(directory, "release.json"), "utf8"),
         ) as { windows: boolean; npmPackages: string[] };
         expect(release.windows).toBe(false);
-        expect(release.npmPackages).toEqual([]);
+        expect(release.npmPackages).toEqual(forkNpmPackages(false));
+        expect(release.npmPackages).not.toContain("@s2code/t3-win32-x64");
       },
       { windows: false },
     ));

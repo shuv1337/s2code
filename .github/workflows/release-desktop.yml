@@ -64,6 +64,12 @@ on:
         required: false
         default: false
         type: boolean
+      # A failed build of this target does not fail the caller; release.yml sets
+      # it for Windows x64 and publishes without Windows when that build fails.
+      win_optional:
+        required: false
+        default: false
+        type: boolean
       # Whether the job opens the packaged app against a seeded database and
       # opens a thread before uploading it. Linux AppImage or macOS DMG.
       launch_check:
@@ -145,8 +151,7 @@ jobs:
       (!startsWith(inputs.runner, '[') ||
       (contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main'))
     name: Build ${{ inputs.label }}
-    # A failed Windows build must not block the release; release.yml leaves Windows out instead.
-    continue-on-error: ${{ inputs.platform == 'win' }}
+    continue-on-error: ${{ inputs.win_optional }}
     # Every macOS arm64 attempt of a run shares this group, so the hosted queue
     # fallback in release.yml cancels a shuvbot attempt that is still queued.
     # Other targets are alone in their group.
@@ -872,6 +877,33 @@ jobs:
               throw 'Installer signature or fork publisher mismatch.'
             }
           }
+
+      # NSIS nests the app as $PLUGINSDIR/app-<arch>.7z, so pull out only that
+      # payload and list it; nothing is unpacked from it.
+      - name: Require the WSL runtime in the Windows installer
+        if: inputs.platform == 'win'
+        shell: pwsh
+        env:
+          APP_PAYLOAD: ${{ inputs.arch == 'x64' && 'app-64.7z' || format('app-{0}.7z', inputs.arch) }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue)?.Source ?? 'C:\Program Files\7-Zip\7z.exe'
+          $installers = @(Get-ChildItem release-publish/*.exe)
+          if ($installers.Count -ne 1) { throw "Expected one Windows installer, found $($installers.Count)." }
+          $out = Join-Path $env:RUNNER_TEMP 'installer-payload'
+          Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
+          & $sevenZip e -y -r "-o$out" $installers[0].FullName $env:APP_PAYLOAD | Out-Null
+          # 7-Zip exits 1 for warnings it recovered from; the payload on disk decides.
+          if ($LASTEXITCODE -ge 2) { throw "7-Zip could not read $($installers[0].Name) (exit $LASTEXITCODE)." }
+          $payload = Join-Path $out $env:APP_PAYLOAD
+          if (-not (Test-Path $payload)) { throw "$($installers[0].Name) has no $env:APP_PAYLOAD." }
+          $listing = & $sevenZip l -ba -slt $payload
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip could not list $env:APP_PAYLOAD (exit $LASTEXITCODE)." }
+          if (-not ($listing -match '^Path = resources[\\/]wsl-runtime\.tar\.gz$')) {
+            throw "$($installers[0].Name) has no resources/wsl-runtime.tar.gz."
+          }
+          Write-Host "$($installers[0].Name) carries resources/wsl-runtime.tar.gz."
+          Remove-Item -Recurse -Force $out
 
       - name: Collect resource monitor
         shell: bash

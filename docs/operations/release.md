@@ -27,10 +27,14 @@ macOS ARM64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
 x64 (NSIS). Intel macOS and Windows ARM64 are not built; the updater feeds list only the remaining targets, so existing Windows ARM64 installs update to the x64 build and Intel Mac installs find no update they can download. The Windows desktop embeds the matching same-version Linux
 `s2code-<version>-linux-<arch>` archive for its WSL backend.
 
-A failed Windows x64 build does not block the release. Publication leaves out the
-Windows installer and CLI archive, publishes no npm packages for that version (every
-launcher depends on the Windows platform package), keeps the release out of the
-rolling index, and says so in the release notes. macOS and Linux still block.
+A failed Windows x64 build does not block the release; macOS and Linux still do.
+Publication then leaves out the Windows installer, CLI archive and
+`@s2code/t3-win32-x64` npm package. The launchers publish without that dependency
+and their tags move as usual, so `npx @s2code/cli` does not work on Windows for that
+version. The release notes and Discord post say so, the release stays out of the
+rolling index, and a final `windows_missing` job turns the run red. Before upload,
+the Windows build lists the installer's app payload and requires
+`resources/wsl-runtime.tar.gz`.
 
 CLI archives cover **four** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-x64`. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
@@ -43,7 +47,7 @@ publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the public npm endpoints are `s2code` and
 `@s2code/t3-<platform>` for those four CLI targets. Platform packages publish first; the launchers follow only
-once npm has accepted all four, with exact matching optional dependency versions.
+once npm has accepted every platform package in the release, with exact matching optional dependency versions.
 The `shuv2code` bridge launcher publishes the same version and depends on those
 canonical platform packages, preserving upgrades for existing npm installs.
 

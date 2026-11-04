@@ -95,10 +95,11 @@ function neverAssignedHostedRunner(job) {
 }
 
 function classifyAttempt(job) {
-  if (!job) return { retry: false, ok: false, reason: "missing" };
-  if (job.conclusion === "success") return { retry: false, ok: true, reason: "success" };
-  if (neverAssignedHostedRunner(job)) return { retry: true, ok: false, reason: "not-acquired" };
-  return { retry: false, ok: false, reason: job.conclusion || "failed" };
+  if (!job) return { notAcquired: false, ok: false, reason: "missing" };
+  if (job.conclusion === "success") return { notAcquired: false, ok: true, reason: "success" };
+  if (neverAssignedHostedRunner(job))
+    return { notAcquired: true, ok: false, reason: "not-acquired" };
+  return { notAcquired: false, ok: false, reason: job.conclusion || "failed" };
 }
 
 const queueFallbackStarted = (jobs) =>
@@ -115,7 +116,7 @@ function classifyCaller(jobs, callerName) {
   const attempt = classifyAttempt(jobs.find((job) => job.name === buildJobName(callerName)));
   // The queue fallback cancelled the first attempt; its cancellation is not a runner miss.
   if (callerName === MAC_ARM64_CALLERS[0] && !attempt.ok && queueFallbackStarted(jobs))
-    return { callerName, retry: false, ok: false, reason: "superseded" };
+    return { callerName, notAcquired: false, ok: false, reason: "superseded" };
   return { callerName, ...attempt };
 }
 
@@ -123,10 +124,11 @@ function classifyAttempts(jobs, callerNames = MAC_ARM64_CALLERS) {
   const attempts = callerNames.map((callerName) => classifyCaller(jobs, callerName));
   if (attempts.some((attempt) => attempt.ok)) return { ok: true, reason: "success", attempts };
   const realFailure = attempts.find(
-    (attempt) => !attempt.retry && attempt.reason !== "missing" && attempt.reason !== "superseded",
+    (attempt) =>
+      !attempt.notAcquired && attempt.reason !== "missing" && attempt.reason !== "superseded",
   );
   if (realFailure) return { ok: false, reason: realFailure.reason, attempts };
-  if (attempts.some((attempt) => attempt.retry))
+  if (attempts.some((attempt) => attempt.notAcquired))
     return { ok: false, reason: "not-acquired", attempts };
   return { ok: false, reason: "missing", attempts };
 }
