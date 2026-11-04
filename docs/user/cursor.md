@@ -48,7 +48,9 @@ run Auto after the named-model allowance is spent.
 
 To pool accounts, turn on **Turn off at usage limit** for each account. Once two accounts have it
 on, the model picker shows them as one **Cursor pool** entry. Each new thread starts on the account
-with the most headroom for its model and stays there. When a turn fails because that account's
+with the most headroom for its model and stays there. [Pool accounts](./usage.md#pool-accounts)
+covers how ties take turns and what happens when an agent names one account.
+When a turn fails because that account's
 quota is spent, S2Code turns the instance off, notes when and why, and continues the thread on the
 pool account with the most headroom. The new account starts a fresh Cursor session and receives the recent conversation, so expect
 it to re-read context once. A thread switches automatically only once per message; if the next account

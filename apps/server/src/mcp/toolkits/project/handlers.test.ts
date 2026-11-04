@@ -370,6 +370,46 @@ it.effect("a launch retried with the same clientRequestId replays the first one"
   }),
 );
 
+it.effect("a launch binds a named model's instance unless it is a pool default", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const { projectId, modelSelection, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "auto",
+      launched,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const launch = (params: {
+      readonly modelSelection?: ModelSelection;
+      readonly allowPoolFailover?: boolean;
+      readonly poolStart?: boolean;
+    }) =>
+      toolkit.handle("t3_thread_launch", { title: "Fix", projectId, ...params }).pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.map((chunks) => chunks.at(-1)?.result as { readonly warning?: string }),
+        Effect.provide(dependencies),
+      );
+
+    yield* launch({ modelSelection });
+    yield* launch({ modelSelection, allowPoolFailover: true });
+    yield* launch({ modelSelection, poolStart: true });
+    const unnamed = yield* launch({ allowPoolFailover: true });
+    expect(launched.map((input) => input.namedInstance)).toEqual([
+      { allowPoolFailover: false },
+      { allowPoolFailover: true },
+      undefined,
+      undefined,
+    ]);
+    expect(unnamed.warning).toBe(
+      "allowPoolFailover was ignored: it applies only to a named modelSelection.",
+    );
+  }),
+);
+
 it.effect("a launch key of any length or content gives a short id and never a defect", () =>
   Effect.gen(function* () {
     const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];

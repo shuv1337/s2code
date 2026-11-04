@@ -44,7 +44,6 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
-import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -86,6 +85,8 @@ export interface ThreadLaunchInput {
   readonly title: string;
   readonly generateTitle?: boolean;
   readonly modelSelection: ModelSelection;
+  /** The caller named `modelSelection.instanceId`; see `InstanceResolution.named`. */
+  readonly namedInstance?: { readonly allowPoolFailover: boolean };
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
@@ -174,7 +175,9 @@ export class ThreadLaunchService extends Context.Service<
       input: ThreadLaunchInput,
     ) => Effect.Effect<
       ThreadLaunchResult,
-      ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | ThreadLaunchError
+      | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | ThreadManagement.ThreadManagementProviderInstanceUnavailableError
     >;
     /** Check before creation for early errors; launch otherwise accepts and reports base failures inside the thread. */
     readonly checkWorktreeBase: (
@@ -211,7 +214,6 @@ const make = Effect.gen(function* () {
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
-  const resolveSpentInstance = yield* makeSpentInstanceResolver;
   const textGeneration = yield* TextGeneration.TextGeneration;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
@@ -843,13 +845,27 @@ const make = Effect.gen(function* () {
         (yield* managedFolders.isScratchProject(request.projectId))
           ? { ...request, workspaceStrategy: { type: "root" } }
           : request;
+      const launchReceipt = yield* readReceipt(normalized, normalized.commandId);
+      // A retry after the thread was created keeps its instance; picking again could rotate away.
+      const createdThreadId =
+        Option.isSome(launchReceipt) && launchReceipt.value.commandType === "thread.create"
+          ? (normalized.threadId ?? launchReceipt.value.threadId ?? undefined)
+          : undefined;
+      const created =
+        createdThreadId === undefined
+          ? null
+          : yield* threads
+              .getThreadShell(createdThreadId)
+              .pipe(Effect.mapError(mapError(normalized, "read-receipt", createdThreadId)));
       const input: ThreadLaunchInput = {
         ...normalized,
-        modelSelection: yield* resolveSpentInstance(
-          normalized.modelSelection,
-          normalized.projectId,
-          { threadStart: true },
-        ),
+        modelSelection:
+          created?.modelSelection ??
+          (yield* threads.resolveThreadStartInstance({
+            modelSelection: normalized.modelSelection,
+            projectId: normalized.projectId,
+            ...(normalized.namedInstance === undefined ? {} : { named: normalized.namedInstance }),
+          })),
       };
       yield* ProjectCloneTracker.rejectCommandsDuringClone(cloneTracker, {
         type: "thread.create",
@@ -871,7 +887,6 @@ const make = Effect.gen(function* () {
         )("Reusing an existing thread requires a thread id.");
       }
 
-      const launchReceipt = yield* readReceipt(input, input.commandId);
       yield* threads.assertProviderInstanceEnabled({
         projectId: input.projectId,
         commandId: input.commandId,
@@ -989,26 +1004,30 @@ const make = Effect.gen(function* () {
               .message({ threadId, ordinal: 1 })
               .pipe(Effect.mapError(mapError(input, "dispatch-message", threadId))));
           const dispatched = yield* threads
-            .dispatch({
-              type: "message.dispatch",
-              commandId: messageCommandId,
-              threadId,
-              messageId,
-              text: input.initialMessage.text,
-              ...(input.initialMessage.scheduledTaskId === undefined
-                ? {}
-                : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
-              ...(input.initialMessage.senderThreadId === undefined
-                ? {}
-                : { senderThreadId: input.initialMessage.senderThreadId }),
-              attachments: input.initialMessage.attachments,
-              ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
-              ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
-              modelSelection: input.modelSelection,
-              dispatchMode: { type: "defer_start", workspaceStrategy },
-              createdBy: input.createdBy,
-              creationSource: input.creationSource,
-            })
+            .dispatch(
+              {
+                type: "message.dispatch",
+                commandId: messageCommandId,
+                threadId,
+                messageId,
+                text: input.initialMessage.text,
+                ...(input.initialMessage.scheduledTaskId === undefined
+                  ? {}
+                  : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
+                ...(input.initialMessage.senderThreadId === undefined
+                  ? {}
+                  : { senderThreadId: input.initialMessage.senderThreadId }),
+                attachments: input.initialMessage.attachments,
+                ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
+                ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
+                modelSelection: input.modelSelection,
+                dispatchMode: { type: "defer_start", workspaceStrategy },
+                createdBy: input.createdBy,
+                creationSource: input.creationSource,
+              },
+              // The launch placed the thread above; the first message must not pick again.
+              { threadStart: false },
+            )
             .pipe(
               // An agent's launch can land on a thread that a replay, or a concurrent
               // launch with the same key, created with broader modes. The orchestrator

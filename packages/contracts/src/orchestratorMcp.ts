@@ -97,6 +97,11 @@ export const OrchestratorMcpTargetOptions = Schema.Union([
 ]);
 export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.Type;
 
+/** Opt-in for a named instance, shared by every tool that can name one. */
+export const OrchestratorMcpAllowPoolFailover = Schema.Boolean.annotate({
+  description: "If the named seat can't run, fall back to another member of its pool.",
+});
+
 export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(
     ProviderInstanceId.annotate({
@@ -109,10 +114,11 @@ export const OrchestratorMcpTarget = Schema.Struct({
     }),
   ),
   model: Schema.optional(TrimmedNonEmptyString),
+  allowPoolFailover: Schema.optional(OrchestratorMcpAllowPoolFailover),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
-        "Options from `orchestrator_capabilities`, such as {effort:'max'}. Given values override inherited. [] or {} clears.",
+        "Options from `orchestrator_capabilities`. Given values override inherited. [] or {} clears.",
     }),
   ),
   environmentId: Schema.optional(
@@ -177,7 +183,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "'shared' (default): parent checkout. 'worktree': new prepared checkout from the parent commit, for a separate checkout or PR per child. Uncommitted edits stay out.",
+        "'shared' (default): parent checkout. 'worktree': new prepared checkout from the parent commit. Uncommitted edits stay out.",
     }),
   ),
   mode: Schema.optional(

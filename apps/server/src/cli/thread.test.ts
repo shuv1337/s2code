@@ -2,7 +2,15 @@ import { assert, it } from "@effect/vitest";
 import { RunId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { readLatestMessages, type ThreadTools, titleFromMessage, waitForRun } from "./thread.ts";
+import * as Option from "effect/Option";
+
+import {
+  launchModelFields,
+  readLatestMessages,
+  type ThreadTools,
+  titleFromMessage,
+  waitForRun,
+} from "./thread.ts";
 
 const threadId = ThreadId.make("thread-1");
 const runId = RunId.make("run-1");
@@ -164,4 +172,28 @@ it.effect("show returns a --messages count larger than one call can spread", () 
 it("titles from a long first line without splitting an emoji", () => {
   const title = titleFromMessage(`${"a".repeat(78)}😀 and the rest of a long first line`);
   assert.strictEqual(title, `${"a".repeat(78)}…`);
+});
+
+it("start names --provider with --allow-pool-failover, and warns when there is no --provider", () => {
+  assert.deepStrictEqual(
+    launchModelFields({
+      provider: Option.some("codex"),
+      model: Option.some("gpt-5.4"),
+      allowPoolFailover: true,
+    }),
+    {
+      fields: {
+        modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+        allowPoolFailover: true,
+      },
+      warning: undefined,
+    },
+  );
+  assert.deepStrictEqual(
+    launchModelFields({ provider: Option.none(), model: Option.none(), allowPoolFailover: true }),
+    {
+      fields: {},
+      warning: "Warning: --allow-pool-failover was ignored: it applies only with --provider.",
+    },
+  );
 });
