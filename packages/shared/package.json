@@ -367,6 +367,10 @@
       "types": "./src/HostProcess.ts",
       "import": "./src/HostProcess.ts"
     },
+    "./testing/caseSensitiveFileSystem": {
+      "types": "./src/testing/caseSensitiveFileSystem.ts",
+      "import": "./src/testing/caseSensitiveFileSystem.ts"
+    },
     "./testing/gitEnv": {
       "types": "./src/testing/gitEnv.ts",
       "import": "./src/testing/gitEnv.ts"
