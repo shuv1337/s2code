@@ -1,3 +1,4 @@
+const { spawnSync } = require("node:child_process");
 const FS = require("node:fs");
 
 // The first attempt runs on the self-hosted shuvbot runner (scripts/lib/fork-release.ts).
@@ -37,6 +38,34 @@ function splitDesktopMatrix(matrix) {
     fallback: { ...mac[0], runner: HOSTED_FALLBACK_RUNNER },
     rest: { include: rest },
   };
+}
+
+const JOBS_FETCH_ATTEMPTS = 4;
+const JOBS_FETCH_DELAY_MS = 5000;
+
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// The jobs API intermittently answers 5xx. A failed read leaves outputPath untouched.
+function fetchJobs(
+  outputPath,
+  { env = process.env, attempts = JOBS_FETCH_ATTEMPTS, delayMs = JOBS_FETCH_DELAY_MS } = {},
+) {
+  const endpoint = `repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}/jobs?per_page=100`;
+  for (let attempt = 1; ; attempt++) {
+    const result = spawnSync("gh", ["api", "--paginate", endpoint, "--jq", ".jobs[]"], {
+      encoding: "utf8",
+      env,
+    });
+    if (result.status === 0) {
+      FS.writeFileSync(outputPath, result.stdout);
+      return attempt;
+    }
+    const reason = (result.error?.message ?? result.stderr ?? "").trim().split("\n").pop();
+    if (attempt >= attempts)
+      throw new Error(`Could not read this run's jobs after ${attempts} attempts: ${reason}`);
+    console.log(`::warning::Reading this run's jobs failed (attempt ${attempt}): ${reason}`);
+    sleepSync(delayMs * attempt);
+  }
 }
 
 function readJobsJsonl(path) {
@@ -130,6 +159,10 @@ function main() {
     ]);
     return;
   }
+  if (command === "jobs") {
+    fetchJobs(process.argv[3]);
+    return;
+  }
   const jobs = readJobsJsonl(process.argv[3]);
   if (command === "queue-state") {
     console.log(classifyQueue(jobs, Number(process.argv[4])));
@@ -166,7 +199,7 @@ function main() {
     return;
   }
   throw new Error(
-    "Use split-matrix, attempt <jobs.jsonl>, gate <jobs.jsonl>, or queue-state <jobs.jsonl> <seconds>.",
+    "Use split-matrix, jobs <jobs.jsonl>, attempt <jobs.jsonl>, gate <jobs.jsonl>, or queue-state <jobs.jsonl> <seconds>.",
   );
 }
 
@@ -182,6 +215,7 @@ module.exports = {
   classifyAttempts,
   classifyCaller,
   classifyQueue,
+  fetchJobs,
   neverAssignedHostedRunner,
   readJobsJsonl,
   splitDesktopMatrix,

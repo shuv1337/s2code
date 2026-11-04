@@ -14,8 +14,41 @@ const {
   buildJobName,
   classifyAttempts,
   classifyQueue,
+  fetchJobs,
+  readJobsJsonl,
   splitDesktopMatrix,
 } = require("./macos-arm64-runner-retry.cjs");
+
+const script = path.join(__dirname, "macos-arm64-runner-retry.cjs");
+
+// A `gh` on PATH that fails its first `failures` calls, then prints `jobs` as JSONL.
+function fakeGh(root, { failures, jobs }) {
+  const bin = path.join(root, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(root, "jobs.out"), jobs.map((job) => JSON.stringify(job)).join("\n"));
+  fs.writeFileSync(
+    path.join(bin, "gh"),
+    `#!/bin/sh
+calls=$(cat "${root}/calls" 2>/dev/null || echo 0)
+echo $((calls + 1)) > "${root}/calls"
+echo "$*" > "${root}/args"
+if [ "$calls" -lt ${failures} ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi
+cat "${root}/jobs.out"
+`,
+    { mode: 0o755 },
+  );
+  return {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      GITHUB_REPOSITORY: "shuv1337/s2code",
+      GITHUB_RUN_ID: "41740484868",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+    calls: () => Number(fs.readFileSync(path.join(root, "calls"), "utf8")),
+    args: () => fs.readFileSync(path.join(root, "args"), "utf8").trim(),
+  };
+}
 
 const workflow = fs.readFileSync(path.join(__dirname, "../workflows/release.yml"), "utf8");
 const desktop = fs.readFileSync(path.join(__dirname, "../workflows/release-desktop.yml"), "utf8");
@@ -294,6 +327,44 @@ test("the workflows wire the queue watch, shared concurrency group and keychain 
   assert.ok(desktop.includes("APP_BUILDER_TMP_DIR: ${{ runner.temp }}"));
 });
 
+test("the CLI archive signs with the keychain it imported into, by path", () => {
+  const importStep = desktop
+    .split("      - name: Import macOS signing certificate for the CLI archive\n")[1]
+    .split("\n      - name:")[0];
+  assert.ok(importStep.includes("set-key-partition-list -S apple-tool:,apple:,codesign: "));
+  assert.ok(importStep.includes('echo "T3CODE_CLI_MAC_SIGN_KEYCHAIN=$keychain"'));
+  const listStep = desktop
+    .split("      - name: List macOS code signing identity names\n")[1]
+    .split("\n      - name:")[0];
+  for (const call of [
+    'list -p codesigning "$T3CODE_CLI_MAC_SIGN_KEYCHAIN"',
+    'list -v -p codesigning "$T3CODE_CLI_MAC_SIGN_KEYCHAIN"',
+    "list -p codesigning\n",
+    "list -v -p codesigning\n",
+  ])
+    assert.ok(listStep.includes(call), call);
+  const buildStep = desktop
+    .split("      - name: Build CLI archive\n")[1]
+    .split("\n      - name:")[0];
+  assert.match(
+    buildStep,
+    /unset [^\n]*T3CODE_CLI_MAC_SIGN_IDENTITY T3CODE_CLI_MAC_SIGN_KEYCHAIN\n/,
+  );
+});
+
+test("the dependency verification the desktop builds download is produced first", () => {
+  const download = desktop
+    .split("      - name: Download dependency verification\n")[1]
+    .split("\n      - name:")[0];
+  assert.equal(download.includes("continue-on-error"), false);
+  const bundle = workflow.split("  build_bundle:\n")[1].split("\n  desktop:\n")[0];
+  assert.match(
+    bundle,
+    /name: Upload dependency verification\n[\s\S]*name: release-dependency-verification\n\s+path: \$\{\{ runner\.temp \}\}\/pnpm-metadata\/lockfile-verified\.jsonl\n\s+if-no-files-found: error/,
+  );
+  assert.ok(bundle.includes("pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata"));
+});
+
 test("the self-hosted job is allowlisted, starts clean, and never holds Azure secrets on the Mac", () => {
   assert.ok(
     desktop.includes(
@@ -316,4 +387,98 @@ test("the self-hosted job is allowlisted, starts clean, and never holds Azure se
   assert.equal(gated.length, 20);
   // Left ungated: the Windows-only "Prepare Azure Trusted Signing" step's seven secrets.
   assert.equal(azure.length, 7);
+  // Every macOS arm64 caller passes the Mac signing secrets by name instead of inheriting all.
+  const macSecrets = workflow
+    .split("    secrets: &mac_arm64_secrets\n")[1]
+    .split("    with:")[0]
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(":")[0]);
+  assert.deepEqual(macSecrets, [
+    "CSC_LINK",
+    "CSC_KEY_PASSWORD",
+    "APPLE_API_KEY",
+    "APPLE_API_KEY_ID",
+    "APPLE_API_ISSUER",
+    "MACOS_PROVISIONING_PROFILE",
+  ]);
+  for (const caller of MAC_ARM64_CALLERS) {
+    const job = workflow.split(`    name: ${caller}\n`)[1].split("\n  mac_arm64_")[0];
+    assert.match(job, /\n {4}secrets: [&*]mac_arm64_secrets\n/, caller);
+    assert.equal(job.includes("secrets: inherit"), false, caller);
+  }
+});
+
+test("a jobs read retries a transient API failure and keeps the last read when retries run out", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "macos-arm64-jobs-"));
+  const output = path.join(root, "jobs.jsonl");
+  const queued = { name: buildJobName(MAC_ARM64_CALLERS[0]), status: "queued" };
+  const gh = fakeGh(root, { failures: 2, jobs: [queued] });
+  assert.equal(fetchJobs(output, { env: gh.env, delayMs: 0 }), 3);
+  assert.equal(
+    gh.args(),
+    "api --paginate repos/shuv1337/s2code/actions/runs/41740484868/attempts/1/jobs?per_page=100 --jq .jobs[]",
+  );
+  assert.deepEqual(readJobsJsonl(output), [queued]);
+
+  fs.rmSync(path.join(root, "calls"));
+  const down = fakeGh(root, { failures: 99, jobs: [] });
+  assert.throws(
+    () => fetchJobs(output, { env: down.env, delayMs: 0, attempts: 3 }),
+    /after 3 attempts: HTTP 502: Bad Gateway/,
+  );
+  assert.equal(down.calls(), 3);
+  assert.deepEqual(readJobsJsonl(output), [queued]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("with shuvbot offline, the release falls back to hosted macos-26 and the gate accepts it", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "macos-arm64-offline-"));
+  const jobs = path.join(root, "jobs.jsonl");
+  const run = (...args) =>
+    spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env: gh.env });
+  // No shuvbot runner is online, so the first attempt never leaves the queue.
+  const queued = { name: buildJobName(MAC_ARM64_CALLERS[0]), status: "queued", runner_id: 0 };
+  let gh = fakeGh(root, { failures: 0, jobs: [queued] });
+  assert.equal(run("jobs", jobs).status, 0);
+  assert.equal(
+    run("queue-state", jobs, String(QUEUE_TIMEOUT_SECONDS - 15)).stdout.trim(),
+    "waiting",
+  );
+  assert.equal(run("queue-state", jobs, String(QUEUE_TIMEOUT_SECONDS)).stdout.trim(), "timeout");
+
+  const { fallback } = splitDesktopMatrix({
+    include: [{ platform: "mac", arch: "arm64", runner: '["self-hosted","shuvbot-macos"]' }],
+  });
+  assert.equal(fallback.runner, "macos-26");
+
+  // Starting the fallback cancels the queued attempt through their shared concurrency group.
+  fs.rmSync(path.join(root, "calls"));
+  gh = fakeGh(root, {
+    failures: 0,
+    jobs: [
+      { ...queued, status: "completed", conclusion: "cancelled", steps: [] },
+      {
+        name: buildJobName(QUEUE_FALLBACK_CALLER),
+        status: "completed",
+        conclusion: "success",
+        runner_id: 42,
+        steps: [{ name: "Checkout" }],
+      },
+    ],
+  });
+  assert.equal(run("jobs", jobs).status, 0);
+  const gate = run("gate", jobs);
+  assert.equal(gate.status, 0, gate.stderr);
+  assert.match(gate.stdout, /Desktop \(macOS arm64\): superseded/);
+  assert.match(gate.stdout, /Desktop \(macOS arm64 queue fallback\): success/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("every macOS arm64 jobs read goes through the retrying reader", () => {
+  assert.equal(/gh api --paginate .*\/jobs/.test(workflow), false);
+  // The queue watch keeps waiting on a failed read; the checks and the gate fail closed.
+  assert.match(workflow, /retry\.cjs jobs "\$RUNNER_TEMP\/jobs\.jsonl" \|\| echo "::warning::/);
+  assert.match(workflow, /retry\.cjs jobs "\$RUNNER_TEMP\/jobs\.jsonl"\n {10}node \S+ attempt/);
+  assert.match(workflow, /retry\.cjs jobs "\$RUNNER_TEMP\/jobs\.jsonl"\n {10}node \S+ gate/);
 });

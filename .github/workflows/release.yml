@@ -135,9 +135,19 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
       - uses: voidzero-dev/setup-vp@v1
+        env:
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
         with:
           node-version-file: package.json
           run-install: true
+      # Share only the verification results, not the large registry metadata cache.
+      - name: Upload dependency verification
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dependency-verification
+          path: ${{ runner.temp }}/pnpm-metadata/lockfile-verified.jsonl
+          if-no-files-found: error
+          retention-days: 1
       - run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
       - name: Align all compiled surfaces
         env:
@@ -194,7 +204,14 @@ jobs:
     name: Desktop (macOS arm64)
     needs: [preflight, build_bundle]
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    # The Mac build gets its own signing secrets and nothing else (no Azure).
+    secrets: &mac_arm64_secrets
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
     with:
       label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
       runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).runner }}
@@ -237,8 +254,10 @@ jobs:
         run: |
           set -euo pipefail
           started=$SECONDS
+          touch "$RUNNER_TEMP/jobs.jsonl"
           while true; do
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+            # A read that fails every retry keeps the last one, so an offline shuvbot still times out into the fallback.
+            node .github/scripts/macos-arm64-runner-retry.cjs jobs "$RUNNER_TEMP/jobs.jsonl" || echo "::warning::Judging the shuvbot queue from the last successful jobs read."
             state="$(node .github/scripts/macos-arm64-runner-retry.cjs queue-state "$RUNNER_TEMP/jobs.jsonl" "$((SECONDS - started))")"
             echo "shuvbot queue: $state after $((SECONDS - started))s"
             case "$state" in
@@ -260,7 +279,7 @@ jobs:
     needs: [preflight, build_bundle, mac_arm64_queue_watch]
     if: needs.mac_arm64_queue_watch.outputs.fallback == 'true'
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    secrets: *mac_arm64_secrets
     with: &mac_arm64_fallback_build
       label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
       runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64_fallback).runner }}
@@ -299,7 +318,7 @@ jobs:
           CALLER_NAME: ${{ env.CALLER_NAME }}
         run: |
           set -euo pipefail
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs jobs "$RUNNER_TEMP/jobs.jsonl"
           node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
 
   desktop_mac_arm64_retry_2:
@@ -307,7 +326,7 @@ jobs:
     needs: [preflight, build_bundle, mac_arm64_after_1]
     if: always() && !cancelled() && needs.mac_arm64_after_1.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    secrets: *mac_arm64_secrets
     with: *mac_arm64_fallback_build
 
   mac_arm64_after_2:
@@ -327,7 +346,7 @@ jobs:
     needs: [preflight, build_bundle, mac_arm64_after_2]
     if: always() && !cancelled() && needs.mac_arm64_after_2.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    secrets: *mac_arm64_secrets
     with: *mac_arm64_fallback_build
 
   mac_arm64_after_3:
@@ -347,7 +366,7 @@ jobs:
     needs: [preflight, build_bundle, mac_arm64_after_3]
     if: always() && !cancelled() && needs.mac_arm64_after_3.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    secrets: *mac_arm64_secrets
     with: *mac_arm64_fallback_build
 
   mac_arm64_after_4:
@@ -367,7 +386,7 @@ jobs:
     needs: [preflight, build_bundle, mac_arm64_after_4]
     if: always() && !cancelled() && needs.mac_arm64_after_4.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    secrets: *mac_arm64_secrets
     with: *mac_arm64_fallback_build
 
   mac_arm64_after_5:
@@ -387,7 +406,7 @@ jobs:
     needs: [preflight, build_bundle, mac_arm64_after_5]
     if: always() && !cancelled() && needs.mac_arm64_after_5.outputs.retry == 'true'
     uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
+    secrets: *mac_arm64_secrets
     with: *mac_arm64_fallback_build
 
   mac_arm64_ready:
@@ -415,7 +434,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" --jq '.jobs[]' > "$RUNNER_TEMP/jobs.jsonl"
+          node .github/scripts/macos-arm64-runner-retry.cjs jobs "$RUNNER_TEMP/jobs.jsonl"
           node .github/scripts/macos-arm64-runner-retry.cjs gate "$RUNNER_TEMP/jobs.jsonl"
 
   prepare:
