@@ -1,3 +1,4 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,6 +10,7 @@ import {
   sanitizeLinkedPrompt,
   withoutPromptLinkParams,
 } from "./promptLinks.ts";
+import { hostedThreadLink } from "./threadLinks.ts";
 
 describe("sanitizeLinkedPrompt", () => {
   it("removes characters a reader cannot see and counts them", () => {
@@ -107,13 +109,35 @@ describe("link round trips", () => {
     );
   });
 
+  it("opens a copied thread link in the app at that thread", () => {
+    const fork = "https://app.fork.test";
+    const link = hostedThreadLink(
+      { environmentId: EnvironmentId.make("env-1"), threadId: ThreadId.make("mcp:1") },
+      fork,
+    );
+    const path = promptLinkAppPath(link, fork);
+    expect(path).toBe("/env-1/mcp%3A1");
+    const deepLink = promptLinkDeepLink(path!);
+    expect(deepLink).toBe("s2code://threads/env-1/mcp%3A1");
+    expect(promptLinkAppPath(deepLink)).toBe(path);
+  });
+
   it("maps app scheme and hosted links to in-app paths, and nothing else", () => {
     expect(promptLinkAppPath("t3code://new?prompt=hi")).toBe("/new?prompt=hi");
     expect(promptLinkAppPath("t3code-dev://threads/env-1/thread-1")).toBe("/env-1/thread-1");
     expect(promptLinkAppPath("https://app.t3.codes/env-1/thread-1?prompt=go")).toBeNull();
-    expect(
-      promptLinkAppPath("https://app.fork.test/env-1/thread-1?prompt=go", "https://app.fork.test"),
-    ).toBe("/env-1/thread-1?prompt=go");
+    expect(promptLinkAppPath("https://app.t3.codes/threads/env-1/thread-1")).toBeNull();
+    const fork = "https://app.fork.test";
+    expect(promptLinkAppPath(`${fork}/env-1/thread-1?prompt=go`, fork)).toBe(
+      "/env-1/thread-1?prompt=go",
+    );
+    expect(promptLinkAppPath(`${fork}/threads/env-1/thread-1`, fork)).toBe("/env-1/thread-1");
+    expect(promptLinkAppPath(`${fork}/threads/env-1/thread-1?prompt=go`, fork)).toBe(
+      "/env-1/thread-1?prompt=go",
+    );
+    // The web app's own thread route, reloaded, is no link.
+    expect(promptLinkAppPath(`${fork}/env-1/thread-1`, fork)).toBeNull();
+    expect(promptLinkAppPath(`${fork}/threads/env-1`, fork)).toBeNull();
     expect(promptLinkAppPath("https://app.t3.codes/settings/general")).toBeNull();
     expect(promptLinkAppPath("https://evil.test/new?prompt=hi")).toBeNull();
     expect(promptLinkAppPath("t3code://app/index.html")).toBeNull();

@@ -184,6 +184,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
     },
     {
       label: "the local network opens",
+      prints: " pair --base-dir <baseDir>`. Use the code on your other device.",
       installed: true,
       env: "S2CODE_LAN=false\n",
       args: ["--lan"],
@@ -373,7 +374,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
         ),
       );
       if (input.prints !== undefined) {
-        expect(lines.join("\n")).toContain(input.prints);
+        expect(lines.join("\n")).toContain(input.prints.replace("<baseDir>", baseDir));
       }
       expect(exit._tag).toBe(input.restartFails === true ? "Failure" : "Success");
       expect({ installs, restarts }).toEqual({

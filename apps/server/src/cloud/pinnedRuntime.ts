@@ -10,14 +10,15 @@ import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import {
   CLI_RELEASE_CHECKSUMS_FILE,
   cliArchiveFileNames,
   cliArchivePlatformKey,
   cliArchiveTarCommand,
-  cliReleaseDownloadBaseUrl,
+  cliReleaseAssetUrl,
+  type CliArchivePlatformKey,
   parseChecksums,
 } from "@t3tools/shared/cliRelease";
 
@@ -128,6 +129,8 @@ interface PinnedRuntimeInstallInput {
   readonly arch: string;
   readonly httpClient: HttpClient.HttpClient;
   readonly releaseBaseUrl?: string | undefined;
+  /** Reuse a cached runtime only while the release source still lists it, as a policy mirror does. */
+  readonly requirePublishedRelease?: boolean;
   readonly onProgress?: (progress: PinnedRuntimeProgress) => void;
 }
 
@@ -195,29 +198,11 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
     });
   }
   const httpClient = input.httpClient;
-  const baseUrl = cliReleaseDownloadBaseUrl(input.version, input.releaseBaseUrl);
   input.onProgress?.({ stage: "download", received: 0, total: undefined });
-  const checksums = parseChecksums(
-    new TextDecoder().decode(
-      yield* fetchReleaseAsset(
-        httpClient,
-        `${baseUrl}/${CLI_RELEASE_CHECKSUMS_FILE}`,
-        "downloading the t3 release checksums",
-      ),
-    ),
-  );
-  const selected = cliArchiveFileNames(input.version, platformKey)
-    .map((name) => [name, checksums.get(name)] as const)
-    .find((entry): entry is readonly [string, string] => entry[1] !== undefined);
-  if (selected === undefined) {
-    return yield* new PinnedRuntimeInstallError({
-      step: `finding a ${platformKey} archive in the t3 release checksums`,
-    });
-  }
-  const [fileName, expected] = selected;
+  const { fileName, expected } = yield* publishedArchive(input, platformKey);
   const archive = yield* fetchReleaseAsset(
     httpClient,
-    `${baseUrl}/${fileName}`,
+    cliReleaseAssetUrl(input.version, fileName, input.releaseBaseUrl),
     "downloading the t3 release archive",
     input.onProgress,
   );
@@ -265,6 +250,41 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
     );
   yield* fs.remove(archivePath, { force: true }).pipe(Effect.ignore);
 });
+
+/** The release's archive for this machine and its checksum; fails when the release lists none. */
+const publishedArchive = Effect.fn("cloud.pinned_runtime.published_archive")(function* (
+  input: PinnedRuntimeInstallInput,
+  platformKey: CliArchivePlatformKey,
+) {
+  const fileNames = cliArchiveFileNames(input.version, platformKey);
+  const checksums = parseChecksums(
+    new TextDecoder().decode(
+      yield* fetchReleaseAsset(
+        input.httpClient,
+        cliReleaseAssetUrl(input.version, CLI_RELEASE_CHECKSUMS_FILE, input.releaseBaseUrl),
+        "downloading the t3 release checksums",
+      ),
+    ),
+  );
+  const fileName = fileNames.find((name) => checksums.has(name));
+  const expected = fileName === undefined ? undefined : checksums.get(fileName);
+  if (fileName === undefined || expected === undefined) {
+    return yield* new PinnedRuntimeInstallError({
+      step: `finding ${fileNames[0]} in the t3 release checksums`,
+    });
+  }
+  return { fileName, expected };
+});
+
+const isPinnedRuntimeInstallError = Schema.is(PinnedRuntimeInstallError);
+
+/** Whether an install failed because the release source does not publish the version for this machine. */
+export const isUnpublishedRelease = (error: unknown): error is PinnedRuntimeInstallError =>
+  isPinnedRuntimeInstallError(error) &&
+  (error.step.startsWith("finding ") ||
+    (error.step.startsWith("downloading the t3 release") &&
+      HttpClientError.isHttpClientError(error.cause) &&
+      error.cause.response?.status === 404));
 
 const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(function* (
   input: PinnedRuntimeInstallInput,
@@ -351,6 +371,15 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     Option.isSome(sentinel) &&
     isProductRuntimeComplete(sentinel.value, input.version, product);
   if (alreadyPinned) {
+    if (input.requirePublishedRelease === true) {
+      const platformKey = cliArchivePlatformKey(input.platform, input.arch);
+      if (platformKey === undefined) {
+        return yield* new PinnedRuntimeInstallError({
+          step: `selecting a t3 release archive for ${input.platform}-${input.arch}`,
+        });
+      }
+      yield* publishedArchive(input, platformKey);
+    }
     input.onProgress?.({ stage: "cached" });
     yield* input.validate(paths);
     return paths;

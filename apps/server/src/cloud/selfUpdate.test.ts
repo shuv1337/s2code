@@ -40,9 +40,10 @@ interface HarnessOptions {
 }
 
 const archiveBytes = new TextEncoder().encode("not really a tarball");
-const releaseHttpClient = (order: string[], beforeDownload?: Effect.Effect<void>) =>
+const releaseHttpClient = (order: string[], urls: string[], beforeDownload?: Effect.Effect<void>) =>
   HttpClient.make((request) =>
     Effect.gen(function* () {
+      urls.push(request.url);
       if (request.url.endsWith("/SHA256SUMS")) {
         const digest = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", archiveBytes));
         const hex = Array.from(new Uint8Array(digest), (byte) =>
@@ -67,6 +68,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-self-update-test-" });
   yield* fs.writeFileString(path.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
   const order: string[] = [];
+  const urls: string[] = [];
   const runner = ProcessRunner.ProcessRunner.of({
     run: (input) =>
       Effect.gen(function* () {
@@ -148,7 +150,10 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
         run: () => Effect.die("unexpected desktop app update run"),
       },
     ),
-    Effect.provideService(HttpClient.HttpClient, releaseHttpClient(order, options.beforeDownload)),
+    Effect.provideService(
+      HttpClient.HttpClient,
+      releaseHttpClient(order, urls, options.beforeDownload),
+    ),
     Effect.provideService(HostProcess.Platform, "linux"),
     Effect.provideService(HostProcess.Architecture, "x64"),
     Effect.provide(
@@ -158,7 +163,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
       ),
     ),
   );
-  return { selfUpdate, order };
+  return { selfUpdate, order, urls };
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
@@ -410,7 +415,13 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       const policy = {
         schemaVersion: 1,
         organization: "Example Corp",
-        limits: { updates: { mode: "auto", allowNightly: false } },
+        limits: {
+          updates: {
+            mode: "auto",
+            allowNightly: false,
+            feedUrl: "https://updates.example.com/t3code/",
+          },
+        },
       } as const;
       // Channels are separate installs, so only a nightly install can request a nightly.
       const nightly = yield* makeHarness({ policy, currentVersion: "1.0.0-nightly.20261014.1" });
@@ -421,9 +432,17 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       ).toBe("Example Corp manages T3 Code updates. Only stable releases can be installed.");
       expect(nightly.order).toEqual([]);
       const stable = yield* makeHarness({ policy });
+      // The mirror lists only 1.1.0's archive.
+      expect(
+        (yield* stable.selfUpdate.update({ targetVersion: "1.2.0" }).pipe(Effect.flip)).reason,
+      ).toBe("Example Corp's update mirror has no s2code@1.2.0 for this machine.");
       expect((yield* stable.selfUpdate.update({ targetVersion: "1.1.0" })).updateId).toBe(
         "launcher-id",
       );
+      // The release comes from the policy's mirror, not GitHub.
+      expect(stable.urls.length).toBeGreaterThan(0);
+      for (const url of stable.urls)
+        expect(url).toMatch(/^https:\/\/updates\.example\.com\/t3code\/v1\.[12]\.0\//);
     }),
   );
 
