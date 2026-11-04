@@ -24,7 +24,7 @@ Public app names and URL schemes use S2Code and `s2code`.
 One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives, package manifests and release receipts. Desktop builds cover
 macOS ARM64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
-x64 (NSIS). Intel macOS and Windows ARM64 are not built. The Windows desktop embeds the matching same-version Linux
+x64 (NSIS). Intel macOS and Windows ARM64 are not built; the updater feeds list only the remaining targets, so existing Windows ARM64 installs update to the x64 build and Intel Mac installs find no update they can download. The Windows desktop embeds the matching same-version Linux
 `s2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
 compares its digest before publication.
 

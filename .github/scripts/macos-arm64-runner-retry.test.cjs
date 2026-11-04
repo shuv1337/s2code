@@ -62,7 +62,6 @@ test("splits macOS arm64 out of the shared desktop matrix", () => {
         runner: '["self-hosted","macOS","ARM64","shuvbot-macos"]',
         label: "macOS arm64",
       },
-      { platform: "mac", arch: "x64", runner: "macos-15-intel", label: "macOS x64" },
       { platform: "linux", arch: "x64", runner: "ubuntu-24.04", label: "Linux x64" },
     ],
   });
@@ -71,7 +70,7 @@ test("splits macOS arm64 out of the shared desktop matrix", () => {
   assert.deepEqual(split.fallback, { ...split.mac, runner: "macos-26" });
   assert.deepEqual(
     split.rest.include.map((target) => target.label),
-    ["macOS x64", "Linux x64"],
+    ["Linux x64"],
   );
   assert.throws(() => splitDesktopMatrix({ include: [] }), /one macOS arm64/);
 });

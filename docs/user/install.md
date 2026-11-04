@@ -95,8 +95,10 @@ is the only train this fork publishes.
 
 ### Intel Macs
 
-S2Code is no longer built for Intel Macs: there is no desktop app and no standalone executable,
-and existing installs get no further updates. To run a server there, build it from source with `vp`, which provides the Node version it needs
+S2Code is no longer built for Intel Macs: there is no desktop app and no standalone executable.
+An Intel install you already have keeps working, but it never gets another update. It may
+still show "Update available" and then fail to download it; there is nothing to fix on your side.
+To run a server on an Intel Mac, build it from source with `vp`, which provides the Node version it needs
 ([Install vp](https://github.com/shuv1337/s2code#install-vp)):
 
 ```bash
@@ -107,6 +109,16 @@ node apps/server/dist/bin.mjs
 
 Release self-update does not apply to a server run from source;
 update it with `git pull` and a rebuild.
+
+### Windows on Arm
+
+S2Code is no longer built for Windows on Arm, and `install.ps1` stops with a message there. A
+Windows on Arm desktop app you already have will still be offered the next update, and that update is
+the x64 build, which installs over it and runs under x64 emulation without asking. Expect two
+problems: the WSL backend likely fails, because the x64 build carries an x64 Linux runtime and
+an Arm distro cannot run it; and Windows 10 on Arm has no x64 emulation, so the app may not start.
+To stay on the Arm version you have, set `T3CODE_DISABLE_AUTO_UPDATE=1` before the app starts.
+To run a server on Windows on Arm, build it from source as described for Intel Macs.
 
 ## Desktop app
 

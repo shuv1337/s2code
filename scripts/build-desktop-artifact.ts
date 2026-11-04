@@ -727,7 +727,7 @@ export class StagedFfmpegMissingError extends Schema.TaggedError<StagedFfmpegMis
   },
 ) {
   override get message(): string {
-    return `${this.label} installed no usable FFmpeg (${this.resolved ?? "ffmpeg-static did not resolve"} in ${this.stageDir}). ffmpeg-static is optional so win32-arm64 can install at all, so a failed download here would otherwise ship silently without transcription.`;
+    return `${this.label} installed no usable FFmpeg (${this.resolved ?? "ffmpeg-static did not resolve"} in ${this.stageDir}). ffmpeg-static is optional so a platform without a binary can still install, so a failed download here would otherwise ship silently without transcription.`;
   }
 }
 
@@ -3599,9 +3599,8 @@ export const verifyWindowsPrimaryFffNativeLoad = Effect.fn(
 });
 
 /**
- * ffmpeg-static is optional (win32-arm64 has no binary), so a failed install is silent and the
- * package still resolves a path; check both package and executable. Every stage install runs
- * this except win32-arm64, where transcription is knowingly unavailable.
+ * ffmpeg-static is optional, so a failed install is silent and the package still resolves a
+ * path; check both package and executable. Every stage install runs this.
  */
 export const assertStagedFfmpeg = Effect.fn("desktopArtifact.assertStagedFfmpeg")(
   function* (input: {
@@ -3610,7 +3609,6 @@ export const assertStagedFfmpeg = Effect.fn("desktopArtifact.assertStagedFfmpeg"
     readonly arch: typeof BuildArch.Type;
     readonly label: string;
   }) {
-    if (input.platform === "win" && input.arch === "arm64") return;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const resolved = yield* Effect.try(() =>

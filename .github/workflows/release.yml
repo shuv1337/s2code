@@ -118,7 +118,7 @@ jobs:
       - name: Verify release logic
         run: |
           node --test .github/scripts/macos-arm64-runner-retry.test.cjs
-          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/merge-update-manifests.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
+          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@v7
         with:
           name: release-plan
@@ -499,7 +499,7 @@ jobs:
           pattern: cli-*
           merge-multiple: true
           path: prepared/release-assets
-      - name: Build the seven public packages once from the verified-source archives
+      - name: Build the six public packages once from the verified-source archives
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
