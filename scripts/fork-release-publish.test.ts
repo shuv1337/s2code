@@ -69,7 +69,8 @@ const http = `import fs from 'node:fs';
 // state file is never contended, and spread so no single poll is exhausted.
 const flakyTags=Number(process.env.FIXTURE_FLAKY_TAGS??0);
 const flakyVersions=Number(process.env.FIXTURE_FLAKY_VERSIONS??0);
-let tagReads=0, versionReads=0;
+// Per package, so concurrent pollers each see the same alternation.
+const tagReads={}, versionReads={};
 globalThis.fetch=async input=>{
  const s=JSON.parse(fs.readFileSync(process.env.FIXTURE_STATE,'utf8')); const url=new URL(String(input));
  if(url.hostname==='registry.npmjs.org') {
@@ -77,12 +78,12 @@ globalThis.fetch=async input=>{
    if(s.mode==='http-error') return new Response('PRIVATE_RESPONSE_BODY',{status:502});
    // Like npm: tags live under /-/package/, and /<name>/dist-tags is a version lookup.
    if(parts[0]==='-' && parts[1]==='package' && parts[3]==='dist-tags') {
-     if(flakyTags>0 && ++tagReads%flakyTags===0) return new Response('PRIVATE_RESPONSE_BODY',{status:503});
+     if(flakyTags>0 && (tagReads[parts[2]]=(tagReads[parts[2]]??0)+1)%flakyTags===0) return new Response('PRIVATE_RESPONSE_BODY',{status:503});
      return Response.json(s.tags[decodeURIComponent(parts[2])]??{});
    }
    if(parts[1]==='dist-tags') return Response.json('version not found: dist-tags',{status:404});
    const name=decodeURIComponent(parts[0]);
-   if(flakyVersions>0 && ++versionReads%flakyVersions===0) return new Response('PRIVATE_RESPONSE_BODY',{status:429});
+   if(flakyVersions>0 && (versionReads[name]=(versionReads[name]??0)+1)%flakyVersions===0) return new Response('PRIVATE_RESPONSE_BODY',{status:429});
    if(s.mode==='npm-error') return new Response(null,{status:404});
    if(!s.registry[name]) throw new Error('Unexpected registry package');
    // Bytes that are not this run's: never retried, never republished.
@@ -267,9 +268,7 @@ describe("fork publication fixtures", () => {
     expect(body.includes("are signed and notarized")).toBe(mac);
     expect(body.includes("WARNING: The macOS desktop apps are unsigned")).toBe(!mac);
     expect(body.includes("### Windows\n\nThe Windows installers are unsigned.")).toBe(!win);
-    expect(body.includes("### Windows\n\nThe Windows installers (arm64 and x64) are signed.")).toBe(
-      win,
-    );
+    expect(body.includes("### Windows\n\nThe Windows installers are signed.")).toBe(win);
     expect(state.release.draft).toBe(false);
   });
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -473,8 +472,12 @@ describe("fork publication fixtures", () => {
         "nightly",
         "latest",
       ]);
-      expect(promotions.findIndex(([pkg]) => pkg === "@s2code/cli")).toBe(promotions.length - 4);
-      expect(promotions.slice(-2).map(([pkg]) => pkg)).toEqual(["shuv2code", "shuv2code"]);
+      expect(
+        promotions
+          .slice(-4)
+          .map(([pkg]) => pkg)
+          .toSorted(),
+      ).toEqual(["@s2code/cli", "@s2code/cli", "shuv2code", "shuv2code"]);
       expect(state.tags["@s2code/cli"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });

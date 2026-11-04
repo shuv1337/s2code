@@ -54,16 +54,6 @@ export const FORK_DESKTOP_MATRIX = [
     cli_archive: true,
   },
   {
-    label: "macOS x64",
-    platform: "mac",
-    arch: "x64",
-    runner: "macos-15-intel",
-    target: "dmg",
-    rust_target: "x86_64-apple-darwin",
-    resource_key: "darwin-x64",
-    cli_archive: false,
-  },
-  {
     label: "Linux x64",
     platform: "linux",
     arch: "x64",
@@ -91,16 +81,6 @@ export const FORK_DESKTOP_MATRIX = [
     target: "nsis",
     rust_target: "x86_64-pc-windows-msvc",
     resource_key: "win32-x64",
-    cli_archive: true,
-  },
-  {
-    label: "Windows arm64",
-    platform: "win",
-    arch: "arm64",
-    runner: "windows-11-arm",
-    target: "nsis",
-    rust_target: "aarch64-pc-windows-msvc",
-    resource_key: "win32-arm64",
     cli_archive: true,
   },
 ] as const;
@@ -224,11 +204,11 @@ export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha">) 
     "Local/direct desktop and CLI release.",
     "### macOS",
     plan.signing.mac
-      ? "The macOS desktop apps (arm64 and x64) are signed and notarized, with stapled tickets verified in the update ZIPs. The DMG containers themselves are not signed."
+      ? "The macOS desktop apps are signed and notarized, with stapled tickets verified in the update ZIPs. The DMG containers themselves are not signed."
       : "WARNING: The macOS desktop apps are unsigned and not notarized. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     "### Windows",
     plan.signing.win
-      ? "The Windows installers (arm64 and x64) are signed."
+      ? "The Windows installers are signed."
       : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     `Source: ${plan.sha}.`,
   ].join("\n\n");
@@ -305,7 +285,7 @@ export function assertForkNpmSet(manifests: ReadonlyArray<unknown>, version: str
     checked.length !== FORK_NPM_PACKAGES.length ||
     new Set(checked.map((manifest) => manifest.name)).size !== FORK_NPM_PACKAGES.length
   )
-    throw new Error("All five platform packages, the launcher and its legacy bridge are required.");
+    throw new Error("Every platform package, the launcher and its legacy bridge are required.");
   return checked;
 }
 export function assertForkDistTag(version: string, tag: string) {

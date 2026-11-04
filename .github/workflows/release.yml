@@ -437,57 +437,17 @@ jobs:
           node .github/scripts/macos-arm64-runner-retry.cjs jobs "$RUNNER_TEMP/jobs.jsonl"
           node .github/scripts/macos-arm64-runner-retry.cjs gate "$RUNNER_TEMP/jobs.jsonl"
 
-  prepare:
-    needs: [preflight, desktop, mac_arm64_ready]
-    if: >-
-      always() &&
-      !cancelled() &&
-      needs.preflight.result == 'success' &&
-      needs.desktop.result == 'success' &&
-      needs.mac_arm64_ready.result == 'success'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-      - uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          run-install: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-plan
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: desktop-*
-          merge-multiple: true
-          path: prepared/release-assets
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: cli-*
-          merge-multiple: true
-          path: prepared/release-assets
-      - name: Build the seven public packages once from the verified-source archives
-        env:
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
-      - name: Verify complete matrix, source/WSL receipts, feeds and package allowlist
-        run: node scripts/fork-release.ts prepare
-      - uses: actions/upload-artifact@v7
-        with:
-          name: fork-release-prepared
-          path: prepared/
-          if-no-files-found: error
-
+  # Prepare and publish share one job so the release assets are downloaded once
+  # rather than uploaded again as a multi-gigabyte artifact between jobs.
   publish:
-    needs: [due, preflight, prepare]
+    needs: [due, preflight, desktop, mac_arm64_ready]
     if: >-
       always() &&
       !cancelled() &&
       needs.due.result == 'success' &&
       needs.preflight.result == 'success' &&
-      needs.prepare.result == 'success' &&
+      needs.desktop.result == 'success' &&
+      needs.mac_arm64_ready.result == 'success' &&
       needs.due.outputs.allowed_ref == 'true' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04 # npm trusted publishing requires GitHub-hosted runners.
@@ -520,8 +480,23 @@ jobs:
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/fork-npmrc" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v8
         with:
-          name: fork-release-prepared
-          path: prepared
+          name: release-plan
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: prepared/release-assets
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: prepared/release-assets
+      - name: Build the public npm packages once from the verified-source archives
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
+      - name: Verify complete matrix, source/WSL receipts, feeds and package allowlist
+        run: node scripts/fork-release.ts prepare
       - name: Draft, verify, publish npm when ready, expose feeds and index last
         run: node scripts/fork-release.ts publish --execute
       # Runs only after the publish step succeeds; a Discord failure never fails the release.

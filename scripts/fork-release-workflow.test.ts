@@ -79,7 +79,8 @@ describe("fork workflow gates", () => {
     expect(publish).toContain("needs.due.outputs.allowed_ref == 'true'");
     expect(publish).toContain("github.event.repository.default_branch");
     expect(publish).not.toContain("refs/tags/");
-    expect(publish).toContain("needs.prepare.result == 'success'");
+    expect(publish).toContain("needs.desktop.result == 'success'");
+    expect(publish).toContain("needs.mac_arm64_ready.result == 'success'");
   });
   it("leaves preview signing outside the release environment and supplies the packager's existing config names", () => {
     expect(desktop).not.toContain("environment: fork-release");

@@ -9,13 +9,12 @@ export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 /** Overrides the download origin for mirrors and air-gapped installs. */
 export const CLI_RELEASE_BASE_URL_ENV = "S2CODE_RELEASE_BASE_URL";
 
-// Keep archive keys aligned with the Linux matrix, Windows ARM64 build, and cli_archive rows in release.yml.
+// Keep archive keys aligned with the cli_archive rows of FORK_DESKTOP_MATRIX.
 // Node single-executables do not support darwin-x64 and segfault at startup.
 export const CLI_ARCHIVE_PLATFORM_KEYS = [
   "darwin-arm64",
   "linux-arm64",
   "linux-x64",
-  "win32-arm64",
   "win32-x64",
 ] as const;
 export type CliArchivePlatformKey = (typeof CLI_ARCHIVE_PLATFORM_KEYS)[number];

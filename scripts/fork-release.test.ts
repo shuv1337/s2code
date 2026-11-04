@@ -114,7 +114,8 @@ function fixture(
           desktops.filter((name) => /\.(deb|AppImage)$/.test(name) && name.includes("-arm64.")),
         ],
       ] as const)
-        FS.writeFileSync(Path.join(directory, name), manifest([...files]));
+        // electron-builder writes a per-arch manifest only for an arch it built.
+        if (files.length) FS.writeFileSync(Path.join(directory, name), manifest([...files]));
     }
     run(directory, plan);
   } finally {
@@ -163,7 +164,7 @@ describe("complete fork release assets", () => {
         const assets = prepareForkAssets(plan, directory);
         expect(
           assets.filter((name) => /\.(dmg|zip|AppImage|deb|exe|tar\.gz)$/.test(name)),
-        ).toHaveLength(25);
+        ).toHaveLength(19);
         const checksums = FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8");
         for (let index = 0; index < plan.cliAssets.length; index++) {
           const name = plan.cliAssets[index]!;
@@ -186,7 +187,7 @@ describe("complete fork release assets", () => {
             "fixture",
           );
           expect(feed.version).toBe(plan.version);
-          if (name.includes("mac") || !name.includes("linux")) expect(feed.files).toHaveLength(2);
+          if (name.includes("mac") || !name.includes("linux")) expect(feed.files).toHaveLength(1);
         }
         if (channel === "preview") expect(assets.some((name) => name.endsWith(".yml"))).toBe(false);
       }),
@@ -353,7 +354,7 @@ exit \${FAKE_SEVEN_ZIP_EXIT:-1}
     }));
   it("rejects mixed revisions and mismatched Windows WSL runtimes", () =>
     fixture("stable", (directory, plan) => {
-      const file = Path.join(directory, "build-win-arm64.json");
+      const file = Path.join(directory, "build-win-x64.json");
       const receipt = JSON.parse(FS.readFileSync(file, "utf8"));
       FS.writeFileSync(file, JSON.stringify({ ...receipt, sha: "cd".repeat(20) }));
       expect(() => prepareForkAssets(plan, directory)).toThrow("source/version/signing");

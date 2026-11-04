@@ -23,14 +23,13 @@ Public app names and URL schemes use S2Code and `s2code`.
 
 One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives, package manifests and release receipts. Desktop builds cover
-macOS ARM64/x64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
-ARM64/x64 (NSIS). Each Windows desktop embeds the matching same-version Linux
+macOS ARM64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows x64
+(NSIS). Intel macOS and Windows ARM64 are not built. The Windows desktop embeds the matching same-version Linux
 `s2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
 compares its digest before publication.
 
-CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
-`win32-arm64`, `win32-x64`. **Intel macOS CLI/SEA is unsupported**; use the Intel
-desktop app. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
+CLI archives cover **four** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
+`win32-x64`. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
 include byte-identical `shuv2code-<version>-<platform>-<arch>` and
 `t3-<version>-<platform>-<arch>` aliases for installed clients; all three names have
 checksum entries. The archive's internal root directory retains
@@ -100,7 +99,7 @@ draft is verified before publication.
 npm publication is optional. It requires both `S2CODE_NPM_TRUSTED_PUBLISHING_READY`
 for the six canonical names and `FORK_NPM_TRUSTED_PUBLISHING_READY` for the legacy
 bridge to be `true`. Otherwise the GitHub release still publishes and `release.json`
-lists no npm packages. When both are ready, all seven packages publish under a temporary
+lists no npm packages. When both are ready, all packages publish concurrently under a temporary
 non-default dist-tag with `npm publish --provenance`, and their names, versions,
 repository and tarball integrity are verified before the release is exposed.
 npm reviews each new version before it can be installed, which took up to about
@@ -178,16 +177,18 @@ The publisher uses a GitHub-hosted runner, `id-token: write`, npm 11.21.0 and no
 
 ## Recovery and human smoke evidence
 
-Rerun failed jobs using the **original immutable `fork-release-prepared` artifact**.
-Already uploaded assets and npm versions are reused only when their digests match.
+Rerunning `publish` rebuilds the npm tarballs from the same run's build artifacts,
+and those tarballs are not byte-reproducible. Already uploaded assets and npm versions
+are reused only when their digests match, so a rerun after some npm versions
+published fails the integrity check; release a new version instead.
 Do not rebuild different signed bytes under an immutable version, overwrite public
 release assets or move a dist-tag backwards. If the original prepared bytes are
 lost, use a new version. Rolling index/tag repair may be retried after a fully
-verified release; inspect all seven endpoints and the release before doing so.
+verified release; inspect every npm package and the release before doing so.
 
 Before claiming delivery, a human must run the protected workflow with real fork
 accounts and capture: signature/team/publisher and notarization evidence for
-signed platforms; CLI smoke results on all five architectures; installs/upgrades
+signed platforms; CLI smoke results on all four architectures; installs/upgrades
 for each desktop target; same-arch Windows WSL startup; checksums and nightly feed
 selection; install-order coexistence with upstream. With npm enabled, also capture
 clean npm installs of the launcher and optional packages and OIDC provenance. An

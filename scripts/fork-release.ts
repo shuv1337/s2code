@@ -9,7 +9,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
-import { NPM_PACKAGE_NAME } from "@t3tools/shared/productIdentity";
 import {
   FORK_RELEASE_REPOSITORY,
   FORK_RELEASE_INDEX_BRANCH,
@@ -200,19 +199,28 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
       const second = Path.join(directory, secondary!);
       // An unsigned platform has no feed in the plan: electron-builder still
       // wrote per-arch manifests, so drop them instead of merging.
+      // Each platform ships one architecture, so the second manifest is absent.
+      const hasSecond = FS.existsSync(second);
       if (plan.feedAssets.includes(output!)) {
-        const merged = mergeUpdateManifests(
-          parseUpdateManifest(FS.readFileSync(first, "utf8"), primary!, platform!),
-          parseUpdateManifest(FS.readFileSync(second, "utf8"), secondary!, platform!),
+        const firstManifest = parseUpdateManifest(
+          FS.readFileSync(first, "utf8"),
+          primary!,
           platform!,
         );
+        const merged = hasSecond
+          ? mergeUpdateManifests(
+              firstManifest,
+              parseUpdateManifest(FS.readFileSync(second, "utf8"), secondary!, platform!),
+              platform!,
+            )
+          : firstManifest;
         FS.writeFileSync(
           Path.join(directory, output!),
           serializeUpdateManifest(merged, { platformLabel: platform! }),
         );
       }
       if (primary !== output || !plan.feedAssets.includes(output!)) FS.unlinkSync(first);
-      FS.unlinkSync(second);
+      if (hasSecond) FS.unlinkSync(second);
     }
     for (const name of plan.feedAssets) {
       const manifest = parseUpdateManifest(
@@ -614,7 +622,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (!plan.npm) return;
     for (const pkg of packages)
       if (!(await publishedVersion(pkg)).published)
-        throw new Error("All seven exact npm versions must exist before release exposure.");
+        throw new Error("Every exact npm version must exist before release exposure.");
   };
   const publishPackage = async (pkg: (typeof packages)[number]) => {
     // A transient answer must never read as "absent" here: publishing over an
@@ -688,16 +696,14 @@ async function publishPrepared(plan: ForkReleasePlan) {
       verifyAssets(names.filter((name) => !plan.feedAssets.includes(name))),
     publishNpm: async () => {
       if (!plan.npm) return;
-      const results = await Promise.allSettled(
-        packages.filter((pkg) => pkg.manifest.name.startsWith("@s2code/t3-")).map(publishPackage),
-      );
+      // Everything lands on the staging tag, which nobody installs, so the
+      // launchers need not wait for the platform packages' review.
+      const results = await Promise.allSettled(packages.map(publishPackage));
       const failures = results.filter((result) => result.status === "rejected");
       if (failures.length)
         throw new Error(
-          `A fork platform package failed publication/verification; launcher publication was skipped. ${failures.map((result) => (result.reason instanceof Error ? result.reason.message : "Unknown publication failure.")).join(" ")}`,
+          `A fork npm package failed publication/verification. ${failures.map((result) => (result.reason instanceof Error ? result.reason.message : "Unknown publication failure.")).join(" ")}`,
         );
-      await publishPackage(packages.find((pkg) => pkg.manifest.name === NPM_PACKAGE_NAME)!);
-      await publishPackage(packages.find((pkg) => pkg.manifest.name === "shuv2code")!);
     },
     verifyNpm,
     uploadFeeds: async () => upload(plan.feedAssets),
@@ -719,7 +725,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
     },
     promoteNpmTags: async () => {
       if (!plan.npm) return;
-      for (const pkg of packages) {
+      const promote = async (pkg: (typeof packages)[number]) => {
         await assertTagNotBackwards(pkg.manifest.name);
         const tags = await readTags(pkg.manifest.name);
         for (const tag of plan.distTags) {
@@ -745,7 +751,11 @@ async function publishPrepared(plan: ForkReleasePlan) {
               "Fork dist-tag promotion is not yet verifiable; retry with the original prepared artifact.",
           });
         }
-      }
+      };
+      const isPlatform = (pkg: (typeof packages)[number]) =>
+        pkg.manifest.name.startsWith("@s2code/t3-");
+      await Promise.all(packages.filter(isPlatform).map(promote));
+      await Promise.all(packages.filter((pkg) => !isPlatform(pkg)).map(promote));
     },
     publishIndex: async () => {
       if (plan.channel === "preview") return;
