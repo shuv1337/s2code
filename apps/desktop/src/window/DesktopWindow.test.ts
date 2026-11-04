@@ -42,6 +42,7 @@ import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
+import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -71,7 +72,7 @@ function makeFakeBrowserWindow() {
     copyImageAt: vi.fn(),
     focus: vi.fn(),
     isDestroyed: vi.fn(() => false),
-    getURL: vi.fn(() => "shuv2code-dev://app/"),
+    getURL: vi.fn(() => ElectronProtocol.getDesktopUrl(true)),
     getZoomLevel: vi.fn(() => zoomLevel),
     getZoomFactor: vi.fn(() => 1.2 ** zoomLevel),
     setZoomLevel: vi.fn((level: number) => {
@@ -1125,10 +1126,12 @@ describe("DesktopWindow", () => {
         if (!willNavigate) {
           return yield* Effect.die("will-navigate listener was not registered");
         }
+        const devScheme = ElectronProtocol.getDesktopScheme(true);
+        const packagedScheme = ElectronProtocol.getDesktopScheme(false);
         for (const [url, expectedPrevented] of [
-          ["t3code-dev://app/threads?id=1#latest", false],
-          ["t3code-dev://other/", true],
-          ["t3code://app/", true],
+          [`${devScheme}://app/threads?id=1#latest`, false],
+          [`${devScheme}://other/`, true],
+          [`${packagedScheme}://app/`, true],
         ] as const) {
           const preventDefault = vi.fn();
           willNavigate({ preventDefault }, url);

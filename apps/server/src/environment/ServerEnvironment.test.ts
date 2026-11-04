@@ -80,13 +80,13 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
       const fs = yield* FileSystem.FileSystem;
       const baseDir = yield* fs.makeTempDirectoryScoped();
       const prefix = `${baseDir}/node`;
-      const entry = `${prefix}/lib/node_modules/shuv2code/dist/bin.mjs`;
-      yield* fs.makeDirectory(`${prefix}/lib/node_modules/shuv2code/dist`, { recursive: true });
+      const entry = `${prefix}/lib/node_modules/shuv2code/bin/shuv2code.mjs`;
+      yield* fs.makeDirectory(`${prefix}/lib/node_modules/shuv2code/bin`, { recursive: true });
       yield* fs.makeDirectory(`${prefix}/bin`, { recursive: true });
       yield* fs.writeFileString(entry, "");
       yield* fs.writeFileString(
         `${prefix}/lib/node_modules/shuv2code/package.json`,
-        '{"name":"shuv2code","version":"0.0.45","bin":{"shuv2code":"./dist/bin.mjs"}}',
+        '{"name":"shuv2code","version":"0.0.45","bin":{"shuv2code":"./bin/shuv2code.mjs"}}',
       );
       yield* fs.symlink(entry, `${prefix}/bin/shuv2code`);
       const config = yield* makeServerConfig(baseDir);
