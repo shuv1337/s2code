@@ -796,17 +796,9 @@ jobs:
             done
           done
 
-          if [[ "${{ inputs.platform }}" == "mac" && "${{ inputs.arch }}" != "arm64" ]]; then
-            shopt -s nullglob
-            for manifest in release-publish/*-mac.yml; do
-              mv "$manifest" "${manifest%.yml}-${{ inputs.arch }}.yml"
-            done
-          fi
-
           # Windows updater metadata is channel-specific (for example
-          # "latest.yml" or "nightly.yml") and carries no arch, so the x64 and
-          # arm64 jobs would upload the same name. Suffix each per-arch copy;
-          # the release job merges them back into one manifest per channel.
+          # "latest.yml" or "nightly.yml") and carries no arch. Suffix it with
+          # the arch; `scripts/fork-release.ts publish` renames it back.
           # builder-debug.yml is electron-builder's config dump, not a feed.
           if [[ "${{ inputs.platform }}" == "win" ]]; then
             for manifest in release-publish/*.yml; do
