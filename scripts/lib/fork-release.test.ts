@@ -215,13 +215,15 @@ describe("fork release contract", () => {
       expect(() => assertForkNpmManifest({ ...manifests()[0], ...override }, "1.2.3")).toThrow(
         "allowlist",
       );
-    expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3")).toThrow("All five");
+    expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3")).toThrow(
+      "All 5 platform packages",
+    );
     expect(() =>
       assertForkNpmManifest(
         { ...manifests().at(-1), optionalDependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
         "1.2.3",
       ),
-    ).toThrow("all five");
+    ).toThrow("all 5 exact matching");
   });
   it("moves latest with nightly, keeps preview off it, and permits only matching staging tags", () => {
     // The fork ships nightly only, so nightly owns `latest` as well.
