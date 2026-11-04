@@ -96,10 +96,19 @@ exit 7
     );
   }
   const requests: Array<string> = [];
+  const file = `/v${VERSION}/${archiveName}`;
+  let mode: "ok" | "redirect" | "truncate" | "stall" = "ok";
   const server = NodeHttp.createServer((request, response) => {
     requests.push(request.url ?? "");
-    if (request.url === `/v${VERSION}/${archiveName}`) {
-      response.writeHead(200, { "Content-Length": archive.length }).end(archive);
+    if (request.url === file && mode === "redirect") {
+      // GitHub answers release downloads with a redirect to its storage host.
+      response.writeHead(302, { Location: `/storage${file}` }).end();
+    } else if (request.url === file || request.url === `/storage${file}`) {
+      response.writeHead(200, { "Content-Length": archive.length });
+      if (mode === "truncate")
+        response.write(archive.subarray(0, archive.length >> 1), () => response.destroy());
+      else if (mode === "stall") response.write(archive.subarray(0, 64));
+      else response.end(archive);
     } else {
       response.writeHead(404).end();
     }
@@ -110,6 +119,7 @@ exit 7
     }),
     () =>
       Effect.callback<void>((resume) => {
+        server.closeAllConnections();
         server.close(() => resume(Effect.void));
       }),
   );
@@ -123,7 +133,19 @@ exit 7
     tamper: () => {
       archive = Buffer.concat([archive, Buffer.from("tampered")]);
     },
+    serve: (next: typeof mode) => {
+      mode = next;
+    },
   };
+});
+
+/** What the launcher records after installing: the version, then the executable's sha256. */
+const markComplete = Effect.fn("test.markComplete")(function* (dir: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const executable = yield* fs.readFile(path.join(dir, "t3"));
+  const hash = NodeCrypto.createHash("sha256").update(executable).digest("hex");
+  yield* fs.writeFileString(path.join(dir, ".install-complete"), `${VERSION}\n${hash}\n`);
 });
 
 /** The launcher's cache under a given HOME; tests clear the environment, so XDG_CACHE_HOME is unset. */
@@ -202,9 +224,12 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
           ["--version|", `serve a b|${launcher}`],
         );
         const versionDir = path.join(runtimeDir(home), VERSION);
+        const marker = yield* fs.readFileString(path.join(versionDir, ".install-complete"));
         assert.equal(
-          (yield* fs.readFileString(path.join(versionDir, ".install-complete"))).trim(),
-          VERSION,
+          marker,
+          `${VERSION}\n${NodeCrypto.createHash("sha256")
+            .update(yield* fs.readFile(path.join(versionDir, "t3")))
+            .digest("hex")}\n`,
         );
         assert.isTrue(yield* fs.exists(path.join(versionDir, "node_modules/native")));
         assert.deepStrictEqual((yield* fs.readDirectory(runtimeDir(home))).sort(), [VERSION]);
@@ -218,16 +243,23 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
           ["--version|", `serve a b|${launcher}`, `--version|${launcher}`],
         );
 
+        // A cached executable that no longer has its recorded hash is downloaded again.
+        yield* fs.writeFileString(path.join(versionDir, "t3"), "#!/bin/sh\necho swapped\n");
+        const reverified = yield* run(process.execPath, [launcher, "serve"], { cwd: root, env });
+        assert.include(reverified.stderr, "no longer matches its recorded sha256");
+        assert.equal(reverified.stdout.trim(), `stub serve launcher=${launcher}`);
+        assert.equal(reverified.exitCode, 7);
+        assert.equal(release.requests.length, requestsAfterFirst + 1);
+        assert.equal(yield* fs.readFileString(path.join(versionDir, ".install-complete")), marker);
+
+        // One whose hash matches its marker but cannot start is reported, not re-downloaded.
         yield* fs.writeFileString(path.join(versionDir, "t3"), "#!/t3-test-missing-loader\n");
+        yield* markComplete(versionDir);
         for (const _attempt of [1, 2]) {
           const cached = yield* run(process.execPath, [launcher, "serve"], { cwd: root, env });
           assert.equal(cached.exitCode, 1, cached.stderr);
           assert.include(cached.stderr, "could not run");
-          assert.equal(release.requests.length, requestsAfterFirst);
-          assert.equal(
-            yield* fs.readFileString(path.join(versionDir, ".install-complete")),
-            `${VERSION}\n`,
-          );
+          assert.equal(release.requests.length, requestsAfterFirst + 1);
         }
 
         const ipcServer = path.join(runtimeDir(home), VERSION, "t3");
@@ -235,6 +267,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
           ipcServer,
           `#!${process.execPath}\nprocess.on("SIGTERM", () => process.exit(23));\nprocess.on("message", (m) => process.send({ reply: m }));\nprocess.send({ args: process.argv.slice(2) });\n`,
         );
+        yield* markComplete(path.dirname(ipcServer));
         const legacy = NodeChildProcess.fork(
           path.join(packageDir, "dist/bin.mjs"),
           ["__service-preflight", "a b"],
@@ -272,7 +305,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         yield* fs.makeDirectory(peerDir);
         yield* fs.writeFileString(path.join(peerDir, "t3"), '#!/bin/sh\necho "peer $*"\nexit 7\n');
         yield* fs.chmod(path.join(peerDir, "t3"), 0o755);
-        yield* fs.writeFileString(path.join(peerDir, ".install-complete"), `${VERSION}\n`);
+        yield* markComplete(peerDir);
         yield* fs.writeFileString(path.join(peerDir, "sidecar"), "peer sidecar");
         const peerChecks = path.join(root, "peer-checks.txt");
         // The peer publishes after the launcher's rename fails and it reads the marker.
@@ -397,6 +430,98 @@ fs.readFileSync = (file, ...rest) => {
         assert.include(unsupported.stderr, "linux-x64");
         assert.include(unsupported.stderr, "win32-x64");
         assert.isFalse(yield* fs.exists(path.join(root, "unsupported-home")));
+      }),
+  );
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "follows redirects, refuses truncated and stalled downloads, and keeps two cached versions",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-transport-test-" });
+        const release = yield* serveFakeRelease(root);
+        const output = yield* buildNpmLauncher({
+          version: VERSION,
+          archivesDir: release.archivesDir,
+          outputDir: path.join(root, "out"),
+        });
+        const launcher = path.join(output.packageDir, "bin/shuv2code.mjs");
+        const hostArchive = cliArchiveFileName(
+          VERSION,
+          `${yield* HostProcess.Platform}-${yield* HostProcess.Architecture}` as (typeof CLI_ARCHIVE_PLATFORM_KEYS)[number],
+        );
+        const launch = (home: string, extra: Record<string, string> = {}) =>
+          run(process.execPath, [launcher, "--version"], {
+            cwd: root,
+            env: {
+              PATH: process.env.PATH,
+              HOME: home,
+              S2CODE_RELEASE_BASE_URL: release.baseUrl,
+              S2CODE_DOWNLOAD_TIMEOUT_SECONDS: "2",
+              ...extra,
+            },
+          });
+
+        release.serve("truncate");
+        const truncatedHome = path.join(root, "truncated");
+        const truncated = yield* launch(truncatedHome);
+        assert.equal(truncated.exitCode, 1);
+        assert.match(truncated.stderr, /shuv2code: (GET .* failed|download of .* ended after)/);
+        assert.deepStrictEqual(yield* fs.readDirectory(runtimeDir(truncatedHome)), []);
+
+        // The idle watchdog stops a download that stops sending, well before the 2s deadline.
+        release.serve("stall");
+        const stalledHome = path.join(root, "stalled");
+        const stalled = yield* launch(stalledHome);
+        assert.equal(stalled.exitCode, 1);
+        assert.include(stalled.stderr, "stalled with no data for 1s");
+        assert.deepStrictEqual(yield* fs.readDirectory(runtimeDir(stalledHome)), []);
+
+        // Pruning keeps this version and the most recently installed other one, never a peer's
+        // in-flight staging folder.
+        release.serve("redirect");
+        const home = path.join(root, "home");
+        const versions = runtimeDir(home);
+        for (const [name, installed] of [
+          ["0.0.1", 1_000],
+          ["0.0.2", 2_000],
+        ] as const) {
+          yield* fs.makeDirectory(path.join(versions, name), { recursive: true });
+          yield* fs.writeFileString(path.join(versions, name, ".install-complete"), `${name}\n`);
+          yield* fs.utimes(path.join(versions, name, ".install-complete"), installed, installed);
+        }
+        yield* fs.makeDirectory(path.join(versions, "0.0.0-unfinished"));
+        yield* fs.makeDirectory(path.join(versions, `${VERSION}.staging-peer`));
+        const redirected = yield* launch(home);
+        assert.equal(redirected.stdout.trim(), VERSION, redirected.stderr);
+        assert.include(release.requests, `/storage/v${VERSION}/${hostArchive}`);
+        assert.deepStrictEqual((yield* fs.readDirectory(versions)).sort(), [
+          "0.0.2",
+          VERSION,
+          `${VERSION}.staging-peer`,
+        ]);
+
+        // A relative XDG_CACHE_HOME is ignored, as the XDG spec requires.
+        if ((yield* HostProcess.Platform) === "linux") {
+          const xdgHome = path.join(root, "xdg");
+          const relative = yield* launch(xdgHome, { XDG_CACHE_HOME: "relative-cache" });
+          assert.equal(relative.exitCode, 0, relative.stderr);
+          assert.deepStrictEqual(yield* fs.readDirectory(runtimeDir(xdgHome)), [VERSION]);
+          assert.isFalse(yield* fs.exists(path.join(root, "relative-cache")));
+        }
+
+        const oldNode = path.join(root, "old-node.mjs");
+        yield* fs.writeFileString(
+          oldNode,
+          'Object.defineProperty(process.versions, "node", { value: "16.20.2" });\n',
+        );
+        const tooOld = yield* run(process.execPath, ["--import", oldNode, launcher, "--version"], {
+          cwd: root,
+          env: { PATH: process.env.PATH, HOME: path.join(root, "old-node-home") },
+        });
+        assert.equal(tooOld.exitCode, 1);
+        assert.include(tooOld.stderr, "needs Node.js 18 or newer");
+        assert.isFalse(yield* fs.exists(path.join(root, "old-node-home")));
       }),
   );
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(

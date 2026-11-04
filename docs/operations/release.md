@@ -45,10 +45,17 @@ When npm is enabled, the only public npm endpoint is `shuv2code`, built by
 code: `checksums.json` pins the SHA-256 of each of the four CLI archives, and on first run
 `bin/shuv2code.mjs` downloads its platform's archive from this version's GitHub Release,
 refuses it on a mismatch, validates `t3 --version`, and caches it under the OS cache
-directory (`<cache>/s2code/runtime/<version>`). Any other platform gets a "not supported"
-error. `S2CODE_RELEASE_BASE_URL` points it at a mirror; the pinned checksums still apply.
-`T3CODE_NPM_LAUNCHER_PATH` tells the executable which launcher started it, so service
-units and update suggestions name the global `shuv2code` command, not the cached binary.
+directory (`<cache>/s2code/runtime/<version>`). The completion marker records the cached
+executable's SHA-256, which every later run re-checks before starting it; a mismatch
+downloads the archive again. Each install prunes the cache to that version and the one
+installed before it. Downloads stop after `S2CODE_DOWNLOAD_TIMEOUT_SECONDS` (default 1800)
+or after 60 seconds without data. Any other platform gets a "not supported" error, and Node
+older than 18 gets a clear error rather than a missing `fetch`. `S2CODE_RELEASE_BASE_URL`
+points it at a mirror; the pinned checksums still apply. `T3CODE_NPM_LAUNCHER_PATH` tells the
+executable which launcher started it, so service units and update suggestions name the
+global command (`<prefix>/bin/shuv2code`, or `<prefix>\shuv2code.cmd` on Windows, or the
+retired alias's `s2code`) rather than the cached binary. The package README
+(`scripts/npm-launcher/README.md`) is what npm shows.
 
 ## Retired npm packages (one-time owner step)
 
@@ -89,11 +96,15 @@ npm publish --access public --tag latest
 npm dist-tag add "@s2code/cli@<first launcher version>" nightly
 for name in @s2code/cli @s2code/t3-darwin-arm64 @s2code/t3-linux-arm64 \
   @s2code/t3-linux-x64 @s2code/t3-win32-x64 @s2code/t3-win32-arm64; do
-  npm deprecate "$name" 'Replaced by shuv2code (single launcher); run npm i -g shuv2code'
+  npm deprecate "$name" 'Replaced by shuv2code (single launcher); run: npm uninstall -g @s2code/cli && npm i -g shuv2code'
 done
 ```
 
-`npx @s2code/cli` then prints the deprecation and still runs the newest `shuv2code`.
+`npx @s2code/cli` then prints the deprecation and runs whichever `shuv2code` was `latest`
+when npm first put the alias in its npx cache. npx reuses that cache, so it does not move to
+newer releases by itself; point users at `npx shuv2code@latest`. A global `@s2code/cli`
+install is likewise pinned to the `shuv2code` it installed; the server recognises that
+layout and its update hint replaces it with `shuv2code`.
 Upgrading an existing `shuv2code` install needs nothing: `npm i -g shuv2code` replaces
 `0.1.6-nightly.20261104.89`, npm drops its `@s2code/t3-*` optional dependencies, and the
 same three commands stay on `PATH`.

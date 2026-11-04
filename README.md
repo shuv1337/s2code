@@ -70,7 +70,9 @@ shuv2code --version
 
 `shuv2code` is a small launcher. On first run it downloads the CLI archive for its exact
 version from the GitHub Release, checks its SHA-256 against the checksums published inside
-the npm package, caches it, and runs it. The `@s2code/cli` and `@s2code/t3-<platform>`
+the npm package, caches it, and runs it. After `npm uninstall -g shuv2code`, delete
+`~/.cache/s2code/runtime` (`~/Library/Caches/s2code/runtime` on macOS,
+`%LOCALAPPDATA%\s2code\runtime` on Windows) to remove the cached CLI. The `@s2code/cli` and `@s2code/t3-<platform>`
 packages are retired; if you installed `@s2code/cli`, run `npm uninstall -g @s2code/cli`
 and then `npm i -g shuv2code`.
 

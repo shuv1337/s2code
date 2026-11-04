@@ -413,46 +413,89 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
     }),
   );
 
-  it.effect("trusts the npm launcher that started the executable only at this exact version", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped();
-      const prefix = path.join(root, "bunx-tools");
-      const packageRoot = path.join(prefix, "lib/node_modules/shuv2code");
-      const launcher = path.join(packageRoot, "bin/shuv2code.mjs");
-      const executable = path.join(root, ".cache/s2code/runtime/1.2.3/t3");
-      yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
-      yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
-      yield* fs.makeDirectory(path.join(prefix, "bin"));
-      yield* fs.writeFileString(launcher, "");
-      yield* fs.writeFileString(executable, "");
-      yield* fs.symlink(launcher, path.join(prefix, "bin/shuv2code"));
-      const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        effect.pipe(
-          Effect.provideService(HostProcess.Arguments, [executable, "serve"]),
-          Effect.provideService(HostProcess.ExecutablePath, executable),
-          Effect.provideService(HostProcess.IsExecutable, true),
-          Effect.provideService(HostProcess.Platform, "linux"),
-          Effect.provideService(HostProcess.Environment, { T3CODE_NPM_LAUNCHER_PATH: launcher }),
+  it.effect.each([
+    { layout: "POSIX", platform: "linux", alias: false },
+    { layout: "POSIX, @s2code/cli alias", platform: "linux", alias: true },
+    { layout: "Windows", platform: "win32", alias: false },
+    { layout: "Windows, @s2code/cli alias", platform: "win32", alias: true },
+  ] as const)(
+    "trusts the npm launcher that started the executable only at this exact version ($layout)",
+    ({ platform, alias }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped();
+        const prefix = path.join(root, "npm-prefix");
+        const modules = path.join(
+          prefix,
+          platform === "win32" ? "node_modules" : "lib/node_modules",
         );
-      for (const [version, expected] of [
-        ["1.2.2", null],
-        [
-          "1.2.3",
-          { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "shuv2code" },
-        ],
-      ] as const) {
-        yield* fs.writeFileString(
-          path.join(packageRoot, "package.json"),
-          JSON.stringify({ name: "shuv2code", version, bin: { shuv2code: "./bin/shuv2code.mjs" } }),
+        const aliasRoot = path.join(modules, "@s2code/cli");
+        const packageRoot = alias
+          ? path.join(aliasRoot, "node_modules/shuv2code")
+          : path.join(modules, "shuv2code");
+        const launcher = path.join(packageRoot, "bin/shuv2code.mjs");
+        const [packageName, binName, binTarget] = alias
+          ? (["@s2code/cli", "s2code", path.join(aliasRoot, "bin/s2code.mjs")] as const)
+          : (["shuv2code", "shuv2code", launcher] as const);
+        const globalBin =
+          platform === "win32"
+            ? path.join(prefix, `${binName}.cmd`)
+            : path.join(prefix, "bin", binName);
+        const executable = path.join(root, ".cache/s2code/runtime/1.2.3/t3");
+        for (const file of [launcher, executable, binTarget, globalBin])
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+        yield* fs.writeFileString(launcher, "");
+        yield* fs.writeFileString(executable, "");
+        if (alias) {
+          yield* fs.writeFileString(binTarget, 'import "shuv2code/bin/shuv2code.mjs";\n');
+          yield* fs.writeFileString(
+            path.join(aliasRoot, "package.json"),
+            JSON.stringify({
+              name: "@s2code/cli",
+              version: "1.2.3",
+              bin: { s2code: "./bin/s2code.mjs" },
+            }),
+          );
+        }
+        // npm links bins on POSIX and writes cmd-shim batch files on Windows.
+        if (platform === "win32")
+          yield* fs.writeFileString(
+            globalBin,
+            `@ECHO off\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\${path.relative(prefix, binTarget).replaceAll("/", "\\")}" %*\r\n`,
+          );
+        else yield* fs.symlink(binTarget, globalBin);
+        const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          effect.pipe(
+            Effect.provideService(HostProcess.Arguments, [executable, "serve"]),
+            Effect.provideService(HostProcess.ExecutablePath, executable),
+            Effect.provideService(HostProcess.IsExecutable, true),
+            Effect.provideService(HostProcess.Platform, platform),
+            Effect.provideService(HostProcess.Environment, { T3CODE_NPM_LAUNCHER_PATH: launcher }),
+          );
+        const realPrefix = yield* fs.realPath(prefix);
+        for (const [version, expected] of [
+          ["1.2.2", null],
+          ["1.2.3", { kind: "npm-global", prefix: realPrefix, packageName }],
+        ] as const) {
+          yield* fs.writeFileString(
+            path.join(packageRoot, "package.json"),
+            JSON.stringify({
+              name: "shuv2code",
+              version,
+              bin: { shuv2code: "./bin/shuv2code.mjs" },
+            }),
+          );
+          expect(yield* provide(resolveServerInstallation)).toEqual(expected);
+        }
+        expect(yield* provide(resolveCliCommand("service install"))).toBe(
+          `${platform === "win32" ? `${realPrefix}/${binName}.cmd` : `${realPrefix}/bin/${binName}`} service install`,
         );
-        expect(yield* provide(resolveServerInstallation)).toEqual(expected);
-      }
-      expect(yield* provide(resolveCliCommand("service install"))).toBe(
-        `${yield* fs.realPath(prefix)}/bin/shuv2code service install`,
-      );
-    }),
+        // A global command that does not lead to this launcher proves nothing.
+        yield* fs.remove(globalBin);
+        yield* fs.writeFileString(globalBin, "an unrelated command");
+        expect(yield* provide(resolveServerInstallation)).toBeNull();
+      }),
   );
 
   it.effect("leaves local, standalone, missing and unreadable installs unknown", () =>

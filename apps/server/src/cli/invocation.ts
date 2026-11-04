@@ -72,20 +72,44 @@ const resolveEntryPath = Effect.gen(function* () {
   return (yield* HostProcess.Arguments)[1] ?? "";
 });
 
+/** Retired name whose final release is a thin alias with `shuv2code` nested below it. */
+const RETIRED_NPM_ALIAS = "@s2code/cli";
+
+/**
+ * npm's global layout: `<prefix>/lib/node_modules` with symlinked bins in `<prefix>/bin` on
+ * POSIX, `<prefix>\node_modules` with `.cmd` shims in `<prefix>` on Windows.
+ */
+const NPM_GLOBAL_LAUNCHER = {
+  posix:
+    /^(.*?)\/lib\/node_modules\/(@s2code\/cli\/node_modules\/)?shuv2code\/bin\/shuv2code\.mjs$/,
+  win32: /^(.*?)\/node_modules\/(@s2code\/cli\/node_modules\/)?shuv2code\/bin\/shuv2code\.mjs$/,
+};
+
+const npmGlobalBin = (
+  path: Path.Path,
+  platform: string,
+  prefix: string,
+  packageName: typeof NPM_PACKAGE_NAME | typeof RETIRED_NPM_ALIAS,
+) => {
+  const name = packageName === RETIRED_NPM_ALIAS ? PRODUCT_ID : NPM_PACKAGE_NAME;
+  return platform === "win32" ? path.join(prefix, `${name}.cmd`) : path.join(prefix, "bin", name);
+};
+
 /** Prove the running package and its global bin belong together before suggesting an update. */
 const resolveOwnedServerInstallation = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const entry = yield* fs.realPath(yield* resolveEntryPath);
-  const match = /^(.*)\/lib\/node_modules\/shuv2code\/bin\/shuv2code\.mjs$/.exec(entry);
+  const match = NPM_GLOBAL_LAUNCHER[platform === "win32" ? "win32" : "posix"].exec(
+    entry.replaceAll("\\", "/"),
+  );
   if (!match) {
     const runner = detectCliRunner(entry);
     return runner === null
       ? null
       : ({ kind: runner === "pnpm dlx" ? "pnpm-dlx" : runner } satisfies ServerInstallation);
   }
-  if (platform === "win32") return null;
   const prefix = match[1] || "/";
   if (
     prefix.includes("/node_modules/") ||
@@ -94,16 +118,30 @@ const resolveOwnedServerInstallation = Effect.gen(function* () {
   )
     return null;
 
-  const packageRoot = path.join(prefix, "lib/node_modules", NPM_PACKAGE_NAME);
+  const packageName = match[2] ? RETIRED_NPM_ALIAS : NPM_PACKAGE_NAME;
+  const packageRoot = path.join(
+    prefix,
+    platform === "win32" ? "" : "lib",
+    "node_modules",
+    packageName,
+  );
   const manifest = yield* fs
     .readFileString(path.join(packageRoot, "package.json"))
     .pipe(Effect.flatMap(decodeInstallManifest));
-  const binPath = manifest.bin?.[NPM_PACKAGE_NAME];
-  if (manifest.name !== NPM_PACKAGE_NAME || !binPath) return null;
+  const binPath = manifest.bin?.[packageName === RETIRED_NPM_ALIAS ? PRODUCT_ID : NPM_PACKAGE_NAME];
+  if (manifest.name !== packageName || !binPath) return null;
   const bin = yield* fs.realPath(path.join(packageRoot, binPath));
-  const globalBin = yield* fs.realPath(path.join(prefix, "bin", NPM_PACKAGE_NAME));
-  if (globalBin !== bin || bin !== entry) return null;
-  return { kind: "npm-global", prefix, packageName: NPM_PACKAGE_NAME } as const;
+  // The alias's bin imports the nested launcher; shuv2code's own bin is the launcher.
+  if (packageName === NPM_PACKAGE_NAME && bin !== entry) return null;
+  const globalBin = npmGlobalBin(path, platform, prefix, packageName);
+  if (platform === "win32") {
+    // npm's cmd-shim names its target relative to the shim's own folder.
+    const shim = yield* fs.readFileString(globalBin);
+    if (!shim.includes(`"%dp0%\\${path.relative(prefix, bin).replaceAll("/", "\\")}"`)) return null;
+  } else if ((yield* fs.realPath(globalBin)) !== bin) {
+    return null;
+  }
+  return { kind: "npm-global", prefix, packageName } as const;
 }).pipe(Effect.orElseSucceed(() => null));
 
 export const resolveServerInstallation = resolveOwnedServerInstallation;
@@ -154,8 +192,14 @@ const resolveCliInvocation = Effect.fnUntraced(function* (
   const installation = yield* resolveOwnedServerInstallation;
   if (installation?.kind === "npm-global") {
     const path = yield* Path.Path;
+    const bin = npmGlobalBin(
+      path,
+      yield* HostProcess.Platform,
+      installation.prefix,
+      installation.packageName,
+    );
     return {
-      command: `${quote(path.join(installation.prefix, "bin", NPM_PACKAGE_NAME))} ${commandArgs}`,
+      command: `${quote(bin)} ${commandArgs}`,
       pathCommand: true,
       launcher: false,
     };

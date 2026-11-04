@@ -44,7 +44,7 @@ export class NpmLauncherPackError extends Schema.TaggedError<NpmLauncherPackErro
   }
 }
 
-/** engines requires import.meta.dirname and fetch. `t3code` is read back by npmReleaseDatabaseMigration. */
+/** engines matches the launcher's own Node check (fetch). `t3code` is read back by npmReleaseDatabaseMigration. */
 export function npmLauncherPackageManifest(version: string, databaseMigration: number) {
   return {
     name: NPM_LAUNCHER_PACKAGE_NAME,
@@ -60,7 +60,7 @@ export function npmLauncherPackageManifest(version: string, databaseMigration: n
       s2c: "./bin/shuv2code.mjs",
     },
     files: ["bin", "dist", "checksums.json"],
-    engines: { node: ">=20.11" },
+    engines: { node: ">=18" },
     t3code: { databaseMigration },
   };
 }
@@ -140,10 +140,7 @@ export const buildNpmLauncher = Effect.fn("buildNpmLauncher")(function* (input: 
   );
   yield* fs.chmod(path.join(stageDir, "bin/shuv2code.mjs"), 0o755);
   yield* fs.copyFile(path.join(sourceDir, "bin.mjs"), path.join(stageDir, "dist/bin.mjs"));
-  const readme = yield* path.fromFileUrl(new URL("../apps/server/README.md", import.meta.url));
-  if (yield* fs.exists(readme)) {
-    yield* fs.copyFile(readme, path.join(stageDir, "README.md"));
-  }
+  yield* fs.copyFile(path.join(sourceDir, "README.md"), path.join(stageDir, "README.md"));
 
   const packageDir = path.join(input.outputDir, NPM_LAUNCHER_PACKAGE_NAME);
   const tarball = path.join(input.outputDir, `${NPM_LAUNCHER_PACKAGE_NAME}.tgz`);
