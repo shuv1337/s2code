@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeModule from "node:module";
 import * as NodeChildProcess from "node:child_process";
+import { desktopAssetGroups } from "./lib/fork-release.ts";
 
 const workflow = NodeFS.readFileSync(
   new URL("../.github/workflows/release.yml", import.meta.url),
@@ -80,9 +81,11 @@ describe("fork workflow gates", () => {
     expect(publish).toContain("github.event.repository.default_branch");
     expect(publish).not.toContain("refs/tags/");
     expect(workflow).not.toContain("\n  prepare:\n");
-    expect(publish).toContain("needs: [due, preflight, desktop, mac_arm64_ready]");
+    expect(publish).toContain("needs: [due, preflight, desktop, desktop_win_x64, mac_arm64_ready]");
     for (const gate of ["desktop", "mac_arm64_ready"])
       expect(publish).toContain(`needs.${gate}.result == 'success'`);
+    // A failed Windows build must not block publishing.
+    expect(publish.split("    runs-on:")[0]).not.toContain("desktop_win_x64.result");
     // Folding prepare in must not widen what the publisher's steps can reach.
     const publishJob = publish.split("    steps:\n")[0]!;
     expect(publishJob).toContain("    environment: fork-release\n");
@@ -98,10 +101,51 @@ describe("fork workflow gates", () => {
       '      NPM_TOKEN: ""',
       '      NODE_AUTH_TOKEN: ""',
     ]);
-    expect(publish.indexOf("node scripts/fork-release.ts prepare")).toBeLessThan(
-      publish.indexOf("node scripts/fork-release.ts publish --execute"),
+    expect(publish).not.toContain("fork-release.ts prepare");
+    expect(publish).toContain(
+      "WINDOWS_BUILT: ${{ steps.windows.outputs.built }}\n        run: node scripts/fork-release.ts publish --execute",
     );
   });
+  it.each([true, false])(
+    "decides from the Windows installer whether Windows and npm ship (installer present: %s)",
+    (present) => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-windows-built-"));
+      try {
+        const version = "1.2.3-nightly.20261014.1";
+        const assets = NodePath.join(root, "prepared/release-assets");
+        NodeFS.mkdirSync(assets, { recursive: true });
+        const installer = desktopAssetGroups(version)
+          .flat()
+          .find((name) => name.endsWith(".exe"))!;
+        if (present) NodeFS.writeFileSync(NodePath.join(assets, installer), "installer");
+        const publish = workflow.split("  publish:\n")[1]!;
+        const step = publish
+          .split("      - name: Check whether Windows x64 built\n")[1]!
+          .split("\n      - ")[0]!;
+        const output = NodePath.join(root, "github-output");
+        const result = NodeChildProcess.spawnSync(
+          "bash",
+          ["-euo", "pipefail", "-c", step.split("        run: |\n")[1]!.replace(/^ {10}/gm, "")],
+          {
+            cwd: root,
+            encoding: "utf8",
+            env: { ...process.env, RELEASE_VERSION: version, GITHUB_OUTPUT: output },
+          },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        expect(NodeFS.readFileSync(output, "utf8")).toBe(`built=${present}\n`);
+        for (const name of [
+          "Build the six public packages once from the verified-source archives",
+          "Drop the extracted npm package trees, keeping the tarballs",
+        ])
+          expect(publish.split(`      - name: ${name}\n`)[1]).toMatch(
+            /^ {8}if: steps\.windows\.outputs\.built == 'true'\n/,
+          );
+      } finally {
+        NodeFS.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
   it("leaves preview signing outside the release environment and supplies the packager's existing config names", () => {
     expect(desktop).not.toContain("environment: fork-release");
     for (const name of [
@@ -135,9 +179,7 @@ it.skipIf(!hasPwsh).each([
       NodeFS.mkdirSync(NodePath.join(root, "release-publish"));
       NodeFS.writeFileSync(NodePath.join(root, "release-publish/fixture.exe"), "not an executable");
       const step = desktop
-        .split(
-          "      - name: Verify Windows installer signatures before declaring a signed receipt\n",
-        )[1]!
+        .split("      - name: Verify Windows installer signatures\n")[1]!
         .split("\n      - name:")[0]!;
       const code = step.split("        run: |\n")[1]!.replace(/^          /gm, "");
       const script = NodePath.join(root, "verify.ps1");

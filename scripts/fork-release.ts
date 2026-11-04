@@ -7,7 +7,12 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeModule from "node:module";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
+import {
+  CLI_ARCHIVE_PLATFORM_KEYS,
+  cliArchiveFileName,
+  cliArchiveLegacyFileName,
+  cliArchivePreviousFileName,
+} from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   FORK_RELEASE_REPOSITORY,
@@ -99,8 +104,8 @@ const digest = (file: string, algorithm = "sha256", encoding: "hex" | "base64" =
   Crypto.createHash(algorithm).update(FS.readFileSync(file)).digest(encoding);
 const writeJson = (file: string, value: unknown) =>
   FS.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
-const readPlan = (file = "release-plan.json") => {
-  const value = JSON.parse(FS.readFileSync(file, "utf8")) as ForkReleasePlan;
+const readPlan = () => {
+  const value = JSON.parse(FS.readFileSync("release-plan.json", "utf8")) as ForkReleasePlan;
   return forkReleasePlan(value);
 };
 function assertCi() {
@@ -135,8 +140,17 @@ function assertPublishContext(npm: boolean) {
 }
 
 export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
+  // A Windows build that failed after uploading its CLI archive leaves that archive behind.
+  if (!plan.windows)
+    for (const key of CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => key.startsWith("win32-")))
+      for (const name of [
+        cliArchiveFileName(plan.version, key),
+        cliArchiveLegacyFileName(plan.version, key),
+        cliArchivePreviousFileName(plan.version, key),
+      ])
+        FS.rmSync(Path.join(directory, name), { force: true });
   const names = FS.readdirSync(directory);
-  const desktops = requiredDesktopAssets(plan.version, names);
+  const desktops = requiredDesktopAssets(plan.version, names, plan.windows);
   for (const name of plan.cliAssets)
     if (!names.includes(name)) throw new Error(`Missing required CLI archive: ${name}`);
   // Keep aliases for installs from before the archive rename; remove after that transition ends.
@@ -145,39 +159,6 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
       FS.copyFileSync(
         Path.join(directory, plan.cliAssets[index]!),
         Path.join(directory, aliases[index]!),
-      );
-  }
-  for (const target of FORK_DESKTOP_MATRIX) {
-    const receipt = JSON.parse(
-      FS.readFileSync(Path.join(directory, `build-${target.platform}-${target.arch}.json`), "utf8"),
-    ) as {
-      sha: string;
-      version: string;
-      platform: string;
-      arch: string;
-      signed: boolean;
-      wslSha256?: string;
-    };
-    if (
-      receipt.sha !== plan.sha ||
-      receipt.version !== plan.version ||
-      receipt.platform !== target.platform ||
-      receipt.arch !== target.arch ||
-      receipt.signed !==
-        (target.platform === "mac"
-          ? plan.signing.mac
-          : target.platform === "win"
-            ? plan.signing.win
-            : false)
-    )
-      throw new Error("Build receipt does not match the resolved source/version/signing matrix.");
-    if (
-      target.platform === "win" &&
-      receipt.wslSha256 !==
-        digest(Path.join(directory, cliArchiveFileName(plan.version, `linux-${target.arch}`)))
-    )
-      throw new Error(
-        "Windows WSL runtime does not match the same-architecture Linux release archive.",
       );
   }
   if (
@@ -189,7 +170,7 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
     const prefix = plan.channel === "stable" ? "latest" : "nightly";
     for (const [platform, primary, output] of [
       ["mac", `${prefix}-mac.yml`, `${prefix}-mac.yml`],
-      ["win", `${prefix}-win-x64.yml`, `${prefix}.yml`],
+      ...(plan.windows ? [["win", `${prefix}-win-x64.yml`, `${prefix}.yml`]] : []),
     ]) {
       const first = Path.join(directory, primary!);
       // An unsigned platform has no feed in the plan: electron-builder still
@@ -266,81 +247,6 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
     signing: { ...plan.signing, linux: "checksum-only" },
   });
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
-}
-
-/**
- * The name electron-builder's NSIS installer embeds its app payload under. The
- * build directory calls the archive `<name>-<version>-<arch>.nsis.7z`, but
- * `File /oname=` renames it on the way in; see app-builder-lib's
- * templates/nsis/include/extractAppPackage.nsh.
- */
-export function windowsInstallerPayloadName(arch: string) {
-  if (arch !== "x64" && arch !== "arm64")
-    throw new Error(`Unsupported Windows release architecture: ${arch}.`);
-  return `app-${arch === "x64" ? "64" : "arm64"}.7z`;
-}
-const SEVEN_ZIP_COMMANDS = ["7z", "C:\\Program Files\\7-Zip\\7z.exe"];
-/**
- * Extract one entry, by pattern, from an archive 7-Zip can open.
- *
- * 7-Zip exits 1 for warnings it recovered from, so only exit 2 and above is a
- * failure; whether the wanted file is on disk decides the rest.
- */
-function extractArchiveEntry(archive: string, entry: string, into: string) {
-  const args = ["x", "-y", "-r", `-o${into}`, archive, entry];
-  for (const command of SEVEN_ZIP_COMMANDS) {
-    try {
-      CP.execFileSync(command, args, {
-        maxBuffer: COMMAND_MAX_BUFFER,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      return;
-    } catch (error) {
-      const failure = error as { code?: unknown; status?: unknown };
-      if (failure.code === "ENOENT") continue;
-      if (typeof failure.status === "number" && failure.status < 2) return;
-      throw releaseCommandError(command, args, error);
-    }
-  }
-  throw new Error(
-    `Reading the Windows installer payload needs 7-Zip; none of ${SEVEN_ZIP_COMMANDS.join(", ")} ran.`,
-  );
-}
-/**
- * Read the app payload back out of the installer users will run. `release/`
- * keeps only finished artifacts, so there is no unpacked build tree left to
- * inspect by the time the receipt is written.
- */
-export function extractPackagedWslRuntime(installerDir: string, arch: string, workDir: string) {
-  const expected = windowsInstallerPayloadName(arch);
-  const installers = FS.readdirSync(installerDir).filter((name) => name.endsWith(".exe"));
-  if (installers.length !== 1)
-    throw new Error(
-      `Expected exactly one Windows installer in ${installerDir}; found ${installers.length}.`,
-    );
-  FS.rmSync(workDir, { recursive: true, force: true });
-  const inner = Path.join(workDir, "inner");
-  extractArchiveEntry(Path.join(installerDir, installers[0]!), "app-*.7z", inner);
-  const payloads = (FS.existsSync(inner) ? FS.readdirSync(inner, { recursive: true }) : [])
-    .map(String)
-    .filter((name) => name.endsWith(".7z"));
-  if (payloads.length !== 1 || Path.basename(payloads[0]!) !== expected)
-    throw new Error(
-      `Expected ${expected} inside ${installers[0]}; found ${payloads.join(", ") || "no app payload"}.`,
-    );
-  const payload = Path.join(workDir, "app");
-  extractArchiveEntry(Path.join(inner, payloads[0]!), "resources/wsl-runtime.tar.gz", payload);
-  return payload;
-}
-export function assertPackagedWslRuntime(payloadDir: string, expected: string) {
-  const file = Path.join(payloadDir, "resources", "wsl-runtime.tar.gz");
-  if (!FS.existsSync(file))
-    throw new Error(`The Windows installer payload has no resources/wsl-runtime.tar.gz (${file}).`);
-  const actual = digest(file);
-  if (actual !== expected)
-    throw new Error(
-      `Packaged Windows WSL runtime ${actual} does not match the released Linux archive ${expected}.`,
-    );
 }
 
 export function inspectForkNpmPackages(directory: string, version: string) {
@@ -443,8 +349,11 @@ async function publishPrepared(plan: ForkReleasePlan) {
   if (run("git", ["rev-parse", "HEAD"]) !== plan.sha)
     throw new Error("Publisher checkout differs from the resolved source.");
   const assets = "prepared/release-assets";
-  const names = FS.readdirSync(assets).filter((name) => !name.startsWith("build-"));
-  const packages = inspectForkNpmPackages("prepared/npm-packages", plan.version);
+  prepareForkAssets(plan, assets);
+  // Shaping copies every CLI archive twice; show the disk that publishing starts from.
+  console.log(CP.spawnSync("df", ["-h", "."], { encoding: "utf8" }).stdout ?? "");
+  const names = FS.readdirSync(assets);
+  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan.version) : [];
   const readTags = async (name: string) => {
     // `/<name>/dist-tags` would be read as a version named "dist-tags".
     const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
@@ -780,11 +689,12 @@ async function publishPrepared(plan: ForkReleasePlan) {
       // The list can still lag this release; read it by id rather than drop it.
       if (!releases.some((entry) => entry.tag_name === plan.tag)) releases.push(getRelease());
       const index = forkReleaseIndex(releases);
-      // A release without a macOS or Windows feed is deliberately incomplete,
-      // so the index keeps the previous entries instead of gaining this one.
+      // A release without a macOS or Windows feed, or without Windows at all, is
+      // deliberately incomplete, so the index keeps the previous entries instead.
       if (
         plan.signing.mac &&
         plan.signing.win &&
+        plan.windows &&
         !index.some((entry) => entry.tag_name === plan.tag)
       )
         throw new Error("New complete release is missing from the release index.");
@@ -902,6 +812,7 @@ async function main() {
       channel,
       signing,
       npm,
+      windows: true,
     });
     if (
       (JSON.parse(FS.readFileSync("apps/server/package.json", "utf8")) as { private?: boolean })
@@ -949,45 +860,18 @@ async function main() {
       process.env.GITHUB_OUTPUT!,
       `mac_signed=${planned.mac}\nwin_signed=${planned.win}\n`,
     );
-  } else if (mode === "receipt") {
-    const platform = process.env.BUILD_PLATFORM!;
-    const arch = process.env.BUILD_ARCH!;
-    const receipt = {
-      sha: run("git", ["rev-parse", "HEAD"]),
-      version: process.env.RELEASE_VERSION!,
-      platform,
-      arch,
-      signed:
-        platform === "mac"
-          ? process.env.MAC_SIGNED === "true"
-          : platform === "win"
-            ? process.env.WIN_SIGNED === "true"
-            : false,
-      ...(platform === "win"
-        ? {
-            wslSha256: digest(
-              `wsl-runtime/${cliArchiveFileName(process.env.RELEASE_VERSION!, `linux-${arch}` as "linux-arm64" | "linux-x64")}`,
-            ),
-          }
-        : {}),
-    };
-    if (platform === "win")
-      assertPackagedWslRuntime(
-        extractPackagedWslRuntime(
-          "release-publish",
-          arch,
-          Path.join(process.env.RUNNER_TEMP ?? process.cwd(), `installer-payload-${arch}`),
-        ),
-        receipt.wslSha256!,
+  } else if (mode === "publish") {
+    // The publish job checks for the Windows installer; its build may fail without blocking.
+    const windows = process.env.WINDOWS_BUILT;
+    if (windows !== "true" && windows !== "false")
+      throw new Error("WINDOWS_BUILT must say whether the Windows x64 build is in this release.");
+    const plan = forkReleasePlan({ ...readPlan(), windows: windows === "true" });
+    if (!plan.windows)
+      console.log(
+        "The Windows x64 build failed: this release leaves out Windows and publishes no npm packages.",
       );
-    writeJson(`release-publish/build-${platform}-${arch}.json`, receipt);
-  } else if (mode === "prepare") {
-    const plan = readPlan();
-    prepareForkAssets(plan, "prepared/release-assets");
-    inspectForkNpmPackages("prepared/npm-packages", plan.version);
-    writeJson("prepared/release-plan.json", plan);
-  } else if (mode === "publish") await publishPrepared(readPlan("prepared/release-plan.json"));
-  else throw new Error("Use preflight, signing, receipt, prepare or publish --execute.");
+    await publishPrepared(plan);
+  } else throw new Error("Use preflight, signing or publish --execute.");
 }
 if (process.argv[1] && import.meta.url === URL.pathToFileURL(Path.resolve(process.argv[1])).href)
   main().catch((error) => {

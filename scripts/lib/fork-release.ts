@@ -141,8 +141,15 @@ export function forkReleasePlan(input: {
   signing: ReturnType<typeof releaseSigningPolicy>;
   /** Whether this release also publishes the npm packages; GitHub assets always publish. */
   npm: boolean;
+  /**
+   * Whether the Windows x64 build is in this release. Its build may fail without
+   * blocking the others; the release then leaves Windows out, and npm with it,
+   * since every launcher depends on the Windows platform package.
+   */
+  windows: boolean;
 }) {
   if (typeof input.npm !== "boolean") throw new Error("Invalid release npm policy.");
+  if (typeof input.windows !== "boolean") throw new Error("Invalid release Windows policy.");
   if (input.repository !== FORK_RELEASE_REPOSITORY)
     throw new Error("Release publication is restricted to the fork repository.");
   if (!/^[a-f0-9]{40}$/i.test(input.sha))
@@ -165,20 +172,18 @@ export function forkReleasePlan(input: {
   // platform gets no feed and is reached only by a deliberate download. Linux
   // updates are checksum-only, so their feeds always publish.
   const prefix = input.channel === "stable" ? "latest" : "nightly";
+  const cliKeys = forkCliPlatformKeys(input.windows);
   return {
     ...input,
+    npm: input.npm && input.windows,
     tag: `v${input.version}`,
     distTag: forkDistTags(input.channel)[0]!,
     distTags: forkDistTags(input.channel),
     stagingTag: `release-${input.sha.slice(0, 12)}-${input.version}`,
     title: `${input.signing.unsigned ? "UNSIGNED — " : ""}S2Code ${input.channel === "nightly" ? "Nightly" : input.channel} v${input.version}`,
-    cliAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(input.version, key)),
-    cliLegacyAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
-      cliArchiveLegacyFileName(input.version, key),
-    ),
-    cliPreviousAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
-      cliArchivePreviousFileName(input.version, key),
-    ),
+    cliAssets: cliKeys.map((key) => cliArchiveFileName(input.version, key)),
+    cliLegacyAssets: cliKeys.map((key) => cliArchiveLegacyFileName(input.version, key)),
+    cliPreviousAssets: cliKeys.map((key) => cliArchivePreviousFileName(input.version, key)),
     feedAssets:
       input.channel === "preview"
         ? []
@@ -186,20 +191,22 @@ export function forkReleasePlan(input: {
             ...(input.signing.mac ? [`${prefix}-mac.yml`] : []),
             `${prefix}-linux.yml`,
             `${prefix}-linux-arm64.yml`,
-            ...(input.signing.win ? [`${prefix}.yml`] : []),
+            ...(input.signing.win && input.windows ? [`${prefix}.yml`] : []),
           ],
   };
 }
 export type ForkReleasePlan = ReturnType<typeof forkReleasePlan>;
+
+function forkCliPlatformKeys(windows: boolean) {
+  return CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => windows || !key.startsWith("win32-"));
+}
 
 // Keep display text separate from the plan serialized into release.json.
 export function forkReleaseTitle(plan: Pick<ForkReleasePlan, "title">) {
   return plan.title.replace(/^UNSIGNED — /, "");
 }
 
-// Publication consumes prepared assets whose receipts match this policy; signed
-// macOS receipts are written only after signature, team and stapled-ticket checks.
-export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha">) {
+export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha" | "windows">) {
   return [
     "Local/direct desktop and CLI release.",
     "### macOS",
@@ -207,34 +214,42 @@ export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha">) 
       ? "The macOS desktop apps are signed and notarized, with stapled tickets verified in the update ZIPs. The DMG containers themselves are not signed."
       : "WARNING: The macOS desktop apps are unsigned and not notarized. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     "### Windows",
-    plan.signing.win
-      ? "The Windows installers are signed."
-      : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
+    !plan.windows
+      ? "The Windows x64 build failed, so this release has no Windows installer or Windows CLI archive, and no npm packages were published for it."
+      : plan.signing.win
+        ? "The Windows installers are signed."
+        : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     `Source: ${plan.sha}.`,
   ].join("\n\n");
 }
 
-export function desktopAssetGroups(version: string) {
-  return FORK_DESKTOP_MATRIX.flatMap((target) => {
-    const extensions =
-      target.platform === "mac"
-        ? ["dmg", "zip"]
-        : target.platform === "linux"
-          ? ["AppImage", "deb"]
-          : ["exe"];
-    return extensions.map((extension) => {
-      const aliases =
-        target.platform === "linux" && target.arch === "x64"
-          ? extension === "deb"
-            ? ["amd64", "x64"]
-            : ["x86_64", "x64"]
-          : [target.arch];
-      return aliases.map((arch) => `S2Code-${version}-${arch}.${extension}`);
-    });
-  });
+export function desktopAssetGroups(version: string, windows = true) {
+  return FORK_DESKTOP_MATRIX.filter((target) => windows || target.platform !== "win").flatMap(
+    (target) => {
+      const extensions =
+        target.platform === "mac"
+          ? ["dmg", "zip"]
+          : target.platform === "linux"
+            ? ["AppImage", "deb"]
+            : ["exe"];
+      return extensions.map((extension) => {
+        const aliases =
+          target.platform === "linux" && target.arch === "x64"
+            ? extension === "deb"
+              ? ["amd64", "x64"]
+              : ["x86_64", "x64"]
+            : [target.arch];
+        return aliases.map((arch) => `S2Code-${version}-${arch}.${extension}`);
+      });
+    },
+  );
 }
-export function requiredDesktopAssets(version: string, names: ReadonlyArray<string>) {
-  return desktopAssetGroups(version).map((group) => {
+export function requiredDesktopAssets(
+  version: string,
+  names: ReadonlyArray<string>,
+  windows = true,
+) {
+  return desktopAssetGroups(version, windows).map((group) => {
     const found = group.filter((name) => names.includes(name));
     if (found.length !== 1)
       throw new Error(`Expected exactly one desktop asset: ${group.join(" or ")}.`);

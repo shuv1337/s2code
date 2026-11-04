@@ -5,20 +5,13 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
-import {
-  prepareForkAssets,
-  inspectForkNpmPackages,
-  assertPackagedWslRuntime,
-  extractPackagedWslRuntime,
-  windowsInstallerPayloadName,
-} from "./fork-release.ts";
+import { prepareForkAssets, inspectForkNpmPackages } from "./fork-release.ts";
 import {
   npmPlatformPackageManifest,
   npmLauncherPackageManifest,
 } from "./build-npm-platform-packages.ts";
-import { forkReleasePlan, FORK_DESKTOP_MATRIX, desktopAssetGroups } from "./lib/fork-release.ts";
+import { forkReleasePlan, desktopAssetGroups } from "./lib/fork-release.ts";
 import { cliArchiveFileName, CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
-import * as HostProcess from "@t3tools/shared/HostProcess";
 import { serializeUpdateManifest, parseUpdateManifest } from "./lib/update-manifest.ts";
 const FS = NodeFS;
 const OS = NodeOS;
@@ -28,7 +21,11 @@ const Crypto = NodeCrypto;
 function fixture(
   channel: "stable" | "nightly" | "preview",
   run: (directory: string, plan: ReturnType<typeof forkReleasePlan>) => void,
-  options: { signing?: { mac: boolean; win: boolean; unsigned: boolean }; npm?: boolean } = {},
+  options: {
+    signing?: { mac: boolean; win: boolean; unsigned: boolean };
+    npm?: boolean;
+    windows?: boolean;
+  } = {},
 ) {
   const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-release-fixture-"));
   const version = channel === "stable" ? "1.2.3" : `1.2.3-${channel}.20261014.1`;
@@ -40,12 +37,9 @@ function fixture(
     channel,
     signing,
     npm: options.npm ?? true,
+    windows: options.windows ?? true,
   });
-  const desktops = desktopAssetGroups(version).map((group) => group[0]!);
-  const sha256 = (name: string) =>
-    Crypto.createHash("sha256")
-      .update(FS.readFileSync(Path.join(directory, name)))
-      .digest("hex");
+  const desktops = desktopAssetGroups(version, plan.windows).map((group) => group[0]!);
   const manifest = (names: string[]) =>
     serializeUpdateManifest(
       {
@@ -67,21 +61,6 @@ function fixture(
   try {
     for (const name of [...desktops, ...plan.cliAssets])
       FS.writeFileSync(Path.join(directory, name), `fixture bytes ${name}`);
-    for (const target of FORK_DESKTOP_MATRIX)
-      FS.writeFileSync(
-        Path.join(directory, `build-${target.platform}-${target.arch}.json`),
-        JSON.stringify({
-          version,
-          sha: plan.sha,
-          platform: target.platform,
-          arch: target.arch,
-          signed:
-            target.platform === "mac" ? signing.mac : target.platform === "win" && signing.win,
-          ...(target.platform === "win"
-            ? { wslSha256: sha256(cliArchiveFileName(version, `linux-${target.arch}`)) }
-            : {}),
-        }),
-      );
     if (channel !== "preview") {
       const prefix = channel === "stable" ? "latest" : "nightly";
       // electron-builder writes a blockmap beside every differentially
@@ -93,10 +72,14 @@ function fixture(
           `${prefix}-mac.yml`,
           desktops.filter((name) => name.endsWith(".zip") && name.includes("-arm64.")),
         ],
-        [
-          `${prefix}-win-x64.yml`,
-          desktops.filter((name) => name.endsWith(".exe") && name.includes("-x64.")),
-        ],
+        ...(plan.windows
+          ? ([
+              [
+                `${prefix}-win-x64.yml`,
+                desktops.filter((name) => name.endsWith(".exe") && name.includes("-x64.")),
+              ],
+            ] as const)
+          : []),
         [
           `${prefix}-linux.yml`,
           desktops.filter((name) => /\.(deb|AppImage)$/.test(name) && !name.includes("-arm64.")),
@@ -231,126 +214,38 @@ describe("complete fork release assets", () => {
       },
       { signing: { mac: true, win: false, unsigned: true } },
     ));
-  it("names the NSIS payload exactly as the installer template embeds it", () => {
-    expect(windowsInstallerPayloadName("x64")).toBe("app-64.7z");
-    expect(windowsInstallerPayloadName("arm64")).toBe("app-arm64.7z");
-    expect(() => windowsInstallerPayloadName("universal")).toThrow("Unsupported Windows");
-    // The build directory names the archive <name>-<version>-<arch>.nsis.7z;
-    // `File /oname=` renames it on the way into the installer. Read the real
-    // template so an app-builder-lib upgrade cannot change this silently.
-    const store = Path.join(import.meta.dirname, "../node_modules/.pnpm");
-    const packaged = FS.readdirSync(store).find((entry) => entry.startsWith("app-builder-lib@"));
-    expect(packaged, "app-builder-lib must be installed to pin the payload name").toBeDefined();
-    const template = FS.readFileSync(
-      Path.join(
-        store,
-        packaged!,
-        "node_modules/app-builder-lib/templates/nsis/include/extractAppPackage.nsh",
-      ),
-      "utf8",
-    );
-    for (const arch of ["x64", "arm64"] as const)
-      expect(template).toContain(
-        `File /oname=$PLUGINSDIR\\${windowsInstallerPayloadName(arch).replace(".7z", "")}.\${COMPRESSION_METHOD}`,
-      );
-    expect(template).toContain("extractUsing7za");
-  });
-  it("needs exactly one Windows installer to read a payload from", () => {
-    const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-installer-"));
-    try {
-      const work = Path.join(directory, "work");
-      expect(() => extractPackagedWslRuntime(directory, "x64", work)).toThrow("found 0");
-      for (const name of ["one.exe", "two.exe"])
-        FS.writeFileSync(Path.join(directory, name), "installer");
-      expect(() => extractPackagedWslRuntime(directory, "x64", work)).toThrow("found 2");
-      // The arch decides the payload name before any extraction is attempted.
-      expect(() => extractPackagedWslRuntime(directory, "universal", work)).toThrow(
-        "Unsupported Windows",
-      );
-      expect(FS.existsSync(work)).toBe(false);
-    } finally {
-      FS.rmSync(directory, { recursive: true, force: true });
-    }
-  });
-  // 7-Zip exits 1 for warnings it recovered from, so the extracted file has to
-  // decide success. The fixture stands in for 7-Zip's NSIS handler.
-  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "accepts a 7-Zip warning exit when the payload lands, and fails on a real error",
-    () => {
-      const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-installer-7z-"));
-      const path = process.env.PATH;
-      try {
-        FS.writeFileSync(Path.join(directory, "S2Code-1.2.3-x64.exe"), "installer");
+  it("leaves out a failed Windows build, including the CLI archive it uploaded first", () =>
+    fixture(
+      "nightly",
+      (directory, plan) => {
         FS.writeFileSync(
-          Path.join(directory, "7z"),
-          `#!/bin/sh
-out=
-for arg in "$@"; do
-  case "$arg" in -o*) out="\${arg#-o}" ;; esac
-  entry="$arg"
-done
-case "$entry" in
-  app-*) mkdir -p "$out/\\$PLUGINSDIR" && printf payload > "$out/\\$PLUGINSDIR/app-64.7z" ;;
-  resources/*) mkdir -p "$out/resources" && printf 'wsl runtime bytes' > "$out/resources/wsl-runtime.tar.gz" ;;
-esac
-exit \${FAKE_SEVEN_ZIP_EXIT:-1}
-`,
-          { mode: 0o700 },
+          Path.join(directory, cliArchiveFileName(plan.version, "win32-x64")),
+          "uploaded before the Windows build failed",
         );
-        process.env.PATH = `${directory}${Path.delimiter}${path ?? ""}`;
-        const payload = extractPackagedWslRuntime(
-          directory,
-          "x64",
-          Path.join(directory, "work-ok"),
-        );
-        expect(() =>
-          assertPackagedWslRuntime(
-            payload,
-            Crypto.createHash("sha256").update("wsl runtime bytes").digest("hex"),
+        const assets = prepareForkAssets(plan, directory);
+        expect(
+          FS.readdirSync(directory).filter(
+            (name) => name.includes("win32") || name.includes(".exe"),
           ),
-        ).not.toThrow();
-        process.env.FAKE_SEVEN_ZIP_EXIT = "2";
-        expect(() =>
-          extractPackagedWslRuntime(directory, "x64", Path.join(directory, "work-error")),
-        ).toThrow("exit 2");
-      } finally {
-        delete process.env.FAKE_SEVEN_ZIP_EXIT;
-        process.env.PATH = path;
-        FS.rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
-  it("verifies the WSL runtime inside the shipped Windows installer", () => {
-    const directory = FS.mkdtempSync(Path.join(OS.tmpdir(), "fork-wsl-payload-"));
-    try {
-      const resources = Path.join(directory, "resources");
-      FS.mkdirSync(resources);
-      const archive = Path.join(resources, "wsl-runtime.tar.gz");
-      FS.writeFileSync(archive, "wsl runtime bytes");
-      const expected = Crypto.createHash("sha256").update("wsl runtime bytes").digest("hex");
-      expect(() => assertPackagedWslRuntime(directory, expected)).not.toThrow();
-      expect(() => assertPackagedWslRuntime(directory, "deadbeef")).toThrow("does not match");
-      FS.unlinkSync(archive);
-      expect(() => assertPackagedWslRuntime(directory, expected)).toThrow(
-        "no resources/wsl-runtime.tar.gz",
-      );
-    } finally {
-      FS.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+        ).toEqual([]);
+        expect(assets.filter((name) => name.endsWith(".yml"))).toEqual([
+          "nightly-mac.yml",
+          "nightly-linux.yml",
+          "nightly-linux-arm64.yml",
+        ]);
+        expect(FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8")).not.toContain("win32");
+        const release = JSON.parse(
+          FS.readFileSync(Path.join(directory, "release.json"), "utf8"),
+        ) as { windows: boolean; npmPackages: string[] };
+        expect(release.windows).toBe(false);
+        expect(release.npmPackages).toEqual([]);
+      },
+      { windows: false },
+    ));
   it("rejects missing CLI platforms before publishing", () =>
     fixture("stable", (directory, plan) => {
       FS.unlinkSync(Path.join(directory, plan.cliAssets[0]!));
       expect(() => prepareForkAssets(plan, directory)).toThrow("Missing required CLI");
-    }));
-  it("rejects mixed revisions and mismatched Windows WSL runtimes", () =>
-    fixture("stable", (directory, plan) => {
-      const file = Path.join(directory, "build-win-x64.json");
-      const receipt = JSON.parse(FS.readFileSync(file, "utf8"));
-      FS.writeFileSync(file, JSON.stringify({ ...receipt, sha: "cd".repeat(20) }));
-      expect(() => prepareForkAssets(plan, directory)).toThrow("source/version/signing");
-      FS.writeFileSync(file, JSON.stringify({ ...receipt, wslSha256: "wrong" }));
-      expect(() => prepareForkAssets(plan, directory)).toThrow("WSL runtime");
     }));
   it("rejects wrong feed bytes and preview automatic metadata", () => {
     fixture("stable", (directory, plan) => {

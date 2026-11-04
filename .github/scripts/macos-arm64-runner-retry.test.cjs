@@ -10,7 +10,6 @@ const {
   QUEUE_FALLBACK_CALLER,
   QUEUE_TIMEOUT_SECONDS,
   NOT_ACQUIRED_ANNOTATION,
-  SUCCESS_AFTER_MISS_NOTICE,
   buildJobName,
   classifyAttempts,
   classifyQueue,
@@ -53,7 +52,8 @@ cat "${root}/jobs.out"
 const workflow = fs.readFileSync(path.join(__dirname, "../workflows/release.yml"), "utf8");
 const desktop = fs.readFileSync(path.join(__dirname, "../workflows/release-desktop.yml"), "utf8");
 
-test("splits macOS arm64 out of the shared desktop matrix", () => {
+test("splits macOS arm64 and Windows x64 out of the shared desktop matrix", () => {
+  const windows = { platform: "win", arch: "x64", runner: "windows-2025", label: "Windows x64" };
   const split = splitDesktopMatrix({
     include: [
       {
@@ -62,18 +62,21 @@ test("splits macOS arm64 out of the shared desktop matrix", () => {
         runner: '["self-hosted","macOS","ARM64","shuvbot-macos"]',
         label: "macOS arm64",
       },
-      { platform: "mac", arch: "x64", runner: "macos-15-intel", label: "macOS x64" },
       { platform: "linux", arch: "x64", runner: "ubuntu-24.04", label: "Linux x64" },
+      windows,
+      { platform: "linux", arch: "arm64", runner: "ubuntu-24.04-arm", label: "Linux arm64" },
     ],
   });
   assert.equal(split.mac.runner, '["self-hosted","macOS","ARM64","shuvbot-macos"]');
   assert.equal(HOSTED_FALLBACK_RUNNER, "macos-26");
   assert.deepEqual(split.fallback, { ...split.mac, runner: "macos-26" });
+  assert.deepEqual(split.win, windows);
   assert.deepEqual(
     split.rest.include.map((target) => target.label),
-    ["macOS x64", "Linux x64"],
+    ["Linux x64", "Linux arm64"],
   );
-  assert.throws(() => splitDesktopMatrix({ include: [] }), /one macOS arm64/);
+  assert.throws(() => splitDesktopMatrix({ include: [windows] }), /one macOS arm64/);
+  assert.throws(() => splitDesktopMatrix({ include: [split.mac] }), /one Windows x64/);
 });
 
 test("retries only a hosted runner that was never assigned", () => {
@@ -134,17 +137,16 @@ test("retries only a hosted runner that was never assigned", () => {
   );
 });
 
-test("the release workflow tries shuvbot first, falls back to hosted macos-26, and leaves the build timeout at 30", () => {
+test("the release workflow tries shuvbot first, falls back to hosted macos-26 once, and leaves the build timeout at 30", () => {
   assert.match(desktop, /timeout-minutes: \$\{\{ inputs\.platform == 'win' && 70 \|\| 30 \}\}/);
   assert.match(workflow, /fromJSON\(needs\.preflight\.outputs\.matrix_rest\)/);
   assert.match(workflow, /runner_id 0/);
   assert.match(workflow, /needs\.mac_arm64_ready\.result == 'success'/);
   assert.equal(/continue-on-error: true\n {4}uses:/.test(workflow), false);
-  assert.ok(workflow.includes("with: &mac_arm64_fallback_build"));
-  assert.ok(workflow.includes("with: *mac_arm64_fallback_build"));
   assert.match(workflow, /matrix_mac_arm64_fallback\)\.runner/);
-  assert.ok(workflow.includes("steps: *mac_arm64_check_steps"));
+  assert.deepEqual(MAC_ARM64_CALLERS, ["Desktop (macOS arm64)", QUEUE_FALLBACK_CALLER]);
   for (const caller of MAC_ARM64_CALLERS) assert.ok(workflow.includes(`name: ${caller}\n`));
+  assert.equal(/retry \d|runner check/.test(workflow), false);
 });
 
 test("gate command fails closed when every attempt missed the runner", () => {
@@ -170,38 +172,6 @@ test("gate command fails closed when every attempt missed the runner", () => {
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /timeout-minutes does not extend that wait/);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test("gate notice tells operators not to re-run after a later attempt succeeds", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "macos-arm64-retry-"));
-  const jobs = path.join(root, "jobs.jsonl");
-  fs.writeFileSync(
-    jobs,
-    [
-      {
-        name: buildJobName(MAC_ARM64_CALLERS[0]),
-        conclusion: "cancelled",
-        runner_id: 0,
-        steps: [],
-      },
-      {
-        name: buildJobName(MAC_ARM64_CALLERS[1]),
-        conclusion: "success",
-        runner_id: 42,
-        steps: [{ name: "Checkout" }],
-      },
-    ]
-      .map((job) => JSON.stringify(job))
-      .join("\n"),
-  );
-  const result = spawnSync(
-    process.execPath,
-    [path.join(__dirname, "macos-arm64-runner-retry.cjs"), "gate", jobs],
-    { encoding: "utf8" },
-  );
-  assert.equal(result.status, 0);
-  assert.ok(result.stdout.includes(`::notice::${SUCCESS_AFTER_MISS_NOTICE}`));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -293,7 +263,7 @@ test("the attempt the queue fallback cancelled is superseded, not retried or a f
   assert.equal(ok.ok, true);
   assert.equal(ok.attempts[0].reason, "superseded");
   assert.equal(ok.attempts[0].retry, false);
-  // Without the fallback, the same job is a runner miss and retries.
+  // Without the fallback, the same job is a runner miss.
   assert.equal(classifyAttempts([cancelledByFallback]).attempts[0].retry, true);
   const failed = classifyAttempts([cancelledByFallback, fallback("failure")]);
   assert.equal(failed.ok, false);
@@ -315,7 +285,9 @@ test("the workflows wire the queue watch, shared concurrency group and keychain 
   );
   assert.match(workflow, /needs\.mac_arm64_queue_watch\.outputs\.fallback == 'true'/);
   assert.match(workflow, /queue-state "\$RUNNER_TEMP\/jobs\.jsonl"/);
-  assert.match(workflow, /\n {8}desktop_mac_arm64_queue_fallback,\n/);
+  assert.ok(
+    workflow.includes("needs: [preflight, desktop_mac_arm64, desktop_mac_arm64_queue_fallback]"),
+  );
   assert.match(
     desktop,
     /concurrency:\n {6}group: release-desktop-\$\{\{ github\.run_id \}\}-\$\{\{ inputs\.platform \}\}-\$\{\{ inputs\.arch \}\}\n {6}cancel-in-progress: true/,
@@ -448,7 +420,10 @@ test("with shuvbot offline, the release falls back to hosted macos-26 and the ga
   assert.equal(run("queue-state", jobs, String(QUEUE_TIMEOUT_SECONDS)).stdout.trim(), "timeout");
 
   const { fallback } = splitDesktopMatrix({
-    include: [{ platform: "mac", arch: "arm64", runner: '["self-hosted","shuvbot-macos"]' }],
+    include: [
+      { platform: "mac", arch: "arm64", runner: '["self-hosted","shuvbot-macos"]' },
+      { platform: "win", arch: "x64", runner: "windows-2025" },
+    ],
   });
   assert.equal(fallback.runner, "macos-26");
 
@@ -477,8 +452,7 @@ test("with shuvbot offline, the release falls back to hosted macos-26 and the ga
 
 test("every macOS arm64 jobs read goes through the retrying reader", () => {
   assert.equal(/gh api --paginate .*\/jobs/.test(workflow), false);
-  // The queue watch keeps waiting on a failed read; the checks and the gate fail closed.
+  // The queue watch keeps waiting on a failed read; the gate fails closed.
   assert.match(workflow, /retry\.cjs jobs "\$RUNNER_TEMP\/jobs\.jsonl" \|\| echo "::warning::/);
-  assert.match(workflow, /retry\.cjs jobs "\$RUNNER_TEMP\/jobs\.jsonl"\n {10}node \S+ attempt/);
   assert.match(workflow, /retry\.cjs jobs "\$RUNNER_TEMP\/jobs\.jsonl"\n {10}node \S+ gate/);
 });

@@ -36,6 +36,7 @@ const plan = (channel = "stable", version = "1.2.3") =>
     channel,
     signing: releaseSigningPolicy(channel, false, fullCredentials),
     npm: true,
+    windows: true,
   });
 const manifests = (version = "1.2.3") =>
   FORK_NPM_PACKAGES.map((name) => ({
@@ -118,6 +119,7 @@ describe("fork release contract", () => {
         channel,
         signing: releaseSigningPolicy(channel, true, {}),
         npm: false,
+        windows: true,
       });
       expect(forkReleaseTitle(value)).not.toContain("UNSIGNED");
       if (channel === "nightly") {
@@ -146,6 +148,7 @@ describe("fork release contract", () => {
       channel: "nightly",
       signing: { mac, win, unsigned: !mac || !win },
       npm: false,
+      windows: true,
     });
     expect(forkReleaseTitle(value)).toBe(`S2Code Nightly v${value.version}`);
     expect(value.title.startsWith("UNSIGNED — ")).toBe(!mac || !win);
@@ -171,6 +174,7 @@ describe("fork release contract", () => {
         channel: "nightly",
         signing: { mac, win, unsigned: !mac || !win },
         npm: false,
+        windows: true,
       }).feedAssets;
     expect(value(true, false)).not.toContain("nightly.yml");
     expect(value(true, false)).toContain("nightly-mac.yml");
@@ -182,6 +186,30 @@ describe("fork release contract", () => {
       "nightly-linux-arm64.yml",
       "nightly.yml",
     ]);
+  });
+  it("leaves Windows and npm out of a release whose Windows build failed, and says so", () => {
+    const value = forkReleasePlan({
+      ...plan("nightly", "1.2.3-nightly.20261014.1"),
+      windows: false,
+    });
+    expect(value.npm).toBe(false);
+    expect(value.feedAssets).toEqual([
+      "nightly-mac.yml",
+      "nightly-linux.yml",
+      "nightly-linux-arm64.yml",
+    ]);
+    for (const names of [value.cliAssets, value.cliLegacyAssets, value.cliPreviousAssets]) {
+      expect(names).toHaveLength(CLI_ARCHIVE_PLATFORM_KEYS.length - 1);
+      expect(names.some((name) => name.includes("win32"))).toBe(false);
+    }
+    expect(
+      desktopAssetGroups(value.version, false)
+        .flat()
+        .some((name) => name.endsWith(".exe")),
+    ).toBe(false);
+    expect(forkReleaseBody(value).split("### Windows\n\n")[1]).toMatch(
+      /^The Windows x64 build failed.*no npm packages/,
+    );
   });
   it("keeps stable/nightly feeds channel-bound and rejects upstream repositories and channel/version mismatches", () => {
     expect(plan().feedAssets).toEqual([

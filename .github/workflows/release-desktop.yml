@@ -145,6 +145,8 @@ jobs:
       (!startsWith(inputs.runner, '[') ||
       (contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main'))
     name: Build ${{ inputs.label }}
+    # A failed Windows build must not block the release; release.yml leaves Windows out instead.
+    continue-on-error: ${{ inputs.platform == 'win' }}
     # Every macOS arm64 attempt of a run shares this group, so the hosted queue
     # fallback in release.yml cancels a shuvbot attempt that is still queued.
     # Other targets are alone in their group.
@@ -155,7 +157,7 @@ jobs:
     # Windows waits for the Linux CLI archive inside its own budget (see
     # "Wait for Linux CLI archive"), so it gets that wait on top of the usual 30.
     # This does not extend the hosted-runner queue. GitHub cancels an unassigned
-    # macos-26 job at about 15 minutes; release.yml requests another runner.
+    # macos-26 job at about 15 minutes.
     # The shuvbot runner has no such queue limit; see docs/operations/release.md.
     timeout-minutes: ${{ inputs.platform == 'win' && 70 || 30 }}
     env:
@@ -819,7 +821,7 @@ jobs:
       # DMG is deliberately not checked: this pipeline never signs the DMG
       # container itself. Signature, team and ticket are the gates; Gatekeeper's
       # own verdict is unreliable on hosted runners and is only logged.
-      - name: Verify macOS signature and notarization before declaring a signed receipt
+      - name: Verify macOS signature and notarization
         if: inputs.release_publication && inputs.platform == 'mac' && steps.signing_policy.outputs.mac_signed == 'true'
         shell: bash
         env:
@@ -860,7 +862,7 @@ jobs:
           # stapled app often enough that Gatekeeper's verdict is only a note.
           spctl --assess --type execute --verbose=2 "$app" || true
 
-      - name: Verify Windows installer signatures before declaring a signed receipt
+      - name: Verify Windows installer signatures
         if: inputs.release_publication && inputs.platform == 'win' && steps.signing_policy.outputs.win_signed == 'true'
         shell: pwsh
         env:
@@ -878,19 +880,6 @@ jobs:
               throw 'Installer signature or fork publisher mismatch.'
             }
           }
-
-      # On Windows the receipt reads the WSL runtime back out of the installer
-      # it just collected, so it needs 7-Zip on PATH.
-      - name: Record resolved source, signing policy and packaged WSL digest
-        if: inputs.release_publication
-        shell: bash
-        env:
-          BUILD_PLATFORM: ${{ inputs.platform }}
-          BUILD_ARCH: ${{ inputs.arch }}
-          RELEASE_VERSION: ${{ inputs.version }}
-          MAC_SIGNED: ${{ steps.signing_policy.outputs.mac_signed }}
-          WIN_SIGNED: ${{ steps.signing_policy.outputs.win_signed }}
-        run: node scripts/fork-release.ts receipt
 
       - name: Collect resource monitor
         shell: bash
