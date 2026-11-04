@@ -453,6 +453,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
           NPM_STATUS: ${{ steps.publish.outputs.npm }}
+          NPM_ERROR: ${{ steps.publish.outputs.npm_error }}
         run: |
           tag="v${RELEASE_VERSION}"
           if [ -z "$DISCORD_RELEASE_WEBHOOK_URL" ]; then echo "Discord webhook secret is unset; skipping."; exit 0; fi
@@ -462,9 +463,15 @@ jobs:
             if grep -q 'Reference already exists' claim.err; then echo "${tag} was already announced; skipping."; else echo "Could not record the announcement claim; skipping."; fi
             exit 0
           fi
+          # This post already says npm is live, so no promotion follow-up is needed.
+          if [ "$NPM_STATUS" = "promoted" ]; then
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/discord-announced/${tag}-npm" -f "sha=$(git rev-parse HEAD)" >/dev/null 2>&1 || true
+          fi
           extra_args=()
           if [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then extra_args=(--npm shuv2code); fi
           if [ "$NPM_STATUS" = "pending" ]; then extra_args+=(--link "npm: pending review; the dist-tags stay on the previous version until it is promoted"); fi
+          if [ "$NPM_STATUS" = "failed" ]; then extra_args+=(--link "npm: check failed (${NPM_ERROR}); the dist-tags stay on the previous version until it is promoted"); fi
           if [ "$WINDOWS_BUILT" != "true" ]; then extra_args+=(--link "windows: not built; npx shuv2code is unavailable on Windows for this version"); fi
           status=0
           bash .github/scripts/notify-discord-release.sh \
@@ -474,6 +481,14 @@ jobs:
             --link "release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
             || status=$?
           exit "$status"
+      # A re-run that promotes a version announced as pending posts one follow-up.
+      - name: Announce the npm promotion on Discord
+        if: steps.publish.outputs.npm == 'promoted'
+        continue-on-error: true
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash .github/scripts/announce-npm-promotion.sh "v${RELEASE_VERSION}"
 
   # Promote-only: once npm shows a version an earlier run left pending review, move
   # its dist-tags. Nothing is built, uploaded or published (docs/operations/release.md).
@@ -487,7 +502,8 @@ jobs:
     environment: fork-release
     timeout-minutes: 15
     permissions:
-      contents: read
+      # Only for the Discord claim ref; the tags move through OIDC.
+      contents: write
       id-token: write
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -509,9 +525,17 @@ jobs:
           printf 'registry=https://registry.npmjs.org/\n' > "$RUNNER_TEMP/fork-npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/fork-npmrc" >> "$GITHUB_ENV"
       - name: Promote the published version once npm shows it
+        id: promote
         env:
           PROMOTE_VERSION: ${{ inputs.promote_version }}
         run: node scripts/fork-release.ts promote --execute
+      - name: Announce the npm promotion on Discord
+        if: steps.promote.outputs.npm == 'promoted'
+        continue-on-error: true
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          PROMOTE_VERSION: ${{ inputs.promote_version }}
+        run: bash .github/scripts/announce-npm-promotion.sh "v${PROMOTE_VERSION}"
 
   # Publish does not wait on Windows, but a release without it must not look green.
   windows_missing:

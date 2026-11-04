@@ -17,6 +17,7 @@ import {
   assertForkDistTag,
   forkReleaseIndex,
   publishForkReleaseSequence,
+  type NpmCheck,
   desktopAssetGroups,
   publishAtomicReleaseIndex,
   FORK_RELEASE_INDEX_URL,
@@ -316,29 +317,34 @@ describe("fork release contract", () => {
       "publishRelease",
       "publishIndex",
       "publishNpm",
-      "npmVisible",
+      "checkNpm",
       "promoteNpmTags",
     ] as const;
-    const operations = (visible: boolean) =>
+    const operations = (check: NpmCheck = { status: "visible" }) =>
       Object.fromEntries(
         steps.map((step) => [
           step,
           async () => {
             order.push(step);
-            return step === "npmVisible" ? visible : undefined;
+            return step === "checkNpm" ? check : undefined;
           },
         ]),
       ) as Parameters<typeof publishForkReleaseSequence>[0];
-    expect(await publishForkReleaseSequence(operations(true))).toBe("promoted");
+    expect(await publishForkReleaseSequence(operations())).toEqual({ status: "promoted" });
     expect(order).toEqual(steps);
-    order.length = 0;
-    expect(await publishForkReleaseSequence(operations(false))).toBe("pending");
-    expect(order).toEqual(steps.slice(0, -1));
+    for (const check of [
+      { status: "pending" },
+      { status: "failed", error: "GET fixture failed (HTTP 503)." },
+    ] as const) {
+      order.length = 0;
+      expect(await publishForkReleaseSequence(operations(check))).toEqual(check);
+      expect(order).toEqual(steps.slice(0, -1));
+    }
     for (const blocked of ["verifyBinaries", "verifyCompleteRelease", "publishRelease"]) {
       order.length = 0;
       await expect(
         publishForkReleaseSequence({
-          ...operations(true),
+          ...operations(),
           [blocked]: async () => {
             order.push(blocked);
             throw new Error("fixture failure");

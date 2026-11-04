@@ -290,7 +290,8 @@ describe("complete fork release assets", () => {
           Path.join(directory, cliArchiveFileName(plan.version, "win32-x64")),
           "uploaded before the Windows build failed",
         );
-        const assets = prepareForkAssets(plan, directory);
+        const launcher = { name: "shuv2code", integrity: "sha512-fixture" };
+        const assets = prepareForkAssets(plan, directory, [launcher]);
         expect(
           FS.readdirSync(directory).filter(
             (name) => name.includes("win32") || name.includes(".exe"),
@@ -304,9 +305,9 @@ describe("complete fork release assets", () => {
         expect(FS.readFileSync(Path.join(directory, "SHA256SUMS"), "utf8")).not.toContain("win32");
         const release = JSON.parse(
           FS.readFileSync(Path.join(directory, "release.json"), "utf8"),
-        ) as { windows: boolean; npmPackages: string[] };
+        ) as { windows: boolean; npmPackages: unknown };
         expect(release.windows).toBe(false);
-        expect(release.npmPackages).toEqual(["shuv2code"]);
+        expect(release.npmPackages).toEqual([launcher]);
       },
       { windows: false },
     ));

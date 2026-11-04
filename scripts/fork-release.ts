@@ -35,6 +35,7 @@ import {
   forkPromotionPlan,
   publishForkReleaseSequence,
   type ForkReleasePlan,
+  type NpmCheck,
 } from "./lib/fork-release.ts";
 import { parseUpdateManifest, serializeUpdateManifest } from "./lib/update-manifest.ts";
 const FS = NodeFS;
@@ -82,6 +83,14 @@ const run = (command: string, args: string[], cwd?: string) => {
     throw releaseCommandError(command, args, error);
   }
 };
+/** A failed command; `stderr` stays out of the message so logs never carry response bodies. */
+class CommandError extends Error {
+  readonly stderr: string;
+  constructor(message: string, stderr: string) {
+    super(message);
+    this.stderr = stderr;
+  }
+}
 const runAsync = (command: string, args: string[]) =>
   new Promise<void>((resolve, reject) => {
     CP.execFile(
@@ -89,7 +98,10 @@ const runAsync = (command: string, args: string[]) =>
       args,
       { encoding: "utf8", maxBuffer: COMMAND_MAX_BUFFER },
       (error, _stdout, stderr) => {
-        if (error) reject(releaseCommandError(command, args, error, stderr));
+        if (error)
+          reject(
+            new CommandError(releaseCommandError(command, args, error, stderr).message, stderr),
+          );
         else resolve();
       },
     );
@@ -140,7 +152,12 @@ function assertPublishContext(npm: boolean) {
     throw new Error("Use OIDC, not inherited npm publish tokens.");
 }
 
-export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
+export function prepareForkAssets(
+  plan: ForkReleasePlan,
+  directory: string,
+  /** What promote-only later checks npm against: exactly these launcher bytes. */
+  npmPackages: ReadonlyArray<{ name: string; integrity: string }> = [],
+) {
   // A Windows build that failed after uploading its CLI archive leaves that archive behind.
   if (!plan.windows)
     for (const key of CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => key.startsWith("win32-")))
@@ -244,7 +261,7 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   );
   writeJson(Path.join(directory, "release.json"), {
     ...plan,
-    npmPackages: plan.npm ? FORK_NPM_PACKAGES : [],
+    npmPackages,
     signing: { ...plan.signing, linux: "checksum-only" },
   });
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
@@ -302,7 +319,17 @@ const RELEASE_LIST_POLL_MS = Math.min(5_000, NPM_POLL_MS);
 /** A registry answer that says nothing about the package, so it can be retried. */
 class TransientRegistryError extends Error {}
 /** The poll budget ran out without an answer. */
-class RegistryExhaustedError extends Error {}
+class RegistryExhaustedError extends Error {
+  /** The last attempt's registry failure, when it had one. */
+  readonly lastFailure: string | undefined;
+  /** Whether any attempt got a real answer rather than a failure. */
+  readonly answered: boolean;
+  constructor(message: string, lastFailure: string | undefined, answered: boolean) {
+    super(message);
+    this.lastFailure = lastFailure;
+    this.answered = answered;
+  }
+}
 /** GET a registry endpoint, separating "no answer" from a real verdict. */
 async function registryFetch(url: string) {
   let response: Response;
@@ -327,11 +354,13 @@ async function pollRegistry<T>(input: {
   readonly exhausted: string;
 }): Promise<T> {
   let transient: string | undefined;
+  let answered = false;
   for (let attempt = 1; attempt <= input.attempts; attempt++) {
     try {
       const answer = await input.read();
       if (answer !== undefined) return answer;
       transient = undefined;
+      answered = true;
     } catch (error) {
       if (!(error instanceof TransientRegistryError)) throw error;
       transient = error.message;
@@ -341,44 +370,55 @@ async function pollRegistry<T>(input: {
   }
   throw new RegistryExhaustedError(
     transient ? `${input.exhausted} Last registry failure: ${transient}` : input.exhausted,
+    transient,
+    answered,
   );
 }
-/** Whether npm serves the version; with `integrity`, it must be exactly these bytes. */
-async function registryVersion(name: string, version: string, integrity?: string) {
+/** Whether npm serves the version, which must be exactly the launcher bytes `integrity` names. */
+async function registryVersion(name: string, version: string, integrity: string) {
   const url = `https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
   const response = await registryFetch(url);
   if (response.status === 404) return false;
   if (!response.ok) throw new Error(`GET ${url} failed (HTTP ${response.status}).`);
   const value = (await response.json()) as { dist?: { integrity?: string } };
   assertForkNpmManifest(value, version);
-  if (integrity !== undefined && value.dist?.integrity !== integrity)
+  if (value.dist?.integrity !== integrity)
     throw new Error(
-      "Existing npm version differs from this run's immutable package bytes; rerun publish only against the same run's build artifacts, or use a new version.",
+      `npm serves ${name}@${version} with bytes other than the release's immutable package bytes; it is never promoted or republished. Rerun publish only against the same run's build artifacts, or use a new version.`,
     );
   return true;
 }
 /** Every registry read polls, so a registry that did not answer is never read as "absent". */
-const npmPublished = (name: string, version: string, integrity?: string) =>
+const npmPublished = (name: string, version: string, integrity: string) =>
   pollRegistry({
     attempts: NPM_TAG_POLLS,
     read: async () => ({ published: await registryVersion(name, version, integrity) }),
     exhausted: `The npm registry did not answer for ${name}@${version}.`,
   }).then((answer) => answer.published);
-/** A short look for the version; one npm still reviews (or a silent registry) reads as not visible. */
-async function npmVisible(name: string, version: string, integrity?: string) {
+/**
+ * A short look for the version. A version npm still reviews answers 404; a
+ * registry that answered nothing but errors is a failed check, not a review.
+ */
+async function npmVisible(name: string, version: string, integrity: string): Promise<NpmCheck> {
   try {
     await pollRegistry({
       attempts: NPM_VISIBLE_POLLS,
       read: async () => (await registryVersion(name, version, integrity)) || undefined,
       exhausted: `npm does not show ${name}@${version} yet.`,
     });
-    return true;
+    return { status: "visible" };
   } catch (error) {
     if (!(error instanceof RegistryExhaustedError)) throw error;
     console.log(error.message);
-    return false;
+    return error.answered || !error.lastFailure
+      ? { status: "pending" }
+      : { status: "failed", error: error.lastFailure };
   }
 }
+/** The first package that is not visible decides what the run reports. */
+const combineChecks = (checks: ReadonlyArray<NpmCheck>): NpmCheck =>
+  checks.find((check) => check.status === "failed") ??
+  checks.find((check) => check.status === "pending") ?? { status: "visible" };
 async function readTags(name: string) {
   // `/<name>/dist-tags` would be read as a version named "dist-tags".
   const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
@@ -408,8 +448,8 @@ async function assertTagNotBackwards(name: string, promotion: Promotion) {
     throw new Error("Refusing to move a fork release/dist-tag backwards.");
   return tags;
 }
-async function promoteTags(name: string, promotion: Promotion) {
-  const tags = await assertTagNotBackwards(name, promotion);
+async function promoteTags(name: string, promotion: Promotion, read?: Record<string, string>) {
+  const tags = read ?? (await assertTagNotBackwards(name, promotion));
   for (const tag of promotion.distTags) {
     if (tags[tag] === promotion.version) continue;
     // The channel tag refuses to move backwards above; an alias such as
@@ -431,18 +471,29 @@ async function promoteTags(name: string, promotion: Promotion) {
     });
   }
 }
-type NpmStatus = "skipped" | "pending" | "promoted";
-/** One line for the log, the run summary and the step output the Discord post reads. */
-function reportNpm(status: NpmStatus, promotion: Promotion) {
+type NpmStatus = "skipped" | Exclude<NpmCheck, { status: "visible" }> | { status: "promoted" };
+/** One line for the log, the run summary and the step outputs the Discord post reads. */
+function reportNpm(result: NpmStatus, promotion: Promotion) {
   const spec = `${FORK_NPM_PACKAGES.join(", ")}@${promotion.version}`;
+  const status = result === "skipped" ? result : result.status;
+  const promote = `gh workflow run release.yml --ref main -f promote_version=${promotion.version}`;
+  // Workflow commands and step outputs are line-based.
+  const error =
+    result !== "skipped" && result.status === "failed" ? result.error.replace(/\s+/g, " ") : "";
   const line =
     status === "pending"
-      ? `npm pending review: ${spec} is published, but npm does not show it yet, so the dist-tags stay on the previous version. Once npm shows it, run: gh workflow run release.yml -f promote_version=${promotion.version}`
-      : status === "promoted"
-        ? `npm: ${spec} is on ${promotion.distTags.join(", ")}.`
-        : "npm: not published (FORK_NPM_TRUSTED_PUBLISHING_READY is not true).";
-  console.log(status === "pending" ? `::warning::${line}` : line);
-  if (process.env.GITHUB_OUTPUT) FS.appendFileSync(process.env.GITHUB_OUTPUT, `npm=${status}\n`);
+      ? `npm pending review: ${spec} is published, but npm does not show it yet, so the dist-tags stay on the previous version. Once npm shows it, run: ${promote}`
+      : status === "failed"
+        ? `npm check failed: the registry answered only errors for ${spec}, so the dist-tags stay on the previous version. Last error: ${error} Once the registry answers, run: ${promote}`
+        : status === "promoted"
+          ? `npm: ${spec} is on ${promotion.distTags.join(", ")}.`
+          : "npm: not published (FORK_NPM_TRUSTED_PUBLISHING_READY is not true).";
+  console.log(status === "pending" || status === "failed" ? `::warning::${line}` : line);
+  if (process.env.GITHUB_OUTPUT)
+    FS.appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `npm=${status}\n${error ? `npm_error=${error}\n` : ""}`,
+    );
   if (process.env.GITHUB_STEP_SUMMARY)
     FS.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
 }
@@ -451,31 +502,64 @@ async function promotePublished(version: string) {
   assertPublishContext(true);
   const promotion = forkPromotionPlan(version);
   // The launcher downloads from the release, and the tags endpoint never returns drafts.
-  const draft = run("gh", [
-    "api",
-    `repos/${FORK_RELEASE_REPOSITORY}/releases/tags/${promotion.tag}`,
-    "--jq",
-    ".draft",
-  ]);
-  if (draft !== "false") throw new Error(`Release ${promotion.tag} is not public.`);
-  let visible = true;
-  for (const name of FORK_NPM_PACKAGES) {
-    await assertTagNotBackwards(name, promotion);
-    visible &&= await npmVisible(name, version);
+  const release = JSON.parse(
+    run("gh", [
+      "api",
+      `repos/${FORK_RELEASE_REPOSITORY}/releases/tags/${promotion.tag}`,
+      "--jq",
+      '{draft, manifest: ([.assets[] | select(.name == "release.json") | .id][0])} | tojson',
+    ]),
+  ) as { draft: boolean; manifest: number | null };
+  if (release.draft !== false || typeof release.manifest !== "number")
+    throw new Error(`Release ${promotion.tag} is not a public fork release.`);
+  // Only the exact launcher bytes this release recorded may be promoted.
+  const recorded = (
+    JSON.parse(
+      run("gh", [
+        "api",
+        "-H",
+        "Accept: application/octet-stream",
+        `repos/${FORK_RELEASE_REPOSITORY}/releases/assets/${release.manifest}`,
+      ]),
+    ) as { npmPackages?: unknown }
+  ).npmPackages;
+  const packages = FORK_NPM_PACKAGES.map((name) => {
+    const entry = (Array.isArray(recorded) ? recorded : []).find(
+      (item: { name?: unknown }) => item?.name === name,
+    ) as { integrity?: unknown } | undefined;
+    if (typeof entry?.integrity !== "string" || !entry.integrity.startsWith("sha512-"))
+      throw new Error(
+        `Release ${promotion.tag} recorded no ${name} launcher bytes, so it published nothing to npm that could be promoted.`,
+      );
+    return { name, integrity: entry.integrity };
+  });
+  const tags = [];
+  const checks = [];
+  for (const pkg of packages) {
+    tags.push(await assertTagNotBackwards(pkg.name, promotion));
+    checks.push(await npmVisible(pkg.name, version, pkg.integrity));
   }
-  if (visible) for (const name of FORK_NPM_PACKAGES) await promoteTags(name, promotion);
-  reportNpm(visible ? "promoted" : "pending", promotion);
+  const check = combineChecks(checks);
+  if (check.status !== "visible") return reportNpm(check, promotion);
+  for (const [index, pkg] of packages.entries())
+    await promoteTags(pkg.name, promotion, tags[index]);
+  reportNpm({ status: "promoted" }, promotion);
 }
 async function publishPrepared(plan: ForkReleasePlan) {
   assertPublishContext(plan.npm);
   if (run("git", ["rev-parse", "HEAD"]) !== plan.sha)
     throw new Error("Publisher checkout differs from the resolved source.");
   const assets = "prepared/release-assets";
-  prepareForkAssets(plan, assets);
+  // Before shaping, which adds alias copies of the archives the launcher pins.
+  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan, assets) : [];
+  prepareForkAssets(
+    plan,
+    assets,
+    packages.map((pkg) => ({ name: pkg.manifest.name, integrity: pkg.integrity })),
+  );
   // Shaping copies every CLI archive twice; show the disk that publishing starts from.
   console.log(CP.spawnSync("df", ["-h", "/"], { encoding: "utf8" }).stdout ?? "");
   const names = FS.readdirSync(assets);
-  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan, assets) : [];
   if (plan.npm) for (const pkg of packages) await assertTagNotBackwards(pkg.manifest.name, plan);
   const gh = (...args: string[]) => run("gh", args);
   const verifyTag = async (required: boolean) => {
@@ -612,9 +696,9 @@ async function publishPrepared(plan: ForkReleasePlan) {
     if (reasons.length) throw new Error(`${failure} ${reasons.join(" ")}`);
   };
   const uploadPackage = async (pkg: (typeof packages)[number]) => {
-    // A transient answer must never read as "absent" here: publishing over an
-    // existing immutable version is refused by npm, not retried.
-    if (!(await npmPublished(pkg.manifest.name, plan.version, pkg.integrity)))
+    // A transient answer must never read as "absent" here.
+    if (await npmPublished(pkg.manifest.name, plan.version, pkg.integrity)) return;
+    try {
       await runAsync("npm", [
         "publish",
         pkg.file,
@@ -624,6 +708,18 @@ async function publishPrepared(plan: ForkReleasePlan) {
         "--tag",
         plan.stagingTag,
       ]);
+    } catch (error) {
+      // A version still in review reads as absent, so a re-run publishes it again
+      // and npm refuses. The visibility check still verifies its bytes.
+      if (
+        !(error instanceof CommandError) ||
+        !/EPUBLISHCONFLICT|cannot publish over the previously published version/i.test(error.stderr)
+      )
+        throw error;
+      console.log(
+        `npm already has ${pkg.manifest.name}@${plan.version}, presumably still in review; checking it instead.`,
+      );
+    }
   };
   const npm = await publishForkReleaseSequence({
     ensureDraft: async () => {
@@ -785,12 +881,12 @@ async function publishPrepared(plan: ForkReleasePlan) {
       if (plan.npm)
         await settleAll(packages, uploadPackage, "The fork launcher failed publication.");
     },
-    npmVisible: async () =>
-      (
+    checkNpm: async () =>
+      combineChecks(
         await Promise.all(
           packages.map((pkg) => npmVisible(pkg.manifest.name, plan.version, pkg.integrity)),
-        )
-      ).every(Boolean),
+        ),
+      ),
     promoteNpmTags: async () =>
       settleAll(
         packages,

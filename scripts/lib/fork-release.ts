@@ -359,6 +359,14 @@ export function forkReleaseIndex(
     .map((release) => ({ tag_name: release.tag_name, draft: false }));
 }
 /**
+ * What a short look at npm found: the version, nothing yet (a 404, as while npm
+ * reviews it), or only registry errors, with the last one.
+ */
+export type NpmCheck =
+  | { status: "visible" }
+  | { status: "pending" }
+  | { status: "failed"; error: string };
+/**
  * The launcher downloads its CLI archive from the GitHub release, so the release,
  * its feeds and the index go public before npm is touched. npm then never holds the
  * release back: a version still in npm's review leaves the dist-tags where they were.
@@ -372,9 +380,9 @@ export async function publishForkReleaseSequence(operations: {
   publishRelease: () => Promise<void>;
   publishIndex: () => Promise<void>;
   publishNpm: () => Promise<void>;
-  npmVisible: () => Promise<boolean>;
+  checkNpm: () => Promise<NpmCheck>;
   promoteNpmTags: () => Promise<void>;
-}) {
+}): Promise<Exclude<NpmCheck, { status: "visible" }> | { status: "promoted" }> {
   await operations.ensureDraft();
   await operations.uploadBinaries();
   await operations.verifyBinaries();
@@ -383,7 +391,8 @@ export async function publishForkReleaseSequence(operations: {
   await operations.publishRelease();
   await operations.publishIndex();
   await operations.publishNpm();
-  if (!(await operations.npmVisible())) return "pending" as const;
+  const check = await operations.checkNpm();
+  if (check.status !== "visible") return check;
   await operations.promoteNpmTags();
-  return "promoted" as const;
+  return { status: "promoted" };
 }

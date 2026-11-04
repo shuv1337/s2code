@@ -174,7 +174,8 @@ Publication runs in this order, and npm never holds the GitHub release back:
 
 npm publication is optional. It requires `FORK_NPM_TRUSTED_PUBLISHING_READY` to be
 `true`. Otherwise the GitHub release still publishes and `release.json` lists no npm
-packages. When it is, the publish job builds the launcher from the release's CLI archives
+packages. When it is, `release.json` records the launcher's name and tarball integrity, and
+the publish job builds the launcher from the release's CLI archives
 and checks that its `checksums.json` pins exactly the archives the release carries, so the
 launcher can always download what it pins. Without a Windows build the launcher pins no
 Windows archive and reports Windows as unsupported.
@@ -183,10 +184,12 @@ npm reviews some new versions before they can be installed, which has taken up t
 fifty minutes. The publish job looks for the version for about three minutes. If npm shows
 it, its name, version, repository and tarball integrity are verified and the dist-tags move.
 If not, the job still succeeds with a `::warning::`, the dist-tags stay on the previous
-version, and the run summary and the Discord post say **npm pending review**. Promote it
-later as described in [Recovery](#recovery-and-human-smoke-evidence). Answers the registry
-could not give (429, 5xx, timeouts) are retried; a mismatched tarball or a package outside
-the allowlist fails at once.
+version, and the run summary and the Discord post say **npm pending review**. If the
+registry answered only errors (429, 5xx, timeouts) for the whole check, they say **npm check
+failed** with the last error instead, and the job is still green. Either way, promote it
+later as described in [Recovery](#recovery-and-human-smoke-evidence). A mismatched tarball
+or a package outside the allowlist fails at once. When the dist-tags move after the release
+was announced, one Discord follow-up says so.
 
 A nightly moves `latest` as well, so `npx shuv2code` installs the newest nightly; `nightly`
 refuses to move backwards, while `latest` is left alone with a log line when a newer
@@ -263,14 +266,14 @@ promote-only path from `main`:
 gh workflow run release.yml --ref main -f promote_version=<version>
 ```
 
-It builds and uploads nothing. It requires the version's GitHub release to be public,
-checks npm for the version, moves `nightly` and `latest` once npm shows it, and is green
-and pending again if npm still does not. Running it twice is harmless. Re-running the
-publish job of the original run (`gh run rerun <run-id> --job <publish-job-id>`) also works
-once npm shows the version: it reuses the public release unchanged, skips the published
-npm version and only promotes. Do not re-run publish while npm still reviews the version,
-because it cannot tell that version apart from an unpublished one and npm refuses the
-second publish.
+It builds and uploads nothing. It requires the version's GitHub release to be public and
+to have published the launcher, moves `nightly` and `latest` only once npm shows the exact
+tarball `release.json` recorded, and is green and pending again if npm still does not.
+Running it twice is harmless. Re-running the publish job of the original run
+(`gh run rerun <run-id> --job <publish-job-id>`) also works: it reuses the public release
+unchanged and skips a published npm version. A version still in review looks unpublished,
+so npm refuses the second publish; the job treats that refusal as published and goes on to
+the same check and promotion.
 
 Use **Re-run failed jobs** on the same workflow run, never **Re-run all jobs**, which
 rebuilds the signed desktops as different bytes. The `publish` job prepares again from
