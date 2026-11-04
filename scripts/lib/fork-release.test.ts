@@ -86,17 +86,15 @@ describe("fork release contract", () => {
       "https://raw.githubusercontent.com/shuv1337/s2code/fork-release-index/index.json",
     );
   });
-  it("covers six native desktops and exactly five CLI architectures with matching Windows/Linux pairs", () => {
-    expect(FORK_DESKTOP_MATRIX).toHaveLength(6);
+  it("covers four native desktops and exactly four CLI architectures with matching Windows/Linux pairs", () => {
+    expect(FORK_DESKTOP_MATRIX).toHaveLength(4);
     expect(FORK_DESKTOP_MATRIX.map((target) => target.runner)).toEqual([
       FORK_MACOS_ARM64_SELF_HOSTED_RUNNER,
-      "macos-15-intel",
       "ubuntu-24.04",
       "ubuntu-24.04-arm",
       "windows-2025",
-      "windows-11-arm",
     ]);
-    expect(FORK_DESKTOP_MATRIX.filter((target) => target.cli_archive)).toHaveLength(5);
+    expect(FORK_DESKTOP_MATRIX.filter((target) => target.cli_archive)).toHaveLength(4);
     expect(CLI_ARCHIVE_PLATFORM_KEYS).not.toContain("darwin-x64");
     for (const target of FORK_DESKTOP_MATRIX.filter((target) => target.platform === "win"))
       expect(
@@ -204,7 +202,7 @@ describe("fork release contract", () => {
   });
   it("protects the private t3 workspace and exact public allowlist", () => {
     expect(serverPackage.private).toBe(true);
-    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(7);
+    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(6);
     for (const override of [
       { name: "t3" },
       { name: "@t3code/t3-linux-x64" },
@@ -216,14 +214,14 @@ describe("fork release contract", () => {
         "allowlist",
       );
     expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3")).toThrow(
-      "All 5 platform packages",
+      "All 4 platform packages",
     );
     expect(() =>
       assertForkNpmManifest(
         { ...manifests().at(-1), optionalDependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
         "1.2.3",
       ),
-    ).toThrow("all 5 exact matching");
+    ).toThrow("all 4 exact matching");
   });
   it("moves latest with nightly, keeps preview off it, and permits only matching staging tags", () => {
     // The fork ships nightly only, so nightly owns `latest` as well.

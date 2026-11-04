@@ -95,8 +95,8 @@ is the only train this fork publishes.
 
 ### Intel Macs
 
-There is no standalone fork executable for Intel Macs (the desktop app is available). To
-run a server there, build it from source with `vp`, which provides the Node version it needs
+S2Code is no longer built for Intel Macs: there is no desktop app and no standalone executable,
+and existing installs get no further updates. To run a server there, build it from source with `vp`, which provides the Node version it needs
 ([Install vp](https://github.com/shuv1337/s2code#install-vp)):
 
 ```bash

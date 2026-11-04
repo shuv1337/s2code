@@ -33,7 +33,7 @@ describe("cliRelease", () => {
     expect(cliArchivePlatformKey("win32", "x64")).toBe("win32-x64");
     expect(cliArchivePlatformKey("darwin", "x64")).toBeUndefined();
     expect(cliArchivePlatformKey("linux", "arm64")).toBe("linux-arm64");
-    expect(cliArchivePlatformKey("win32", "arm64")).toBe("win32-arm64");
+    expect(cliArchivePlatformKey("win32", "arm64")).toBeUndefined();
     expect(cliArchivePlatformKey("freebsd", "x64")).toBeUndefined();
     expect(cliArchivePlatformKey("linux", "ia32")).toBeUndefined();
   });

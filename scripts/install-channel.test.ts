@@ -156,3 +156,47 @@ it.skipIf(platform === "win32" || (platform === "darwin" && arch !== "arm64"))(
     }
   },
 );
+
+it.skipIf(platform === "win32")(
+  "refuses Intel Macs with a clear message and installs nothing",
+  () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "intel-installer-"));
+    try {
+      const tools = NodePath.join(root, "tools");
+      NodeFS.mkdirSync(tools);
+      NodeFS.writeFileSync(
+        NodePath.join(tools, "uname"),
+        '#!/bin/sh\ncase "$1" in -s) echo Darwin;; *) echo x86_64;; esac\n',
+        { mode: 0o755 },
+      );
+      for (const command of ["sh", "sed", "tr", "mkdir"]) {
+        const executable = NodeChildProcess.execFileSync(
+          "sh",
+          ["-c", 'command -v "$1"', "sh", command],
+          {
+            encoding: "utf8",
+          },
+        ).trim();
+        NodeFS.symlinkSync(executable, NodePath.join(tools, command));
+      }
+      const result = NodeChildProcess.spawnSync(
+        "sh",
+        [NodePath.resolve(import.meta.dirname, "install.sh")],
+        {
+          encoding: "utf8",
+          env: {
+            PATH: tools,
+            HOME: root,
+            S2CODE_HOME: NodePath.join(root, "home"),
+            S2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
+          },
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("no longer built for Intel Macs");
+      expect(NodeFS.readdirSync(root)).toEqual(["tools"]);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

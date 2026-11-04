@@ -23,14 +23,13 @@ Public app names and URL schemes use S2Code and `s2code`.
 
 One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives, package manifests and release receipts. Desktop builds cover
-macOS ARM64/x64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
-ARM64/x64 (NSIS). Each Windows desktop embeds the matching same-version Linux
+macOS ARM64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
+x64 (NSIS). Intel macOS and Windows ARM64 are not built. The Windows desktop embeds the matching same-version Linux
 `s2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
 compares its digest before publication.
 
-CLI archives cover **five** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
-`win32-arm64`, `win32-x64`. **Intel macOS CLI/SEA is unsupported**; use the Intel
-desktop app. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
+CLI archives cover **four** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
+`win32-x64`. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
 include byte-identical `shuv2code-<version>-<platform>-<arch>` and
 `t3-<version>-<platform>-<arch>` aliases for installed clients; all three names have
 checksum entries. The archive's internal root directory retains
@@ -39,8 +38,8 @@ look for that exact directory. The internal executable remains `t3`. That does n
 publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the public npm endpoints are `s2code` and
-`@s2code/t3-<platform>` for those five CLI targets. Platform packages publish first; the launchers follow only
-once npm has accepted all five, with exact matching optional dependency versions.
+`@s2code/t3-<platform>` for those four CLI targets. Platform packages publish first; the launchers follow only
+once npm has accepted all four, with exact matching optional dependency versions.
 The `shuv2code` bridge launcher publishes the same version and depends on those
 canonical platform packages, preserving upgrades for existing npm installs.
 
@@ -59,7 +58,7 @@ keychains, keys and profiles from `RUNNER_TEMP` at the end. npm publishing stays
 runners: `scripts/fork-release.ts` refuses any other runner.
 
 To go back to hosted runners, change `FORK_MACOS_ARM64_SELF_HOSTED_RUNNER` in
-`scripts/lib/fork-release.ts` to `"macos-26"`. macOS x64 stays on `macos-15-intel`.
+`scripts/lib/fork-release.ts` to `"macos-26"`.
 
 ## Nightly only
 
@@ -98,14 +97,14 @@ GitHub SHA-256 digests. Updater manifests are uploaded last, and the complete
 draft is verified before publication.
 
 npm publication is optional. It requires both `S2CODE_NPM_TRUSTED_PUBLISHING_READY`
-for the six canonical names and `FORK_NPM_TRUSTED_PUBLISHING_READY` for the legacy
+for the five canonical names and `FORK_NPM_TRUSTED_PUBLISHING_READY` for the legacy
 bridge to be `true`. Otherwise the GitHub release still publishes and `release.json`
-lists no npm packages. When both are ready, all seven packages publish under a temporary
-non-default dist-tag with `npm publish --provenance`: the five platform packages at once,
+lists no npm packages. When both are ready, all six packages publish under a temporary
+non-default dist-tag with `npm publish --provenance`: the four platform packages at once,
 then both launchers at once. Their names, versions, repository and tarball integrity are
 verified before the release is exposed.
 npm reviews each new version before it can be installed, which took up to about
-fifteen minutes for these packages. The seven reviews are awaited together, each for up
+fifteen minutes for these packages. The six reviews are awaited together, each for up
 to thirty minutes. Answers the registry could not give (429, 5xx, timeouts) are retried
 within that budget; a mismatched tarball or a package outside the allowlist fails at once.
 After the release publishes, the `nightly` dist-tag is promoted in two concurrent
@@ -166,7 +165,7 @@ Hosted/relay, marketing and AUR deployment are intentionally separate and are no
 invoked by this pipeline; configure their fork identities in their owning work.
 
 npm is optional (see [Nightly only](#nightly-only)). To enable it, human npm setup
-must establish ownership/bootstrap of the six canonical package names, retain the
+must establish ownership/bootstrap of the five canonical package names, retain the
 legacy bridge package, and configure trusted publishers
 for **calling workflow filename `release.yml`**, repository `shuv1337/s2code`, environment `fork-release`. Enable both direct `npm publish`
 and `npm dist-tag` allowed actions for each package. The readiness variable is an
@@ -188,11 +187,11 @@ Already uploaded assets and npm versions are reused only when their digests matc
 Do not rebuild different signed bytes under an immutable version, overwrite public
 release assets or move a dist-tag backwards. If the run's build artifacts have
 expired or the builds must be redone, use a new version. Rolling index/tag repair may be retried after a fully
-verified release; inspect all seven endpoints and the release before doing so.
+verified release; inspect all six endpoints and the release before doing so.
 
 Before claiming delivery, a human must run the protected workflow with real fork
 accounts and capture: signature/team/publisher and notarization evidence for
-signed platforms; CLI smoke results on all five architectures; installs/upgrades
+signed platforms; CLI smoke results on all four architectures; installs/upgrades
 for each desktop target; same-arch Windows WSL startup; checksums and nightly feed
 selection; install-order coexistence with upstream. With npm enabled, also capture
 clean npm installs of the launcher and optional packages and OIDC provenance. An
