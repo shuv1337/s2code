@@ -9,6 +9,12 @@ on:
     - cron: "17 9 * * *"
   # Manual runs release main immediately, without the due check.
   workflow_dispatch:
+    inputs:
+      promote_version:
+        description: Promote only. Move the npm dist-tags to this already published version; builds and changes nothing else.
+        required: false
+        default: ""
+        type: string
 
 # Serialize publication, including the shared release index.
 concurrency:
@@ -24,7 +30,7 @@ permissions:
 # Their accounts and fork-owned destinations are separate prerequisites (#276/#268).
 jobs:
   due:
-    if: github.repository == 'shuv1337/s2code'
+    if: github.repository == 'shuv1337/s2code' && !inputs.promote_version
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -359,7 +365,7 @@ jobs:
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04 # npm trusted publishing requires GitHub-hosted runners.
     environment: fork-release
-    # npm reviews each new version before it is installable; publish waits for it.
+    # Downloads, shapes and uploads the desktop assets; npm review is never awaited.
     timeout-minutes: 90
     outputs:
       windows_built: ${{ steps.windows.outputs.built }}
@@ -434,7 +440,8 @@ jobs:
         run: df -h /
       # Shapes the assets (feeds, CLI aliases, SHA256SUMS, release.json) and logs
       # disk again before uploading anything.
-      - name: Shape assets, draft, verify, publish npm when ready, expose feeds and index last
+      - name: Shape assets, publish the verified release and index, then npm and its dist-tags
+        id: publish
         env:
           WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
         run: node scripts/fork-release.ts publish --execute
@@ -445,6 +452,7 @@ jobs:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
+          NPM_STATUS: ${{ steps.publish.outputs.npm }}
         run: |
           tag="v${RELEASE_VERSION}"
           if [ -z "$DISCORD_RELEASE_WEBHOOK_URL" ]; then echo "Discord webhook secret is unset; skipping."; exit 0; fi
@@ -456,6 +464,7 @@ jobs:
           fi
           extra_args=()
           if [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then extra_args=(--npm shuv2code); fi
+          if [ "$NPM_STATUS" = "pending" ]; then extra_args+=(--link "npm: pending review; the dist-tags stay on the previous version until it is promoted"); fi
           if [ "$WINDOWS_BUILT" != "true" ]; then extra_args+=(--link "windows: not built; npx shuv2code is unavailable on Windows for this version"); fi
           status=0
           bash .github/scripts/notify-discord-release.sh \
@@ -465,6 +474,44 @@ jobs:
             --link "release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
             || status=$?
           exit "$status"
+
+  # Promote-only: once npm shows a version an earlier run left pending review, move
+  # its dist-tags. Nothing is built, uploaded or published (docs/operations/release.md).
+  promote:
+    name: Promote npm dist-tags
+    if: >-
+      github.repository == 'shuv1337/s2code' &&
+      inputs.promote_version != '' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04 # npm trusted publishing requires GitHub-hosted runners.
+    environment: fork-release
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
+      FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
+      NPM_TOKEN: ""
+      NODE_AUTH_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          run-install: true
+      - name: Pin npm with OIDC dist-tag support; no token fallback
+        run: |
+          npm install --global npm@11.21.0
+          printf 'registry=https://registry.npmjs.org/\n' > "$RUNNER_TEMP/fork-npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/fork-npmrc" >> "$GITHUB_ENV"
+      - name: Promote the published version once npm shows it
+        env:
+          PROMOTE_VERSION: ${{ inputs.promote_version }}
+        run: node scripts/fork-release.ts promote --execute
 
   # Publish does not wait on Windows, but a release without it must not look green.
   windows_missing:

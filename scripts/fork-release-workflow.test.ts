@@ -104,6 +104,21 @@ describe("fork workflow gates", () => {
     expect(publish).toContain(
       "WINDOWS_BUILT: ${{ steps.windows.outputs.built }}\n        run: node scripts/fork-release.ts publish --execute",
     );
+    // Promote-only moves dist-tags with the publisher's OIDC identity and nothing more.
+    const promote = workflow.split("\n  promote:\n")[1]!.split("\n  windows_missing:")[0]!;
+    expect(due).toContain("&& !inputs.promote_version");
+    expect(promote).toContain(
+      "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+    );
+    expect(promote).toContain("    environment: fork-release\n");
+    expect(
+      promote.split("    permissions:\n")[1]!.split("    steps:\n")[0]!.trimEnd().split("\n"),
+    ).toEqual([
+      "      contents: read",
+      "      id-token: write",
+      ...publishJob.split("    permissions:\n")[1]!.trimEnd().split("\n").slice(3),
+    ]);
+    expect(promote).toContain("run: node scripts/fork-release.ts promote --execute");
   });
   it.each([true, false])(
     "decides from the Windows installer what ships, builds npm and announces it (installer present: %s)",
@@ -187,6 +202,8 @@ describe("fork workflow gates", () => {
           WINDOWS_BUILT: String(present),
           DISCORD_RELEASE_WEBHOOK_URL: "https://discord.invalid/fixture",
           FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
+          // Covers both npm outcomes across the two cases.
+          NPM_STATUS: present ? "promoted" : "pending",
         });
         expect(announce.status, announce.stderr).toBe(0);
         const content = (
@@ -200,6 +217,11 @@ describe("fork workflow gates", () => {
         expect(
           content.includes(
             "windows: not built; npx shuv2code is unavailable on Windows for this version",
+          ),
+        ).toBe(!present);
+        expect(
+          content.includes(
+            "npm: pending review; the dist-tags stay on the previous version until it is promoted",
           ),
         ).toBe(!present);
       } finally {

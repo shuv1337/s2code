@@ -305,44 +305,48 @@ describe("fork release contract", () => {
     expect(nightlyRecipe).toContain('_appimage="S2Code-${_release_version}-x86_64.AppImage"');
     expect(desktopAssetGroups("1.2.3").flat()).toContain("S2Code-1.2.3-x86_64.AppImage");
   });
-  it("exposes feeds and release/index only after binary and npm verification", async () => {
+  it("makes the release public before npm, and promotes only a version npm shows", async () => {
     const order: string[] = [];
     const steps = [
       "ensureDraft",
       "uploadBinaries",
       "verifyBinaries",
-      "publishNpm",
-      "verifyNpm",
       "uploadFeeds",
       "verifyCompleteRelease",
       "publishRelease",
-      "promoteNpmTags",
       "publishIndex",
+      "publishNpm",
+      "npmVisible",
+      "promoteNpmTags",
     ] as const;
-    const operations = Object.fromEntries(
-      steps.map((step) => [
-        step,
-        async () => {
-          order.push(step);
-        },
-      ]),
-    ) as Parameters<typeof publishForkReleaseSequence>[0];
-    await publishForkReleaseSequence(operations);
+    const operations = (visible: boolean) =>
+      Object.fromEntries(
+        steps.map((step) => [
+          step,
+          async () => {
+            order.push(step);
+            return step === "npmVisible" ? visible : undefined;
+          },
+        ]),
+      ) as Parameters<typeof publishForkReleaseSequence>[0];
+    expect(await publishForkReleaseSequence(operations(true))).toBe("promoted");
     expect(order).toEqual(steps);
-    for (const blocked of ["verifyBinaries", "publishNpm", "verifyNpm", "verifyCompleteRelease"]) {
+    order.length = 0;
+    expect(await publishForkReleaseSequence(operations(false))).toBe("pending");
+    expect(order).toEqual(steps.slice(0, -1));
+    for (const blocked of ["verifyBinaries", "verifyCompleteRelease", "publishRelease"]) {
       order.length = 0;
       await expect(
         publishForkReleaseSequence({
-          ...operations,
+          ...operations(true),
           [blocked]: async () => {
             order.push(blocked);
             throw new Error("fixture failure");
           },
         }),
       ).rejects.toThrow("fixture failure");
-      expect(order).not.toContain("publishRelease");
+      expect(order).not.toContain("publishNpm");
       expect(order).not.toContain("promoteNpmTags");
-      expect(order).not.toContain("publishIndex");
     }
   });
 });

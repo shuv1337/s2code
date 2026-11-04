@@ -163,25 +163,34 @@ Publication accepts only the default branch. The scheduled due/source check
 runs without a protected environment, so days with nothing to release skip the
 builds and publication without requesting approval.
 
-Artifacts are first uploaded to a **draft** release and checked against their
-GitHub SHA-256 digests. Updater manifests are uploaded last, and the complete
-draft is verified before publication.
+Publication runs in this order, and npm never holds the GitHub release back:
+
+1. Artifacts are uploaded to a **draft** release and checked against their GitHub
+   SHA-256 digests. Updater manifests are uploaded last, the complete draft is
+   verified, and the release and the rolling index are made public.
+2. `npm publish --provenance` publishes the `shuv2code` launcher under a temporary
+   staging dist-tag that nobody installs.
+3. The `nightly` and `latest` dist-tags move to the new version once npm shows it.
 
 npm publication is optional. It requires `FORK_NPM_TRUSTED_PUBLISHING_READY` to be
 `true`. Otherwise the GitHub release still publishes and `release.json` lists no npm
 packages. When it is, the publish job builds the launcher from the release's CLI archives
-and checks that its `checksums.json` matches the archives being uploaded. The launcher
-publishes under a temporary non-default dist-tag with `npm publish --provenance` while the
-release is still a draft; nobody installs that tag, so it does not matter that its download
-would fail until then. Its name, version, repository and tarball integrity are verified
-before the release is exposed. npm reviews each new version before it can be installed,
-which took up to about fifteen minutes; the review is awaited for up to thirty minutes.
-Answers the registry could not give (429, 5xx, timeouts) are retried within that budget;
-a mismatched tarball or a package outside the allowlist fails at once.
-The `nightly` dist-tag is promoted only after the release publishes, so a promoted launcher
-can always download its archive. A nightly moves `latest` as well, so `npx shuv2code`
-installs the newest nightly; `nightly` refuses to move backwards, while `latest` is left
-alone with a log line when a newer version already holds it.
+and checks that its `checksums.json` pins exactly the archives the release carries, so the
+launcher can always download what it pins. Without a Windows build the launcher pins no
+Windows archive and reports Windows as unsupported.
+
+npm reviews some new versions before they can be installed, which has taken up to about
+fifty minutes. The publish job looks for the version for about three minutes. If npm shows
+it, its name, version, repository and tarball integrity are verified and the dist-tags move.
+If not, the job still succeeds with a `::warning::`, the dist-tags stay on the previous
+version, and the run summary and the Discord post say **npm pending review**. Promote it
+later as described in [Recovery](#recovery-and-human-smoke-evidence). Answers the registry
+could not give (429, 5xx, timeouts) are retried; a mismatched tarball or a package outside
+the allowlist fails at once.
+
+A nightly moves `latest` as well, so `npx shuv2code` installs the newest nightly; `nightly`
+refuses to move backwards, while `latest` is left alone with a log line when a newer
+version already holds it.
 
 `SHA256SUMS` covers final desktop and CLI bytes. The updater feeds that publish
 use the `nightly*.yml` Electron manifest names and include both architectures. The
@@ -198,9 +207,10 @@ checks retain the fork npm/GitHub sources. Consumers of the rolling index should
 use the raw branch URL above, not the former release-asset URL. CDN caches may
 briefly serve the previous complete index after a successful publication.
 
-When npm is enabled, GitHub and npm cannot commit a release atomically. Exact npm
-versions become public during publication, but automatic tags remain unchanged until verification.
-A failure after the launcher publishes leaves automatic promotion incomplete and the workflow red. Never treat a successful dry run or
+When npm is enabled, GitHub and npm cannot commit a release atomically. The GitHub
+release is complete and public before npm is touched, and the dist-tags stay unchanged
+until npm shows a verified version. A failed npm publish turns the workflow red with the
+release already public; a version still in review leaves it green and pending. Never treat a successful dry run or
 one published endpoint as delivery evidence.
 
 ## Account and credential prerequisites (names only)
@@ -245,6 +255,22 @@ The publisher uses a GitHub-hosted runner, `id-token: write`, npm 11.21.0 and no
 `NPM_TOKEN`/`NODE_AUTH_TOKEN` fallback. No credentials belong in source or release assets.
 
 ## Recovery and human smoke evidence
+
+To promote a version that finished npm review after its run reported it pending, run the
+promote-only path from `main`:
+
+```bash
+gh workflow run release.yml --ref main -f promote_version=<version>
+```
+
+It builds and uploads nothing. It requires the version's GitHub release to be public,
+checks npm for the version, moves `nightly` and `latest` once npm shows it, and is green
+and pending again if npm still does not. Running it twice is harmless. Re-running the
+publish job of the original run (`gh run rerun <run-id> --job <publish-job-id>`) also works
+once npm shows the version: it reuses the public release unchanged, skips the published
+npm version and only promotes. Do not re-run publish while npm still reviews the version,
+because it cannot tell that version apart from an unpublished one and npm refuses the
+second publish.
 
 Use **Re-run failed jobs** on the same workflow run, never **Re-run all jobs**, which
 rebuilds the signed desktops as different bytes. The `publish` job prepares again from
