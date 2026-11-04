@@ -97,11 +97,10 @@ export const OrchestratorMcpTargetOptions = Schema.Union([
 ]);
 export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.Type;
 
-/**
- * Opt-in for a named instance: when it cannot take the work, its pool's freest member does. No
- * description, to keep the tool list small; a refusal names the flag when it would help.
- */
-export const OrchestratorMcpAllowPoolFailover = Schema.Boolean;
+/** Opt-in for a named instance, shared by every tool that can name one. */
+export const OrchestratorMcpAllowPoolFailover = Schema.Boolean.annotate({
+  description: "If the named seat can't run, fall back to another member of its pool.",
+});
 
 export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(
