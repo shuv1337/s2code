@@ -344,10 +344,29 @@ const bundleLinuxLibatomic = Effect.fn("bundleLinuxLibatomic")(function* (input:
 
 const MacSigningConfig = Config.all({
   identity: Config.String("T3CODE_CLI_MAC_SIGN_IDENTITY").pipe(Config.option),
+  keychain: Config.String("T3CODE_CLI_MAC_SIGN_KEYCHAIN").pipe(Config.option),
   appleApiKey: Config.String("APPLE_API_KEY").pipe(Config.option),
   appleApiKeyId: Config.String("APPLE_API_KEY_ID").pipe(Config.option),
   appleApiIssuer: Config.String("APPLE_API_ISSUER").pipe(Config.option),
 });
+
+export function macCodesignArgs(input: {
+  readonly identity: string;
+  readonly keychain: string | undefined;
+  readonly entitlements: string | undefined;
+  readonly target: string;
+}): ReadonlyArray<string> {
+  return [
+    "--force",
+    "--sign",
+    input.identity,
+    // A runner in the System session (a LaunchDaemon) ignores the user keychain search list.
+    ...(input.keychain ? ["--keychain", input.keychain] : []),
+    ...(input.identity === "-" ? [] : ["--options", "runtime", "--timestamp"]),
+    ...(input.entitlements ? ["--entitlements", input.entitlements] : []),
+    input.target,
+  ];
+}
 
 /** Apple Silicon requires signed binaries; notarization's hardened runtime also requires every native addon signed. */
 const signMacArchiveContents = Effect.fn("signMacArchiveContents")(function* (input: {
@@ -359,6 +378,7 @@ const signMacArchiveContents = Effect.fn("signMacArchiveContents")(function* (in
   const path = yield* Path.Path;
   const signing = yield* MacSigningConfig;
   const identity = Option.getOrUndefined(signing.identity)?.trim() || "-";
+  const keychain = Option.getOrUndefined(signing.keychain)?.trim() || undefined;
 
   const entitlements = path.join(input.repoRoot, "apps/server/resources/cli-entitlements.plist");
   const libraries = (yield* fs.readDirectory(input.contentDir, { recursive: true }))
@@ -373,14 +393,15 @@ const signMacArchiveContents = Effect.fn("signMacArchiveContents")(function* (in
 
   for (const target of [...libraries, input.executablePath]) {
     yield* runCommand(
-      ChildProcess.make("codesign", [
-        "--force",
-        "--sign",
-        identity,
-        ...(identity === "-" ? [] : ["--options", "runtime", "--timestamp"]),
-        ...(target === input.executablePath ? ["--entitlements", entitlements] : []),
-        target,
-      ]),
+      ChildProcess.make(
+        "codesign",
+        macCodesignArgs({
+          identity,
+          keychain,
+          entitlements: target === input.executablePath ? entitlements : undefined,
+          target,
+        }),
+      ),
       `codesign ${path.relative(input.contentDir, target)}`,
     );
   }

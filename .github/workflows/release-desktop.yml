@@ -250,10 +250,9 @@ jobs:
           cache: true
           run-install: false
 
-      # pnpm checks the lockfile and policy before reusing this result. A missing
-      # artifact leaves the cache empty, so installation runs the checks again.
+      # pnpm checks the lockfile and policy before reusing this result, which
+      # release.yml's build_bundle uploads before any desktop job starts.
       - name: Download dependency verification
-        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-dependency-verification
@@ -485,7 +484,7 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$cert_path" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
           keychains=("$keychain")
           while IFS= read -r existing; do keychains+=("$existing"); done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
           security list-keychains -d user -s "${keychains[@]}"
@@ -494,8 +493,27 @@ jobs:
             echo "No Developer ID Application identity found in CSC_LINK." >&2
             exit 1
           fi
-          echo "T3CODE_CLI_MAC_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          # shuvbot's runner is a LaunchDaemon in the System session, where codesign
+          # searches only System.keychain unless --keychain names this one.
+          {
+            echo "T3CODE_CLI_MAC_SIGN_IDENTITY=$identity"
+            echo "T3CODE_CLI_MAC_SIGN_KEYCHAIN=$keychain"
+          } >> "$GITHUB_ENV"
           echo "macOS CLI signing enabled."
+
+      # Identity names only: no hashes, keychain passwords or certificate data.
+      - name: List macOS code signing identity names
+        if: inputs.cli_archive && inputs.platform == 'mac' && env.T3CODE_CLI_MAC_SIGN_KEYCHAIN != ''
+        shell: bash
+        run: |
+          list() {
+            echo "security find-identity $*:"
+            security find-identity "$@" 2>/dev/null | sed -n 's/^[^"]*"\([^"]*\)".*$/  \1/p' || true
+          }
+          list -p codesigning "$T3CODE_CLI_MAC_SIGN_KEYCHAIN"
+          list -v -p codesigning "$T3CODE_CLI_MAC_SIGN_KEYCHAIN"
+          list -p codesigning
+          list -v -p codesigning
 
       - name: Stage resource monitor for the CLI archive
         if: inputs.cli_archive
@@ -526,7 +544,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ inputs.release_publication }}" == true && "${{ steps.signing_policy.outputs.mac_signed }}" != true && "${{ inputs.platform }}" == mac ]]; then
-            unset APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER T3CODE_CLI_MAC_SIGN_IDENTITY
+            unset APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER T3CODE_CLI_MAC_SIGN_IDENTITY T3CODE_CLI_MAC_SIGN_KEYCHAIN
           fi
           if [[ "${{ inputs.release_publication }}" == true && "${{ steps.signing_policy.outputs.win_signed }}" != true && "${{ inputs.platform }}" == win ]]; then
             unset AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME
