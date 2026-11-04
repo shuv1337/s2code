@@ -941,34 +941,45 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect("status returns an explicit non-repo result for deleted directories", () =>
-    Effect.gen(function* () {
-      const rootDir = yield* makeTempDir("t3code-git-manager-missing-dir-");
-      const cwd = NodePath.join(rootDir, "deleted-repo");
-      yield* makeDirectory(cwd);
-      yield* removePath(cwd);
-      const { manager } = yield* makeManager();
+  it.effect(
+    "status returns an explicit non-repo result for deleted directories and worktrees",
+    () =>
+      Effect.gen(function* () {
+        const rootDir = yield* makeTempDir("t3code-git-manager-missing-dir-");
+        const cwd = NodePath.join(rootDir, "deleted-repo");
+        yield* makeDirectory(cwd);
+        yield* removePath(cwd);
+        // Git 2.56 reports a dangling .git file as "gitfile does not point to a valid repository".
+        const repoDir = NodePath.join(rootDir, "repo");
+        const danglingWorktree = NodePath.join(rootDir, "dangling");
+        yield* makeDirectory(repoDir);
+        yield* initRepo(repoDir);
+        yield* runGit(repoDir, ["worktree", "add", danglingWorktree, "-b", "dangling"]);
+        yield* removePath(NodePath.join(repoDir, ".git", "worktrees", "dangling"));
+        const { manager } = yield* makeManager();
 
-      const status = yield* manager.status({ cwd });
+        for (const statusCwd of [cwd, danglingWorktree]) {
+          const status = yield* manager.status({ cwd: statusCwd });
 
-      expect(status).toEqual({
-        isRepo: false,
-        hasPrimaryRemote: false,
-        isDefaultRef: false,
-        refName: null,
-        hasWorkingTreeChanges: false,
-        workingTree: {
-          files: [],
-          insertions: 0,
-          deletions: 0,
-        },
-        hasUpstream: false,
-        aheadCount: 0,
-        behindCount: 0,
-        aheadOfDefaultCount: 0,
-        pr: null,
-      });
-    }),
+          expect(status).toEqual({
+            isRepo: false,
+            hasPrimaryRemote: false,
+            isDefaultRef: false,
+            refName: null,
+            hasWorkingTreeChanges: false,
+            workingTree: {
+              files: [],
+              insertions: 0,
+              deletions: 0,
+            },
+            hasUpstream: false,
+            aheadCount: 0,
+            behindCount: 0,
+            aheadOfDefaultCount: 0,
+            pr: null,
+          });
+        }
+      }),
   );
 
   it.effect("a git read in flight during a T3 git action does not outlive it", () =>
