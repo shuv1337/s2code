@@ -236,7 +236,8 @@ const publishCmd = Command.make(
           const version = manifests[0]?.version;
           if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
             throw new Error("Invalid fork package version.");
-          assertForkNpmSet(manifests, version);
+          // Manual publication only ships the complete set, Windows included.
+          assertForkNpmSet(manifests, version, true);
           if (!config.dryRun && !forkNpmPublishingReady(publishingEnvironment))
             throw new Error(
               "New s2code npm publishers and the shuv2code bridge must both be verified before publication.",

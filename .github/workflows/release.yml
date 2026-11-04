@@ -73,6 +73,7 @@ jobs:
       matrix_rest: ${{ steps.split_matrix.outputs.matrix_rest }}
       matrix_mac_arm64: ${{ steps.split_matrix.outputs.matrix_mac_arm64 }}
       matrix_mac_arm64_fallback: ${{ steps.split_matrix.outputs.matrix_mac_arm64_fallback }}
+      matrix_win_x64: ${{ steps.split_matrix.outputs.matrix_win_x64 }}
       due: ${{ needs.due.outputs.due }}
     steps:
       - uses: actions/checkout@v6
@@ -111,14 +112,14 @@ jobs:
           export RELEASE_DATE
           node scripts/fork-release.ts preflight
       - id: split_matrix
-        name: Keep macOS arm64 out of the shared desktop matrix
+        name: Keep macOS arm64 and Windows x64 out of the shared desktop matrix
         env:
           MATRIX: ${{ steps.plan.outputs.matrix }}
         run: node .github/scripts/macos-arm64-runner-retry.cjs split-matrix
       - name: Verify release logic
         run: |
           node --test .github/scripts/macos-arm64-runner-retry.test.cjs
-          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
+          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@v7
         with:
           name: release-plan
@@ -192,14 +193,40 @@ jobs:
       # environment, so the team id comes from preflight rather than `vars`.
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
-  # macOS arm64 builds first on the self-hosted shuvbot runner (owned by Fleet
-  # Ops; see docs/operations/release.md). Retries 2-6 use hosted macos-26, which
-  # cancels an unassigned job after ~15 minutes (runner_id 0). That is not
-  # timeout-minutes (already 30). A missed attempt stays cancelled, so the run
-  # stays red even when a later attempt succeeds. The gate notice says not to
-  # re-run failed jobs. `with` (retries) and the check steps are anchored.
-  # To revert to hosted runners, set FORK_MACOS_ARM64_SELF_HOSTED_RUNNER in
-  # scripts/lib/fork-release.ts to "macos-26".
+  # Publish does not require this job: a failed Windows build leaves the Windows
+  # assets and npm package out of the release (see the publish job). GitHub
+  # refuses continue-on-error on a job that calls a reusable workflow, so
+  # win_optional sets it on the build job in release-desktop.yml.
+  desktop_win_x64:
+    name: Desktop (Windows x64)
+    needs: [preflight, build_bundle]
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).label }}
+      runner: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).runner }}
+      platform: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).platform }}
+      target: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).target }}
+      arch: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).arch }}
+      rust_target: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).rust_target }}
+      resource_key: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).resource_key }}
+      cli_archive: ${{ fromJSON(needs.preflight.outputs.matrix_win_x64).cli_archive }}
+      win_optional: true
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      relay_client_tracing: false
+      release_publication: true
+      mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
+      win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
+      apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+
+  # macOS arm64 builds once on the self-hosted shuvbot runner (owned by Fleet
+  # Ops; see docs/operations/release.md). If shuvbot never picks it up, the queue
+  # watch below starts one hosted macos-26 build instead. GitHub cancels a hosted
+  # job that gets no runner after ~15 minutes (runner_id 0); timeout-minutes does
+  # not extend that, and nothing retries it. To revert to hosted runners, set
+  # FORK_MACOS_ARM64_SELF_HOSTED_RUNNER in scripts/lib/fork-release.ts to "macos-26".
   desktop_mac_arm64:
     name: Desktop (macOS arm64)
     needs: [preflight, build_bundle]
@@ -280,7 +307,7 @@ jobs:
     if: needs.mac_arm64_queue_watch.outputs.fallback == 'true'
     uses: ./.github/workflows/release-desktop.yml
     secrets: *mac_arm64_secrets
-    with: &mac_arm64_fallback_build
+    with:
       label: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).label }}
       runner: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64_fallback).runner }}
       platform: ${{ fromJSON(needs.preflight.outputs.matrix_mac_arm64).platform }}
@@ -298,130 +325,9 @@ jobs:
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
 
-  mac_arm64_after_1:
-    name: macOS arm64 runner check 1
-    needs: [preflight, desktop_mac_arm64]
-    if: always() && !cancelled() && needs.desktop_mac_arm64.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      retry: ${{ steps.decide.outputs.retry }}
-    env:
-      CALLER_NAME: Desktop (macOS arm64)
-    steps: &mac_arm64_check_steps
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-      - id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CALLER_NAME: ${{ env.CALLER_NAME }}
-        run: |
-          set -euo pipefail
-          node .github/scripts/macos-arm64-runner-retry.cjs jobs "$RUNNER_TEMP/jobs.jsonl"
-          node .github/scripts/macos-arm64-runner-retry.cjs attempt "$RUNNER_TEMP/jobs.jsonl"
-
-  desktop_mac_arm64_retry_2:
-    name: Desktop (macOS arm64 retry 2)
-    needs: [preflight, build_bundle, mac_arm64_after_1]
-    if: always() && !cancelled() && needs.mac_arm64_after_1.outputs.retry == 'true'
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: *mac_arm64_secrets
-    with: *mac_arm64_fallback_build
-
-  mac_arm64_after_2:
-    name: macOS arm64 runner check 2
-    needs: [preflight, desktop_mac_arm64_retry_2]
-    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_2.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      retry: ${{ steps.decide.outputs.retry }}
-    env:
-      CALLER_NAME: Desktop (macOS arm64 retry 2)
-    steps: *mac_arm64_check_steps
-
-  desktop_mac_arm64_retry_3:
-    name: Desktop (macOS arm64 retry 3)
-    needs: [preflight, build_bundle, mac_arm64_after_2]
-    if: always() && !cancelled() && needs.mac_arm64_after_2.outputs.retry == 'true'
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: *mac_arm64_secrets
-    with: *mac_arm64_fallback_build
-
-  mac_arm64_after_3:
-    name: macOS arm64 runner check 3
-    needs: [preflight, desktop_mac_arm64_retry_3]
-    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_3.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      retry: ${{ steps.decide.outputs.retry }}
-    env:
-      CALLER_NAME: Desktop (macOS arm64 retry 3)
-    steps: *mac_arm64_check_steps
-
-  desktop_mac_arm64_retry_4:
-    name: Desktop (macOS arm64 retry 4)
-    needs: [preflight, build_bundle, mac_arm64_after_3]
-    if: always() && !cancelled() && needs.mac_arm64_after_3.outputs.retry == 'true'
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: *mac_arm64_secrets
-    with: *mac_arm64_fallback_build
-
-  mac_arm64_after_4:
-    name: macOS arm64 runner check 4
-    needs: [preflight, desktop_mac_arm64_retry_4]
-    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_4.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      retry: ${{ steps.decide.outputs.retry }}
-    env:
-      CALLER_NAME: Desktop (macOS arm64 retry 4)
-    steps: *mac_arm64_check_steps
-
-  desktop_mac_arm64_retry_5:
-    name: Desktop (macOS arm64 retry 5)
-    needs: [preflight, build_bundle, mac_arm64_after_4]
-    if: always() && !cancelled() && needs.mac_arm64_after_4.outputs.retry == 'true'
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: *mac_arm64_secrets
-    with: *mac_arm64_fallback_build
-
-  mac_arm64_after_5:
-    name: macOS arm64 runner check 5
-    needs: [preflight, desktop_mac_arm64_retry_5]
-    if: always() && !cancelled() && needs.desktop_mac_arm64_retry_5.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      retry: ${{ steps.decide.outputs.retry }}
-    env:
-      CALLER_NAME: Desktop (macOS arm64 retry 5)
-    steps: *mac_arm64_check_steps
-
-  desktop_mac_arm64_retry_6:
-    name: Desktop (macOS arm64 retry 6)
-    needs: [preflight, build_bundle, mac_arm64_after_5]
-    if: always() && !cancelled() && needs.mac_arm64_after_5.outputs.retry == 'true'
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: *mac_arm64_secrets
-    with: *mac_arm64_fallback_build
-
   mac_arm64_ready:
     name: macOS arm64 runner acquired
-    needs:
-      [
-        preflight,
-        desktop_mac_arm64,
-        desktop_mac_arm64_queue_fallback,
-        desktop_mac_arm64_retry_2,
-        desktop_mac_arm64_retry_3,
-        desktop_mac_arm64_retry_4,
-        desktop_mac_arm64_retry_5,
-        desktop_mac_arm64_retry_6,
-      ]
+    needs: [preflight, desktop_mac_arm64, desktop_mac_arm64_queue_fallback]
     if: always() && !cancelled() && needs.preflight.outputs.due == 'true' && needs.desktop_mac_arm64.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -437,11 +343,12 @@ jobs:
           node .github/scripts/macos-arm64-runner-retry.cjs jobs "$RUNNER_TEMP/jobs.jsonl"
           node .github/scripts/macos-arm64-runner-retry.cjs gate "$RUNNER_TEMP/jobs.jsonl"
 
-  # Prepare runs inside publish so the release assets download once instead of
+  # Publish shapes the release assets itself so they download once instead of
   # round-tripping as a multi-gigabyte artifact. A rerun rebuilds the same npm
-  # bytes from this run's build artifacts.
+  # bytes from this run's build artifacts. desktop_win_x64 is waited for but
+  # not required.
   publish:
-    needs: [due, preflight, desktop, mac_arm64_ready]
+    needs: [due, preflight, desktop, desktop_win_x64, mac_arm64_ready]
     if: >-
       always() &&
       !cancelled() &&
@@ -455,6 +362,8 @@ jobs:
     environment: fork-release
     # npm reviews each new version before it is installable; publish waits for it.
     timeout-minutes: 90
+    outputs:
+      windows_built: ${{ steps.windows.outputs.built }}
     permissions:
       contents: write
       actions: read
@@ -499,10 +408,30 @@ jobs:
           pattern: cli-*
           merge-multiple: true
           path: prepared/release-assets
-      - name: Build the six public packages once from the verified-source archives
+      # The Windows build uploads its installer only after its launch, signature
+      # and WSL payload checks pass, so the installer decides whether Windows ships.
+      - name: Check whether Windows x64 built
+        id: windows
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages
+        run: |
+          if [ -f "prepared/release-assets/S2Code-${RELEASE_VERSION}-x64.exe" ]; then
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::The Windows x64 build failed. This release leaves out the Windows assets and the Windows npm platform package."
+            # A CLI archive uploaded before the failure must not become an npm package.
+            rm -f "prepared/release-assets/s2code-${RELEASE_VERSION}-win32-x64.zip"
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Without Windows, the launchers list only the platforms that built.
+      - name: Build the public npm packages once from the verified-source archives
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
+        run: |
+          args=()
+          if [ "$WINDOWS_BUILT" != "true" ]; then args=(--allow-missing); fi
+          node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages "${args[@]}"
       # Publish reads only the .tgz files. The extracted trees beside them duplicate
       # every platform binary. The release assets stay: publish uploads and re-hashes them.
       - name: Drop the extracted npm package trees, keeping the tarballs
@@ -521,11 +450,13 @@ jobs:
           echo "Kept tarballs:"
           ls -l "${tarballs[@]}"
           df -h /
-      - name: Verify complete matrix, source/WSL receipts, feeds and package allowlist
-        run: node scripts/fork-release.ts prepare
       - name: Log disk before publish
         run: df -h /
-      - name: Draft, verify, publish npm when ready, expose feeds and index last
+      # Shapes the assets (feeds, CLI aliases, SHA256SUMS, release.json) and logs
+      # disk again before uploading anything.
+      - name: Shape assets, draft, verify, publish npm when ready, expose feeds and index last
+        env:
+          WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
         run: node scripts/fork-release.ts publish --execute
       # Runs only after the publish step succeeds; a Discord failure never fails the release.
       - name: Announce the release on Discord
@@ -533,6 +464,7 @@ jobs:
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
         run: |
           tag="v${RELEASE_VERSION}"
           if [ -z "$DISCORD_RELEASE_WEBHOOK_URL" ]; then echo "Discord webhook secret is unset; skipping."; exit 0; fi
@@ -542,13 +474,26 @@ jobs:
             if grep -q 'Reference already exists' claim.err; then echo "${tag} was already announced; skipping."; else echo "Could not record the announcement claim; skipping."; fi
             exit 0
           fi
-          npm_args=()
-          if [ "$S2CODE_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then npm_args=(--npm s2code); fi
+          extra_args=()
+          if [ "$S2CODE_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then extra_args=(--npm s2code); fi
+          if [ "$WINDOWS_BUILT" != "true" ]; then extra_args+=(--link "windows: not built; npx @s2code/cli is unavailable on Windows for this version"); fi
           status=0
           bash .github/scripts/notify-discord-release.sh \
             --project S2Code \
             --version "$tag" \
-            "${npm_args[@]}" \
+            "${extra_args[@]}" \
             --link "release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
             || status=$?
           exit "$status"
+
+  # Publish does not wait on Windows, but a release without it must not look green.
+  windows_missing:
+    name: Windows x64 left out of the release
+    needs: publish
+    if: always() && needs.publish.outputs.windows_built == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "::error::The Windows x64 build failed, so this release has no Windows installer, Windows CLI archive or Windows npm platform package."
+          exit 1

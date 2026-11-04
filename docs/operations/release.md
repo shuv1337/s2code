@@ -22,11 +22,19 @@ Public app names and URL schemes use S2Code and `s2code`.
 ## Matrix and source
 
 One resolved commit and one exact version feed the shared JS bundle, all native
-builds, archives, package manifests and release receipts. Desktop builds cover
+builds, archives and package manifests. Desktop builds cover
 macOS ARM64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
 x64 (NSIS). Intel macOS and Windows ARM64 are not built; the updater feeds list only the remaining targets, so existing Windows ARM64 installs update to the x64 build and Intel Mac installs find no update they can download. The Windows desktop embeds the matching same-version Linux
-`s2code-<version>-linux-<arch>` archive; the receipt reads that archive back out of the finished installer and
-compares its digest before publication.
+`s2code-<version>-linux-<arch>` archive for its WSL backend.
+
+A failed Windows x64 build does not block the release; macOS and Linux still do.
+Publication then leaves out the Windows installer, CLI archive and
+`@s2code/t3-win32-x64` npm package. The launchers publish without that dependency
+and their tags move as usual, so `npx @s2code/cli` does not work on Windows for that
+version. The release notes and Discord post say so, the release stays out of the
+rolling index, and a final `windows_missing` job turns the run red. Before upload,
+the Windows build lists the installer's app payload and requires
+`resources/wsl-runtime.tar.gz`.
 
 CLI archives cover **four** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-x64`. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
@@ -39,7 +47,7 @@ publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the public npm endpoints are `s2code` and
 `@s2code/t3-<platform>` for those four CLI targets. Platform packages publish first; the launchers follow only
-once npm has accepted all four, with exact matching optional dependency versions.
+once npm has accepted every platform package in the release, with exact matching optional dependency versions.
 The `shuv2code` bridge launcher publishes the same version and depends on those
 canonical platform packages, preserving upgrades for existing npm installs.
 
@@ -49,7 +57,7 @@ The macOS arm64 desktop build runs first on `shuvbot-macos`, a self-hosted Apple
 runner (labels `self-hosted, macOS, ARM64, shuvbot-macos`) that Fleet Ops owns. Ask Fleet Ops about
 its availability, Xcode installs and maintenance. If shuvbot has not picked the build up within
 10 minutes, a hosted `macos-26` build starts and cancels the queued one (they share a concurrency
-group). Retries 2-6 also use hosted `macos-26`.
+group). Nothing retries a hosted build that never gets a runner.
 The job pins Xcode 27.1 through `DEVELOPER_DIR` and fails on a beta, because the runner's
 default Xcode is a beta. It runs only for `schedule` or `workflow_dispatch` on `main` (an
 allowlist, so `pull_request` and every other event are refused). The macOS job never receives the
@@ -77,8 +85,7 @@ runs on the finished artifacts: the app bundle is verified inside the macOS
 update ZIP for signature, team and stapled ticket, and the Windows installer for
 its publisher. `spctl` is logged but not a gate, because hosted runners report
 "Insufficient Context" for a stapled app. The DMG container itself is not
-signed, and the Windows receipt needs 7-Zip on the runner to read the
-installer's payload. A platform without complete credentials ships unsigned.
+signed. A platform without complete credentials ships unsigned.
 Release titles identify the version and channel; the body describes signing
 separately under macOS and Windows, including warnings and updater limitations
 for unsigned platforms. `release.json` retains the per-platform signing policy

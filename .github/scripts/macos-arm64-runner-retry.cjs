@@ -1,42 +1,38 @@
 const { spawnSync } = require("node:child_process");
 const FS = require("node:fs");
 
-// The first attempt runs on the self-hosted shuvbot runner (scripts/lib/fork-release.ts).
-// A later attempt falls back to a hosted runner. GitHub cancels a hosted job that never
-// receives a runner after about 15 minutes; timeout-minutes does not extend that wait,
-// and a later job is a new request.
+// The build runs on the self-hosted shuvbot runner (scripts/lib/fork-release.ts). If
+// shuvbot never picks it up, one hosted build replaces it. GitHub cancels a hosted job
+// that never receives a runner after about 15 minutes; timeout-minutes does not extend
+// that wait.
 const HOSTED_FALLBACK_RUNNER = "macos-26";
 // If shuvbot has not picked the first attempt up by then, release.yml starts a hosted
 // attempt, which cancels the queued one through their shared concurrency group.
 const QUEUE_TIMEOUT_SECONDS = 600;
 const QUEUE_FALLBACK_CALLER = "Desktop (macOS arm64 queue fallback)";
-const MAC_ARM64_CALLERS = [
-  "Desktop (macOS arm64)",
-  "Desktop (macOS arm64 retry 2)",
-  "Desktop (macOS arm64 retry 3)",
-  "Desktop (macOS arm64 retry 4)",
-  "Desktop (macOS arm64 retry 5)",
-  "Desktop (macOS arm64 retry 6)",
-  QUEUE_FALLBACK_CALLER,
-];
+const MAC_ARM64_CALLERS = ["Desktop (macOS arm64)", QUEUE_FALLBACK_CALLER];
 
 const buildJobName = (callerName) => `${callerName} / Build macOS arm64`;
 
+// macOS arm64 and Windows x64 each get their own job in release.yml.
 function splitDesktopMatrix(matrix) {
   if (!matrix || !Array.isArray(matrix.include))
     throw new Error("Desktop matrix is missing include.");
-  const mac = matrix.include.filter(
-    (target) => target.platform === "mac" && target.arch === "arm64",
-  );
-  const rest = matrix.include.filter(
-    (target) => !(target.platform === "mac" && target.arch === "arm64"),
-  );
-  if (mac.length !== 1)
-    throw new Error(`Expected one macOS arm64 desktop target, found ${mac.length}.`);
+  const take = (platform, arch, label) => {
+    const found = matrix.include.filter(
+      (target) => target.platform === platform && target.arch === arch,
+    );
+    if (found.length !== 1)
+      throw new Error(`Expected one ${label} desktop target, found ${found.length}.`);
+    return found[0];
+  };
+  const mac = take("mac", "arm64", "macOS arm64");
+  const win = take("win", "x64", "Windows x64");
   return {
-    mac: mac[0],
-    fallback: { ...mac[0], runner: HOSTED_FALLBACK_RUNNER },
-    rest: { include: rest },
+    mac,
+    fallback: { ...mac, runner: HOSTED_FALLBACK_RUNNER },
+    win,
+    rest: { include: matrix.include.filter((target) => target !== mac && target !== win) },
   };
 }
 
@@ -82,10 +78,6 @@ function readJobsJsonl(path) {
 }
 
 const NOT_ACQUIRED_ANNOTATION = "not acquired by Runner of type hosted";
-// The run stays red: GitHub cannot ignore a cancelled reusable-workflow job.
-// Re-run failed jobs would queue the first runner again. Publication guards refuse a second copy.
-const SUCCESS_AFTER_MISS_NOTICE =
-  "A later macOS arm64 attempt acquired a runner and succeeded. This run stays red. Do not use Re-run failed jobs: that queues the first runner again.";
 
 function annotationMessages(job) {
   if (!Array.isArray(job.annotations)) return null;
@@ -93,7 +85,7 @@ function annotationMessages(job) {
 }
 
 // Only a job GitHub cancelled before assigning a hosted runner. A build that
-// started, a plain failure, or a missing steps array is not retried.
+// started, a plain failure, or a missing steps array is a real failure.
 function neverAssignedHostedRunner(job) {
   if (!job || job.conclusion !== "cancelled" || job.runner_id !== 0) return false;
   if (!Array.isArray(job.steps) || job.steps.length !== 0) return false;
@@ -103,10 +95,11 @@ function neverAssignedHostedRunner(job) {
 }
 
 function classifyAttempt(job) {
-  if (!job) return { retry: false, ok: false, reason: "missing" };
-  if (job.conclusion === "success") return { retry: false, ok: true, reason: "success" };
-  if (neverAssignedHostedRunner(job)) return { retry: true, ok: false, reason: "not-acquired" };
-  return { retry: false, ok: false, reason: job.conclusion || "failed" };
+  if (!job) return { notAcquired: false, ok: false, reason: "missing" };
+  if (job.conclusion === "success") return { notAcquired: false, ok: true, reason: "success" };
+  if (neverAssignedHostedRunner(job))
+    return { notAcquired: true, ok: false, reason: "not-acquired" };
+  return { notAcquired: false, ok: false, reason: job.conclusion || "failed" };
 }
 
 const queueFallbackStarted = (jobs) =>
@@ -123,7 +116,7 @@ function classifyCaller(jobs, callerName) {
   const attempt = classifyAttempt(jobs.find((job) => job.name === buildJobName(callerName)));
   // The queue fallback cancelled the first attempt; its cancellation is not a runner miss.
   if (callerName === MAC_ARM64_CALLERS[0] && !attempt.ok && queueFallbackStarted(jobs))
-    return { callerName, retry: false, ok: false, reason: "superseded" };
+    return { callerName, notAcquired: false, ok: false, reason: "superseded" };
   return { callerName, ...attempt };
 }
 
@@ -131,10 +124,11 @@ function classifyAttempts(jobs, callerNames = MAC_ARM64_CALLERS) {
   const attempts = callerNames.map((callerName) => classifyCaller(jobs, callerName));
   if (attempts.some((attempt) => attempt.ok)) return { ok: true, reason: "success", attempts };
   const realFailure = attempts.find(
-    (attempt) => !attempt.retry && attempt.reason !== "missing" && attempt.reason !== "superseded",
+    (attempt) =>
+      !attempt.notAcquired && attempt.reason !== "missing" && attempt.reason !== "superseded",
   );
   if (realFailure) return { ok: false, reason: realFailure.reason, attempts };
-  if (attempts.some((attempt) => attempt.retry))
+  if (attempts.some((attempt) => attempt.notAcquired))
     return { ok: false, reason: "not-acquired", attempts };
   return { ok: false, reason: "missing", attempts };
 }
@@ -156,6 +150,7 @@ function main() {
       ["matrix_rest", JSON.stringify(split.rest)],
       ["matrix_mac_arm64", JSON.stringify(split.mac)],
       ["matrix_mac_arm64_fallback", JSON.stringify(split.fallback)],
+      ["matrix_win_x64", JSON.stringify(split.win)],
     ]);
     return;
   }
@@ -168,27 +163,11 @@ function main() {
     console.log(classifyQueue(jobs, Number(process.argv[4])));
     return;
   }
-  if (command === "attempt") {
-    const callerName = process.env.CALLER_NAME;
-    if (!callerName) throw new Error("CALLER_NAME is required.");
-    const decision = classifyCaller(jobs, callerName);
-    console.log(`macOS arm64 acquire ${callerName}: ${decision.reason}`);
-    if (decision.retry)
-      console.log(
-        "::notice::macOS arm64 hosted runner was not acquired. Requesting a hosted macos-26 runner.",
-      );
-    writeGithubOutput([["retry", decision.retry ? "true" : "false"]]);
-    return;
-  }
   if (command === "gate") {
     const decision = classifyAttempts(jobs);
     for (const attempt of decision.attempts)
       console.log(`${attempt.callerName}: ${attempt.reason}`);
-    if (decision.ok) {
-      if (decision.attempts.some((attempt) => attempt.reason === "not-acquired"))
-        console.log(`::notice::${SUCCESS_AFTER_MISS_NOTICE}`);
-      return;
-    }
+    if (decision.ok) return;
     const acquired = decision.reason === "not-acquired";
     console.error(
       acquired
@@ -199,7 +178,7 @@ function main() {
     return;
   }
   throw new Error(
-    "Use split-matrix, jobs <jobs.jsonl>, attempt <jobs.jsonl>, gate <jobs.jsonl>, or queue-state <jobs.jsonl> <seconds>.",
+    "Use split-matrix, jobs <jobs.jsonl>, gate <jobs.jsonl>, or queue-state <jobs.jsonl> <seconds>.",
   );
 }
 
@@ -209,7 +188,6 @@ module.exports = {
   QUEUE_TIMEOUT_SECONDS,
   MAC_ARM64_CALLERS,
   NOT_ACQUIRED_ANNOTATION,
-  SUCCESS_AFTER_MISS_NOTICE,
   buildJobName,
   classifyAttempt,
   classifyAttempts,

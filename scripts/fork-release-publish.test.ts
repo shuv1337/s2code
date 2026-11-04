@@ -14,6 +14,7 @@ import {
 } from "./build-npm-platform-packages.ts";
 import { desktopAssetGroups, forkReleasePlan, forkReleaseTitle } from "./lib/fork-release.ts";
 import { releaseCommandError } from "./fork-release.ts";
+import { serializeUpdateManifest } from "./lib/update-manifest.ts";
 
 const shim = `import fs from 'node:fs'; import crypto from 'node:crypto'; import cp from 'node:child_process';
 const file=process.env.FIXTURE_STATE; const s=JSON.parse(fs.readFileSync(file,'utf8'));
@@ -158,24 +159,54 @@ function publishFixture(
     version: `1.2.3-${channel}.20261014.1`,
     signing,
     npm,
+    windows: true,
   });
   try {
     const prepared = NodePath.join(root, "prepared");
-    NodeFS.mkdirSync(NodePath.join(prepared, "release-assets"), { recursive: true });
-    NodeFS.writeFileSync(NodePath.join(prepared, "release-plan.json"), JSON.stringify(plan));
-    NodeFS.writeFileSync(
-      NodePath.join(prepared, "release-assets/fixture.bin"),
-      "immutable fixture bytes",
-    );
-    for (const feed of plan.feedAssets)
-      NodeFS.writeFileSync(NodePath.join(prepared, "release-assets", feed), `feed ${feed}`);
+    const assetDir = NodePath.join(prepared, "release-assets");
+    NodeFS.mkdirSync(assetDir, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(root, "release-plan.json"), JSON.stringify(plan));
+    // What the build jobs upload, before publish shapes it.
+    const windows = runner.WINDOWS_BUILT !== "false";
+    // What build-npm-platform-packages writes, with --allow-missing when Windows did not build.
+    const npmKeys = CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => windows || !key.startsWith("win32-"));
+    const desktops = desktopAssetGroups(plan.version, windows).map((group) => group[0]!);
+    for (const name of [...desktops, ...forkReleasePlan({ ...plan, windows }).cliAssets])
+      NodeFS.writeFileSync(NodePath.join(assetDir, name), `immutable fixture bytes ${name}`);
+    const feed = (name: string, test: (file: string) => boolean) =>
+      NodeFS.writeFileSync(
+        NodePath.join(assetDir, name),
+        serializeUpdateManifest(
+          {
+            version: plan.version,
+            releaseDate: "2026-10-14T12:00:00Z",
+            extras: {},
+            files: desktops.filter(test).map((url) => {
+              const bytes = NodeFS.readFileSync(NodePath.join(assetDir, url));
+              const sha512 = NodeCrypto.createHash("sha512").update(bytes).digest("base64");
+              return { url, size: bytes.length, sha512 };
+            }),
+          },
+          { platformLabel: "fixture" },
+        ),
+      );
+    if (channel !== "preview") {
+      const prefix = channel === "stable" ? "latest" : "nightly";
+      feed(`${prefix}-mac.yml`, (file) => file.endsWith(".zip"));
+      if (windows) feed(`${prefix}-win-x64.yml`, (file) => file.endsWith(".exe"));
+      feed(`${prefix}-linux.yml`, (file) => file.endsWith(".AppImage") && !file.includes("arm64"));
+      feed(
+        `${prefix}-linux-arm64.yml`,
+        (file) => file.endsWith(".AppImage") && file.includes("arm64"),
+      );
+    }
     const registry: Record<string, unknown> = {};
     const packageDir = NodePath.join(root, "package");
     NodeFS.mkdirSync(packageDir);
     for (const manifest of [
-      ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => npmPlatformPackageManifest(key, plan.version, {})),
-      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS),
-      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS, "shuv2code"),
+      ...npmKeys.map((key) => npmPlatformPackageManifest(key, plan.version, {})),
+      npmLauncherPackageManifest(plan.version, npmKeys),
+      npmLauncherPackageManifest(plan.version, npmKeys, "shuv2code"),
     ]) {
       const file = NodePath.join(prepared, "npm-packages", manifest.name + ".tgz");
       NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
@@ -244,6 +275,7 @@ function publishFixture(
           GITHUB_WORKFLOW_REF: `${plan.repository}/.github/workflows/release.yml@${ref}`,
           GITHUB_REF: ref,
           GITHUB_DEFAULT_BRANCH: "main",
+          WINDOWS_BUILT: "true",
           ...runner,
           ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
@@ -317,10 +349,19 @@ describe("fork publication fixtures", () => {
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "resumes an existing draft invisible to the tags API and uploads/publishes by its exact ID",
     () => {
-      const { result, state } = publishFixture();
+      const { result, state, plan } = publishFixture();
       expect(result.status, result.stderr).toBe(0);
       expect(state.release.draft).toBe(false);
-      expect(state.release.assets).toEqual([expect.objectContaining({ name: "fixture.bin" })]);
+      expect(state.release.assets.map((asset) => asset.name).sort()).toEqual(
+        [
+          ...desktopAssetGroups(plan.version).map((group) => group[0]!),
+          ...plan.cliAssets,
+          ...plan.cliLegacyAssets,
+          ...plan.cliPreviousAssets,
+          "SHA256SUMS",
+          "release.json",
+        ].sort(),
+      );
       expect(state.commands.some((args) => args.includes("--jq"))).toBe(true);
       expect(
         state.commands.some((args) => args.some((arg) => arg.includes("/releases/1234/assets?"))),
@@ -438,11 +479,64 @@ describe("fork publication fixtures", () => {
       expect(state.release.draft).toBe(false);
       expect(state.commands.some(([command]) => command === "npm")).toBe(false);
       expect(state.release.assets.map((asset) => asset.name).sort()).toEqual(
-        ["fixture.bin", ...plan.feedAssets].sort(),
+        [
+          ...desktopAssetGroups(plan.version).map((group) => group[0]!),
+          ...plan.cliAssets,
+          ...plan.cliLegacyAssets,
+          ...plan.cliPreviousAssets,
+          "SHA256SUMS",
+          "release.json",
+          ...plan.feedAssets,
+        ].sort(),
       );
       expect(plan.feedAssets).toEqual(["nightly-linux.yml", "nightly-linux-arm64.yml"]);
       // Without macOS and Windows feeds the release is not a complete index
       // entry, and publication proceeds with the index unchanged.
+      expect(JSON.parse(state.index!)).toEqual([]);
+    },
+  );
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "publishes npm without the Windows package when the Windows build failed, and says so",
+    () => {
+      const { result, state } = publishFixture(
+        "new-release",
+        "refs/heads/main",
+        true,
+        "nightly",
+        {},
+        {},
+        { mac: true, win: true, unsigned: false },
+        [],
+        { RUNNER_ENVIRONMENT: "github-hosted", WINDOWS_BUILT: "false" },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(state.release.draft).toBe(false);
+      // Every other package still moves to this version, launchers included.
+      const promoted = new Set(
+        state.commands
+          .filter(([command, subcommand]) => command === "npm" && subcommand === "dist-tag")
+          .map((args) => args[3]!.slice(0, args[3]!.lastIndexOf("@"))),
+      );
+      expect([...promoted].sort()).toEqual([
+        "@s2code/cli",
+        "@s2code/t3-darwin-arm64",
+        "@s2code/t3-linux-arm64",
+        "@s2code/t3-linux-x64",
+        "shuv2code",
+      ]);
+      const names = state.release.assets.map((asset) => asset.name);
+      expect(names).toContain("nightly-mac.yml");
+      expect(
+        names.filter(
+          (name) => name.includes("win32") || name.includes(".exe") || name === "nightly.yml",
+        ),
+      ).toEqual([]);
+      const body = state.commands
+        .find((args) => args.includes("POST"))!
+        .find((arg) => arg.startsWith("body="))!;
+      expect(body).toContain("### Windows\n\nThe Windows x64 build failed");
+      expect(body).toContain("`npx @s2code/cli` is unavailable on Windows for this version.");
+      // A release without Windows is not a complete index entry.
       expect(JSON.parse(state.index!)).toEqual([]);
     },
   );
@@ -459,6 +553,7 @@ describe("fork publication fixtures", () => {
           version: `1.2.2-nightly.20261013.${index + 1}`,
           signing: { mac: true, win: true, unsigned: false },
           npm: false,
+          windows: true,
         });
         return {
           id: 10_000 + index,

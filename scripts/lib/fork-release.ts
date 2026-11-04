@@ -39,6 +39,10 @@ export const FORK_NPM_PACKAGES = [
   NPM_PACKAGE_NAME,
   "shuv2code",
 ];
+/** The npm packages one release publishes: without Windows, its platform package stays out. */
+export function forkNpmPackages(windows: boolean) {
+  return FORK_NPM_PACKAGES.filter((name) => windows || !name.startsWith("@s2code/t3-win32-"));
+}
 export const forkNpmPublishingReady = (env: Readonly<Record<string, string | undefined>>) =>
   env.S2CODE_NPM_TRUSTED_PUBLISHING_READY === "true" &&
   env.FORK_NPM_TRUSTED_PUBLISHING_READY === "true";
@@ -141,8 +145,15 @@ export function forkReleasePlan(input: {
   signing: ReturnType<typeof releaseSigningPolicy>;
   /** Whether this release also publishes the npm packages; GitHub assets always publish. */
   npm: boolean;
+  /**
+   * Whether the Windows x64 build is in this release. Its build may fail without
+   * blocking the others; the release then leaves out the Windows assets and the
+   * Windows npm platform package, and the launchers do not depend on it.
+   */
+  windows: boolean;
 }) {
   if (typeof input.npm !== "boolean") throw new Error("Invalid release npm policy.");
+  if (typeof input.windows !== "boolean") throw new Error("Invalid release Windows policy.");
   if (input.repository !== FORK_RELEASE_REPOSITORY)
     throw new Error("Release publication is restricted to the fork repository.");
   if (!/^[a-f0-9]{40}$/i.test(input.sha))
@@ -165,6 +176,7 @@ export function forkReleasePlan(input: {
   // platform gets no feed and is reached only by a deliberate download. Linux
   // updates are checksum-only, so their feeds always publish.
   const prefix = input.channel === "stable" ? "latest" : "nightly";
+  const cliKeys = forkCliPlatformKeys(input.windows);
   return {
     ...input,
     tag: `v${input.version}`,
@@ -172,13 +184,9 @@ export function forkReleasePlan(input: {
     distTags: forkDistTags(input.channel),
     stagingTag: `release-${input.sha.slice(0, 12)}-${input.version}`,
     title: `${input.signing.unsigned ? "UNSIGNED — " : ""}S2Code ${input.channel === "nightly" ? "Nightly" : input.channel} v${input.version}`,
-    cliAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) => cliArchiveFileName(input.version, key)),
-    cliLegacyAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
-      cliArchiveLegacyFileName(input.version, key),
-    ),
-    cliPreviousAssets: CLI_ARCHIVE_PLATFORM_KEYS.map((key) =>
-      cliArchivePreviousFileName(input.version, key),
-    ),
+    cliAssets: cliKeys.map((key) => cliArchiveFileName(input.version, key)),
+    cliLegacyAssets: cliKeys.map((key) => cliArchiveLegacyFileName(input.version, key)),
+    cliPreviousAssets: cliKeys.map((key) => cliArchivePreviousFileName(input.version, key)),
     feedAssets:
       input.channel === "preview"
         ? []
@@ -186,20 +194,22 @@ export function forkReleasePlan(input: {
             ...(input.signing.mac ? [`${prefix}-mac.yml`] : []),
             `${prefix}-linux.yml`,
             `${prefix}-linux-arm64.yml`,
-            ...(input.signing.win ? [`${prefix}.yml`] : []),
+            ...(input.signing.win && input.windows ? [`${prefix}.yml`] : []),
           ],
   };
 }
 export type ForkReleasePlan = ReturnType<typeof forkReleasePlan>;
+
+export function forkCliPlatformKeys(windows: boolean) {
+  return CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => windows || !key.startsWith("win32-"));
+}
 
 // Keep display text separate from the plan serialized into release.json.
 export function forkReleaseTitle(plan: Pick<ForkReleasePlan, "title">) {
   return plan.title.replace(/^UNSIGNED — /, "");
 }
 
-// Publication consumes prepared assets whose receipts match this policy; signed
-// macOS receipts are written only after signature, team and stapled-ticket checks.
-export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha">) {
+export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha" | "windows">) {
   return [
     "Local/direct desktop and CLI release.",
     "### macOS",
@@ -207,41 +217,50 @@ export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha">) 
       ? "The macOS desktop apps are signed and notarized, with stapled tickets verified in the update ZIPs. The DMG containers themselves are not signed."
       : "WARNING: The macOS desktop apps are unsigned and not notarized. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     "### Windows",
-    plan.signing.win
-      ? "The Windows installers are signed."
-      : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
+    !plan.windows
+      ? "The Windows x64 build failed, so this release has no Windows installer, Windows CLI archive or @s2code/t3-win32-x64 npm package. `npx @s2code/cli` is unavailable on Windows for this version."
+      : plan.signing.win
+        ? "The Windows installers are signed."
+        : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     `Source: ${plan.sha}.`,
   ].join("\n\n");
 }
 
-export function desktopAssetGroups(version: string) {
-  return FORK_DESKTOP_MATRIX.flatMap((target) => {
-    const extensions =
-      target.platform === "mac"
-        ? ["dmg", "zip"]
-        : target.platform === "linux"
-          ? ["AppImage", "deb"]
-          : ["exe"];
-    return extensions.map((extension) => {
-      const aliases =
-        target.platform === "linux" && target.arch === "x64"
-          ? extension === "deb"
-            ? ["amd64", "x64"]
-            : ["x86_64", "x64"]
-          : [target.arch];
-      return aliases.map((arch) => `S2Code-${version}-${arch}.${extension}`);
-    });
-  });
+export function desktopAssetGroups(version: string, windows = true) {
+  return FORK_DESKTOP_MATRIX.filter((target) => windows || target.platform !== "win").flatMap(
+    (target) => {
+      const extensions =
+        target.platform === "mac"
+          ? ["dmg", "zip"]
+          : target.platform === "linux"
+            ? ["AppImage", "deb"]
+            : ["exe"];
+      return extensions.map((extension) => {
+        const aliases =
+          target.platform === "linux" && target.arch === "x64"
+            ? extension === "deb"
+              ? ["amd64", "x64"]
+              : ["x86_64", "x64"]
+            : [target.arch];
+        return aliases.map((arch) => `S2Code-${version}-${arch}.${extension}`);
+      });
+    },
+  );
 }
-export function requiredDesktopAssets(version: string, names: ReadonlyArray<string>) {
-  return desktopAssetGroups(version).map((group) => {
+export function requiredDesktopAssets(
+  version: string,
+  names: ReadonlyArray<string>,
+  windows = true,
+) {
+  return desktopAssetGroups(version, windows).map((group) => {
     const found = group.filter((name) => names.includes(name));
     if (found.length !== 1)
       throw new Error(`Expected exactly one desktop asset: ${group.join(" or ")}.`);
     return found[0]!;
   });
 }
-export function assertForkNpmManifest(value: unknown, version: string) {
+export function assertForkNpmManifest(value: unknown, version: string, windows: boolean) {
+  const allowed = forkNpmPackages(windows);
   const manifest = value as {
     name?: string;
     version?: string;
@@ -255,7 +274,7 @@ export function assertForkNpmManifest(value: unknown, version: string) {
     .replace(/\/$/, "");
   if (
     !manifest.name ||
-    !FORK_NPM_PACKAGES.includes(manifest.name) ||
+    !allowed.includes(manifest.name) ||
     manifest.name === "t3" ||
     manifest.private === true ||
     manifest.version !== version ||
@@ -265,7 +284,7 @@ export function assertForkNpmManifest(value: unknown, version: string) {
       "Refusing publication outside the exact fork package/version/repository allowlist.",
     );
   if (manifest.name === NPM_PACKAGE_NAME || manifest.name === "shuv2code") {
-    const expected = FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/t3-"));
+    const expected = allowed.filter((name) => name.startsWith("@s2code/t3-"));
     if (
       Object.keys(manifest.optionalDependencies ?? {}).length !== expected.length ||
       expected.some((name) => manifest.optionalDependencies?.[name] !== version)
@@ -281,14 +300,19 @@ export function assertForkNpmManifest(value: unknown, version: string) {
     optionalDependencies?: Record<string, string>;
   };
 }
-export function assertForkNpmSet(manifests: ReadonlyArray<unknown>, version: string) {
-  const checked = manifests.map((manifest) => assertForkNpmManifest(manifest, version));
+export function assertForkNpmSet(
+  manifests: ReadonlyArray<unknown>,
+  version: string,
+  windows: boolean,
+) {
+  const allowed = forkNpmPackages(windows);
+  const checked = manifests.map((manifest) => assertForkNpmManifest(manifest, version, windows));
   if (
-    checked.length !== FORK_NPM_PACKAGES.length ||
-    new Set(checked.map((manifest) => manifest.name)).size !== FORK_NPM_PACKAGES.length
+    checked.length !== allowed.length ||
+    new Set(checked.map((manifest) => manifest.name)).size !== allowed.length
   )
     throw new Error(
-      `All ${CLI_ARCHIVE_PLATFORM_KEYS.length} platform packages, the launcher and its legacy bridge are required.`,
+      `All ${allowed.length - 2} platform packages, the launcher and its legacy bridge are required.`,
     );
   return checked;
 }

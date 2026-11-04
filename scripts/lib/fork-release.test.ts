@@ -6,6 +6,7 @@ import { CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
 import {
   FORK_DESKTOP_MATRIX,
   FORK_NPM_PACKAGES,
+  forkNpmPackages,
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
   releaseSigningPolicy,
@@ -36,19 +37,17 @@ const plan = (channel = "stable", version = "1.2.3") =>
     channel,
     signing: releaseSigningPolicy(channel, false, fullCredentials),
     npm: true,
+    windows: true,
   });
-const manifests = (version = "1.2.3") =>
-  FORK_NPM_PACKAGES.map((name) => ({
+const manifests = (version = "1.2.3", windows = true) =>
+  forkNpmPackages(windows).map((name, _, names) => ({
     name,
     version,
     repository: { url: "https://github.com/shuv1337/s2code" },
     ...(!name.startsWith("@s2code/t3-")
       ? {
           optionalDependencies: Object.fromEntries(
-            FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/t3-")).map((name) => [
-              name,
-              version,
-            ]),
+            names.filter((name) => name.startsWith("@s2code/t3-")).map((name) => [name, version]),
           ),
         }
       : {}),
@@ -118,6 +117,7 @@ describe("fork release contract", () => {
         channel,
         signing: releaseSigningPolicy(channel, true, {}),
         npm: false,
+        windows: true,
       });
       expect(forkReleaseTitle(value)).not.toContain("UNSIGNED");
       if (channel === "nightly") {
@@ -146,6 +146,7 @@ describe("fork release contract", () => {
       channel: "nightly",
       signing: { mac, win, unsigned: !mac || !win },
       npm: false,
+      windows: true,
     });
     expect(forkReleaseTitle(value)).toBe(`S2Code Nightly v${value.version}`);
     expect(value.title.startsWith("UNSIGNED — ")).toBe(!mac || !win);
@@ -171,6 +172,7 @@ describe("fork release contract", () => {
         channel: "nightly",
         signing: { mac, win, unsigned: !mac || !win },
         npm: false,
+        windows: true,
       }).feedAssets;
     expect(value(true, false)).not.toContain("nightly.yml");
     expect(value(true, false)).toContain("nightly-mac.yml");
@@ -182,6 +184,34 @@ describe("fork release contract", () => {
       "nightly-linux-arm64.yml",
       "nightly.yml",
     ]);
+  });
+  it("leaves Windows out of a release whose Windows build failed, and says so", () => {
+    const value = forkReleasePlan({
+      ...plan("nightly", "1.2.3-nightly.20261014.1"),
+      windows: false,
+    });
+    expect(value.feedAssets).toEqual([
+      "nightly-mac.yml",
+      "nightly-linux.yml",
+      "nightly-linux-arm64.yml",
+    ]);
+    for (const names of [value.cliAssets, value.cliLegacyAssets, value.cliPreviousAssets]) {
+      expect(names).toHaveLength(CLI_ARCHIVE_PLATFORM_KEYS.length - 1);
+      expect(names.some((name) => name.includes("win32"))).toBe(false);
+    }
+    expect(
+      desktopAssetGroups(value.version, false)
+        .flat()
+        .some((name) => name.endsWith(".exe")),
+    ).toBe(false);
+    // npm still publishes for the platforms that built.
+    expect(value.npm).toBe(true);
+    expect(forkNpmPackages(false)).toEqual(
+      FORK_NPM_PACKAGES.filter((name) => name !== "@s2code/t3-win32-x64"),
+    );
+    expect(forkReleaseBody(value).split("### Windows\n\n")[1]).toMatch(
+      /^The Windows x64 build failed.*@s2code\/t3-win32-x64 npm package\. `npx @s2code\/cli` is unavailable on Windows for this version\.\n/,
+    );
   });
   it("keeps stable/nightly feeds channel-bound and rejects upstream repositories and channel/version mismatches", () => {
     expect(plan().feedAssets).toEqual([
@@ -202,7 +232,7 @@ describe("fork release contract", () => {
   });
   it("protects the private t3 workspace and exact public allowlist", () => {
     expect(serverPackage.private).toBe(true);
-    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(6);
+    expect(assertForkNpmSet(manifests(), "1.2.3", true)).toHaveLength(6);
     for (const override of [
       { name: "t3" },
       { name: "@t3code/t3-linux-x64" },
@@ -210,18 +240,28 @@ describe("fork release contract", () => {
       { version: "1.2.4" },
       { repository: { url: "https://github.com/pingdotgg/t3code" } },
     ])
-      expect(() => assertForkNpmManifest({ ...manifests()[0], ...override }, "1.2.3")).toThrow(
-        "allowlist",
-      );
-    expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3")).toThrow(
+      expect(() =>
+        assertForkNpmManifest({ ...manifests()[0], ...override }, "1.2.3", true),
+      ).toThrow("allowlist");
+    expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3", true)).toThrow(
       "All 4 platform packages",
     );
     expect(() =>
       assertForkNpmManifest(
         { ...manifests().at(-1), optionalDependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
         "1.2.3",
+        true,
       ),
     ).toThrow("all 4 exact matching");
+    // Without Windows: no Windows package, and no launcher that depends on one.
+    expect(assertForkNpmSet(manifests("1.2.3", false), "1.2.3", false)).toHaveLength(5);
+    expect(() => assertForkNpmSet(manifests(), "1.2.3", false)).toThrow("allowlist");
+    expect(() => assertForkNpmManifest(manifests().at(-1), "1.2.3", false)).toThrow(
+      "all 3 exact matching",
+    );
+    expect(() => assertForkNpmSet(manifests("1.2.3", false), "1.2.3", true)).toThrow(
+      "all 4 exact matching",
+    );
   });
   it("moves latest with nightly, keeps preview off it, and permits only matching staging tags", () => {
     // The fork ships nightly only, so nightly owns `latest` as well.
