@@ -22,7 +22,8 @@ eas() {
   case "$1" in
     fingerprint:generate) echo '{}' ;;
     build:list) echo '[]' ;;
-    build|update) echo "$*" >> "$TEST_COMMANDS" ;;
+    build) echo "$*" >> "$TEST_COMMANDS" ;;
+    update) echo "$*" >> "$TEST_COMMANDS"; mkdir -p dist ;;
     *) return 99 ;;
   esac
 }
@@ -51,6 +52,7 @@ function reconcile(settings: Record<string, string>) {
       "bash",
       ["--norc", "-eu", "-o", "pipefail", "-c", fixtures + script],
       {
+        cwd: directory,
         encoding: "utf8",
         env: {
           PATH: process.env.PATH,
@@ -70,6 +72,9 @@ function reconcile(settings: Record<string, string>) {
       status: result.status,
       summary: NodeFS.existsSync(summary) ? NodeFS.readFileSync(summary, "utf8") : "",
       commands: NodeFS.existsSync(commands) ? NodeFS.readFileSync(commands, "utf8") : "",
+      exports: ["dist-ios", "dist-android"].filter((name) =>
+        NodeFS.existsSync(NodePath.join(directory, name)),
+      ),
     };
   } finally {
     NodeFS.rmSync(directory, { recursive: true, force: true });
@@ -122,6 +127,7 @@ describe("production push delivery reconciliation", () => {
     expect(result.commands).toContain(
       "update --channel production --environment production --platform android",
     );
+    expect(result.exports).toEqual(["dist-ios", "dist-android"]);
     expect(result.commands).not.toContain("build --platform");
   });
 });
