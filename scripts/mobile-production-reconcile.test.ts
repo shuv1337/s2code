@@ -22,7 +22,8 @@ eas() {
   case "$1" in
     fingerprint:generate) echo '{}' ;;
     build:list) echo '[]' ;;
-    build|update) echo "$*" >> "$TEST_COMMANDS" ;;
+    build) echo "$*" >> "$TEST_COMMANDS" ;;
+    update) echo "$*" >> "$TEST_COMMANDS"; mkdir dist ;;
     *) return 99 ;;
   esac
 }
@@ -51,6 +52,7 @@ function reconcile(settings: Record<string, string>) {
       "bash",
       ["--norc", "-eu", "-o", "pipefail", "-c", fixtures + script],
       {
+        cwd: directory,
         encoding: "utf8",
         env: {
           PATH: process.env.PATH,

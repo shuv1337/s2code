@@ -42,6 +42,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
       const server = NodeHttp.createServer((request, response) => {
         if (request.url?.endsWith("/SHA256SUMS")) {
           response.end(`${checksum}  ${archiveName}\n`);
+        } else if (!request.url?.endsWith(`/${archiveName}`)) {
+          response.writeHead(404).end();
         } else if (fail) {
           response.writeHead(500).end();
         } else {
