@@ -7,7 +7,8 @@ client architecture with the devil-terminal identity and Apple Watch work.
 
 Use [fork builds](https://github.com/shuv1337/s2code/releases) or build from source with
 `vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#matrix-and-source)
-cover desktop artifacts. Published fork CLI packages use `s2code` / `s2c`.
+cover desktop artifacts. The npm package is `shuv2code`; it installs the `shuv2code`, `s2code`
+and `s2c` commands.
 
 Fresh installations use `~/.s2code-v2` (with `-nightly` or `-preview` for those channels)
 and a separate Electron profile. Existing verified `~/.shuv2code-v2*` homes and profiles
@@ -59,6 +60,19 @@ irm https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.ps1 |
 ```
 
 The fork publishes nightly builds only, so this installs the nightly train. Then run `s2code-nightly` to start the server and open the local web app. `s2code-nightly service install` keeps it running in the background, `s2code-nightly update` moves to a newer release, and `s2code-nightly --help` has the full reference.
+
+With npm (Linux x64/arm64, macOS on Apple silicon, Windows x64):
+
+```bash
+npm i -g shuv2code
+shuv2code --version
+```
+
+`shuv2code` is a small launcher. On first run it downloads the CLI archive for its exact
+version from the GitHub Release, checks its SHA-256 against the checksums published inside
+the npm package, caches it, and runs it. The `@s2code/cli` and `@s2code/t3-<platform>`
+packages are retired; if you installed `@s2code/cli`, run `npm uninstall -g @s2code/cli`
+and then `npm i -g shuv2code`.
 
 ### Desktop app
 

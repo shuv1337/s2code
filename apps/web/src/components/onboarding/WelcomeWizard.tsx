@@ -547,7 +547,7 @@ function ConnectAccountOption({
             <p className="text-sm text-muted-foreground">
               Run this on each computer you want to connect.
             </p>
-            <CommandBlock command="npx @s2code/cli connect" className="mt-3" />
+            <CommandBlock command="npx shuv2code connect" className="mt-3" />
             <p className="mt-3 text-xs text-muted-foreground">
               Keep S2Code running. Select the computers you want to set up above.
             </p>
@@ -656,11 +656,11 @@ function PairingForm({
           <CollapsiblePanel>
             <p className="pt-3 text-sm text-muted-foreground">
               On the computer with your code, start S2Code or run{" "}
-              <code className="font-mono">npx @s2code/cli serve</code>, then run:
+              <code className="font-mono">npx shuv2code serve</code>, then run:
             </p>
-            <CommandBlock command="npx @s2code/cli pair" className="mt-2" />
+            <CommandBlock command="npx shuv2code pair" className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              On a tailnet, run <code className="font-mono">npx @s2code/cli pair --tailscale</code>{" "}
+              On a tailnet, run <code className="font-mono">npx shuv2code pair --tailscale</code>{" "}
               instead.
             </p>
           </CollapsiblePanel>

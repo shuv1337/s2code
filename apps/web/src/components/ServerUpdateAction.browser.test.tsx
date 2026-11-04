@@ -100,7 +100,7 @@ function setup(): Disposable {
   testState.updateServer.mockReset();
   testState.toast.mockReset();
   testState.clipboard.mockReset();
-  testState.npmPackage = "@s2code/cli";
+  testState.npmPackage = "shuv2code";
   testState.serverVersions.clear();
   sessionAtom = Atom.make<SessionResult>(AsyncResult.success(currentSession));
   testState.sessionAtom = sessionAtom;
@@ -192,7 +192,7 @@ describe("ServerUpdateAction", () => {
     await using screen = await renderAction({ selfUpdate: null, targetVersion: "0.0.45" });
     expect(button(screen, "Copy relaunch command")!.disabled).toBe(false);
     await click(screen, "Copy relaunch command");
-    expect(testState.clipboard).toHaveBeenCalledWith("npx @s2code/cli@0.0.45");
+    expect(testState.clipboard).toHaveBeenCalledWith("npx shuv2code@0.0.45");
     expect(testState.updateServer).not.toHaveBeenCalled();
   });
 });

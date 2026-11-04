@@ -40,8 +40,9 @@
       ],
       "ignoreDependencies": ["agent-device", "esbuild"],
       // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
-      // knip run beside it in check:changed must not report.
-      "ignore": [".knip-test-*/**"],
+      // knip run beside it in check:changed must not report. The shuv2code npm
+      // package's files are copied into the package, never imported.
+      "ignore": [".knip-test-*/**", "npm-launcher/**"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.

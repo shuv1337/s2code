@@ -44,26 +44,41 @@ const InstallManifest = Schema.Struct({
   name: Schema.String,
   version: Schema.String,
   bin: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-  optionalDependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 });
 const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(InstallManifest));
 
-const npmPackageBinName = (packageName: typeof NPM_PACKAGE_NAME | typeof LEGACY_PRODUCT_ID) =>
-  packageName === NPM_PACKAGE_NAME ? PRODUCT_ID : LEGACY_PRODUCT_ID;
+/**
+ * The npm launcher that started this executable (`T3CODE_NPM_LAUNCHER_PATH`), else the source
+ * entry script or the executable itself. Spawned processes inherit the variable, so a launcher
+ * counts only when its package is this exact version.
+ */
+const resolveEntryPath = Effect.gen(function* () {
+  const npmLauncher = (yield* HostProcess.Environment).T3CODE_NPM_LAUNCHER_PATH?.trim();
+  if (npmLauncher) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const manifest = yield* fs
+      .readFileString(path.join(path.dirname(npmLauncher), "../package.json"))
+      .pipe(Effect.flatMap(decodeInstallManifest), Effect.option);
+    if (
+      Option.isSome(manifest) &&
+      manifest.value.name === NPM_PACKAGE_NAME &&
+      manifest.value.version === packageJson.version
+    ) {
+      return npmLauncher;
+    }
+  }
+  if (yield* HostProcess.IsExecutable) return yield* HostProcess.ExecutablePath;
+  return (yield* HostProcess.Arguments)[1] ?? "";
+});
 
 /** Prove the running package and its global bin belong together before suggesting an update. */
 const resolveOwnedServerInstallation = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const args = yield* HostProcess.Arguments;
-  const executable = yield* HostProcess.IsExecutable;
-  const executablePath = yield* HostProcess.ExecutablePath;
   const platform = yield* HostProcess.Platform;
-  const entry = yield* fs.realPath(executable ? executablePath : (args[1] ?? ""));
-  const match =
-    /^(.*)\/lib\/node_modules\/(@s2code\/cli|shuv2code)\/(?:dist\/bin\.mjs|bin\/t3\.js|node_modules\/@(?:s2code|shuv2code)\/t3-[^/]+\/t3)$/.exec(
-      entry,
-    );
+  const entry = yield* fs.realPath(yield* resolveEntryPath);
+  const match = /^(.*)\/lib\/node_modules\/shuv2code\/bin\/shuv2code\.mjs$/.exec(entry);
   if (!match) {
     const runner = detectCliRunner(entry);
     return runner === null
@@ -79,30 +94,16 @@ const resolveOwnedServerInstallation = Effect.gen(function* () {
   )
     return null;
 
-  const packageName = match[2] === NPM_PACKAGE_NAME ? NPM_PACKAGE_NAME : LEGACY_PRODUCT_ID;
-  const binName = npmPackageBinName(packageName);
-  const packageRoot = path.join(prefix, "lib/node_modules", packageName);
+  const packageRoot = path.join(prefix, "lib/node_modules", NPM_PACKAGE_NAME);
   const manifest = yield* fs
     .readFileString(path.join(packageRoot, "package.json"))
     .pipe(Effect.flatMap(decodeInstallManifest));
-  if (manifest.name !== packageName || !manifest.bin?.[binName]) return null;
-  const bin = yield* fs.realPath(path.join(packageRoot, manifest.bin[binName]!));
-  const globalBin = yield* fs.realPath(path.join(prefix, "bin", binName));
-  if (globalBin !== bin) return null;
-  if (executable) {
-    const nativeManifest = yield* fs
-      .readFileString(path.join(path.dirname(entry), "package.json"))
-      .pipe(Effect.flatMap(decodeInstallManifest));
-    if (
-      manifest.bin[binName]! !== "./bin/t3.js" ||
-      manifest.optionalDependencies?.[nativeManifest.name] !== nativeManifest.version ||
-      nativeManifest.version !== manifest.version
-    )
-      return null;
-  } else if (bin !== entry) {
-    return null;
-  }
-  return { kind: "npm-global", prefix, packageName } as const;
+  const binPath = manifest.bin?.[NPM_PACKAGE_NAME];
+  if (manifest.name !== NPM_PACKAGE_NAME || !binPath) return null;
+  const bin = yield* fs.realPath(path.join(packageRoot, binPath));
+  const globalBin = yield* fs.realPath(path.join(prefix, "bin", NPM_PACKAGE_NAME));
+  if (globalBin !== bin || bin !== entry) return null;
+  return { kind: "npm-global", prefix, packageName: NPM_PACKAGE_NAME } as const;
 }).pipe(Effect.orElseSucceed(() => null));
 
 export const resolveServerInstallation = resolveOwnedServerInstallation;
@@ -154,7 +155,7 @@ const resolveCliInvocation = Effect.fnUntraced(function* (
   if (installation?.kind === "npm-global") {
     const path = yield* Path.Path;
     return {
-      command: `${quote(path.join(installation.prefix, "bin", npmPackageBinName(installation.packageName)))} ${commandArgs}`,
+      command: `${quote(path.join(installation.prefix, "bin", NPM_PACKAGE_NAME))} ${commandArgs}`,
       pathCommand: true,
       launcher: false,
     };

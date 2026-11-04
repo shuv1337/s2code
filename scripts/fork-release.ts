@@ -133,7 +133,7 @@ function assertPublishContext(npm: boolean) {
     throw new Error("GitHub-hosted OIDC with id-token: write is required.");
   if (!forkNpmPublishingReady(process.env))
     throw new Error(
-      "S2CODE_NPM_TRUSTED_PUBLISHING_READY must attest the five new publishers and FORK_NPM_TRUSTED_PUBLISHING_READY the shuv2code bridge, including publish and dist-tag permissions for release.yml. These flags are not authentication tests.",
+      "FORK_NPM_TRUSTED_PUBLISHING_READY must attest the shuv2code trusted publisher, including publish and dist-tag permissions for release.yml. It is not an authentication test.",
     );
   if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN)
     throw new Error("Use OIDC, not inherited npm publish tokens.");
@@ -249,16 +249,27 @@ export function prepareForkAssets(plan: ForkReleasePlan, directory: string) {
   return [...payloads, "SHA256SUMS", "release.json", ...plan.feedAssets];
 }
 
-export function inspectForkNpmPackages(directory: string, version: string) {
-  const tarballs = [
-    ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => Path.join(directory, "@s2code", `t3-${key}.tgz`)),
-    Path.join(directory, "@s2code", "cli.tgz"),
-    Path.join(directory, "shuv2code.tgz"),
-  ];
+/** The launcher must pin exactly the CLI archives this release uploads. */
+export function inspectForkNpmPackages(directory: string, plan: ForkReleasePlan, assets: string) {
+  const tarballs = FORK_NPM_PACKAGES.map((name) => Path.join(directory, `${name}.tgz`));
   const manifests = tarballs.map(
     (file) => JSON.parse(run("tar", ["-xOf", file, "package/package.json"])) as unknown,
   );
-  const checked = assertForkNpmSet(manifests, version);
+  const checked = assertForkNpmSet(manifests, plan.version);
+  const released = plan.cliAssets
+    .map((archive) => `${digest(Path.join(assets, archive))}  ${archive}`)
+    .sort();
+  for (const file of tarballs) {
+    const checksums = JSON.parse(run("tar", ["-xOf", file, "package/checksums.json"])) as Record<
+      string,
+      { archive: string; sha256: string }
+    >;
+    const pinned = Object.values(checksums)
+      .map((entry) => `${entry.sha256}  ${entry.archive}`)
+      .sort();
+    if (pinned.join("\n") !== released.join("\n"))
+      throw new Error("The launcher's checksums.json does not match this release's CLI archives.");
+  }
   return tarballs.map((file, index) => ({
     file,
     manifest: checked[index]!,
@@ -353,7 +364,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
   // Shaping copies every CLI archive twice; show the disk that publishing starts from.
   console.log(CP.spawnSync("df", ["-h", "."], { encoding: "utf8" }).stdout ?? "");
   const names = FS.readdirSync(assets);
-  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan.version) : [];
+  const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan, assets) : [];
   const readTags = async (name: string) => {
     // `/<name>/dist-tags` would be read as a version named "dist-tags".
     const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
@@ -514,8 +525,6 @@ async function publishPrepared(plan: ForkReleasePlan) {
       if (!(await publishedVersion(pkg)).published)
         throw new Error("Every exact npm version must exist before release exposure.");
   };
-  const isPlatform = (pkg: (typeof packages)[number]) =>
-    pkg.manifest.name.startsWith("@s2code/t3-");
   const settleAll = async <T>(
     items: ReadonlyArray<T>,
     operation: (item: T) => Promise<void>,
@@ -628,20 +637,10 @@ async function publishPrepared(plan: ForkReleasePlan) {
       verifyAssets(names.filter((name) => !plan.feedAssets.includes(name))),
     publishNpm: async () => {
       if (!plan.npm) return;
-      // Launchers publish only once npm has accepted every platform upload, so
-      // a refused platform never strands an immutable launcher version. Nobody
-      // installs the staging tag, so they need not wait for platform review.
-      await settleAll(
-        packages.filter(isPlatform),
-        uploadPackage,
-        "A fork platform package failed publication; launcher publication was skipped.",
-      );
-      await settleAll(
-        packages.filter((pkg) => !isPlatform(pkg)),
-        uploadPackage,
-        "A fork launcher failed publication.",
-      );
-      await settleAll(packages, awaitReview, "A fork npm package failed verification.");
+      // The staging tag installs nothing, so the launcher may publish while its
+      // release is still a draft whose archives it cannot download yet.
+      await settleAll(packages, uploadPackage, "The fork launcher failed publication.");
+      await settleAll(packages, awaitReview, "The fork launcher failed verification.");
     },
     verifyNpm,
     uploadFeeds: async () => upload(plan.feedAssets),
@@ -663,17 +662,8 @@ async function publishPrepared(plan: ForkReleasePlan) {
     },
     promoteNpmTags: async () => {
       if (!plan.npm) return;
-      // A failed platform wave leaves every launcher tag on the previous release.
-      await settleAll(
-        packages.filter(isPlatform),
-        promote,
-        "Fork platform dist-tag promotion failed; launchers were not promoted.",
-      );
-      await settleAll(
-        packages.filter((pkg) => !isPlatform(pkg)),
-        promote,
-        "Fork launcher dist-tag promotion failed.",
-      );
+      // Runs after the release is public, so a promoted launcher can always download.
+      await settleAll(packages, promote, "Fork launcher dist-tag promotion failed.");
     },
     publishIndex: async () => {
       if (plan.channel === "preview") return;
@@ -782,7 +772,7 @@ async function main() {
     const npm = forkNpmPublishingReady(process.env);
     if (!npm)
       console.log(
-        "npm publication skipped: both S2CODE_NPM_TRUSTED_PUBLISHING_READY and the legacy bridge readiness are required. Only the GitHub release will publish.",
+        "npm publication skipped: FORK_NPM_TRUSTED_PUBLISHING_READY is not true. Only the GitHub release will publish.",
       );
     const sha = run("git", ["rev-parse", "HEAD"]);
     const base = (
@@ -868,7 +858,7 @@ async function main() {
     const plan = forkReleasePlan({ ...readPlan(), windows: windows === "true" });
     if (!plan.windows)
       console.log(
-        "The Windows x64 build failed: this release leaves out Windows and publishes no npm packages.",
+        "The Windows x64 build failed: this release leaves out Windows and does not publish npm.",
       );
     await publishPrepared(plan);
   } else throw new Error("Use preflight, signing or publish --execute.");

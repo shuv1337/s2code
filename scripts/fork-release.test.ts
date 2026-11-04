@@ -6,10 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 import { prepareForkAssets, inspectForkNpmPackages } from "./fork-release.ts";
-import {
-  npmPlatformPackageManifest,
-  npmLauncherPackageManifest,
-} from "./build-npm-platform-packages.ts";
+import { npmLauncherPackageManifest } from "./build-npm-launcher.ts";
 import { forkReleasePlan, desktopAssetGroups } from "./lib/fork-release.ts";
 import { cliArchiveFileName, CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
 import { serializeUpdateManifest, parseUpdateManifest } from "./lib/update-manifest.ts";
@@ -97,40 +94,59 @@ function fixture(
   }
 }
 describe("complete fork release assets", () => {
-  it("checks the real public tarball manifests and byte integrity, not neighboring package directories", () => {
-    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-npm-fixture-"));
-    try {
-      const manifests = [
-        ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => npmPlatformPackageManifest(key, "1.2.3", {})),
-        npmLauncherPackageManifest("1.2.3", CLI_ARCHIVE_PLATFORM_KEYS),
-        npmLauncherPackageManifest("1.2.3", CLI_ARCHIVE_PLATFORM_KEYS, "shuv2code"),
-      ];
-      const packageDirectory = NodePath.join(directory, "package");
-      NodeFS.mkdirSync(packageDirectory);
-      const pack = (name: string, manifest: unknown) => {
-        const file = NodePath.join(directory, `${name}.tgz`);
-        NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
-        NodeFS.writeFileSync(
-          NodePath.join(packageDirectory, "package.json"),
-          JSON.stringify(manifest),
+  it("checks the real launcher tarball: manifest, byte integrity, and the archive checksums it pins", () =>
+    fixture("nightly", (assets, plan) => {
+      const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-npm-fixture-"));
+      try {
+        const sha256 = (name: string) =>
+          Crypto.createHash("sha256")
+            .update(FS.readFileSync(Path.join(assets, name)))
+            .digest("hex");
+        const pinned = Object.fromEntries(
+          CLI_ARCHIVE_PLATFORM_KEYS.map((key) => {
+            const archive = cliArchiveFileName(plan.version, key);
+            return [key, { archive, sha256: sha256(archive) }];
+          }),
         );
-        NodeChildProcess.execFileSync("tar", ["-czf", file, "-C", directory, "package"]);
-      };
-      for (const manifest of manifests) pack(manifest.name, manifest);
-      const checked = inspectForkNpmPackages(directory, "1.2.3");
-      expect(checked.map((pkg) => pkg.manifest.name)).toEqual(
-        manifests.map((manifest) => manifest.name),
-      );
-      for (const pkg of checked)
-        expect(pkg.integrity).toBe(
-          `sha512-${NodeCrypto.createHash("sha512").update(NodeFS.readFileSync(pkg.file)).digest("base64")}`,
+        const packageDirectory = NodePath.join(directory, "package");
+        NodeFS.mkdirSync(packageDirectory);
+        const pack = (manifest: unknown, checksums: unknown) => {
+          for (const [name, value] of [
+            ["package.json", manifest],
+            ["checksums.json", checksums],
+          ] as const)
+            NodeFS.writeFileSync(NodePath.join(packageDirectory, name), JSON.stringify(value));
+          NodeChildProcess.execFileSync("tar", [
+            "-czf",
+            NodePath.join(directory, "shuv2code.tgz"),
+            "-C",
+            directory,
+            "package",
+          ]);
+        };
+        const manifest = npmLauncherPackageManifest(plan.version, 79);
+        pack(manifest, pinned);
+        const [checked] = inspectForkNpmPackages(directory, plan, assets);
+        expect(checked!.manifest.name).toBe("shuv2code");
+        expect(checked!.integrity).toBe(
+          `sha512-${NodeCrypto.createHash("sha512").update(NodeFS.readFileSync(checked!.file)).digest("base64")}`,
         );
-      pack(manifests[0]!.name, { ...manifests[0], name: "t3" });
-      expect(() => inspectForkNpmPackages(directory, "1.2.3")).toThrow("allowlist");
-    } finally {
-      NodeFS.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+        pack({ ...manifest, name: "t3" }, pinned);
+        expect(() => inspectForkNpmPackages(directory, plan, assets)).toThrow("allowlist");
+        const linux = cliArchiveFileName(plan.version, "linux-x64");
+        for (const checksums of [
+          { ...pinned, "linux-x64": { archive: linux, sha256: "0".repeat(64) } },
+          Object.fromEntries(Object.entries(pinned).filter(([key]) => key !== "win32-x64")),
+        ]) {
+          pack(manifest, checksums);
+          expect(() => inspectForkNpmPackages(directory, plan, assets)).toThrow(
+            "checksums.json does not match",
+          );
+        }
+      } finally {
+        NodeFS.rmSync(directory, { recursive: true, force: true });
+      }
+    }));
   it.each(["stable", "nightly", "preview"] as const)(
     "prepares the complete %s platform matrix and final checksums",
     (channel) =>

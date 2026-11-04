@@ -9,9 +9,8 @@ the old name in their updater feed and installer URLs and rely on GitHub's renam
 redirect, so never create a new repository named `shuv2code`. npm trusted publishers
 bind to the repository name and must name `shuv1337/s2code`. An available npm name
 does not prove ownership. npm rejects the bare `s2code` name as too similar to existing
-packages, so the launcher is `@s2code/cli`. It installs only the `s2code` command, because
-`npx` runs a scoped package only when it has a single bin; the `shuv2code` bridge keeps its
-extra command names. Keep the bridge's trusted publisher configured. Do not
+packages, so the one npm package is `shuv2code`, which installs the `shuv2code`, `s2code`
+and `s2c` commands. Keep its trusted publisher configured. Do not
 move the maintainer checkout while project paths and attached worktrees use it.
 Signed desktop app IDs, Electron renderer origins, profile directories and the
 internal Electron package name retain their installed identities. Electron selects
@@ -28,8 +27,8 @@ x64 (NSIS). Intel macOS and Windows ARM64 are not built. The Windows desktop emb
 `s2code-<version>-linux-<arch>` archive for its WSL backend.
 
 A failed Windows x64 build does not block the release. Publication leaves out the
-Windows installer and CLI archive, publishes no npm packages for that version (every
-launcher depends on the Windows platform package), keeps the release out of the
+Windows installer and CLI archive, does not publish npm for that version (the launcher
+pins a checksum for every platform's archive, Windows included), keeps the release out of the
 rolling index, and says so in the release notes. macOS and Linux still block.
 
 CLI archives cover **four** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
@@ -41,11 +40,63 @@ checksum entries. The archive's internal root directory retains
 look for that exact directory. The internal executable remains `t3`. That does not authorize
 publishing the workspace package named `t3`, which is private.
 
-When npm is enabled, the public npm endpoints are `s2code` and
-`@s2code/t3-<platform>` for those four CLI targets. Platform packages publish first; the launchers follow only
-once npm has accepted all four, with exact matching optional dependency versions.
-The `shuv2code` bridge launcher publishes the same version and depends on those
-canonical platform packages, preserving upgrades for existing npm installs.
+When npm is enabled, the only public npm endpoint is `shuv2code`, built by
+`scripts/build-npm-launcher.ts` on upstream's single-launcher model. It holds no native
+code: `checksums.json` pins the SHA-256 of each of the four CLI archives, and on first run
+`bin/shuv2code.mjs` downloads its platform's archive from this version's GitHub Release,
+refuses it on a mismatch, validates `t3 --version`, and caches it under the OS cache
+directory (`<cache>/s2code/runtime/<version>`). Any other platform gets a "not supported"
+error. `S2CODE_RELEASE_BASE_URL` points it at a mirror; the pinned checksums still apply.
+`T3CODE_NPM_LAUNCHER_PATH` tells the executable which launcher started it, so service
+units and update suggestions name the global `shuv2code` command, not the cached binary.
+
+## Retired npm packages (one-time owner step)
+
+`@s2code/cli` and `@s2code/t3-<platform>` (`darwin-arm64`, `linux-arm64`, `linux-x64`,
+`win32-x64`, `win32-arm64`) are retired. CI never publishes them again, so
+`0.1.6-nightly.20261104.89` is the final release of each `@s2code/t3-*` package. Nothing
+is unpublished. The workflow does not deprecate them: npm trusted publishing covers
+`npm publish` from `release.yml`, not `npm deprecate`, and this runs once. After the first
+launcher release is public and `npm i -g shuv2code` works from it, an owner logged in to
+npm publishes a final `@s2code/cli` and deprecates every retired package.
+
+The final `@s2code/cli` is a thin alias. Its version is the first launcher release, so it
+becomes `@s2code/cli@latest`. Its `package.json`:
+
+```json
+{
+  "name": "@s2code/cli",
+  "version": "<first launcher version>",
+  "description": "Replaced by shuv2code. Installs and runs it.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/shuv1337/s2code" },
+  "bin": { "s2code": "./bin/s2code.mjs" },
+  "dependencies": { "shuv2code": "latest" }
+}
+```
+
+and its `bin/s2code.mjs`:
+
+```js
+#!/usr/bin/env node
+import "shuv2code/bin/shuv2code.mjs";
+```
+
+Publish it from that directory, then deprecate:
+
+```bash
+npm publish --access public --tag latest
+npm dist-tag add "@s2code/cli@<first launcher version>" nightly
+for name in @s2code/cli @s2code/t3-darwin-arm64 @s2code/t3-linux-arm64 \
+  @s2code/t3-linux-x64 @s2code/t3-win32-x64 @s2code/t3-win32-arm64; do
+  npm deprecate "$name" 'Replaced by shuv2code (single launcher); run npm i -g shuv2code'
+done
+```
+
+`npx @s2code/cli` then prints the deprecation and still runs the newest `shuv2code`.
+Upgrading an existing `shuv2code` install needs nothing: `npm i -g shuv2code` replaces
+`0.1.6-nightly.20261104.89`, npm drops its `@s2code/t3-*` optional dependencies, and the
+same three commands stay on `PATH`.
 
 ## macOS arm64 runner
 
@@ -99,22 +150,21 @@ Artifacts are first uploaded to a **draft** release and checked against their
 GitHub SHA-256 digests. Updater manifests are uploaded last, and the complete
 draft is verified before publication.
 
-npm publication is optional. It requires both `S2CODE_NPM_TRUSTED_PUBLISHING_READY`
-for the five canonical names and `FORK_NPM_TRUSTED_PUBLISHING_READY` for the legacy
-bridge to be `true`. Otherwise the GitHub release still publishes and `release.json`
-lists no npm packages. When both are ready, all six packages publish under a temporary
-non-default dist-tag with `npm publish --provenance`: the four platform packages at once,
-then both launchers at once. Their names, versions, repository and tarball integrity are
-verified before the release is exposed.
-npm reviews each new version before it can be installed, which took up to about
-fifteen minutes for these packages. The six reviews are awaited together, each for up
-to thirty minutes. Answers the registry could not give (429, 5xx, timeouts) are retried
-within that budget; a mismatched tarball or a package outside the allowlist fails at once.
-After the release publishes, the `nightly` dist-tag is promoted in two concurrent
-waves: every platform package, then both launchers. A nightly moves `latest` as well, so
-`npx @s2code/cli` installs the newest nightly instead of the placeholder version
-that trusted publishing required; `nightly` refuses to move backwards, while
-`latest` is left alone with a log line when a newer version already holds it.
+npm publication is optional. It requires `FORK_NPM_TRUSTED_PUBLISHING_READY` to be
+`true`. Otherwise the GitHub release still publishes and `release.json` lists no npm
+packages. When it is, the publish job builds the launcher from the release's CLI archives
+and checks that its `checksums.json` matches the archives being uploaded. The launcher
+publishes under a temporary non-default dist-tag with `npm publish --provenance` while the
+release is still a draft; nobody installs that tag, so it does not matter that its download
+would fail until then. Its name, version, repository and tarball integrity are verified
+before the release is exposed. npm reviews each new version before it can be installed,
+which took up to about fifteen minutes; the review is awaited for up to thirty minutes.
+Answers the registry could not give (429, 5xx, timeouts) are retried within that budget;
+a mismatched tarball or a package outside the allowlist fails at once.
+The `nightly` dist-tag is promoted only after the release publishes, so a promoted launcher
+can always download its archive. A nightly moves `latest` as well, so `npx shuv2code`
+installs the newest nightly; `nightly` refuses to move backwards, while `latest` is left
+alone with a log line when a newer version already holds it.
 
 `SHA256SUMS` covers final desktop and CLI bytes. The updater feeds that publish
 use the `nightly*.yml` Electron manifest names and include both architectures. The
@@ -133,16 +183,15 @@ briefly serve the previous complete index after a successful publication.
 
 When npm is enabled, GitHub and npm cannot commit a release atomically. Exact npm
 versions become public during publication, but automatic tags remain unchanged until verification.
-A failed platform publish skips the launcher; a later failure leaves automatic
-promotion incomplete and the workflow red. Never treat a successful dry run or
+A failure after the launcher publishes leaves automatic promotion incomplete and the workflow red. Never treat a successful dry run or
 one published endpoint as delivery evidence.
 
 ## Account and credential prerequisites (names only)
 
 Use the protected GitHub environment `fork-release`, with appropriate default
 branch protections and approvals. Repository variables:
-`S2CODE_NPM_TRUSTED_PUBLISHING_READY`, `FORK_NPM_TRUSTED_PUBLISHING_READY`,
-`APPLE_TEAM_ID`.
+`FORK_NPM_TRUSTED_PUBLISHING_READY`, `APPLE_TEAM_ID`. `S2CODE_NPM_TRUSTED_PUBLISHING_READY`
+attested the retired `@s2code/*` publishers and is no longer read.
 
 Signing secrets must be **repository or organization secrets**. The reusable
 desktop build does not select `fork-release` and cannot see secrets attached only
@@ -167,11 +216,10 @@ do not require Clerk, relay, passkey domains or a hosted provisioning profile.
 Hosted/relay, marketing and AUR deployment are intentionally separate and are not
 invoked by this pipeline; configure their fork identities in their owning work.
 
-npm is optional (see [Nightly only](#nightly-only)). To enable it, human npm setup
-must establish ownership/bootstrap of the five canonical package names, retain the
-legacy bridge package, and configure trusted publishers
+npm is optional (see [Nightly only](#nightly-only)). To enable it, the `shuv2code`
+package needs a trusted publisher
 for **calling workflow filename `release.yml`**, repository `shuv1337/s2code`, environment `fork-release`. Enable both direct `npm publish`
-and `npm dist-tag` allowed actions for each package. The readiness variable is an
+and `npm dist-tag` allowed actions. The readiness variable is an
 explicit human attestation, not an authentication test. `npm whoami`, token names,
 404 responses and `npm publish --dry-run` do not verify trusted-publisher readiness.
 New trusted-publisher configurations have a short initial-validation window; see
@@ -190,13 +238,13 @@ Already uploaded assets and npm versions are reused only when their digests matc
 Do not rebuild different signed bytes under an immutable version, overwrite public
 release assets or move a dist-tag backwards. If the run's build artifacts have
 expired or the builds must be redone, use a new version. Rolling index/tag repair may be retried after a fully
-verified release; inspect all six endpoints and the release before doing so.
+verified release; inspect the npm package and the release before doing so.
 
 Before claiming delivery, a human must run the protected workflow with real fork
 accounts and capture: signature/team/publisher and notarization evidence for
 signed platforms; CLI smoke results on all four architectures; installs/upgrades
 for each desktop target; same-arch Windows WSL startup; checksums and nightly feed
 selection; install-order coexistence with upstream. With npm enabled, also capture
-clean npm installs of the launcher and optional packages and OIDC provenance. An
+a clean `npm i -g shuv2code`, its first-run download on each platform, and OIDC provenance. An
 offline test or green artifact job is not evidence that signing, npm ownership or delivery
 was configured correctly.

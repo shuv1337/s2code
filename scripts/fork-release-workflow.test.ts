@@ -96,7 +96,6 @@ describe("fork workflow gates", () => {
       "    env:",
       "      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}",
       "      GH_TOKEN: ${{ github.token }}",
-      "      S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}",
       "      FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}",
       '      NPM_TOKEN: ""',
       '      NODE_AUTH_TOKEN: ""',
@@ -134,13 +133,11 @@ describe("fork workflow gates", () => {
         );
         expect(result.status, result.stderr).toBe(0);
         expect(NodeFS.readFileSync(output, "utf8")).toBe(`built=${present}\n`);
-        for (const name of [
-          "Build the six public packages once from the verified-source archives",
-          "Drop the extracted npm package trees, keeping the tarballs",
-        ])
-          expect(publish.split(`      - name: ${name}\n`)[1]).toMatch(
-            /^ {8}if: steps\.windows\.outputs\.built == 'true'\n/,
-          );
+        expect(
+          publish.split(
+            "      - name: Build the shuv2code npm launcher from the verified-source archives\n",
+          )[1],
+        ).toMatch(/^ {8}if: steps\.windows\.outputs\.built == 'true'\n/);
       } finally {
         NodeFS.rmSync(root, { recursive: true, force: true });
       }

@@ -26,25 +26,25 @@ import {
 
 it("formats package runner commands from their cache entry paths", () => {
   for (const [entryPath, expected] of [
-    ["/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs", "npx @s2code/cli serve"],
+    ["/home/theo/.npm/_npx/abc123/node_modules/t3/dist/bin.mjs", "npx shuv2code serve"],
     [
       "C:\\Users\\theo\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\t3\\dist\\bin.mjs",
-      "npx @s2code/cli serve",
+      "npx shuv2code serve",
     ],
-    ["/home/theo/.cache/pnpm/dlx/abc/node_modules/t3/dist/bin.mjs", "pnpm dlx @s2code/cli serve"],
+    ["/home/theo/.cache/pnpm/dlx/abc/node_modules/t3/dist/bin.mjs", "pnpm dlx shuv2code serve"],
     [
       "/home/theo/.local/share/pnpm/.pnpm/dlx/abc/node_modules/t3/dist/bin.mjs",
-      "pnpm dlx @s2code/cli serve",
+      "pnpm dlx shuv2code serve",
     ],
     [
       "C:\\Users\\theo\\AppData\\Local\\pnpm-cache\\dlx\\abc\\node_modules\\t3\\dist\\bin.mjs",
-      "pnpm dlx @s2code/cli serve",
+      "pnpm dlx shuv2code serve",
     ],
-    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx @s2code/cli serve"],
-    ["/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs", "bunx @s2code/cli serve"],
+    ["/home/theo/.bun/install/cache/t3@0.0.31/dist/bin.mjs", "bunx shuv2code serve"],
+    ["/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs", "bunx shuv2code serve"],
     [
       "C:\\Users\\theo\\AppData\\Local\\Temp\\bunx-0-t3@latest\\node_modules\\t3\\dist\\bin.mjs",
-      "bunx @s2code/cli serve",
+      "bunx shuv2code serve",
     ],
   ] as const) {
     assert.equal(formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }), expected);
@@ -67,11 +67,11 @@ it("treats stable installs as direct invocations", () => {
 
 it("re-suggests the prerelease channel only for prerelease builds", () => {
   for (const [version, expected] of [
-    ["0.0.31-nightly.20260729", "npx @s2code/cli@nightly serve"],
-    ["0.0.31-preview.20260729.1", "npx @s2code/cli@0.0.31-preview.20260729.1 serve"],
-    ["0.0.31-pr.42.1", "npx @s2code/cli@0.0.31-pr.42.1 serve"],
-    ["0.0.31-foo-preview.20260729.1", "npx @s2code/cli serve"],
-    ["0.0.31", "npx @s2code/cli serve"],
+    ["0.0.31-nightly.20260729", "npx shuv2code@nightly serve"],
+    ["0.0.31-preview.20260729.1", "npx shuv2code@0.0.31-preview.20260729.1 serve"],
+    ["0.0.31-pr.42.1", "npx shuv2code@0.0.31-pr.42.1 serve"],
+    ["0.0.31-foo-preview.20260729.1", "npx shuv2code serve"],
+    ["0.0.31", "npx shuv2code serve"],
   ] as const) {
     assert.equal(
       formatCliCommand({
@@ -91,7 +91,7 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "npx @s2code/cli@nightly serve",
+    "npx shuv2code@nightly serve",
   );
   assert.equal(
     formatCliCommand({
@@ -99,7 +99,7 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/tmp/bunx-1000-t3@latest/node_modules/t3/dist/bin.mjs",
       version: "0.0.31",
     }),
-    "bunx @s2code/cli serve",
+    "bunx shuv2code serve",
   );
   assert.equal(
     formatCliCommand({
@@ -141,12 +141,12 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       const npx = "/home/theo/.npm/_npx/abc/node_modules/t3/dist/bin.mjs";
       // sudo's secure_path already has a system Node.
       expect(yield* rootCommand({ node: "/usr/bin/node", entry: npx })).toBe(
-        "sudo npx @s2code/cli browser setup",
+        "sudo npx shuv2code browser setup",
       );
       // nvm, fnm, and tarball installs are dropped by sudo's PATH reset.
       expect(
         yield* rootCommand({ node: "/home/theo/.nvm/versions/node/v24/bin/node", entry: npx }),
-      ).toBe('sudo env "PATH=$PATH" npx @s2code/cli browser setup');
+      ).toBe('sudo env "PATH=$PATH" npx shuv2code browser setup');
       expect(
         yield* rootCommand({
           node: "/home/theo/.local/node/bin/node",
@@ -337,124 +337,121 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
               Effect.provideService(HostProcess.ExecutablePath, entry),
               Effect.provideService(HostProcess.IsExecutable, true),
             ),
-          ).toBe("npx @s2code/cli service install");
+          ).toBe("npx shuv2code service install");
         }
       }
     }),
   );
 
-  it.effect.each([
-    ["@s2code/cli", "s2code"],
-    ["shuv2code", "shuv2code"],
-  ] as const)(
-    "requires the %s npm prefix bin to point to the running package",
-    ([packageName, binName]) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped();
-        const prefix = path.join(root, "bunx-tools");
-        const packageRoot = path.join(prefix, "lib/node_modules", packageName);
-        const entry = path.join(packageRoot, "dist/bin.mjs");
-        const globalBin = path.join(prefix, "bin", binName);
-        yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
-        yield* fs.makeDirectory(path.dirname(globalBin), { recursive: true });
-        yield* fs.writeFileString(entry, "");
-        yield* fs.writeFileString(
-          path.join(packageRoot, "package.json"),
-          JSON.stringify({
-            name: packageName,
-            version: "0.0.45",
-            bin: { [binName]: "./dist/bin.mjs" },
-          }),
-        );
-        const resolve = resolveServerInstallation.pipe(
-          Effect.provideService(HostProcess.Arguments, ["node", entry]),
-          Effect.provideService(HostProcess.IsExecutable, false),
-          Effect.provideService(HostProcess.Platform, "linux"),
-        );
-        expect(yield* resolve).toBeNull();
-        yield* fs.symlink(entry, globalBin);
-        expect(yield* resolve).toEqual({
-          kind: "npm-global",
-          prefix: yield* fs.realPath(prefix),
-          packageName,
-        });
-        const guidance = yield* resolveUninstallGuidance.pipe(
-          Effect.provideService(HostProcess.Arguments, ["node", entry]),
-          Effect.provideService(HostProcess.IsExecutable, false),
-          Effect.provideService(HostProcess.Platform, "linux"),
-        );
-        expect(guidance).toContain(
-          `npm uninstall --global --prefix ${yield* fs.realPath(prefix)} ${packageName}`,
-        );
-        expect(guidance).not.toMatch(/npm uninstall[^`]*\bt3\b/);
-        const command = yield* resolveCliCommand("service install").pipe(
-          Effect.provideService(HostProcess.Arguments, ["node", entry]),
-          Effect.provideService(HostProcess.IsExecutable, false),
-          Effect.provideService(HostProcess.Environment, {}),
-          Effect.provideService(HostProcess.Platform, "linux"),
-        );
-        expect(command).toBe(`${yield* fs.realPath(prefix)}/bin/${binName} service install`);
-        expect(
-          formatServiceStatus(
-            {
-              supported: true,
-              installed: false,
-              current: false,
-              unitPath: "fork.service",
-              logPath: "fork.log",
-            },
-            "1.2.3",
-            () => command,
-          ),
-        ).toContain(command);
-        yield* fs.remove(globalBin);
-        yield* fs.writeFileString(globalBin, "an unrelated t3 command");
-        expect(yield* resolve).toBeNull();
-        expect(
-          yield* resolve.pipe(Effect.provideService(HostProcess.Platform, "win32")),
-        ).toBeNull();
-      }),
+  it.effect("requires the npm prefix bin to point to the running package", () =>
+    Effect.gen(function* () {
+      const packageName = "shuv2code";
+      const binName = "shuv2code";
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const prefix = path.join(root, "bunx-tools");
+      const packageRoot = path.join(prefix, "lib/node_modules", packageName);
+      const entry = path.join(packageRoot, "bin/shuv2code.mjs");
+      const globalBin = path.join(prefix, "bin", binName);
+      yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+      yield* fs.makeDirectory(path.dirname(globalBin), { recursive: true });
+      yield* fs.writeFileString(entry, "");
+      yield* fs.writeFileString(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: packageName,
+          version: "0.0.45",
+          bin: { [binName]: "./bin/shuv2code.mjs" },
+        }),
+      );
+      const resolve = resolveServerInstallation.pipe(
+        Effect.provideService(HostProcess.Arguments, ["node", entry]),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      expect(yield* resolve).toBeNull();
+      yield* fs.symlink(entry, globalBin);
+      expect(yield* resolve).toEqual({
+        kind: "npm-global",
+        prefix: yield* fs.realPath(prefix),
+        packageName,
+      });
+      const guidance = yield* resolveUninstallGuidance.pipe(
+        Effect.provideService(HostProcess.Arguments, ["node", entry]),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      expect(guidance).toContain(
+        `npm uninstall --global --prefix ${yield* fs.realPath(prefix)} ${packageName}`,
+      );
+      expect(guidance).not.toMatch(/npm uninstall[^`]*\bt3\b/);
+      const command = yield* resolveCliCommand("service install").pipe(
+        Effect.provideService(HostProcess.Arguments, ["node", entry]),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provideService(HostProcess.Environment, {}),
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      expect(command).toBe(`${yield* fs.realPath(prefix)}/bin/${binName} service install`);
+      expect(
+        formatServiceStatus(
+          {
+            supported: true,
+            installed: false,
+            current: false,
+            unitPath: "fork.service",
+            logPath: "fork.log",
+          },
+          "1.2.3",
+          () => command,
+        ),
+      ).toContain(command);
+      yield* fs.remove(globalBin);
+      yield* fs.writeFileString(globalBin, "an unrelated t3 command");
+      expect(yield* resolve).toBeNull();
+      expect(yield* resolve.pipe(Effect.provideService(HostProcess.Platform, "win32"))).toBeNull();
+    }),
   );
 
-  it.effect("proves the native executable belongs to the npm launcher", () =>
+  it.effect("trusts the npm launcher that started the executable only at this exact version", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped();
       const prefix = path.join(root, "bunx-tools");
-      const packageRoot = path.join(prefix, "lib/node_modules/@s2code/cli");
-      const launcher = path.join(packageRoot, "bin/t3.js");
-      const entry = path.join(packageRoot, "node_modules/@s2code/t3-linux-x64/t3");
+      const packageRoot = path.join(prefix, "lib/node_modules/shuv2code");
+      const launcher = path.join(packageRoot, "bin/shuv2code.mjs");
+      const executable = path.join(root, ".cache/s2code/runtime/1.2.3/t3");
       yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
-      yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
+      yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
       yield* fs.makeDirectory(path.join(prefix, "bin"));
       yield* fs.writeFileString(launcher, "");
-      yield* fs.writeFileString(entry, "");
-      yield* fs.writeFileString(
-        path.join(packageRoot, "package.json"),
-        '{"name":"@s2code/cli","version":"0.0.45","bin":{"s2code":"./bin/t3.js"},"optionalDependencies":{"@s2code/t3-linux-x64":"0.0.45"}}',
-      );
-      yield* fs.symlink(launcher, path.join(prefix, "bin/s2code"));
-      const resolve = resolveServerInstallation.pipe(
-        Effect.provideService(HostProcess.ExecutablePath, entry),
-        Effect.provideService(HostProcess.IsExecutable, true),
-        Effect.provideService(HostProcess.Platform, "linux"),
-      );
-      for (const [version, expected] of [
-        ["0.0.44", null],
-        [
-          "0.0.45",
-          { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "@s2code/cli" },
-        ],
-      ]) {
-        yield* fs.writeFileString(
-          path.join(path.dirname(entry), "package.json"),
-          `{"name":"@s2code/t3-linux-x64","version":"${version}"}`,
+      yield* fs.writeFileString(executable, "");
+      yield* fs.symlink(launcher, path.join(prefix, "bin/shuv2code"));
+      const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        effect.pipe(
+          Effect.provideService(HostProcess.Arguments, [executable, "serve"]),
+          Effect.provideService(HostProcess.ExecutablePath, executable),
+          Effect.provideService(HostProcess.IsExecutable, true),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.provideService(HostProcess.Environment, { T3CODE_NPM_LAUNCHER_PATH: launcher }),
         );
-        expect(yield* resolve).toEqual(expected);
+      for (const [version, expected] of [
+        ["1.2.2", null],
+        [
+          "1.2.3",
+          { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "shuv2code" },
+        ],
+      ] as const) {
+        yield* fs.writeFileString(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({ name: "shuv2code", version, bin: { shuv2code: "./bin/shuv2code.mjs" } }),
+        );
+        expect(yield* provide(resolveServerInstallation)).toEqual(expected);
       }
+      expect(yield* provide(resolveCliCommand("service install"))).toBe(
+        `${yield* fs.realPath(prefix)}/bin/shuv2code service install`,
+      );
     }),
   );
 

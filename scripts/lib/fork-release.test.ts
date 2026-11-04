@@ -43,27 +43,11 @@ const manifests = (version = "1.2.3") =>
     name,
     version,
     repository: { url: "https://github.com/shuv1337/s2code" },
-    ...(!name.startsWith("@s2code/t3-")
-      ? {
-          optionalDependencies: Object.fromEntries(
-            FORK_NPM_PACKAGES.filter((name) => name.startsWith("@s2code/t3-")).map((name) => [
-              name,
-              version,
-            ]),
-          ),
-        }
-      : {}),
   }));
 describe("fork release contract", () => {
-  it("requires separate attestations for the new npm names and legacy launcher", () => {
-    expect(forkNpmPublishingReady({ FORK_NPM_TRUSTED_PUBLISHING_READY: "true" })).toBe(false);
+  it("publishes npm only once the shuv2code trusted publisher is attested", () => {
     expect(forkNpmPublishingReady({ S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true" })).toBe(false);
-    expect(
-      forkNpmPublishingReady({
-        S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true",
-        FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
-      }),
-    ).toBe(true);
+    expect(forkNpmPublishingReady({ FORK_NPM_TRUSTED_PUBLISHING_READY: "true" })).toBe(true);
   });
   it("keeps the last public index when atomic publication fails and uses a stable reader URL", async () => {
     const previous = { sha: "old-blob", content: '[{"tag_name":"v1.2.2","draft":false}]\n' };
@@ -153,6 +137,10 @@ describe("fork release contract", () => {
     expect(forkReleaseTitle(value)).toBe(`S2Code Nightly v${value.version}`);
     expect(value.title.startsWith("UNSIGNED — ")).toBe(!mac || !win);
     const body = forkReleaseBody(value);
+    expect(body).not.toContain("### npm");
+    expect(forkReleaseBody({ ...value, npm: true })).toContain(
+      "### npm\n\n`npm i -g shuv2code` installs a small launcher.",
+    );
     const macSection = body.split("### macOS\n\n")[1]!.split("### Windows")[0]!;
     const winSection = body.split("### Windows\n\n")[1]!;
     expect(macSection.includes("are signed and notarized")).toBe(mac);
@@ -208,7 +196,7 @@ describe("fork release contract", () => {
         .some((name) => name.endsWith(".exe")),
     ).toBe(false);
     expect(forkReleaseBody(value).split("### Windows\n\n")[1]).toMatch(
-      /^The Windows x64 build failed.*no npm packages/,
+      /^The Windows x64 build failed.*npm was not published/,
     );
   });
   it("keeps stable/nightly feeds channel-bound and rejects upstream repositories and channel/version mismatches", () => {
@@ -230,10 +218,13 @@ describe("fork release contract", () => {
   });
   it("protects the private t3 workspace and exact public allowlist", () => {
     expect(serverPackage.private).toBe(true);
-    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(6);
+    expect(FORK_NPM_PACKAGES).toEqual(["shuv2code"]);
+    expect(assertForkNpmSet(manifests(), "1.2.3")).toHaveLength(1);
     for (const override of [
       { name: "t3" },
       { name: "@t3code/t3-linux-x64" },
+      { name: "@s2code/t3-linux-x64" },
+      { name: "@s2code/cli" },
       { private: true },
       { version: "1.2.4" },
       { repository: { url: "https://github.com/pingdotgg/t3code" } },
@@ -241,15 +232,17 @@ describe("fork release contract", () => {
       expect(() => assertForkNpmManifest({ ...manifests()[0], ...override }, "1.2.3")).toThrow(
         "allowlist",
       );
-    expect(() => assertForkNpmSet(manifests().slice(1), "1.2.3")).toThrow(
-      "All 4 platform packages",
+    expect(() => assertForkNpmSet([], "1.2.3")).toThrow("Exactly the shuv2code launcher");
+    expect(() => assertForkNpmSet([...manifests(), ...manifests()], "1.2.3")).toThrow(
+      "Exactly the shuv2code launcher",
     );
-    expect(() =>
-      assertForkNpmManifest(
-        { ...manifests().at(-1), optionalDependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
-        "1.2.3",
-      ),
-    ).toThrow("all 4 exact matching");
+    for (const dependencies of [
+      { optionalDependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
+      { dependencies: { "@s2code/t3-linux-x64": "1.2.3" } },
+    ])
+      expect(() => assertForkNpmManifest({ ...manifests()[0], ...dependencies }, "1.2.3")).toThrow(
+        "no dependencies",
+      );
   });
   it("moves latest with nightly, keeps preview off it, and permits only matching staging tags", () => {
     // The fork ships nightly only, so nightly owns `latest` as well.

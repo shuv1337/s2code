@@ -6,12 +6,9 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeModule from "node:module";
-import { CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
+import { CLI_ARCHIVE_PLATFORM_KEYS, cliArchiveFileName } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import {
-  npmPlatformPackageManifest,
-  npmLauncherPackageManifest,
-} from "./build-npm-platform-packages.ts";
+import { npmLauncherPackageManifest } from "./build-npm-launcher.ts";
 import { desktopAssetGroups, forkReleasePlan, forkReleaseTitle } from "./lib/fork-release.ts";
 import { releaseCommandError } from "./fork-release.ts";
 import { serializeUpdateManifest } from "./lib/update-manifest.ts";
@@ -201,14 +198,23 @@ function publishFixture(
     const registry: Record<string, unknown> = {};
     const packageDir = NodePath.join(root, "package");
     NodeFS.mkdirSync(packageDir);
-    for (const manifest of [
-      ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => npmPlatformPackageManifest(key, plan.version, {})),
-      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS),
-      npmLauncherPackageManifest(plan.version, CLI_ARCHIVE_PLATFORM_KEYS, "shuv2code"),
-    ]) {
+    // CI builds the launcher only when Windows built, since it pins every platform's archive.
+    if (windows) {
+      const manifest = npmLauncherPackageManifest(plan.version, 79);
       const file = NodePath.join(prepared, "npm-packages", manifest.name + ".tgz");
       NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
       NodeFS.writeFileSync(NodePath.join(packageDir, "package.json"), JSON.stringify(manifest));
+      const checksums = Object.fromEntries(
+        CLI_ARCHIVE_PLATFORM_KEYS.map((key) => {
+          const archive = cliArchiveFileName(plan.version, key);
+          const bytes = NodeFS.readFileSync(NodePath.join(assetDir, archive));
+          return [
+            key,
+            { archive, sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex") },
+          ];
+        }),
+      );
+      NodeFS.writeFileSync(NodePath.join(packageDir, "checksums.json"), JSON.stringify(checksums));
       NodeChildProcess.execFileSync("tar", ["-czf", file, "-C", root, "package"]);
       registry[manifest.name] = {
         ...manifest,
@@ -277,12 +283,7 @@ function publishFixture(
           ...runner,
           ACTIONS_ID_TOKEN_REQUEST_URL: "fixture",
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture",
-          ...(npm
-            ? {
-                S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true",
-                FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
-              }
-            : {}),
+          ...(npm ? { FORK_NPM_TRUSTED_PUBLISHING_READY: "true" } : {}),
           // Same number of polls as CI, without the fifteen-second waits.
           FORK_RELEASE_NPM_POLL_MS: "1",
           FIXTURE_FLAKY_TAGS: String(flaky.tags ?? 0),
@@ -383,11 +384,9 @@ describe("fork publication fixtures", () => {
     (mode) => {
       const { result, state } = publishFixture(mode);
       expect(result.status).not.toBe(0);
-      // A refused platform upload must not burn an immutable launcher version.
       expect(
         state.commands.filter(
-          ([command, subcommand, file]) =>
-            command === "npm" && subcommand === "publish" && !file!.includes("/@s2code/t3-"),
+          ([command, subcommand]) => command === "npm" && subcommand === "dist-tag",
         ),
       ).toEqual([]);
       expect(result.stderr).toMatch(
@@ -579,43 +578,22 @@ describe("fork publication fixtures", () => {
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "promotes nightly and latest, platform packages before the launcher",
+    "promotes nightly, and latest unless a newer version holds it",
     () => {
-      const held = "@s2code/t3-linux-x64";
       const { result, state, plan } = publishFixture("resume", "refs/heads/main", true, "nightly", {
-        ...Object.fromEntries(
-          CLI_ARCHIVE_PLATFORM_KEYS.map((key) => [`@s2code/t3-${key}`, { latest: "0.0.0" }]),
-        ),
-        s2code: { latest: "0.0.0" },
         // A newer published version must keep `latest`, without failing the run.
-        [held]: { latest: "9.9.9" },
+        shuv2code: { latest: "9.9.9" },
       });
       expect(result.status, result.stderr).toBe(0);
       const promotions = state.commands
         .filter(([command, subcommand]) => command === "npm" && subcommand === "dist-tag")
-        .map((args) => [args[3]!.slice(0, args[3]!.lastIndexOf("@")), args[4]!] as const);
-      for (const name of CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`))
-        expect(promotions.filter(([pkg]) => pkg === name).map(([, tag]) => tag)).toEqual(
-          name === held ? ["nightly"] : ["nightly", "latest"],
-        );
-      expect(promotions.filter(([pkg]) => pkg === "@s2code/cli").map(([, tag]) => tag)).toEqual([
-        "nightly",
-        "latest",
-      ]);
-      // Two waves: every platform tag moves before either launcher's.
-      expect(
-        promotions
-          .slice(-4)
-          .map(([pkg]) => pkg)
-          .sort(),
-      ).toEqual(["@s2code/cli", "@s2code/cli", "shuv2code", "shuv2code"]);
-      expect(state.tags["@s2code/cli"]).toEqual({ nightly: plan.version, latest: plan.version });
-      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
-      expect(state.tags[held]).toEqual({ nightly: plan.version, latest: "9.9.9" });
+        .map((args) => args[4]);
+      expect(promotions).toEqual(["nightly"]);
+      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: "9.9.9" });
     },
   );
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "stages platform packages before launchers, reviews them together, then promotes",
+    "stages the launcher, waits for review, and promotes it only once the release is public",
     () => {
       const { result, state, plan, npmLog } = publishFixture(
         "fresh",
@@ -626,36 +604,28 @@ describe("fork publication fixtures", () => {
       expect(result.status, result.stderr).toBe(0);
       const at = (match: (entry: (typeof npmLog)[number]) => boolean) =>
         npmLog.flatMap((entry, index) => (match(entry) ? [index] : []));
-      const command = (subcommand: string, platform?: boolean) =>
-        at(
-          (entry) =>
-            "args" in entry &&
-            entry.args[0] === subcommand &&
-            (platform === undefined ||
-              entry.args.some((arg) => arg.includes("@s2code/t3-")) === platform),
-        );
+      const command = (subcommand: string) =>
+        at((entry) => "args" in entry && entry.args[0] === subcommand);
       const publishes = npmLog.flatMap((entry) =>
         "args" in entry && entry.args[0] === "publish" ? [entry.args] : [],
       );
-      expect(publishes).toHaveLength(6);
-      for (const args of publishes)
-        expect(args).toEqual(expect.arrayContaining(["--provenance", "--tag", plan.stagingTag]));
-      expect(Math.max(...command("publish", true))).toBeLessThan(
-        Math.min(...command("publish", false)),
-      );
-      // Launchers went up while every platform package was still in review.
+      expect(publishes).toEqual([
+        expect.arrayContaining([
+          "prepared/npm-packages/shuv2code.tgz",
+          "--provenance",
+          "--tag",
+          plan.stagingTag,
+        ]),
+      ]);
       const reviews = at((entry) => "visible" in entry);
-      expect(reviews).toHaveLength(6);
+      expect(reviews).toHaveLength(1);
       expect(Math.max(...command("publish"))).toBeLessThan(Math.min(...reviews));
-      // Promotion waits for every package to verify and for the public release.
+      // Promotion waits for review and for the public release the launcher downloads from.
       expect(Math.max(...reviews)).toBeLessThan(Math.min(...command("dist-tag")));
       expect(
         npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag" && entry.draft),
       ).toEqual([]);
-      expect(Math.max(...command("dist-tag", true))).toBeLessThan(
-        Math.min(...command("dist-tag", false)),
-      );
-      expect(command("dist-tag")).toHaveLength(12);
+      expect(command("dist-tag")).toHaveLength(2);
       expect(state.release.draft).toBe(false);
       expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
     },
@@ -670,9 +640,9 @@ describe("fork publication fixtures", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(error);
       expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "publish")).toHaveLength(
-        6,
+        1,
       );
-      expect(npmLog.filter((entry) => "visible" in entry)).toHaveLength(6);
+      expect(npmLog.filter((entry) => "visible" in entry)).toHaveLength(1);
       expect(npmLog.filter((entry) => "args" in entry && entry.args[0] === "dist-tag")).toEqual([]);
       expect(state.release.draft).toBe(true);
     },
@@ -689,7 +659,7 @@ describe("fork publication fixtures", () => {
         "refs/heads/main",
         true,
         "nightly",
-        { s2code: { latest: "0.0.0" } },
+        { shuv2code: { latest: "0.0.0" } },
         { versions: 2, tags: 2 },
       );
       expect(result.status, result.stderr).toBe(0);
@@ -699,7 +669,7 @@ describe("fork publication fixtures", () => {
           ([command, subcommand]) => command === "npm" && subcommand === "publish",
         ),
       ).toBe(false);
-      expect(state.tags["@s2code/cli"]).toEqual({ nightly: plan.version, latest: plan.version });
+      expect(state.tags["shuv2code"]).toEqual({ nightly: plan.version, latest: plan.version });
       expect(result.stderr).not.toContain("PRIVATE_RESPONSE_BODY");
     },
   );
