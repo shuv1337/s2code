@@ -81,7 +81,7 @@ Yes. Use the composer microphone for draft-only dictation, or Call for a two-way
 
 ## Does it work on Windows, Mac, and Linux?
 
-Yes, all three. Desktop app, CLI, the works. Two catches: Intel Macs and Windows on Arm are no longer built. Existing Intel installs stop getting updates, and existing Windows on Arm installs are updated to the x64 build, which runs emulated and may break WSL or fail to start on Windows 10 on Arm ([details](./install.md#windows-on-arm)). On those machines [run from source](./install.md#intel-macs) or connect to a server elsewhere. Windows folks can also run agents inside WSL. [Install](./install.md)
+Yes, all three. Desktop app, CLI, the works. Two catches: Intel Macs and Windows on Arm are no longer built. Existing Intel installs stop getting updates but keep offering one that fails to download ([details](./install.md#intel-macs)), and existing Windows on Arm installs are updated to the x64 build, which runs emulated and may break WSL or fail to start on Windows 10 on Arm ([details](./install.md#windows-on-arm)). On those machines [run from source](./install.md#intel-macs) or connect to a server elsewhere. Windows folks can also run agents inside WSL. [Install](./install.md)
 
 ## Why is my provider not showing up?
 
