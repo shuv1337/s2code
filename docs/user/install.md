@@ -96,8 +96,10 @@ is the only train this fork publishes.
 ### Intel Macs
 
 S2Code is no longer built for Intel Macs: there is no desktop app and no standalone executable.
-An Intel install you already have keeps working, but it never gets another update. It may
-still show "Update available" and then fail to download it; there is nothing to fix on your side.
+An Intel install you already have keeps working, but it never gets another update. It still
+shows "Update available", the download fails with "Download failed ... Click to retry", and the
+same update is offered again a few minutes later. There is nothing to fix on your side. To stop
+the prompt, set `T3CODE_DISABLE_AUTO_UPDATE=1` before the app starts.
 To run a server on an Intel Mac, build it from source with `vp`, which provides the Node version it needs
 ([Install vp](https://github.com/shuv1337/s2code#install-vp)):
 
