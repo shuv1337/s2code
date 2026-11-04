@@ -173,6 +173,19 @@ or endpoint configurations do not report subscription limits.
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
+## Pool accounts
+
+Turn on **Turn off at usage limit** for two or more instances of one provider, such as two Codex or
+two Cursor accounts, and they form a pool. The model picker shows the pool as one entry. Each new
+thread starts on the pool account with the most headroom for its model, and accounts tied for the
+most headroom take turns. When an account's quota runs out, S2Code turns that instance off and
+moves the thread to the pool account with the most headroom.
+
+An agent or the `t3 thread start` command can name one account instead. That thread runs there or
+fails with an error saying why the account cannot take it, such as being out of quota or signed
+out. To let the pool take over when the named account cannot, the agent passes
+`allowPoolFailover: true`, or the command adds `--allow-pool-failover`.
+
 ## Connect a CLIProxyAPI hub
 
 To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the

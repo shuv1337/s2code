@@ -264,8 +264,16 @@ function threadManagementFailure(error: unknown): OrchestratorMcpFailure {
     case "ThreadManagementDurableRunProjectionError":
       return failure("orchestration_error", error.message);
     case "ThreadManagementProviderInstanceDisabledError":
+    case "ThreadManagementProviderInstanceUnavailableError":
       return failure("invalid_request", error.message);
   }
+}
+
+/** A target that names an instance is binding; one that does not may start anywhere in its pool. */
+function namedInstance(target: OrchestratorMcpTarget | undefined) {
+  return target?.providerInstanceId === undefined
+    ? undefined
+    : { allowPoolFailover: target.allowPoolFailover === true };
 }
 
 // Without a reason, a Stop reads as the user's (see RunExecutionService.USER_STOP_REASON).
@@ -366,28 +374,32 @@ function capabilityModelOption(descriptor: ProviderOptionDescriptor): Orchestrat
   };
 }
 
+/** With `poolCanReplace`, leaves out what pool failover moves a named instance away from. */
 function providerConstraints(
   provider: ServerProvider | undefined,
   supportsOrchestrationV2: boolean,
+  poolCanReplace = false,
 ): ReadonlyArray<string> {
   const constraints: Array<string> = [];
   if (!supportsOrchestrationV2) {
     constraints.push("No V2 provider adapter is registered.");
   }
   if (provider === undefined) return constraints;
-  if (!isProviderAvailable(provider)) {
+  if (!poolCanReplace && !isProviderAvailable(provider)) {
     constraints.push(provider.unavailableReason ?? "Provider driver is unavailable.");
   }
   if (!provider.enabled) {
-    constraints.push("Provider instance is disabled.");
+    if (!poolCanReplace) constraints.push("Provider instance is disabled.");
     // Disabled snapshots contain placeholders for installation, health, and auth.
     return constraints;
   }
-  if (!provider.installed) constraints.push("Provider executable is not installed.");
-  if (provider.status === "error" || provider.status === "disabled") {
+  if (!poolCanReplace && !provider.installed) {
+    constraints.push("Provider executable is not installed.");
+  }
+  if (provider.status === "disabled" || (!poolCanReplace && provider.status === "error")) {
     constraints.push(provider.message ?? `Provider status is ${provider.status}.`);
   }
-  if (provider.auth.status === "unauthenticated") {
+  if (!poolCanReplace && provider.auth.status === "unauthenticated") {
     constraints.push("Provider is not authenticated.");
   }
   return constraints;
@@ -1420,6 +1432,7 @@ const make = Effect.gen(function* () {
     const constraints = providerConstraints(
       provider,
       orchestrationCapableInstanceIds.has(provider.instanceId),
+      requestedInstanceId !== undefined && input.target?.allowPoolFailover === true,
     );
     if (constraints.length > 0) {
       return yield* failure(
@@ -2545,29 +2558,43 @@ const make = Effect.gen(function* () {
         }
         workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
       }
+      const named = namedInstance(input.target);
+      const modelSelection =
+        named === undefined || isRetryOfAcceptedDelegation
+          ? target.modelSelection
+          : yield* threadManagement
+              .resolveThreadStartInstance({
+                modelSelection: target.modelSelection,
+                projectId: parent.thread.projectId,
+                named,
+              })
+              .pipe(Effect.mapError(threadManagementFailure));
       // ThreadManagementService.dispatch is the chokepoint for this command
       // type's own enablement check, using the same command id and its
       // receipt-replay exemption, so no separate assert runs here.
       const result = yield* threadManagement
-        .dispatch({
-          type: "delegated_task.request",
-          createdBy: "agent",
-          creationSource: "mcp",
-          commandId,
-          parentThreadId: scope.thread.threadId,
-          parentRunId: parentRun.id,
-          parentNodeId: parentRun.rootNodeId,
-          task: taskPrompt(input),
-          ...(input.title === undefined ? {} : { title: input.title }),
-          modelSelection: target.modelSelection,
-          runtimeMode,
-          interactionMode,
-          ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-          // Async delegations wake the parent on every child terminal; wait
-          // delegations deliver through the blocking tool call, so a wake is
-          // only needed if the parent settled first (timeout, disconnect).
-          completionWake: input.mode === "wait" ? "settled_only" : "always",
-        })
+        .dispatch(
+          {
+            type: "delegated_task.request",
+            createdBy: "agent",
+            creationSource: "mcp",
+            commandId,
+            parentThreadId: scope.thread.threadId,
+            parentRunId: parentRun.id,
+            parentNodeId: parentRun.rootNodeId,
+            task: taskPrompt(input),
+            ...(input.title === undefined ? {} : { title: input.title }),
+            modelSelection,
+            runtimeMode,
+            interactionMode,
+            ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
+            // Async delegations wake the parent on every child terminal; wait
+            // delegations deliver through the blocking tool call, so a wake is
+            // only needed if the parent settled first (timeout, disconnect).
+            completionWake: input.mode === "wait" ? "settled_only" : "always",
+          },
+          named === undefined ? undefined : { threadStart: false },
+        )
         .pipe(
           Effect.mapError((error) =>
             error._tag === "ThreadManagementProviderInstanceDisabledError"
@@ -2915,6 +2942,7 @@ const make = Effect.gen(function* () {
                     : {
                         ...request.target,
                         providerInstanceId: committedThread.modelSelection.instanceId,
+                        allowPoolFailover: false,
                       },
                 providers,
                 skipProjectEnablementFilter: isRetryOfAcceptedCreation,
@@ -2928,7 +2956,22 @@ const make = Effect.gen(function* () {
                 parent.thread.interactionMode,
                 request.interactionMode,
               );
-              yield* assertTargetEnabledForProject(parent, commandId, target);
+              // A named instance is placed before creation, so a refusal leaves no thread behind.
+              const named = committedThread === null ? namedInstance(request.target) : undefined;
+              const placed =
+                named === undefined
+                  ? target.modelSelection
+                  : yield* threadManagement
+                      .resolveThreadStartInstance({
+                        modelSelection: target.modelSelection,
+                        projectId: parent.thread.projectId,
+                        named,
+                      })
+                      .pipe(Effect.mapError(threadManagementFailure));
+              yield* assertTargetEnabledForProject(parent, commandId, {
+                ...target,
+                modelSelection: placed,
+              });
               const title = threadTitle({
                 parentTitle: parent.thread.title,
                 prompt: request.prompt,
@@ -2944,7 +2987,7 @@ const make = Effect.gen(function* () {
                   threadId,
                   projectId: parent.thread.projectId,
                   title,
-                  modelSelection: target.modelSelection,
+                  modelSelection: placed,
                   runtimeMode,
                   interactionMode,
                   branch: parent.thread.branch,
@@ -2967,28 +3010,31 @@ const make = Effect.gen(function* () {
                 .pipe(Effect.mapError(threadManagementFailure))).thread.modelSelection;
               if (request.prompt !== undefined) {
                 yield* threadManagement
-                  .dispatch({
-                    type: "message.dispatch",
-                    createdBy: "agent",
-                    creationSource: "mcp",
-                    commandId: stableCommandId({
-                      scope,
-                      requestKey: key,
-                      operation: "dispatch-thread",
-                      index,
-                    }),
-                    threadId,
-                    senderThreadId: scope.thread.threadId,
-                    messageId: stableMessageId({
-                      scope,
-                      requestKey: key,
-                      index,
-                    }),
-                    text: request.prompt,
-                    attachments: [],
-                    modelSelection: resolvedModelSelection,
-                    dispatchMode: { type: "start_immediately" },
-                  })
+                  .dispatch(
+                    {
+                      type: "message.dispatch",
+                      createdBy: "agent",
+                      creationSource: "mcp",
+                      commandId: stableCommandId({
+                        scope,
+                        requestKey: key,
+                        operation: "dispatch-thread",
+                        index,
+                      }),
+                      threadId,
+                      senderThreadId: scope.thread.threadId,
+                      messageId: stableMessageId({
+                        scope,
+                        requestKey: key,
+                        index,
+                      }),
+                      text: request.prompt,
+                      attachments: [],
+                      modelSelection: resolvedModelSelection,
+                      dispatchMode: { type: "start_immediately" },
+                    },
+                    named === undefined ? undefined : { threadStart: false },
+                  )
                   .pipe(
                     Effect.mapError((error) =>
                       error._tag === "ThreadManagementProviderInstanceDisabledError"
@@ -3002,6 +3048,7 @@ const make = Effect.gen(function* () {
               }
               const projection = yield* loadProjection(threadId);
               const run = projection.runs.at(-1);
+              const ranOn = run?.modelSelection ?? projection.thread.modelSelection;
               yield* threadManagement
                 .dispatch({
                   type: "thread.created.record",
@@ -3033,8 +3080,8 @@ const make = Effect.gen(function* () {
                 title: projection.thread.title,
                 createdBy: projection.thread.createdBy,
                 creationSource: projection.thread.creationSource,
-                providerInstanceId: resolvedModelSelection.instanceId,
-                model: resolvedModelSelection.model,
+                providerInstanceId: ranOn.instanceId,
+                model: ranOn.model,
               } satisfies OrchestratorMcpCreatedThread;
             }),
           { concurrency: 1 },

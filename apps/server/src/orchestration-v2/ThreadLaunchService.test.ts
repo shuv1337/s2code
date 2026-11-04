@@ -145,10 +145,12 @@ function makeHarness(options: HarnessOptions = {}) {
   );
   const layerServerSettings = ServerSettings.layerTest(options.serverSettings);
   const layerReceipts = CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase));
+  const layerProviderRegistry = ProviderRegistryMock.layer(options.providers);
   const layerThreadManagement = ThreadManagement.layer.pipe(
     Layer.provide(layerOrchestrator),
     Layer.provide(layerServerSettings),
     Layer.provide(layerReceipts),
+    Layer.provide(layerProviderRegistry),
   );
   const layerOutbox = EffectOutbox.layer.pipe(Layer.provide(layerDatabase));
   const createWorktree = vi.fn(
@@ -224,7 +226,7 @@ function makeHarness(options: HarnessOptions = {}) {
       generateBranchName,
     }),
     layerServerSettings,
-    ProviderRegistryMock.layer(options.providers),
+    layerProviderRegistry,
     options.managedFolders ??
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
         namedProjectsRoot: "/projects",
@@ -573,33 +575,103 @@ it.effect.each(["a launch", "an unbound automation"] as const)(
   },
 );
 
-it.effect("starts a pooled thread on the member with the most headroom and keeps it there", () => {
-  const spare = { ...modelSelection, instanceId: ProviderInstanceId.make("codex_spare") };
-  const pooled = { driver: adapter.driver, disableOnUsageLimit: true, enabled: true };
-  const member = (instanceId: ProviderInstanceId, usedPercent: number) => ({
-    instanceId,
-    driver: adapter.driver,
+const spare = { ...modelSelection, instanceId: ProviderInstanceId.make("codex_spare") };
+const claudeSpare = {
+  ...claudeModelSelection,
+  instanceId: ProviderInstanceId.make("claude_spare"),
+};
+
+/**
+ * Codex instances `codex` and `codex_spare` at the given usage, pooled unless `pooled` is false.
+ * With `claudeUsedPercent`, `claudeAgent` and `claude_spare` form a second pool at that usage.
+ */
+function poolHarness(usedPercent: {
+  readonly codex: number;
+  readonly spare: number;
+  readonly pooled?: boolean;
+  readonly claudeUsedPercent?: number;
+}) {
+  const member = (
+    selection: { readonly instanceId: ProviderInstanceId; readonly model: string },
+    driver: ProviderDriverKind,
+    used: number,
+  ) => ({
+    instanceId: selection.instanceId,
+    driver,
     enabled: true,
     installed: true,
     version: null,
     status: "ready" as const,
     auth: { status: "authenticated" as const },
     checkedAt: "2026-11-02T00:00:00.000Z",
-    models: [{ slug: spare.model, name: "Codex", isCustom: false, capabilities: null }],
+    models: [{ slug: selection.model, name: selection.model, isCustom: false, capabilities: null }],
     slashCommands: [],
     skills: [],
     usageLimits: {
       checkedAt: "2026-11-02T00:00:00.000Z",
-      windows: [{ id: "five_hour", kind: "session" as const, label: "Session", usedPercent }],
+      windows: [{ id: "five_hour", kind: "session" as const, label: "Session", usedPercent: used }],
     },
   });
-  const harness = makeHarness({
-    adapters: [adapter, { ...adapter, instanceId: spare.instanceId }],
+  const pooledAs = (driver: ProviderDriverKind) => ({
+    driver,
+    disableOnUsageLimit: usedPercent.pooled !== false,
+    enabled: true,
+  });
+  const claude = usedPercent.claudeUsedPercent;
+  return makeHarness({
+    adapters: [
+      adapter,
+      { ...adapter, instanceId: spare.instanceId },
+      ...(claude === undefined
+        ? []
+        : [claudeAdapter, { ...claudeAdapter, instanceId: claudeSpare.instanceId }]),
+    ],
     serverSettings: {
-      providerInstances: { [modelSelection.instanceId]: pooled, [spare.instanceId]: pooled },
+      providerInstances: {
+        [modelSelection.instanceId]: pooledAs(adapter.driver),
+        [spare.instanceId]: pooledAs(adapter.driver),
+        ...(claude === undefined
+          ? {}
+          : {
+              [claudeModelSelection.instanceId]: pooledAs(claudeAdapter.driver),
+              [claudeSpare.instanceId]: pooledAs(claudeAdapter.driver),
+            }),
+      },
     },
-    providers: [member(modelSelection.instanceId, 80), member(spare.instanceId, 10)],
+    providers: [
+      member(modelSelection, adapter.driver, usedPercent.codex),
+      member(spare, adapter.driver, usedPercent.spare),
+      ...(claude === undefined
+        ? []
+        : [
+            member(claudeModelSelection, claudeAdapter.driver, claude),
+            member(claudeSpare, claudeAdapter.driver, claude),
+          ]),
+    ],
   });
+}
+
+const launchedInstance = (
+  name: string,
+  options: {
+    readonly namedInstance?: { readonly allowPoolFailover: boolean };
+    readonly modelSelection?: { readonly instanceId: ProviderInstanceId; readonly model: string };
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { threadId } = yield* launches.launch({
+      ...launchInput({ command: `command:${name}`, thread: `thread:${name}`, message: "Start" }),
+      ...(options.modelSelection === undefined ? {} : { modelSelection: options.modelSelection }),
+      ...(options.namedInstance === undefined ? {} : { namedInstance: options.namedInstance }),
+    });
+    const projection = yield* threads.getThreadProjection(threadId);
+    return projection.runs[0]?.providerInstanceId;
+  });
+
+it.effect("starts a pooled thread on the member with the most headroom and keeps it there", () => {
+  const harness = poolHarness({ codex: 80, spare: 10 });
   return Effect.gen(function* () {
     const launches = yield* ThreadLaunch.ThreadLaunchService;
     const threads = yield* ThreadManagement.ThreadManagementService;
@@ -626,6 +698,119 @@ it.effect("starts a pooled thread on the member with the most headroom and keeps
     );
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect("rotates unnamed thread starts among pool members tied for the most headroom", () =>
+  Effect.gen(function* () {
+    const started = [
+      yield* launchedInstance("tie-1"),
+      yield* launchedInstance("tie-2"),
+      yield* launchedInstance("tie-3"),
+    ];
+    assert.deepStrictEqual(
+      [...new Set(started)].toSorted(),
+      [modelSelection.instanceId, spare.instanceId].toSorted(),
+    );
+    assert.notStrictEqual(started[0], started[1]);
+    assert.notStrictEqual(started[1], started[2]);
+  }).pipe(Effect.provide(poolHarness({ codex: 30, spare: 30 }).layer)),
+);
+
+it.effect("starts a named pool instance as asked, though another has more headroom", () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* launchedInstance("named", { namedInstance: { allowPoolFailover: false } }),
+      modelSelection.instanceId,
+    );
+  }).pipe(Effect.provide(poolHarness({ codex: 80, spare: 10 }).layer)),
+);
+
+it.effect("refuses a named instance that is out of quota, naming it and why", () => {
+  const harness = poolHarness({ codex: 100, spare: 10 });
+  return Effect.gen(function* () {
+    const failure = yield* launchedInstance("named-spent", {
+      namedInstance: { allowPoolFailover: false },
+    }).pipe(Effect.flip);
+    assert.strictEqual(failure._tag, "ThreadManagementProviderInstanceUnavailableError");
+    assert.strictEqual(
+      failure.message,
+      'Requested provider instance "codex" is out of quota for gpt-5.1-codex; pass allowPoolFailover: true to use another pool instance.',
+    );
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    assert.isNull(yield* threads.getThreadShell(ThreadId.make("thread:named-spent")));
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect(
+  "moves a named instance that is out of quota to its pool only when failover is allowed",
+  () =>
+    Effect.gen(function* () {
+      assert.strictEqual(
+        yield* launchedInstance("named-failover", { namedInstance: { allowPoolFailover: true } }),
+        spare.instanceId,
+      );
+    }).pipe(Effect.provide(poolHarness({ codex: 100, spare: 10 }).layer)),
+);
+
+it.effect(
+  "refuses a named instance outside any pool without promising a pool, even with failover",
+  () =>
+    Effect.gen(function* () {
+      const failure = yield* launchedInstance("unpooled-failover", {
+        namedInstance: { allowPoolFailover: true },
+      }).pipe(Effect.flip);
+      assert.strictEqual(
+        failure.message,
+        'Requested provider instance "codex" is out of quota for gpt-5.1-codex.',
+      );
+    }).pipe(Effect.provide(poolHarness({ codex: 100, spare: 10, pooled: false }).layer)),
+);
+
+it.effect("rotates each pool's tied members on its own when starts alternate between pools", () =>
+  Effect.gen(function* () {
+    const started: Array<ProviderInstanceId | undefined> = [];
+    for (const [index, selection] of [
+      modelSelection,
+      claudeModelSelection,
+      modelSelection,
+      claudeModelSelection,
+    ].entries()) {
+      started.push(yield* launchedInstance(`interleaved-${index}`, { modelSelection: selection }));
+    }
+    // A turn shared across pools would land each pool on the same member twice.
+    assert.deepStrictEqual(
+      [started[0], started[2]].toSorted(),
+      [modelSelection.instanceId, spare.instanceId].toSorted(),
+    );
+    assert.deepStrictEqual(
+      [started[1], started[3]].toSorted(),
+      [claudeModelSelection.instanceId, claudeSpare.instanceId].toSorted(),
+    );
+  }).pipe(Effect.provide(poolHarness({ codex: 30, spare: 30, claudeUsedPercent: 30 }).layer)),
+);
+
+it.effect("a retried launch keeps the instance its committed thread started on", () =>
+  Effect.gen(function* () {
+    // Moves the tied pool's next turn off `codex`.
+    assert.strictEqual(yield* launchedInstance("before-retry"), modelSelection.instanceId);
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    // The launch's thread was created on `codex`, then its first message was lost.
+    yield* threads.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("command:retried"),
+      threadId: ThreadId.make("thread:retried"),
+      projectId,
+      title: "New thread",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    assert.strictEqual(yield* launchedInstance("retried"), modelSelection.instanceId);
+  }).pipe(Effect.provide(poolHarness({ codex: 30, spare: 30 }).layer)),
+);
 
 it.effect("retains automation and sender attribution while a message waits in the queue", () => {
   const harness = makeHarness({ runSetup: () => Effect.never });

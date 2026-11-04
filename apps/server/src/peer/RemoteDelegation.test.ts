@@ -80,7 +80,7 @@ const modelSelection = { instanceId, model: "gpt-5.4" };
 
 type LaunchedWith = Pick<
   ThreadLaunch.ThreadLaunchInput,
-  "modelSelection" | "runtimeMode" | "interactionMode"
+  "modelSelection" | "runtimeMode" | "interactionMode" | "namedInstance"
 >;
 
 /** The thread the box launches for the task, which the test finishes. */
@@ -432,6 +432,9 @@ const boxToolkitLayer = (thread: BoxThread) => {
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
+                ...(input.namedInstance === undefined
+                  ? {}
+                  : { namedInstance: input.namedInstance }),
               }),
             ),
             Effect.andThen(Effect.flatten(Ref.get(thread.afterLaunch))),
@@ -1096,12 +1099,15 @@ it.effect("a task named only by environment inherits the parent's model, within 
         target: { environmentId: box.environmentId },
       });
       expect(result.isError, JSON.stringify(result.content)).toBe(false);
-      // The parent's model, and the link's modes rather than the parent's.
-      expect(yield* Ref.get(thread.launchedWith)).toEqual({
+      // The parent's model, and the link's modes rather than the parent's. The caller named no
+      // instance, so the box's pool may place it.
+      const launchedWith = yield* Ref.get(thread.launchedWith);
+      expect(launchedWith).toEqual({
         modelSelection,
         runtimeMode: "auto-accept-edits",
         interactionMode: "default",
       });
+      expect(launchedWith?.namedInstance).toBeUndefined();
 
       // Asking for more than the link allows is still refused there.
       const broader = yield* a.call("delegate_task", {
