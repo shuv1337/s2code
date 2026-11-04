@@ -54,3 +54,11 @@ before it replaces it.
 S2Code removes characters you cannot see, such as zero-width and hidden tag characters, because
 they can hide instructions for the agent. When a prompt had them, S2Code warns you that it may be
 malicious.
+
+## Share a thread
+
+**Copy thread** copies a link to the thread. In S2Code, a thread link in a message opens the thread
+in the app. A build configured with a hosted web app copies a link such as
+`https://<hosted app>/threads/<environment>/<thread>` instead, which you can paste anywhere, such as
+Slack, a GitHub comment, or your notes. Opening it asks where to open it, like a prompt link, then
+opens the thread. Only someone connected to the machine that runs the thread can see it.

@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 
 import {
+  formatHostedThreadLink,
   formatThreadLink,
   guessThreadLinkRef,
+  hostedThreadLink,
   parseThreadLinkHref,
   relabelThreadLinks,
   threadLinkCandidates,
@@ -172,5 +174,37 @@ describe("thread links", () => {
       "[Fix ci build](t3-thread://v2/e/t1)",
     );
     expect(formatThreadLink(ref("e", "t1"), " ] ")).toBe("<t3-thread://v2/e/t1>");
+  });
+});
+
+describe("hosted thread links", () => {
+  it("escapes every id character a sentence or path could claim", () => {
+    const thread = ref("env.1", "thread:delegated/mcp%3A1.");
+    expect(hostedThreadLink(thread, "https://app.fork.test/")).toBe(
+      "https://app.fork.test/threads/env%2E1/thread%3Adelegated%2Fmcp%253A1%2E",
+    );
+  });
+
+  it("writes a copied link a reader can follow, labeled when it has a title", () => {
+    const fork = "https://app.fork.test";
+    expect(formatHostedThreadLink(ref("e", "t1"), "Fix [ci]", fork)).toBe(
+      "[Fix ci](https://app.fork.test/threads/e/t1)",
+    );
+    expect(formatHostedThreadLink(ref("e", "t1"), " ", fork)).toBe(
+      "https://app.fork.test/threads/e/t1",
+    );
+  });
+
+  // s2code fork: no hosted app by default.
+  it("copies a v2 link without a hosted app, and reads no hosted path as a link", () => {
+    expect(hostedThreadLink(ref("e", "t1"))).toBe("<t3-thread://v2/e/t1>");
+    expect(formatHostedThreadLink(ref("e", "t1"), "Fix [ci]")).toBe(
+      "[Fix ci](t3-thread://v2/e/t1)",
+    );
+    expect(parseThreadLinkHref("https://app.t3.codes/threads/env-1/thread-1")).toBeNull();
+    expect(parseThreadLinkHref("/threads/env-1/thread-1")).toBeNull();
+    const text = "See src/threads/there/t1 and https://app.t3.codes/threads/there/t1.";
+    expect(relabelThreadLinks(text, local, titlesIn({ there: { t1: "There" } }))).toBe(text);
+    expect(threadLinkRefs(text, local)).toEqual([]);
   });
 });
