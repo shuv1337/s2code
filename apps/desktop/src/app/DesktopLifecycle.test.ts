@@ -226,74 +226,88 @@ describe("DesktopLifecycle", () => {
     }),
   );
 
+  const appLinkArgs = (scheme: string) => [
+    `${scheme.toUpperCase()}://pair?token=spent`,
+    `${scheme}://new?prompt=hello`,
+  ];
+  const stable = "0.0.43";
+  const nightly = "0.0.43-nightly.20261104.2428";
+  const preview = "0.0.43-preview.20261104.2428";
+
   it.effect.each([
-    { channel: "stable", appVersion: "0.0.43", appLinkScheme: "s2code" },
-    { channel: "stable", appVersion: "0.0.43", appLinkScheme: "shuv2code" },
+    { name: "stable without s2code: links", appVersion: stable, args: appLinkArgs("s2code") },
+    { name: "stable without shuv2code: links", appVersion: stable, args: appLinkArgs("shuv2code") },
     {
-      channel: "nightly",
-      appVersion: "0.0.43-nightly.20261104.2428",
-      appLinkScheme: "s2code-nightly",
+      name: "nightly without s2code-nightly: links",
+      appVersion: nightly,
+      args: appLinkArgs("s2code-nightly"),
     },
     {
-      channel: "nightly",
-      appVersion: "0.0.43-nightly.20261104.2428",
-      appLinkScheme: "shuv2code-nightly",
+      name: "nightly without shuv2code-nightly: links",
+      appVersion: nightly,
+      args: appLinkArgs("shuv2code-nightly"),
     },
     {
-      channel: "preview",
-      appVersion: "0.0.43-preview.20261104.2428",
-      appLinkScheme: "s2code-preview",
+      name: "preview without s2code-preview: links",
+      appVersion: preview,
+      args: appLinkArgs("s2code-preview"),
     },
     {
-      channel: "preview",
-      appVersion: "0.0.43-preview.20261104.2428",
-      appLinkScheme: "shuv2code-preview",
+      name: "preview without shuv2code-preview: links",
+      appVersion: preview,
+      args: appLinkArgs("shuv2code-preview"),
     },
-  ])(
-    "relaunches $channel without the $appLinkScheme: link that launched it",
-    ({ appVersion, appLinkScheme }) =>
-      Effect.gen(function* () {
-        const relaunched = yield* Deferred.make<Electron.RelaunchOptions>();
-        const layerEnvironment = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
-          platform: "linux",
-          isDevelopment: false,
-          appVersion,
-        } as DesktopEnvironment.DesktopEnvironment["Service"]);
-        const layer = DesktopLifecycle.layer.pipe(
-          Layer.provideMerge(
-            layerElectronApp(
-              new Map(),
-              Effect.void,
-              () => Effect.void,
-              (options) => Deferred.succeed(relaunched, options).pipe(Effect.asVoid),
-            ),
+    {
+      name: "without app links but keeps every other argument",
+      appVersion: stable,
+      args: [...appLinkArgs("s2code"), "--open=s2code://x", ...appLinkArgs("shuv2code")],
+      kept: ["--open=s2code://x"],
+    },
+  ])("relaunches $name", ({ appVersion, args, kept = [] }) =>
+    Effect.gen(function* () {
+      const relaunched = yield* Deferred.make<Electron.RelaunchOptions>();
+      const layerEnvironment = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "linux",
+        isDevelopment: false,
+        appVersion,
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(
+          layerElectronApp(
+            new Map(),
+            Effect.void,
+            () => Effect.void,
+            (options) => Deferred.succeed(relaunched, options).pipe(Effect.asVoid),
           ),
-          Layer.provideMerge(layerElectronTheme),
-          Layer.provideMerge(layerElectronWindow()),
-          Layer.provideMerge(layerDesktopWindow()),
-          Layer.provideMerge(layerEnvironment),
-          Layer.provideMerge(DesktopShutdown.layer),
-          Layer.provideMerge(DesktopState.layer),
-        );
+        ),
+        Layer.provideMerge(layerElectronTheme),
+        Layer.provideMerge(layerElectronWindow()),
+        Layer.provideMerge(layerDesktopWindow()),
+        Layer.provideMerge(layerEnvironment),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+      );
 
-        const options = yield* Effect.gen(function* () {
-          const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
-          yield* (yield* DesktopShutdown.DesktopShutdown).markComplete;
-          yield* lifecycle.relaunch("network access changed");
-          return yield* Deferred.await(relaunched);
-        }).pipe(
-          Effect.provide(layer),
-          Effect.provideService(HostProcess.ExecutablePath, "/opt/T3 Code/t3code"),
-          Effect.provideService(HostProcess.Arguments, [
-            "/opt/T3 Code/t3code",
-            "--no-sandbox",
-            `${appLinkScheme.toUpperCase()}://pair?token=spent`,
-            `${appLinkScheme}://new?prompt=hello`,
-          ]),
-        );
+      const options = yield* Effect.gen(function* () {
+        const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+        yield* (yield* DesktopShutdown.DesktopShutdown).markComplete;
+        yield* lifecycle.relaunch("network access changed");
+        return yield* Deferred.await(relaunched);
+      }).pipe(
+        Effect.provide(layer),
+        Effect.provideService(HostProcess.ExecutablePath, "/opt/T3 Code/t3code"),
+        Effect.provideService(HostProcess.Arguments, [
+          "/opt/T3 Code/t3code",
+          "--no-sandbox",
+          ...args,
+        ]),
+      );
 
-        assert.deepEqual(options, { execPath: "/opt/T3 Code/t3code", args: ["--no-sandbox"] });
-      }),
+      assert.deepEqual(options, {
+        execPath: "/opt/T3 Code/t3code",
+        args: ["--no-sandbox", ...kept],
+      });
+    }),
   );
 
   it.effect("exits on a repeated quit only once shutdown has stalled", () =>

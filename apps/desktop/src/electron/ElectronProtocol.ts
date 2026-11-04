@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
+import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
 import {
   resolveChannelIdentity,
   resolveLegacyChannelIdentity,
@@ -29,6 +30,19 @@ export function getPublicDesktopSchemes(isDevelopment: boolean, version = ""): r
     isDevelopment ? "s2code-dev" : resolveChannelIdentity(version).scheme,
     getDesktopScheme(isDevelopment, version),
   ];
+}
+
+/** A prompt link the desktop opens: a hosted web link, or one on this channel's own schemes. */
+export function isDesktopPromptLink(
+  value: string,
+  publicSchemes: readonly string[],
+  hostedAppUrl?: string,
+): boolean {
+  if (promptLinkAppPath(value, hostedAppUrl) === null) return false;
+  const protocol = new URL(value).protocol;
+  return (
+    protocol === "http:" || protocol === "https:" || publicSchemes.includes(protocol.slice(0, -1))
+  );
 }
 
 function getDesktopOrigin(isDevelopment: boolean, version: string): string {

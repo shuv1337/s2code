@@ -51,6 +51,23 @@ describe("ElectronProtocol", () => {
       ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
     },
   );
+  it("opens prompt links on a configured hosted origin or this channel's schemes only", () => {
+    const schemes = ElectronProtocol.getPublicDesktopSchemes(false, "1.2.3");
+    const hosted = "https://app.fork.test";
+    const isPromptLink = (value: string, hostedAppUrl?: string) =>
+      ElectronProtocol.isDesktopPromptLink(value, schemes, hostedAppUrl);
+    assert.isTrue(isPromptLink(`${hosted}/new?prompt=hi`, hosted));
+    assert.isTrue(isPromptLink(`${hosted}/threads/env-1/thread-1`, hosted));
+    assert.isTrue(isPromptLink("s2code://new?prompt=hi"));
+    assert.isTrue(isPromptLink("shuv2code://threads/env-1/thread-1"));
+    // No hosted origin is configured by default, so web links stay with the browser.
+    assert.isFalse(isPromptLink(`${hosted}/new?prompt=hi`));
+    assert.isFalse(isPromptLink("https://evil.test/new?prompt=hi", hosted));
+    assert.isFalse(isPromptLink(`${hosted}/settings/general`, hosted));
+    assert.isFalse(isPromptLink("s2code-nightly://new?prompt=hi"));
+    assert.isFalse(isPromptLink("t3code://new?prompt=hi"));
+  });
+
   beforeEach(() => {
     handleMock.mockReset();
     netFetchMock.mockReset();
