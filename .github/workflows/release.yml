@@ -92,7 +92,6 @@ jobs:
           # Sign each platform whose credentials are complete; otherwise the
           # release is labeled UNSIGNED.
           ALLOW_UNSIGNED: "true"
-          S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}
           FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -119,7 +118,7 @@ jobs:
       - name: Verify release logic
         run: |
           node --test .github/scripts/macos-arm64-runner-retry.test.cjs
-          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts apps/server/scripts/publishOrder.test.ts scripts/build-npm-platform-packages.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
+          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts scripts/build-npm-launcher.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@v7
         with:
           name: release-plan
@@ -371,7 +370,6 @@ jobs:
     env:
       GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
-      S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}
       FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}
       NPM_TOKEN: ""
       NODE_AUTH_TOKEN: ""
@@ -418,38 +416,20 @@ jobs:
           if [ -f "prepared/release-assets/S2Code-${RELEASE_VERSION}-x64.exe" ]; then
             echo "built=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::The Windows x64 build failed. This release leaves out the Windows assets and the Windows npm platform package."
-            # A CLI archive uploaded before the failure must not become an npm package.
+            echo "::warning::The Windows x64 build failed. This release leaves out the Windows assets, and the npm launcher has no Windows build."
+            # A CLI archive uploaded before the failure must not be pinned by the launcher.
             rm -f "prepared/release-assets/s2code-${RELEASE_VERSION}-win32-x64.zip"
             echo "built=false" >> "$GITHUB_OUTPUT"
           fi
-      # Without Windows, the launchers list only the platforms that built.
-      - name: Build the public npm packages once from the verified-source archives
+      # The launcher pins a checksum for each archive that built; without Windows it lists the rest.
+      - name: Build the shuv2code npm launcher from the verified-source archives
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           WINDOWS_BUILT: ${{ steps.windows.outputs.built }}
         run: |
           args=()
           if [ "$WINDOWS_BUILT" != "true" ]; then args=(--allow-missing); fi
-          node scripts/build-npm-platform-packages.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages "${args[@]}"
-      # Publish reads only the .tgz files. The extracted trees beside them duplicate
-      # every platform binary. The release assets stay: publish uploads and re-hashes them.
-      - name: Drop the extracted npm package trees, keeping the tarballs
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          cd prepared/npm-packages
-          # Each tree sits beside its tarball (<name>/ and <name>.tgz), never around it.
-          tarballs=(*.tgz @s2code/*.tgz)
-          [ "${#tarballs[@]}" -gt 0 ]
-          for tgz in "${tarballs[@]}"; do
-            echo "Removing extracted tree ${tgz%.tgz}"
-            rm -rf "${tgz%.tgz}"
-            test -f "$tgz"
-          done
-          echo "Kept tarballs:"
-          ls -l "${tarballs[@]}"
-          df -h /
+          node scripts/build-npm-launcher.ts --archives-dir prepared/release-assets --version "$RELEASE_VERSION" --output-dir prepared/npm-packages "${args[@]}"
       - name: Log disk before publish
         run: df -h /
       # Shapes the assets (feeds, CLI aliases, SHA256SUMS, release.json) and logs
@@ -475,8 +455,8 @@ jobs:
             exit 0
           fi
           extra_args=()
-          if [ "$S2CODE_NPM_TRUSTED_PUBLISHING_READY" = "true" ] && [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then extra_args=(--npm s2code); fi
-          if [ "$WINDOWS_BUILT" != "true" ]; then extra_args+=(--link "windows: not built; npx @s2code/cli is unavailable on Windows for this version"); fi
+          if [ "$FORK_NPM_TRUSTED_PUBLISHING_READY" = "true" ]; then extra_args=(--npm shuv2code); fi
+          if [ "$WINDOWS_BUILT" != "true" ]; then extra_args+=(--link "windows: not built; npx shuv2code is unavailable on Windows for this version"); fi
           status=0
           bash .github/scripts/notify-discord-release.sh \
             --project S2Code \

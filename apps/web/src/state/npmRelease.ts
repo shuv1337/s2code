@@ -28,22 +28,17 @@ const readNpmJson = (packageName: string, spec: string) =>
     Effect.provide(FetchHttpClient.layer),
   );
 
-// Older releases exist only under shuv2code. Prefer the new package when both
-// publish, but retain the exact package that can install a requested version.
+// Every fork release is published as shuv2code; @s2code/cli only ever mirrored some of them.
 export const npmReleasePackageAtom = Atom.family((version: string) =>
   Atom.make(
     Effect.gen(function* () {
-      for (const packageName of ["@s2code/cli", "shuv2code"] as const) {
-        const body = yield* readNpmJson(packageName, version);
-        if (
-          typeof body === "object" &&
-          body !== null &&
-          "version" in body &&
-          body.version === version
-        )
-          return packageName;
-      }
-      return null;
+      const body = yield* readNpmJson(NPM_PACKAGE_NAME, version);
+      return typeof body === "object" &&
+        body !== null &&
+        "version" in body &&
+        body.version === version
+        ? NPM_PACKAGE_NAME
+        : null;
     }),
   ).pipe(
     Atom.withRefresh("5 minutes"),
@@ -85,7 +80,7 @@ export const npmReleasePublishedAtom = Atom.family((version: string) =>
   Atom.make((get) => AsyncResult.map(get(npmReleasePackageAtom(version)), (name) => name !== null)),
 );
 
-const NO_VERSION_ATOM = Atom.make(AsyncResult.success<ForkNpmPackage | null>(null)).pipe(
+const NO_VERSION_ATOM = Atom.make(AsyncResult.success<typeof NPM_PACKAGE_NAME | null>(null)).pipe(
   Atom.withLabel("npm-release-package:none"),
 );
 

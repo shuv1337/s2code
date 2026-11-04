@@ -6,7 +6,7 @@ import { render, stubGlobal } from "../../test/render";
 import { useNpmReleasePublished } from "./npmRelease";
 
 it("offers a version only when it is published in the fork npm package", async () => {
-  const url = "https://registry.npmjs.org/@s2code%2fcli/1.2.3";
+  const url = "https://registry.npmjs.org/shuv2code/1.2.3";
   const requests: string[] = [];
   using _fetch = stubGlobal("fetch", async (input: RequestInfo | URL) => {
     const requested = input instanceof Request ? input.url : String(input);

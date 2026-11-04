@@ -362,6 +362,14 @@ export default defineConfig({
         rules: { "t3code/no-global-process-runtime": "off" },
       },
       {
+        // The shuv2code npm launcher is published as plain, dependency-free Node.
+        files: ["scripts/npm-launcher/**"],
+        rules: {
+          "t3code/no-global-process-runtime": "off",
+          "t3code/namespace-node-imports": "off",
+        },
+      },
+      {
         files: ["apps/server/src/mcp/McpHttpServer.ts"],
         rules: { "t3code/no-raw-mcp-registration": "off" },
       },

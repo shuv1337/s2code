@@ -57,7 +57,7 @@ export class OlderBootServiceError extends Schema.TaggedError<OlderBootServiceEr
 
   override get message(): string {
     const command = (subcommand: string) => `\`${forkCliCommand(subcommand)}\``;
-    return `An S2Code background service set up for ${this.baseDir} may still run a release without the ownership lock. On that machine, try ${command("update")} and let it restart (or run ${command("service restart")} if the update is already installed). If the older launcher cannot update, run ${command("service uninstall")}, then reinstall with ${command("service install")} from a current CLI. You can also leave the service uninstalled. Pass \`--base-dir ${this.baseDir}\` to each command, and use \`npx @s2code/cli@latest\` if the CLI is not installed or is outdated. Then retry. No server was stopped.`;
+    return `An S2Code background service set up for ${this.baseDir} may still run a release without the ownership lock. On that machine, try ${command("update")} and let it restart (or run ${command("service restart")} if the update is already installed). If the older launcher cannot update, run ${command("service uninstall")}, then reinstall with ${command("service install")} from a current CLI. You can also leave the service uninstalled. Pass \`--base-dir ${this.baseDir}\` to each command, and use \`npx shuv2code@latest\` if the CLI is not installed or is outdated. Then retry. No server was stopped.`;
   }
 }
 

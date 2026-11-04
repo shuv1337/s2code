@@ -66,6 +66,7 @@ export const ServerInstallation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("npm-global"),
     prefix: TrimmedNonEmptyString,
+    // Servers from before the single launcher may still report the retired @s2code/cli.
     packageName: Schema.optionalKey(Schema.Literals(["@s2code/cli", "shuv2code"])),
   }),
 ]);

@@ -99,13 +99,15 @@ export function supportsDesktopAppUpdate(
 export function manualServerUpdateCommand(
   targetVersion: string,
   installation?: ServerInstallation,
-  packageName: ForkNpmPackage = "@s2code/cli",
+  packageName: ForkNpmPackage = "shuv2code",
 ): string {
   if (installation?.kind === "npm-global") {
     const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
-    // Older servers did not report the package name and only installed shuv2code.
-    const installedPackage = installation.packageName ?? "shuv2code";
-    return `npm install --global --prefix ${prefix} ${installedPackage}@${targetVersion}`;
+    const install = `npm install --global --prefix ${prefix} shuv2code@${targetVersion}`;
+    // @s2code/cli is retired and installs the same `s2code` command, so it must go first.
+    return installation.packageName === "@s2code/cli"
+      ? `npm uninstall --global --prefix ${prefix} @s2code/cli && ${install}`
+      : install;
   }
   const runner =
     installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";

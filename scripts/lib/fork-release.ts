@@ -34,17 +34,9 @@ export const FORK_MACOS_ARM64_SELF_HOSTED_RUNNER = JSON.stringify([
   "ARM64",
   "shuvbot-macos",
 ]);
-export const FORK_NPM_PACKAGES = [
-  ...CLI_ARCHIVE_PLATFORM_KEYS.map((key) => `@s2code/t3-${key}`),
-  NPM_PACKAGE_NAME,
-  "shuv2code",
-];
-/** The npm packages one release publishes: without Windows, its platform package stays out. */
-export function forkNpmPackages(windows: boolean) {
-  return FORK_NPM_PACKAGES.filter((name) => windows || !name.startsWith("@s2code/t3-win32-"));
-}
+/** The single launcher; the retired @s2code/t3-* and @s2code/cli names are never published again. */
+export const FORK_NPM_PACKAGES = [NPM_PACKAGE_NAME];
 export const forkNpmPublishingReady = (env: Readonly<Record<string, string | undefined>>) =>
-  env.S2CODE_NPM_TRUSTED_PUBLISHING_READY === "true" &&
   env.FORK_NPM_TRUSTED_PUBLISHING_READY === "true";
 export const FORK_DESKTOP_MATRIX = [
   {
@@ -127,8 +119,7 @@ export function releaseSigningPolicy(channel: string, allowUnsigned: boolean, en
 }
 /**
  * The npm dist-tags a channel publishes, primary tag first. The fork ships only
- * nightly, so a nightly also moves `latest`; `npx @s2code/cli` would otherwise
- * install the placeholder version that trusted publishing required.
+ * nightly, so a nightly also moves `latest`, which a bare `npx shuv2code` installs.
  */
 export function forkDistTags(channel: string) {
   return channel === "stable"
@@ -147,8 +138,8 @@ export function forkReleasePlan(input: {
   npm: boolean;
   /**
    * Whether the Windows x64 build is in this release. Its build may fail without
-   * blocking the others; the release then leaves out the Windows assets and the
-   * Windows npm platform package, and the launchers do not depend on it.
+   * blocking the others; the release then leaves out the Windows assets, and the
+   * launcher it publishes pins no Windows checksum.
    */
   windows: boolean;
 }) {
@@ -209,7 +200,9 @@ export function forkReleaseTitle(plan: Pick<ForkReleasePlan, "title">) {
   return plan.title.replace(/^UNSIGNED — /, "");
 }
 
-export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha" | "windows">) {
+export function forkReleaseBody(
+  plan: Pick<ForkReleasePlan, "signing" | "sha" | "windows" | "npm">,
+) {
   return [
     "Local/direct desktop and CLI release.",
     "### macOS",
@@ -218,10 +211,16 @@ export function forkReleaseBody(plan: Pick<ForkReleasePlan, "signing" | "sha" | 
       : "WARNING: The macOS desktop apps are unsigned and not notarized. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     "### Windows",
     !plan.windows
-      ? "The Windows x64 build failed, so this release has no Windows installer, Windows CLI archive or @s2code/t3-win32-x64 npm package. `npx @s2code/cli` is unavailable on Windows for this version."
+      ? "The Windows x64 build failed, so this release has no Windows installer or Windows CLI archive, and its npm launcher has no Windows build: `npx shuv2code` is unavailable on Windows for this version."
       : plan.signing.win
         ? "The Windows installers are signed."
         : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
+    ...(plan.npm
+      ? [
+          "### npm",
+          "`npm i -g shuv2code` installs a small launcher. On first run it downloads this release's CLI archive and refuses it unless its SHA-256 matches the checksum published inside the npm package. `@s2code/cli` and `@s2code/t3-<platform>` are retired: replace an `@s2code/cli` install with `npm uninstall -g @s2code/cli && npm i -g shuv2code`.",
+        ]
+      : []),
     `Source: ${plan.sha}.`,
   ].join("\n\n");
 }
@@ -259,13 +258,13 @@ export function requiredDesktopAssets(
     return found[0]!;
   });
 }
-export function assertForkNpmManifest(value: unknown, version: string, windows: boolean) {
-  const allowed = forkNpmPackages(windows);
+export function assertForkNpmManifest(value: unknown, version: string) {
   const manifest = value as {
     name?: string;
     version?: string;
     private?: boolean;
     repository?: { url?: string };
+    dependencies?: Record<string, string>;
     optionalDependencies?: Record<string, string>;
   };
   const repository = manifest.repository?.url
@@ -274,7 +273,7 @@ export function assertForkNpmManifest(value: unknown, version: string, windows: 
     .replace(/\/$/, "");
   if (
     !manifest.name ||
-    !allowed.includes(manifest.name) ||
+    !FORK_NPM_PACKAGES.includes(manifest.name) ||
     manifest.name === "t3" ||
     manifest.private === true ||
     manifest.version !== version ||
@@ -283,37 +282,21 @@ export function assertForkNpmManifest(value: unknown, version: string, windows: 
     throw new Error(
       "Refusing publication outside the exact fork package/version/repository allowlist.",
     );
-  if (manifest.name === NPM_PACKAGE_NAME || manifest.name === "shuv2code") {
-    const expected = allowed.filter((name) => name.startsWith("@s2code/t3-"));
-    if (
-      Object.keys(manifest.optionalDependencies ?? {}).length !== expected.length ||
-      expected.some((name) => manifest.optionalDependencies?.[name] !== version)
-    )
-      throw new Error(
-        `Launcher must depend on all ${expected.length} exact matching fork platform versions.`,
-      );
-  }
-  return manifest as {
-    name: string;
-    version: string;
-    repository: { url: string };
-    optionalDependencies?: Record<string, string>;
-  };
-}
-export function assertForkNpmSet(
-  manifests: ReadonlyArray<unknown>,
-  version: string,
-  windows: boolean,
-) {
-  const allowed = forkNpmPackages(windows);
-  const checked = manifests.map((manifest) => assertForkNpmManifest(manifest, version, windows));
+  // The launcher downloads its executable; a dependency would bring back the platform packages.
   if (
-    checked.length !== allowed.length ||
-    new Set(checked.map((manifest) => manifest.name)).size !== allowed.length
+    Object.keys(manifest.dependencies ?? {}).length > 0 ||
+    Object.keys(manifest.optionalDependencies ?? {}).length > 0
   )
-    throw new Error(
-      `All ${allowed.length - 2} platform packages, the launcher and its legacy bridge are required.`,
-    );
+    throw new Error("The launcher must have no dependencies.");
+  return manifest as { name: string; version: string; repository: { url: string } };
+}
+export function assertForkNpmSet(manifests: ReadonlyArray<unknown>, version: string) {
+  const checked = manifests.map((manifest) => assertForkNpmManifest(manifest, version));
+  if (
+    checked.length !== FORK_NPM_PACKAGES.length ||
+    new Set(checked.map((manifest) => manifest.name)).size !== FORK_NPM_PACKAGES.length
+  )
+    throw new Error(`Exactly the ${FORK_NPM_PACKAGES.join(", ")} launcher is required.`);
   return checked;
 }
 export function assertForkDistTag(version: string, tag: string) {

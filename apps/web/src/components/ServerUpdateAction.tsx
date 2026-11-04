@@ -354,7 +354,7 @@ export function ServerUpdateAction({
 
   const manualCommand =
     selfUpdate === null
-      ? manualServerUpdateCommand(targetVersion, installation, npmPackage ?? "@s2code/cli")
+      ? manualServerUpdateCommand(targetVersion, installation, npmPackage ?? "shuv2code")
       : null;
   const actionLabel =
     manualCommand !== null

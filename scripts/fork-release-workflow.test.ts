@@ -96,7 +96,6 @@ describe("fork workflow gates", () => {
       "    env:",
       "      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}",
       "      GH_TOKEN: ${{ github.token }}",
-      "      S2CODE_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.S2CODE_NPM_TRUSTED_PUBLISHING_READY }}",
       "      FORK_NPM_TRUSTED_PUBLISHING_READY: ${{ vars.FORK_NPM_TRUSTED_PUBLISHING_READY }}",
       '      NPM_TOKEN: ""',
       '      NODE_AUTH_TOKEN: ""',
@@ -174,20 +173,19 @@ describe("fork workflow gates", () => {
         expect(NodeFS.existsSync(strayArchive)).toBe(present);
 
         const build = runStep(
-          "Build the public npm packages once from the verified-source archives",
+          "Build the shuv2code npm launcher from the verified-source archives",
           {
             WINDOWS_BUILT: String(present),
           },
         );
         expect(build.status, build.stderr).toBe(0);
-        expect(
-          NodeFS.readFileSync(NodePath.join(root, "node-args"), "utf8").includes("--allow-missing"),
-        ).toBe(!present);
+        const nodeArgs = NodeFS.readFileSync(NodePath.join(root, "node-args"), "utf8").split("\n");
+        expect(nodeArgs[0]).toBe("scripts/build-npm-launcher.ts");
+        expect(nodeArgs.includes("--allow-missing")).toBe(!present);
 
         const announce = runStep("Announce the release on Discord", {
           WINDOWS_BUILT: String(present),
           DISCORD_RELEASE_WEBHOOK_URL: "https://discord.invalid/fixture",
-          S2CODE_NPM_TRUSTED_PUBLISHING_READY: "true",
           FORK_NPM_TRUSTED_PUBLISHING_READY: "true",
         });
         expect(announce.status, announce.stderr).toBe(0);
@@ -196,10 +194,12 @@ describe("fork workflow gates", () => {
             content: string;
           }
         ).content.split("\n");
-        expect(content.some((line) => line.startsWith("npm: "))).toBe(true);
+        expect(
+          content.some((line) => line.startsWith("npm: ") && line.includes("/shuv2code/")),
+        ).toBe(true);
         expect(
           content.includes(
-            "windows: not built; npx @s2code/cli is unavailable on Windows for this version",
+            "windows: not built; npx shuv2code is unavailable on Windows for this version",
           ),
         ).toBe(!present);
       } finally {

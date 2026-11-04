@@ -29,14 +29,16 @@ describe("versionSkew", () => {
     ).toBe("npm install --global --prefix '/opt/maria'\\''s node' shuv2code@0.0.45");
   });
 
-  it("retains the detected global package when its aliases overlap another install", () => {
+  it("moves a retired @s2code/cli global install onto shuv2code in the same prefix", () => {
     expect(
       manualServerUpdateCommand("2.0.0", {
         kind: "npm-global",
         prefix: "/opt/node",
         packageName: "@s2code/cli",
       }),
-    ).toBe("npm install --global --prefix '/opt/node' @s2code/cli@2.0.0");
+    ).toBe(
+      "npm uninstall --global --prefix '/opt/node' @s2code/cli && npm install --global --prefix '/opt/node' shuv2code@2.0.0",
+    );
     expect(
       manualServerUpdateCommand("2.0.0", {
         kind: "npm-global",
@@ -50,12 +52,12 @@ describe("versionSkew", () => {
   });
 
   it("keeps runner and unknown commands as relaunches", () => {
-    expect(manualServerUpdateCommand("0.0.45")).toBe("npx @s2code/cli@0.0.45");
-    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe("npx @s2code/cli@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45")).toBe("npx shuv2code@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe("npx shuv2code@0.0.45");
     expect(manualServerUpdateCommand("0.0.45", { kind: "pnpm-dlx" })).toBe(
-      "pnpm dlx @s2code/cli@0.0.45",
+      "pnpm dlx shuv2code@0.0.45",
     );
-    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx @s2code/cli@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx shuv2code@0.0.45");
   });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";

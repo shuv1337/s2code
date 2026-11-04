@@ -79,7 +79,7 @@ Setting `S2CODE_IMPORT_UPSTREAM` reports this limitation rather than importing.
 These examples use `s2code-nightly`, the command a default install creates.
 Stable (`s2code`) and preview (`s2code-preview`) are reached only by setting
 `S2CODE_CHANNEL`, and neither train is published today. A published npm install uses
-the fork package `s2code`; uninstall only that proven package/prefix, never `t3`.
+the fork package `shuv2code`; uninstall only that proven package/prefix, never `t3`.
 
 Run `s2code-nightly help` or `s2code-nightly --help` for the full reference. To start in
 a new working directory, use an explicit path such as `s2code-nightly ./my-project`. A bare
@@ -89,9 +89,17 @@ If the command or its `start` subcommand reports an already running server, conn
 instead. Stop it before starting a replacement, or use a different `--base-dir`
 for an independent server.
 
-Do not use `npx t3` to try this fork: it downloads upstream. Once the fork npm
-package is published, `npx @s2code/cli` runs the newest nightly, because nightly
-is the only train this fork publishes.
+Do not use `npx t3` to try this fork: it downloads upstream. `npx shuv2code` runs the
+newest nightly, because nightly is the only train this fork publishes. Install it with
+`npm i -g shuv2code` for the `shuv2code`, `s2code` and `s2c` commands. The npm package
+holds no executable: on first run it downloads the CLI archive for its version from the
+GitHub Release, refuses it unless its SHA-256 matches the checksum shipped in the package,
+and caches it (`~/.cache/s2code`, `~/Library/Caches/s2code` on macOS,
+`%LOCALAPPDATA%\s2code` on Windows), keeping the current version and the one before it.
+`npm uninstall -g shuv2code` leaves that cache behind; delete its `runtime` folder to free
+the space. Other platforms get a "not supported" error. It needs Node.js 18 or newer. The
+`@s2code/cli` and `@s2code/t3-<platform>` packages are retired; replace an `@s2code/cli`
+install with `npm uninstall -g @s2code/cli && npm i -g shuv2code`.
 
 ### Intel Macs
 
