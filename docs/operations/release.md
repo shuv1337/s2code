@@ -23,13 +23,16 @@ Public app names and URL schemes use S2Code and `s2code`.
 One resolved commit and one exact version feed the shared JS bundle, all native
 builds, archives and package manifests. Desktop builds cover
 macOS ARM64 (DMG and ZIP), Linux ARM64/x64 (AppImage and DEB), and Windows
-x64 (NSIS). Intel macOS and Windows ARM64 are not built. The Windows desktop embeds the matching same-version Linux
+x64 (NSIS). Intel macOS and Windows ARM64 are not built; the updater feeds list only the remaining targets, so existing Windows ARM64 installs update to the x64 build and Intel Mac installs find no update they can download. The Windows desktop embeds the matching same-version Linux
 `s2code-<version>-linux-<arch>` archive for its WSL backend.
 
-A failed Windows x64 build does not block the release. Publication leaves out the
-Windows installer and CLI archive, does not publish npm for that version (the launcher
-pins a checksum for every platform's archive, Windows included), keeps the release out of the
-rolling index, and says so in the release notes. macOS and Linux still block.
+A failed Windows x64 build does not block the release; macOS and Linux still do.
+Publication then leaves out the Windows installer and CLI archive, and the npm launcher
+publishes without a Windows checksum and its tags move as usual, so `npx shuv2code` reports
+Windows as not supported for that version. The release notes and Discord post say so, the
+release stays out of the rolling index, and a final `windows_missing` job turns the run red.
+Before upload, the Windows build lists the installer's app payload and requires
+`resources/wsl-runtime.tar.gz`.
 
 CLI archives cover **four** targets: `darwin-arm64`, `linux-arm64`, `linux-x64`,
 `win32-x64`. CLI release archives are named `s2code-<version>-<platform>-<arch>` and
@@ -42,7 +45,8 @@ publishing the workspace package named `t3`, which is private.
 
 When npm is enabled, the only public npm endpoint is `shuv2code`, built by
 `scripts/build-npm-launcher.ts` on upstream's single-launcher model. It holds no native
-code: `checksums.json` pins the SHA-256 of each of the four CLI archives, and on first run
+code: `checksums.json` pins the SHA-256 of each CLI archive the release built (all four, or three
+when the Windows build failed), and on first run
 `bin/shuv2code.mjs` downloads its platform's archive from this version's GitHub Release,
 refuses it on a mismatch, validates `t3 --version`, and caches it under the OS cache
 directory (`<cache>/s2code/runtime/<version>`). The completion marker records the cached
@@ -60,8 +64,9 @@ retired alias's `s2code`) rather than the cached binary. The package README
 ## Retired npm packages (one-time owner step)
 
 `@s2code/cli` and `@s2code/t3-<platform>` (`darwin-arm64`, `linux-arm64`, `linux-x64`,
-`win32-x64`, `win32-arm64`) are retired. CI never publishes them again, so
-`0.1.6-nightly.20261104.89` is the final release of each `@s2code/t3-*` package. Nothing
+`win32-x64`, `win32-arm64`) are retired. CI never publishes them again, so the last release
+built before this change (`0.1.6-nightly.20261104.89` when it was written) is the final
+release of each `@s2code/t3-*` package. Nothing
 is unpublished. The workflow does not deprecate them: npm trusted publishing covers
 `npm publish` from `release.yml`, not `npm deprecate`, and this runs once. After the first
 launcher release is public and `npm i -g shuv2code` works from it, an owner logged in to
@@ -105,8 +110,9 @@ when npm first put the alias in its npx cache. npx reuses that cache, so it does
 newer releases by itself; point users at `npx shuv2code@latest`. A global `@s2code/cli`
 install is likewise pinned to the `shuv2code` it installed; the server recognises that
 layout and its update hint replaces it with `shuv2code`.
-Upgrading an existing `shuv2code` install needs nothing: `npm i -g shuv2code` replaces
-`0.1.6-nightly.20261104.89`, npm drops its `@s2code/t3-*` optional dependencies, and the
+Upgrading an existing `shuv2code` install needs nothing: `npm i -g shuv2code` replaces a
+platform-package version such as `0.1.6-nightly.20261104.89`, npm drops its `@s2code/t3-*`
+optional dependencies, and the
 same three commands stay on `PATH`.
 
 ## macOS arm64 runner

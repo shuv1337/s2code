@@ -175,12 +175,11 @@ describe("fork release contract", () => {
       "nightly.yml",
     ]);
   });
-  it("leaves Windows and npm out of a release whose Windows build failed, and says so", () => {
+  it("leaves Windows out of a release whose Windows build failed, and says so", () => {
     const value = forkReleasePlan({
       ...plan("nightly", "1.2.3-nightly.20261014.1"),
       windows: false,
     });
-    expect(value.npm).toBe(false);
     expect(value.feedAssets).toEqual([
       "nightly-mac.yml",
       "nightly-linux.yml",
@@ -195,8 +194,10 @@ describe("fork release contract", () => {
         .flat()
         .some((name) => name.endsWith(".exe")),
     ).toBe(false);
+    // npm still publishes the launcher, pinning only the archives that built.
+    expect(value.npm).toBe(true);
     expect(forkReleaseBody(value).split("### Windows\n\n")[1]).toMatch(
-      /^The Windows x64 build failed.*npm was not published/,
+      /^The Windows x64 build failed.*`npx shuv2code` is unavailable on Windows for this version\.\n/,
     );
   });
   it("keeps stable/nightly feeds channel-bound and rejects upstream repositories and channel/version mismatches", () => {

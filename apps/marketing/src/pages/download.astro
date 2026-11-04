@@ -57,7 +57,7 @@ const imageProps = {
             </span>
           </a>
         </div>
-        <p class="intel-note">
+        <p class="arch-note">
           Intel Macs are no longer built. <a href="https://github.com/shuv1337/s2code/blob/main/docs/user/install.md#intel-macs">Run from source</a> instead.
         </p>
       </section>
@@ -108,7 +108,7 @@ const imageProps = {
             </span>
           </a>
         </div>
-        <p class="intel-note">
+        <p class="arch-note">
           On ARM? Download the arm64 <a data-asset="arm64.deb" href={RELEASES_URL}>.deb</a> or
           <a data-asset="arm64.AppImage" href={RELEASES_URL}>AppImage</a>.
         </p>
@@ -145,9 +145,9 @@ const imageProps = {
         <code class="cli-line cli-line--stable">irm https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.ps1 | iex</code>
         <code class="cli-line cli-line--nightly">curl -fsSL https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.sh | S2CODE_CHANNEL=nightly sh</code>
         <code class="cli-line cli-line--nightly">$env:S2CODE_CHANNEL="nightly"; irm https://raw.githubusercontent.com/shuv1337/s2code/main/scripts/install.ps1 | iex</code>
-        <p class="cli-note">Once the renamed npm package is published, try it without installing. Until then, use the release installer above.</p>
-        <code class="cli-line cli-line--stable">npx @s2code/cli@latest</code>
-        <code class="cli-line cli-line--nightly">npx @s2code/cli@nightly</code>
+        <p class="cli-note">Or run it with npm (Node.js 18 or newer), without installing.</p>
+        <code class="cli-line cli-line--stable">npx shuv2code@latest</code>
+        <code class="cli-line cli-line--nightly">npx shuv2code@nightly</code>
       </section>
     </div>
 
@@ -525,12 +525,12 @@ const imageProps = {
     color: #b6b0ff;
   }
 
-  .intel-note {
+  .arch-note {
     font-size: 0.8rem;
     color: var(--fg-dim);
   }
 
-  .intel-note a,
+  .arch-note a,
   .releases-link a {
     color: var(--fg-muted);
     text-decoration: underline;
@@ -539,7 +539,7 @@ const imageProps = {
     transition: color 0.3s ease, text-decoration-color 0.3s ease;
   }
 
-  .intel-note a:hover,
+  .arch-note a:hover,
   .releases-link a:hover {
     color: var(--fg);
     text-decoration-color: var(--fg);

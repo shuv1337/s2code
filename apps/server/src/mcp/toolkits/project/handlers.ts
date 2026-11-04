@@ -223,12 +223,16 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             )?.supportedRuntimeModes,
           });
         }
+        const named = input.modelSelection !== undefined && input.poolStart !== true;
         const result = yield* ThreadMessageIntake.launchThread({
           commandId,
           threadId,
           projectId,
           title: input.title,
           modelSelection,
+          ...(named && !replaying
+            ? { namedInstance: { allowPoolFailover: input.allowPoolFailover === true } }
+            : {}),
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: input.workspaceStrategy ?? { type: "root" },
@@ -255,7 +259,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 message: error.message,
               });
             }
-            if (error._tag === "ThreadManagementProviderInstanceDisabledError") {
+            if (
+              error._tag === "ThreadManagementProviderInstanceDisabledError" ||
+              error._tag === "ThreadManagementProviderInstanceUnavailableError"
+            ) {
               return new OrchestratorMcpFailure({
                 code: "invalid_request",
                 message: error.message,
@@ -280,6 +287,12 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           modelSelection: thread.modelSelection,
           runId: run?.id ?? null,
           status: run?.status ?? null,
+          ...(input.allowPoolFailover === true && !named
+            ? {
+                warning:
+                  "allowPoolFailover was ignored: it applies only to a named modelSelection.",
+              }
+            : {}),
         };
       }),
     // The launched thread carries the caller's link, if it has one.

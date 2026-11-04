@@ -53,8 +53,7 @@ describe("shouldBundleCliDependency", () => {
 });
 
 describe("partitionStageDependencies", () => {
-  // win32-arm64 has no ffmpeg-static binary and its install script fails there,
-  // which would fail the whole stage install for a required dependency.
+  // A failed ffmpeg-static install script would fail the whole stage install if it were required.
   it("stages packages that cannot build everywhere as optional", () => {
     assert.deepStrictEqual(
       partitionStageDependencies({ "ffmpeg-static": "5.3.0", "node-pty": "1.1.0" }),

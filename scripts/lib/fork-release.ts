@@ -138,8 +138,8 @@ export function forkReleasePlan(input: {
   npm: boolean;
   /**
    * Whether the Windows x64 build is in this release. Its build may fail without
-   * blocking the others; the release then leaves Windows out, and npm with it,
-   * since the launcher must carry a checksum for every supported platform.
+   * blocking the others; the release then leaves out the Windows assets, and the
+   * launcher it publishes pins no Windows checksum.
    */
   windows: boolean;
 }) {
@@ -170,7 +170,6 @@ export function forkReleasePlan(input: {
   const cliKeys = forkCliPlatformKeys(input.windows);
   return {
     ...input,
-    npm: input.npm && input.windows,
     tag: `v${input.version}`,
     distTag: forkDistTags(input.channel)[0]!,
     distTags: forkDistTags(input.channel),
@@ -192,7 +191,7 @@ export function forkReleasePlan(input: {
 }
 export type ForkReleasePlan = ReturnType<typeof forkReleasePlan>;
 
-function forkCliPlatformKeys(windows: boolean) {
+export function forkCliPlatformKeys(windows: boolean) {
   return CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => windows || !key.startsWith("win32-"));
 }
 
@@ -212,7 +211,7 @@ export function forkReleaseBody(
       : "WARNING: The macOS desktop apps are unsigned and not notarized. They ship no updater feed and are never offered as automatic updates; install them deliberately.",
     "### Windows",
     !plan.windows
-      ? "The Windows x64 build failed, so this release has no Windows installer or Windows CLI archive, and npm was not published for it."
+      ? "The Windows x64 build failed, so this release has no Windows installer or Windows CLI archive, and its npm launcher has no Windows build: `npx shuv2code` is unavailable on Windows for this version."
       : plan.signing.win
         ? "The Windows installers are signed."
         : "The Windows installers are unsigned. They ship no updater feed and are never offered as automatic updates; install them deliberately.",

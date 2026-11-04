@@ -266,6 +266,12 @@ const make = Effect.gen(function* () {
           projectId,
           title: input.title ?? parent.thread.title,
           modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
+          // An inherited instance was not named by the caller, so its pool there may place the task.
+          ...(target.providerInstanceId === undefined
+            ? { poolStart: true }
+            : target.allowPoolFailover === true
+              ? { allowPoolFailover: true }
+              : {}),
           ...(runtimeMode === undefined ? {} : { runtimeMode }),
           ...(interactionMode === undefined ? {} : { interactionMode }),
           message: task,

@@ -273,6 +273,11 @@ describe("usage limit replacement", () => {
     ["no member without the model", { model: "gpt-6.1-sol" }, null],
     ["no exhausted member", { providers: [providers[0]!, member("busy", 100)] }, null],
     [
+      "no failing member",
+      { providers: [providers[0]!, member("idle", 10, { status: "error" })] },
+      null,
+    ],
+    [
       "no unauthenticated member",
       { providers: [providers[0]!, member("idle", 10, { auth: { status: "unauthenticated" } })] },
       null,

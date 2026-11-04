@@ -31,7 +31,7 @@ export class NpmLauncherArchivesMissingError extends Schema.TaggedError<NpmLaunc
   { archivesDir: Schema.String, missing: Schema.Array(Schema.String) },
 ) {
   override get message(): string {
-    return `${this.archivesDir} lacks ${this.missing.join(", ")}. The launcher must carry a checksum for every supported platform.`;
+    return `${this.archivesDir} lacks ${this.missing.join(", ")}. A launcher without them reports those platforms as unsupported; pass --allow-missing for a release that deliberately left them out.`;
   }
 }
 
@@ -79,10 +79,11 @@ const latestServerMigrationId = Effect.fn("latestServerMigrationId")(function* (
   return Math.max(0, ...ids);
 });
 
-/** `{ [platformKey]: { archive, sha256 } }` for every supported platform; the launcher trusts nothing else. */
+/** `{ [platformKey]: { archive, sha256 } }` for each archive present; the launcher trusts nothing else. */
 const archiveChecksums = Effect.fn("archiveChecksums")(function* (input: {
   readonly archivesDir: string;
   readonly version: string;
+  readonly allowMissing: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -90,15 +91,17 @@ const archiveChecksums = Effect.fn("archiveChecksums")(function* (input: {
     key,
     archive: cliArchiveFileName(input.version, key),
   }));
+  const present: typeof archives = [];
   const missing: Array<string> = [];
-  for (const { archive } of archives) {
-    if (!(yield* fs.exists(path.join(input.archivesDir, archive)))) missing.push(archive);
+  for (const entry of archives) {
+    if (yield* fs.exists(path.join(input.archivesDir, entry.archive))) present.push(entry);
+    else missing.push(entry.archive);
   }
-  if (missing.length > 0) {
+  if (missing.length > 0 && (!input.allowMissing || present.length === 0)) {
     return yield* new NpmLauncherArchivesMissingError({ archivesDir: input.archivesDir, missing });
   }
   const checksums: Record<string, { archive: string; sha256: string }> = {};
-  for (const { key, archive } of archives) {
+  for (const { key, archive } of present) {
     const bytes = yield* fs.readFile(path.join(input.archivesDir, archive));
     const digest = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", bytes));
     checksums[key] = { archive, sha256: Buffer.from(digest).toString("hex") };
@@ -110,11 +113,15 @@ export const buildNpmLauncher = Effect.fn("buildNpmLauncher")(function* (input: 
   readonly version: string;
   readonly archivesDir: string;
   readonly outputDir: string;
+  readonly allowMissing?: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const sourceDir = yield* path.fromFileUrl(new URL("./npm-launcher/", import.meta.url));
-  const checksums = yield* archiveChecksums(input);
+  const checksums = yield* archiveChecksums({
+    ...input,
+    allowMissing: input.allowMissing === true,
+  });
 
   yield* fs.makeDirectory(input.outputDir, { recursive: true });
   const scratch = yield* fs.makeTempDirectoryScoped({
@@ -166,6 +173,10 @@ const command = Command.make(
       Flag.withDescription("Directory holding the release's s2code-<version>-<platform> archives."),
     ),
     outputDir: Flag.String("output-dir").pipe(Flag.withDefault("npm-packages")),
+    allowMissing: Flag.Boolean("allow-missing").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Pin only the archives present, for a release missing a platform."),
+    ),
   },
   buildNpmLauncher,
 ).pipe(Command.withDescription("Build the shuv2code npm launcher package."));

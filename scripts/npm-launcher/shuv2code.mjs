@@ -246,7 +246,7 @@ async function main() {
   const key = `${process.platform}-${process.arch}`;
   if (!Object.hasOwn(checksums, key)) {
     throw new Error(
-      `${key} is not supported. The CLI is built for ${Object.keys(checksums).join(", ")}.\n` +
+      `${key} is not supported by S2Code ${version}, which is built for ${Object.keys(checksums).join(", ")}.\n` +
         `The desktop app and release archives are at ${RELEASES}`,
     );
   }

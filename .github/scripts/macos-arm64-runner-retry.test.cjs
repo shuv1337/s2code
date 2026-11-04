@@ -79,7 +79,7 @@ test("splits macOS arm64 and Windows x64 out of the shared desktop matrix", () =
   assert.throws(() => splitDesktopMatrix({ include: [split.mac] }), /one Windows x64/);
 });
 
-test("retries only a hosted runner that was never assigned", () => {
+test("counts only a hosted runner that was never assigned as not acquired", () => {
   const missed = {
     name: buildJobName(MAC_ARM64_CALLERS[0]),
     conclusion: "cancelled",
@@ -114,14 +114,17 @@ test("retries only a hosted runner that was never assigned", () => {
   assert.equal(
     classifyAttempts([
       { ...missed, runner_id: 7, steps: [{ name: "Checkout", conclusion: "cancelled" }] },
-    ]).attempts[0].retry,
+    ]).attempts[0].notAcquired,
     false,
   );
-  assert.equal(classifyAttempts([{ ...missed, conclusion: "failure" }]).attempts[0].retry, false);
-  assert.equal(classifyAttempts([{ ...missed, runner_id: null }]).attempts[0].retry, false);
-  assert.equal(classifyAttempts([{ ...missed, steps: undefined }]).attempts[0].retry, false);
   assert.equal(
-    classifyAttempts([{ ...missed, annotations: [{ message: "other" }] }]).attempts[0].retry,
+    classifyAttempts([{ ...missed, conclusion: "failure" }]).attempts[0].notAcquired,
+    false,
+  );
+  assert.equal(classifyAttempts([{ ...missed, runner_id: null }]).attempts[0].notAcquired, false);
+  assert.equal(classifyAttempts([{ ...missed, steps: undefined }]).attempts[0].notAcquired, false);
+  assert.equal(
+    classifyAttempts([{ ...missed, annotations: [{ message: "other" }] }]).attempts[0].notAcquired,
     false,
   );
   assert.equal(
@@ -132,7 +135,7 @@ test("retries only a hosted runner that was never assigned", () => {
           { message: `The job was ${NOT_ACQUIRED_ANNOTATION} even after multiple attempts` },
         ],
       },
-    ]).attempts[0].retry,
+    ]).attempts[0].notAcquired,
     true,
   );
 });
@@ -246,7 +249,7 @@ test("a shuvbot attempt still queued after the timeout triggers the hosted fallb
   assert.equal(state(QUEUE_TIMEOUT_SECONDS), "timeout");
 });
 
-test("the attempt the queue fallback cancelled is superseded, not retried or a failure", () => {
+test("the attempt the queue fallback cancelled is superseded, not a runner miss or a failure", () => {
   const cancelledByFallback = {
     name: buildJobName(MAC_ARM64_CALLERS[0]),
     conclusion: "cancelled",
@@ -262,9 +265,9 @@ test("the attempt the queue fallback cancelled is superseded, not retried or a f
   const ok = classifyAttempts([cancelledByFallback, fallback("success")]);
   assert.equal(ok.ok, true);
   assert.equal(ok.attempts[0].reason, "superseded");
-  assert.equal(ok.attempts[0].retry, false);
+  assert.equal(ok.attempts[0].notAcquired, false);
   // Without the fallback, the same job is a runner miss.
-  assert.equal(classifyAttempts([cancelledByFallback]).attempts[0].retry, true);
+  assert.equal(classifyAttempts([cancelledByFallback]).attempts[0].notAcquired, true);
   const failed = classifyAttempts([cancelledByFallback, fallback("failure")]);
   assert.equal(failed.ok, false);
   assert.equal(failed.reason, "failure");

@@ -309,6 +309,15 @@ const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
                 projectId: project.id,
                 instanceId: error.instanceId,
               }).pipe(Effect.as(undefined)),
+            ThreadManagementProviderInstanceUnavailableError: (error) =>
+              Effect.logInfo(
+                "Skipped bootstrap thread because its provider instance is unavailable",
+                {
+                  projectId: project.id,
+                  instanceId: error.instanceId,
+                  reason: error.reason,
+                },
+              ).pipe(Effect.as(undefined)),
             ThreadLaunchError: (error) =>
               Effect.logWarning("Failed to launch bootstrap thread", {
                 projectId: project.id,

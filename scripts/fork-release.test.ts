@@ -147,6 +147,58 @@ describe("complete fork release assets", () => {
         NodeFS.rmSync(directory, { recursive: true, force: true });
       }
     }));
+  it("accepts a launcher pinning only the archives that built when Windows did not", () =>
+    fixture(
+      "nightly",
+      (assets, plan) => {
+        const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-npm-fixture-"));
+        try {
+          const packageDirectory = NodePath.join(directory, "package");
+          NodeFS.mkdirSync(packageDirectory);
+          const pack = (archives: ReadonlyArray<string>) => {
+            NodeFS.writeFileSync(
+              NodePath.join(packageDirectory, "package.json"),
+              JSON.stringify(npmLauncherPackageManifest(plan.version, 79)),
+            );
+            NodeFS.writeFileSync(
+              NodePath.join(packageDirectory, "checksums.json"),
+              JSON.stringify(
+                Object.fromEntries(
+                  archives.map((archive) => [
+                    archive,
+                    {
+                      archive,
+                      sha256: FS.existsSync(Path.join(assets, archive))
+                        ? Crypto.createHash("sha256")
+                            .update(FS.readFileSync(Path.join(assets, archive)))
+                            .digest("hex")
+                        : "0".repeat(64),
+                    },
+                  ]),
+                ),
+              ),
+            );
+            NodeChildProcess.execFileSync("tar", [
+              "-czf",
+              NodePath.join(directory, "shuv2code.tgz"),
+              "-C",
+              directory,
+              "package",
+            ]);
+          };
+          expect(plan.cliAssets.some((name) => name.includes("win32"))).toBe(false);
+          pack(plan.cliAssets);
+          expect(inspectForkNpmPackages(directory, plan, assets)).toHaveLength(1);
+          pack([...plan.cliAssets, cliArchiveFileName(plan.version, "win32-x64")]);
+          expect(() => inspectForkNpmPackages(directory, plan, assets)).toThrow(
+            "checksums.json does not match",
+          );
+        } finally {
+          NodeFS.rmSync(directory, { recursive: true, force: true });
+        }
+      },
+      { windows: false },
+    ));
   it.each(["stable", "nightly", "preview"] as const)(
     "prepares the complete %s platform matrix and final checksums",
     (channel) =>
@@ -254,7 +306,7 @@ describe("complete fork release assets", () => {
           FS.readFileSync(Path.join(directory, "release.json"), "utf8"),
         ) as { windows: boolean; npmPackages: string[] };
         expect(release.windows).toBe(false);
-        expect(release.npmPackages).toEqual([]);
+        expect(release.npmPackages).toEqual(["shuv2code"]);
       },
       { windows: false },
     ));

@@ -524,6 +524,38 @@ fs.readFileSync = (file, ...rest) => {
         assert.isFalse(yield* fs.exists(path.join(root, "old-node-home")));
       }),
   );
+  it.effect("pins only the archives present, and only when told a platform is missing", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-missing-test-" });
+      const archivesDir = path.join(root, "archives");
+      yield* fs.makeDirectory(archivesDir);
+      const build = (allowMissing: boolean) =>
+        buildNpmLauncher({
+          version: VERSION,
+          archivesDir,
+          outputDir: path.join(root, "out"),
+          allowMissing,
+        });
+      // Even --allow-missing refuses a launcher that could run nowhere.
+      assert.equal((yield* Effect.flip(build(true)))._tag, "NpmLauncherArchivesMissingError");
+      for (const key of CLI_ARCHIVE_PLATFORM_KEYS.filter((key) => !key.startsWith("win32-")))
+        yield* fs.writeFileString(path.join(archivesDir, cliArchiveFileName(VERSION, key)), key);
+      const refused = yield* Effect.flip(build(false));
+      assert.equal(refused._tag, "NpmLauncherArchivesMissingError");
+      assert.include(refused.message, cliArchiveFileName(VERSION, "win32-x64"));
+      const output = yield* build(true);
+      const checksums = yield* decodeChecksums(
+        yield* fs.readFileString(path.join(output.packageDir, "checksums.json")),
+      );
+      assert.deepStrictEqual(Object.keys(checksums).sort(), [
+        "darwin-arm64",
+        "linux-arm64",
+        "linux-x64",
+      ]);
+    }),
+  );
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "does not publish an unusable release",
     () =>

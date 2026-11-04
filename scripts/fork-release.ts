@@ -362,7 +362,7 @@ async function publishPrepared(plan: ForkReleasePlan) {
   const assets = "prepared/release-assets";
   prepareForkAssets(plan, assets);
   // Shaping copies every CLI archive twice; show the disk that publishing starts from.
-  console.log(CP.spawnSync("df", ["-h", "."], { encoding: "utf8" }).stdout ?? "");
+  console.log(CP.spawnSync("df", ["-h", "/"], { encoding: "utf8" }).stdout ?? "");
   const names = FS.readdirSync(assets);
   const packages = plan.npm ? inspectForkNpmPackages("prepared/npm-packages", plan, assets) : [];
   const readTags = async (name: string) => {
@@ -858,7 +858,7 @@ async function main() {
     const plan = forkReleasePlan({ ...readPlan(), windows: windows === "true" });
     if (!plan.windows)
       console.log(
-        "The Windows x64 build failed: this release leaves out Windows and does not publish npm.",
+        "The Windows x64 build failed: this release leaves out the Windows assets, and the npm launcher has no Windows build.",
       );
     await publishPrepared(plan);
   } else throw new Error("Use preflight, signing or publish --execute.");
