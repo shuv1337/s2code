@@ -697,6 +697,16 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 });
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
+/** Instances of one driver that share work by usage-limit headroom. */
+export const OrchestratorMcpProviderPool = Schema.Struct({
+  driver: ProviderDriverKind,
+  label: Schema.String,
+  memberInstanceIds: Schema.Array(ProviderInstanceId),
+  /** Models every member has. */
+  models: Schema.Array(Schema.String),
+});
+export type OrchestratorMcpProviderPool = typeof OrchestratorMcpProviderPool.Type;
+
 export const OrchestratorMcpEnvironmentLink = Schema.Struct({
   environmentId: EnvironmentId,
   label: Schema.String,
@@ -726,6 +736,8 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
+  /** Absent from environments older than pools. */
+  pools: Schema.optional(Schema.Array(OrchestratorMcpProviderPool)),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,
     asyncPolling: Schema.Boolean,

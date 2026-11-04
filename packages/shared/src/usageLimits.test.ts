@@ -25,8 +25,10 @@ import {
   hiddenUsageLimitPoolMembers,
   pickUsageLimitPoolStart,
   pickUsageLimitReplacement,
+  poolModelIntersection,
   resolveNewThreadModelSelection,
   usageLimitPoolDriver,
+  usageLimitPools,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -329,6 +331,42 @@ describe("usage limit replacement", () => {
         ProviderInstanceId.make("idle"),
       ),
     ).toBeNull();
+  });
+
+  it("intersects pool members' models in the first member's order", () => {
+    const models = (...slugs: string[]) => ({
+      models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+    });
+    expect(
+      poolModelIntersection([models("a", "b", "c"), models("c", "b"), models("b", "c")]),
+    ).toEqual(["b", "c"]);
+    expect(poolModelIntersection([models("a"), models()])).toEqual([]);
+    expect(poolModelIntersection([])).toEqual([]);
+  });
+
+  it("lists each pool's registered members and the models they share", () => {
+    const opus = { slug: model, name: "Opus", isCustom: false, capabilities: null };
+    const composer = {
+      slug: "composer-2.5",
+      name: "Composer",
+      isCustom: false,
+      capabilities: null,
+    };
+    expect(
+      usageLimitPools(settings({ solo: { disableOnUsageLimit: false } }), [
+        member("busy", 70, { models: [opus, composer] }),
+        member("idle", 10, { models: [composer, opus] }),
+        member("solo", 0, { models: [opus, composer] }),
+        provider({}),
+      ]),
+    ).toEqual([
+      {
+        driver: cursor,
+        label: "Cursor pool",
+        memberInstanceIds: ["busy", "idle"],
+        models: [model, "composer-2.5"],
+      },
+    ]);
   });
 });
 

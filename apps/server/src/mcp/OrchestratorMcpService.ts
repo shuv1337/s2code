@@ -69,7 +69,7 @@ import {
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
-import { collectProviderUsageLimits } from "@t3tools/shared/usageLimits";
+import { collectProviderUsageLimits, usageLimitPools } from "@t3tools/shared/usageLimits";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
@@ -2358,6 +2358,7 @@ const make = Effect.gen(function* () {
             constraints: [...constraints],
           };
         }),
+        pools: usageLimitPools(settings, providers),
         features: {
           appOwnedSubagents: true,
           asyncPolling: true,

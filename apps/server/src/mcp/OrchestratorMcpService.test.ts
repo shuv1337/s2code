@@ -2338,6 +2338,14 @@ describe("OrchestratorMcpService provider resolution", () => {
             attachments: [],
             dispatchMode: { type: "start_immediately" },
           });
+          assert.deepEqual((yield* service.capabilities(scope)).pools, [
+            {
+              driver,
+              label: "Codex pool",
+              memberInstanceIds: [codexInstanceId, altInstanceId],
+              models: [model],
+            },
+          ]);
           const threadsBefore = yield* orchestrator.countThreads();
           const create = (
             clientRequestId: string,

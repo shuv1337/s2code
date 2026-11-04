@@ -221,6 +221,42 @@ export function usageLimitPoolLabel(driver: ProviderDriverKind): string {
   return `${PROVIDER_DISPLAY_NAMES[driver] ?? driver} pool`;
 }
 
+/** The model slugs every member advertises, in the first member's order. */
+export function poolModelIntersection(
+  members: ReadonlyArray<Pick<ServerProvider, "models">>,
+): string[] {
+  const [first, ...rest] = members;
+  return (first?.models ?? [])
+    .map((model) => model.slug)
+    .filter((slug) => rest.every((member) => member.models.some((model) => model.slug === slug)));
+}
+
+export interface UsageLimitPool {
+  readonly driver: ProviderDriverKind;
+  readonly label: string;
+  readonly memberInstanceIds: readonly ProviderInstanceId[];
+  /** Models every member has, so a pooled start can land on any of them. */
+  readonly models: readonly string[];
+}
+
+/** The registered members of each pool, by driver. */
+export function usageLimitPools(
+  settings: Pick<ServerSettings, "providerInstances">,
+  providers: readonly ServerProvider[],
+): UsageLimitPool[] {
+  const byDriver = new Map<ProviderDriverKind, ServerProvider[]>();
+  for (const provider of providers) {
+    const driver = usageLimitPoolDriver(settings, provider.instanceId);
+    if (driver !== null) byDriver.set(driver, [...(byDriver.get(driver) ?? []), provider]);
+  }
+  return [...byDriver].map(([driver, members]) => ({
+    driver,
+    label: usageLimitPoolLabel(driver),
+    memberInstanceIds: members.map((member) => member.instanceId),
+    models: poolModelIntersection(members),
+  }));
+}
+
 /**
  * Pickers show each pool as one member: the first eligible preferred id in it, else its first
  * eligible candidate, else its first. Returns the members to hide.
