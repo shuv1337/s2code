@@ -257,6 +257,36 @@ export function usageLimitPools(
   }));
 }
 
+/** The member a pooled start of `model` lands on, or why the pool cannot take it. */
+export function usageLimitPoolStart(
+  input: Omit<UsageLimitPoolInput, "selection"> & {
+    readonly pool: ProviderDriverKind;
+    readonly model: string;
+  },
+):
+  | { readonly selection: ModelSelection }
+  | { readonly reason: "no_pool" | "model_not_shared" | "no_member"; readonly error: string } {
+  const pool = usageLimitPools(input.settings, input.providers).find(
+    (candidate) => candidate.driver === input.pool,
+  );
+  if (pool === undefined) {
+    return { reason: "no_pool", error: `There is no ${usageLimitPoolLabel(input.pool)}.` };
+  }
+  if (!pool.models.includes(input.model)) {
+    return {
+      reason: "model_not_shared",
+      error: `Not every ${pool.label} member has ${input.model}. orchestrator_capabilities lists the models they share.`,
+    };
+  }
+  const selection = pickUsageLimitPoolStart({
+    ...input,
+    selection: { instanceId: pool.memberInstanceIds[0]!, model: input.model },
+  });
+  return selection === null
+    ? { reason: "no_member", error: `No ${pool.label} member can take ${input.model} now.` }
+    : { selection };
+}
+
 /**
  * Pickers show each pool as one member: the first eligible preferred id in it, else its first
  * eligible candidate, else its first. Returns the members to hide.

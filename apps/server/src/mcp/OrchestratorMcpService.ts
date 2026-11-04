@@ -69,7 +69,12 @@ import {
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
-import { collectProviderUsageLimits, usageLimitPools } from "@t3tools/shared/usageLimits";
+import {
+  collectProviderUsageLimits,
+  usageLimitPoolDriver,
+  usageLimitPools,
+  usageLimitPoolStart,
+} from "@t3tools/shared/usageLimits";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
@@ -83,6 +88,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Struct from "effect/Struct";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -1343,7 +1349,7 @@ const make = Effect.gen(function* () {
   const resolveTargetRechecking = (input: Parameters<typeof resolveTarget>[0]) => {
     const instanceId =
       input.target?.providerInstanceId ??
-      (input.target?.driverKind === undefined
+      (input.target?.driverKind === undefined && input.target?.pool === undefined
         ? input.parent.thread.modelSelection.instanceId
         : undefined);
     const resolved = resolveTarget(input);
@@ -1369,18 +1375,69 @@ const make = Effect.gen(function* () {
     const requestedInstanceId = input.target?.providerInstanceId;
     const requestedDriver = input.target?.driverKind;
     const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
+    const inheritedSelection = input.parent.thread.modelSelection;
     let instanceId = requestedInstanceId;
+    let requestedModel = input.target?.model;
+
+    const pool = input.target?.pool;
+    if (pool !== undefined) {
+      if (requestedInstanceId !== undefined || requestedDriver !== undefined) {
+        return yield* failure(
+          "invalid_request",
+          "Pass target.pool, or providerInstanceId or driverKind, not both.",
+        );
+      }
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
+      );
+      requestedModel ??=
+        usageLimitPoolDriver(settings, inheritedSelection.instanceId) === pool
+          ? inheritedSelection.model
+          : undefined;
+      if (requestedModel === undefined) {
+        return yield* failure("target_required", "Pass target.model with target.pool.");
+      }
+      const started = usageLimitPoolStart({
+        pool,
+        model: requestedModel,
+        providers: input.providers,
+        settings,
+        projectId: input.parent.thread.projectId,
+        now: yield* Clock.currentTimeMillis,
+      });
+      if ("error" in started) {
+        return yield* failure(
+          started.reason === "model_not_shared" ? "model_unavailable" : "provider_unavailable",
+          started.error,
+        );
+      }
+      instanceId = started.selection.instanceId;
+    }
 
     if (instanceId === undefined && requestedDriver !== undefined) {
-      const candidates = input.providers.filter(
+      const drivers = input.providers.filter(
         (provider) =>
           provider.driver === requestedDriver &&
           orchestrationCapableInstanceIds.has(provider.instanceId),
       );
-      if (candidates.length === 0) {
+      if (drivers.length === 0) {
         return yield* failure(
           "provider_unavailable",
           `No V2 provider adapter is registered for driver ${requestedDriver}.`,
+        );
+      }
+      const candidates =
+        requestedModel === undefined
+          ? drivers
+          : drivers.filter(
+              (provider) =>
+                provider.models.length === 0 ||
+                provider.models.some((candidate) => candidate.slug === requestedModel),
+            );
+      if (candidates.length === 0) {
+        return yield* failure(
+          "model_unavailable",
+          `No ${requestedDriver} instance advertises model ${requestedModel}.`,
         );
       }
       const healthyCandidates = candidates.filter(
@@ -1441,8 +1498,6 @@ const make = Effect.gen(function* () {
       );
     }
 
-    const inheritedSelection = input.parent.thread.modelSelection;
-    const requestedModel = input.target?.model;
     const model =
       requestedModel ??
       (instanceId === inheritedSelection.instanceId
@@ -2467,6 +2522,10 @@ const make = Effect.gen(function* () {
       };
     }),
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(function* (callerScope, input) {
+      const withResolvedInstance = (task: OrchestratorMcpDelegateTaskResult) =>
+        input.target?.pool === undefined
+          ? task
+          : { ...task, resolvedInstanceId: task.providerInstanceId };
       const environmentId =
         input.target === undefined
           ? undefined
@@ -2479,9 +2538,11 @@ const make = Effect.gen(function* () {
           ...input,
           target: { ...input.target, environmentId },
         });
-        return yield* input.mode === "wait"
-          ? awaitTask(scope, taskId, input.timeoutMs)
-          : readTask(scope, taskId, false, true);
+        return withResolvedInstance(
+          yield* input.mode === "wait"
+            ? awaitTask(scope, taskId, input.timeoutMs)
+            : readTask(scope, taskId, false, true),
+        );
       }
       const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
       if (
@@ -2560,14 +2621,15 @@ const make = Effect.gen(function* () {
         workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
       }
       const named = namedInstance(input.target);
+      const placed = named !== undefined || input.target?.pool !== undefined;
       const modelSelection =
-        named === undefined || isRetryOfAcceptedDelegation
+        !placed || isRetryOfAcceptedDelegation
           ? target.modelSelection
           : yield* threadManagement
               .resolveThreadStartInstance({
                 modelSelection: target.modelSelection,
                 projectId: parent.thread.projectId,
-                named,
+                ...(named === undefined ? {} : { named }),
               })
               .pipe(Effect.mapError(threadManagementFailure));
       // ThreadManagementService.dispatch is the chokepoint for this command
@@ -2594,7 +2656,7 @@ const make = Effect.gen(function* () {
             // only needed if the parent settled first (timeout, disconnect).
             completionWake: input.mode === "wait" ? "settled_only" : "always",
           },
-          named === undefined ? undefined : { threadStart: false },
+          placed ? { threadStart: false } : undefined,
         )
         .pipe(
           Effect.mapError((error) =>
@@ -2634,7 +2696,7 @@ const make = Effect.gen(function* () {
       }
 
       if (input.mode !== "wait") {
-        return yield* readTask(scope, taskId, false, true);
+        return withResolvedInstance(yield* readTask(scope, taskId, false, true));
       }
       const timeoutMs = Math.min(
         MAX_WAIT_TIMEOUT_MS,
@@ -2642,7 +2704,7 @@ const make = Effect.gen(function* () {
       );
       const waited = yield* waitForTask(scope, taskId, timeoutMs);
       if (Option.isSome(waited) && isTerminalTaskStatus(waited.value.status)) {
-        return waited.value;
+        return withResolvedInstance(waited.value);
       }
       // An incomplete wait gives up delivery: upgrade so a later terminal
       // wakes the parent even mid-turn.
@@ -2677,7 +2739,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-      return yield* readTask(scope, taskId, Option.isNone(waited), true);
+      return withResolvedInstance(yield* readTask(scope, taskId, Option.isNone(waited), true));
     }),
     taskStatus: Effect.fn("OrchestratorMcpService.taskStatus")(function* (callerScope, taskId) {
       const scope = yield* requireThreadScope(callerScope, "task_status");
@@ -2941,7 +3003,7 @@ const make = Effect.gen(function* () {
                   committedThread === null
                     ? request.target
                     : {
-                        ...request.target,
+                        ...Struct.omit(request.target ?? {}, ["pool"]),
                         providerInstanceId: committedThread.modelSelection.instanceId,
                         allowPoolFailover: false,
                       },
@@ -2959,16 +3021,17 @@ const make = Effect.gen(function* () {
               );
               // A named instance is placed before creation, so a refusal leaves no thread behind.
               const named = committedThread === null ? namedInstance(request.target) : undefined;
-              const placed =
-                named === undefined
-                  ? target.modelSelection
-                  : yield* threadManagement
-                      .resolveThreadStartInstance({
-                        modelSelection: target.modelSelection,
-                        projectId: parent.thread.projectId,
-                        named,
-                      })
-                      .pipe(Effect.mapError(threadManagementFailure));
+              const pooled = committedThread === null && request.target?.pool !== undefined;
+              const placedUpFront = named !== undefined || pooled;
+              const placed = placedUpFront
+                ? yield* threadManagement
+                    .resolveThreadStartInstance({
+                      modelSelection: target.modelSelection,
+                      projectId: parent.thread.projectId,
+                      ...(named === undefined ? {} : { named }),
+                    })
+                    .pipe(Effect.mapError(threadManagementFailure))
+                : target.modelSelection;
               yield* assertTargetEnabledForProject(parent, commandId, {
                 ...target,
                 modelSelection: placed,
@@ -3034,7 +3097,7 @@ const make = Effect.gen(function* () {
                       modelSelection: resolvedModelSelection,
                       dispatchMode: { type: "start_immediately" },
                     },
-                    named === undefined ? undefined : { threadStart: false },
+                    placedUpFront ? { threadStart: false } : undefined,
                   )
                   .pipe(
                     Effect.mapError((error) =>
@@ -3082,6 +3145,9 @@ const make = Effect.gen(function* () {
                 createdBy: projection.thread.createdBy,
                 creationSource: projection.thread.creationSource,
                 providerInstanceId: ranOn.instanceId,
+                ...(request.target?.pool === undefined
+                  ? {}
+                  : { resolvedInstanceId: ranOn.instanceId }),
                 model: ranOn.model,
               } satisfies OrchestratorMcpCreatedThread;
             }),

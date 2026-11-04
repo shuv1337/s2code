@@ -29,6 +29,7 @@ import {
   resolveNewThreadModelSelection,
   usageLimitPoolDriver,
   usageLimitPools,
+  usageLimitPoolStart,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -342,6 +343,37 @@ describe("usage limit replacement", () => {
     ).toEqual(["b", "c"]);
     expect(poolModelIntersection([models("a"), models()])).toEqual([]);
     expect(poolModelIntersection([])).toEqual([]);
+  });
+
+  it.each([
+    ["the member with the most headroom", {}, { selection: { instanceId: "idle", model } }],
+    [
+      "nothing for a model one member lacks",
+      { providers: [...providers, member("solo", 0, { models: autoModel })] },
+      { reason: "model_not_shared" },
+    ],
+    [
+      "nothing for another driver",
+      { pool: ProviderDriverKind.make("codex") },
+      { reason: "no_pool" },
+    ],
+    [
+      "nothing when every member is spent",
+      { providers: [member("spent", 100), member("busy", 100)] },
+      { reason: "no_member" },
+    ],
+  ] as const)("starts a pool request on %s", (_name, overrides, expected) => {
+    expect(
+      usageLimitPoolStart({
+        pool: cursor,
+        model,
+        providers,
+        settings: settings({}),
+        projectId: null,
+        now,
+        ...overrides,
+      }),
+    ).toMatchObject(expected);
   });
 
   it("lists each pool's registered members and the models they share", () => {

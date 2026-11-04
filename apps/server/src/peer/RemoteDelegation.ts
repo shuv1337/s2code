@@ -224,11 +224,24 @@ const make = Effect.gen(function* () {
       const inherited = parent.thread.modelSelection;
       const instanceId = target.providerInstanceId ?? inherited.instanceId;
       const model =
-        target.model ?? (instanceId === inherited.instanceId ? inherited.model : undefined);
+        target.model ??
+        (instanceId === inherited.instanceId && target.pool === undefined
+          ? inherited.model
+          : undefined);
       if (model === undefined) {
         return yield* new OrchestratorMcpFailure({
           code: "target_required",
           message: "Pass target.model from orchestrator_capabilities with this environmentId.",
+        });
+      }
+      if (
+        target.pool !== undefined &&
+        (target.providerInstanceId !== undefined || target.options !== undefined)
+      ) {
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message:
+            "In a linked environment, target.pool takes only target.model; omit providerInstanceId and options.",
         });
       }
       const options =
@@ -265,13 +278,21 @@ const make = Effect.gen(function* () {
         {
           projectId,
           title: input.title ?? parent.thread.title,
-          modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
-          // An inherited instance was not named by the caller, so its pool there may place the task.
-          ...(target.providerInstanceId === undefined
-            ? { poolStart: true }
-            : target.allowPoolFailover === true
-              ? { allowPoolFailover: true }
-              : {}),
+          ...(target.pool !== undefined
+            ? { pool: target.pool, model }
+            : {
+                modelSelection: {
+                  instanceId,
+                  model,
+                  ...(options === undefined ? {} : { options }),
+                },
+                // An inherited instance was not named by the caller, so its pool there may place the task.
+                ...(target.providerInstanceId === undefined
+                  ? { poolStart: true }
+                  : target.allowPoolFailover === true
+                    ? { allowPoolFailover: true }
+                    : {}),
+              }),
           ...(runtimeMode === undefined ? {} : { runtimeMode }),
           ...(interactionMode === undefined ? {} : { interactionMode }),
           message: task,

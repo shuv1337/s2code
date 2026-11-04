@@ -77,6 +77,8 @@ interface PoolMember {
   readonly driver: ProviderDriverKind;
   readonly usedPercent: number;
   readonly enabled?: boolean;
+  /** Default: only `model`. */
+  readonly models?: ReadonlyArray<string>;
   /** The provider rejects every turn on this instance with this failure. */
   readonly failure?: OrchestrationV2ProviderFailure;
   /** Turns on this instance stay in flight until this opens. */
@@ -289,7 +291,12 @@ const serverProvider = (
   status: "ready",
   auth: { status: "authenticated" },
   checkedAt: "2026-11-02T00:00:00.000Z",
-  models: [{ slug: model, name: "Opus", isCustom: false, capabilities: null }],
+  models: (member.models ?? [model]).map((slug) => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    capabilities: null,
+  })),
   slashCommands: [],
   skills: [],
   usageLimits: {
@@ -609,6 +616,30 @@ describe("usage limit failover through the real runtime", () => {
             sentinelTarget,
           ]);
           assert.isFalse((yield* instanceSettings(busy))?.enabled === false);
+        }),
+    );
+  });
+
+  it.live("hands off only to a member that has the thread's model", () => {
+    const gate = Deferred.makeUnsafe<void>();
+    return runPool(
+      {
+        [spent]: { driver: cursor, usedPercent: 0, failure: quotaSpent, gate },
+        [busy]: { driver: cursor, usedPercent: 80 },
+        [fresh]: { driver: cursor, usedPercent: 10, models: ["composer-2.5"] },
+      },
+      ({ startedTurns }) =>
+        Effect.gen(function* () {
+          const threadId = yield* startThreadThenSpendQuota("model-filter", spent, gate);
+          const thread = yield* awaitThread(threadId, settled(2));
+          assert.deepEqual(
+            thread.runs.map((run) => [run.providerInstanceId, run.status]),
+            [
+              [spent, "failed"],
+              [busy, "completed"],
+            ],
+          );
+          assert.notInclude(yield* Ref.get(startedTurns), fresh);
         }),
     );
   });

@@ -45,6 +45,9 @@ const clientLaunchHarness = (input: {
   readonly defaultRuntimeMode?: RuntimeMode;
   readonly fallbackModel?: ModelSelection;
   readonly providers?: readonly ServerProvider[];
+  readonly providerInstances?: NonNullable<
+    Parameters<typeof ServerSettings.layerTest>[0]
+  >["providerInstances"];
   /** Where Settings saves a project's model; the legacy project field stays null. */
   readonly overrideModel?: ModelSelection;
   readonly launched: Array<ThreadLaunch.ThreadLaunchInput>;
@@ -68,6 +71,9 @@ const clientLaunchHarness = (input: {
       getProviders: Effect.succeed(input.providers ?? []),
     }),
     ServerSettings.layerTest({
+      ...(input.providerInstances === undefined
+        ? {}
+        : { providerInstances: input.providerInstances }),
       fallbackModelSelection: input.fallbackModel ?? null,
       ...(input.defaultRuntimeMode === undefined
         ? {}
@@ -408,6 +414,80 @@ it.effect("a launch binds a named model's instance unless it is a pool default",
       "allowPoolFailover was ignored: it applies only to a named modelSelection.",
     );
   }),
+);
+
+it.effect(
+  "a pool launch starts unnamed on the pool's pick, or refuses a model one member lacks",
+  () =>
+    Effect.gen(function* () {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const cursor = ProviderDriverKind.make("cursor");
+      const member = (id: string, usedPercent: number, models: ReadonlyArray<string>) =>
+        ({
+          instanceId: ProviderInstanceId.make(id),
+          driver: cursor,
+          enabled: true,
+          installed: true,
+          status: "ready",
+          version: null,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-01-01T00:00:00Z",
+          models: models.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            checkedAt: "2026-01-01T00:00:00Z",
+            windows: [{ id: "apiPercentUsed", kind: "monthly", label: "API", usedPercent }],
+          },
+        }) satisfies ServerProvider;
+      const pooled = { driver: cursor, enabled: true, disableOnUsageLimit: true };
+      const { projectId, modelSelection, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        providers: [
+          member("cursor_busy", 80, ["claude-opus-5-5", "composer-2.5"]),
+          member("cursor_idle", 10, ["claude-opus-5-5"]),
+        ],
+        providerInstances: {
+          [ProviderInstanceId.make("cursor_busy")]: pooled,
+          [ProviderInstanceId.make("cursor_idle")]: pooled,
+        },
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      const launch = (params: {
+        readonly model?: string;
+        readonly modelSelection?: ModelSelection;
+      }) =>
+        toolkit
+          .handle("t3_thread_launch", { title: "Fix", projectId, pool: cursor, ...params })
+          .pipe(
+            Stream.unwrap,
+            Stream.runCollect,
+            Effect.map((chunks) => chunks.at(-1)?.result),
+            Effect.provide(dependencies),
+          );
+
+      expect(yield* launch({ model: "claude-opus-5-5" })).toMatchObject({
+        modelSelection: { instanceId: "cursor_idle", model: "claude-opus-5-5" },
+        resolvedInstanceId: "cursor_idle",
+      });
+      expect(launched.map((input) => input.namedInstance)).toEqual([undefined]);
+      expect(yield* launch({ model: "composer-2.5" })).toMatchObject({
+        code: "invalid_request",
+        message:
+          "Not every Cursor pool member has composer-2.5. orchestrator_capabilities lists the models they share.",
+      });
+      expect(yield* launch({ model: "claude-opus-5-5", modelSelection })).toMatchObject({
+        code: "invalid_request",
+      });
+      expect(launched).toHaveLength(1);
+    }),
 );
 
 it.effect("a launch key of any length or content gives a short id and never a defect", () =>

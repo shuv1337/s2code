@@ -102,7 +102,15 @@ export const OrchestratorMcpAllowPoolFailover = Schema.Boolean.annotate({
   description: "If the named seat can't run, fall back to another member of its pool.",
 });
 
+export const OrchestratorMcpPoolSelector = Schema.optional(ProviderDriverKind).annotate({
+  description: "From capabilities `pools`; T3 picks the member.",
+});
+
+/** The member a `pool` request landed on. */
+const OrchestratorMcpResolvedInstanceId = Schema.optional(ProviderInstanceId);
+
 export const OrchestratorMcpTarget = Schema.Struct({
+  pool: OrchestratorMcpPoolSelector,
   providerInstanceId: Schema.optional(
     ProviderInstanceId.annotate({
       description: "Provider instance id from `orchestrator_capabilities`.",
@@ -230,6 +238,7 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   latestTerminalSummary: Schema.NullOr(Schema.String),
   latestTerminalResultContextTransferId: Schema.NullOr(ContextTransferId),
   providerInstanceId: ProviderInstanceId,
+  resolvedInstanceId: OrchestratorMcpResolvedInstanceId,
   model: Schema.NullOr(Schema.String),
   options: Schema.optional(Schema.Array(ProviderOptionSelection)),
   summary: Schema.NullOr(Schema.String),
@@ -304,6 +313,7 @@ export const OrchestratorMcpCreatedThread = Schema.Struct({
   createdBy: OrchestrationV2Actor,
   creationSource: OrchestrationV2CreationSource,
   providerInstanceId: ProviderInstanceId,
+  resolvedInstanceId: OrchestratorMcpResolvedInstanceId,
   model: Schema.String,
 });
 export type OrchestratorMcpCreatedThread = typeof OrchestratorMcpCreatedThread.Type;
