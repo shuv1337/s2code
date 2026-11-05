@@ -192,7 +192,7 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
+import { isSpentInstance, makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -1692,11 +1692,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         requestedSelection,
         projection.thread.projectId,
       );
-      const movedOffSpentInstance = modelSelection.instanceId !== requestedSelection.instanceId;
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const { movedOffSpentInstanceId: recordedMove, ...storedRun } = storedQueuedRun;
+      // A move recorded at queue time lapses once that instance is restored or runs the work.
+      const movedOffSpentInstanceId =
+        modelSelection.instanceId !== requestedSelection.instanceId
+          ? requestedSelection.instanceId
+          : recordedMove !== undefined &&
+              recordedMove !== modelSelection.instanceId &&
+              isSpentInstance(settings, recordedMove)
+            ? recordedMove
+            : undefined;
       const queuedRun = {
-        ...storedQueuedRun,
+        ...storedRun,
         modelSelection,
         providerInstanceId: modelSelection.instanceId,
+        ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
       };
       // A limited provider would fail and consume every waiting message.
       if (usageLimitHoldsQueue(projection, queuedRun.providerInstanceId)) {
@@ -1716,7 +1727,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         failedRun?.id === options?.endedRunId &&
         failedRun?.workspacePreparation?.type === "worktree" &&
         projection.thread.worktreePath === null;
-      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
       const projectOverride =
         settings.projectSettingsOverrides[projection.thread.projectId]?.providerInstances?.[
           queuedRun.providerInstanceId
@@ -1928,10 +1938,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
       // Work moved off a spent pool account starts a fresh pooled thread with a handoff.
       const canResumeAcrossInstances =
-        !movedOffSpentInstance &&
         switchPlan?.instanceChanged === true &&
         switchPlan.transition.type === "restart_and_resume" &&
         activeProviderThread !== undefined &&
+        activeProviderThread.providerInstanceId !== queuedRun.movedOffSpentInstanceId &&
         activeProviderThread.nativeThreadRef !== null;
       const deliveryProviderThread = canResumeAcrossInstances
         ? {
@@ -4760,7 +4770,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
-  const dispatchSteerIntoRun = Effect.fn("Orchestrator.dispatchSteerIntoRun")(function* (input: {
+  const dispatchSteerIntoRun = Effect.fn("Orchestrator.dispatchSteerIntoRun")(function* (request: {
     readonly command: Extract<
       OrchestrationV2Command,
       { readonly type: "message.dispatch" | "queued-message.promote-to-steer" }
@@ -4795,6 +4805,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly notification?: OrchestrationV2ConversationMessage["notification"];
     readonly forceRestart: boolean;
   }) {
+    // Steering onto another instance restarts the turn there, so a spent target moves like a new run.
+    const changesInstance = request.projection.runs.some(
+      (run) =>
+        run.id === request.targetRunId &&
+        run.providerInstanceId !== request.modelSelection.instanceId,
+    );
+    const input = changesInstance
+      ? {
+          ...request,
+          modelSelection: yield* resolveSpentInstance(
+            request.modelSelection,
+            request.projection.thread.projectId,
+          ).pipe(Effect.orDie),
+        }
+      : request;
     const targetRun = input.projection.runs.find((candidate) => candidate.id === input.targetRunId);
     if (targetRun === undefined) {
       return yield* new OrchestratorDispatchError({
@@ -5733,7 +5758,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
       projection = applyToProjection(projection, event);
     }
-    const modelSelection = command.modelSelection ?? projection.thread.modelSelection;
+    const requestedSelection = command.modelSelection ?? projection.thread.modelSelection;
     let dispatchMode = resolveMessageDispatchIntent(
       projection,
       command.dispatchMode,
@@ -5773,12 +5798,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const parsedGoalCommand = parseGoalCommand(command);
     const goalCommand =
       parsedGoalCommand === null ||
-      (yield* goalDriverFor(command, modelSelection.instanceId)) === undefined
+      (yield* goalDriverFor(command, requestedSelection.instanceId)) === undefined
         ? null
         : parsedGoalCommand;
     let goalStopRunId: RunId | undefined;
     if (goalCommand !== null) {
-      yield* ensureGoalCommandSupported(command, command, modelSelection.instanceId);
+      yield* ensureGoalCommandSupported(command, command, requestedSelection.instanceId);
       // A goal command never joins a running turn. One that starts or ends goal
       // work stops the run and goes first in the queue; the rest wait. A send
       // that asked to be queued (no delivery intent) only queues, and a run
@@ -5966,9 +5991,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection,
         modelSelection:
           delegatedCompletion === undefined && command.notification === undefined
-            ? modelSelection
+            ? requestedSelection
             : (projection.runs.find((run) => run.id === dispatchMode.targetRunId)?.modelSelection ??
-              modelSelection),
+              requestedSelection),
         delegatedCompletion,
         ...(command.notification === undefined ? {} : { notification: command.notification }),
         targetRunId: dispatchMode.targetRunId,
@@ -5988,6 +6013,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return;
     }
 
+    // Server wakes reach this without the dispatch chokepoint, so a spent instance moves here too.
+    const modelSelection = yield* resolveSpentInstance(
+      requestedSelection,
+      projection.thread.projectId,
+    ).pipe(Effect.orDie);
+    const movedOffSpentInstanceId =
+      modelSelection.instanceId === requestedSelection.instanceId
+        ? command.movedOffSpentInstanceId
+        : requestedSelection.instanceId;
     const activeProviderThread = projection.providerThreads.find(
       (candidate) => candidate.id === projection.thread.activeProviderThreadId,
     );
@@ -6179,6 +6213,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? {}
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
         ...failoverChain(projection.runs, command),
+        ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
         ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
       };
       const attempt: OrchestrationV2RunAttempt = {
@@ -6401,6 +6436,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       : null;
     const canResumeAcrossInstances =
       isProviderSwitch &&
+      activeProviderThread.providerInstanceId !== movedOffSpentInstanceId &&
       activeProviderThread.nativeThreadRef !== null &&
       providerSwitchPlan?.transition.type === "restart_and_resume";
     const sessionsToDetach = projection.providerSessions.filter(
@@ -6542,6 +6578,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? {}
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
         ...failoverChain(projection.runs, command),
+        ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
         ...(dispatchMode.type === "defer_start" && dispatchMode.workspaceStrategy !== undefined
           ? { workspacePreparation: dispatchMode.workspaceStrategy }
           : {}),
@@ -7298,6 +7335,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? {}
         : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
       ...failoverChain(projection.runs, command),
+      ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
       ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
       ...wakeWorkStartedAt(projection.runs, command),
     };

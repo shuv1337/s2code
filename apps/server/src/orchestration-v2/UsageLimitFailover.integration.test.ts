@@ -185,38 +185,48 @@ const makeProviderInstance = (
             Effect.gen(function* () {
               yield* Ref.update(deliveries, (inputs) => [...inputs, turnInput]);
               yield* Ref.update(startedTurns, (started) => [...started, instanceId]);
-              if (member.gate !== undefined) yield* Deferred.await(member.gate);
-              const at = yield* DateTime.now;
               const providerTurnId = ProviderTurnId.make(
-                `provider-turn:${instanceId}:${turnInput.runId}`,
+                `provider-turn:${instanceId}:${turnInput.attemptId}`,
               );
               const status = member.failure === undefined ? "completed" : "failed";
               const publish = (event: ProviderAdapter.ProviderAdapterV2Event) =>
                 PubSub.publish(events, event);
-              yield* publish({
-                type: "provider_turn.updated",
-                driver: member.driver,
-                providerTurn: {
-                  id: providerTurnId,
-                  providerThreadId: turnInput.providerThread.id,
-                  nodeId: turnInput.rootNodeId,
-                  runAttemptId: turnInput.attemptId,
-                  nativeTurnRef: {
-                    driver: member.driver,
-                    nativeId: `native-turn:${turnInput.runId}`,
-                    strength: "strong",
+              const publishTurn = (
+                turnStatus: "running" | typeof status,
+                startedAt: DateTime.Utc,
+                completedAt: DateTime.Utc | null,
+              ) =>
+                publish({
+                  type: "provider_turn.updated",
+                  driver: member.driver,
+                  providerTurn: {
+                    id: providerTurnId,
+                    providerThreadId: turnInput.providerThread.id,
+                    nodeId: turnInput.rootNodeId,
+                    runAttemptId: turnInput.attemptId,
+                    nativeTurnRef: {
+                      driver: member.driver,
+                      nativeId: `native-turn:${turnInput.attemptId}`,
+                      strength: "strong",
+                    },
+                    ordinal: turnInput.runOrdinal,
+                    status: turnStatus,
+                    startedAt,
+                    completedAt,
                   },
-                  ordinal: turnInput.runOrdinal,
-                  status,
-                  startedAt: at,
-                  completedAt: at,
-                },
-              });
+                });
+              const startedAt = yield* DateTime.now;
+              if (member.gate !== undefined) {
+                yield* publishTurn("running", startedAt, null);
+                yield* Deferred.await(member.gate);
+              }
+              const at = yield* DateTime.now;
+              yield* publishTurn(status, startedAt, at);
               yield* publish({
                 type: "turn_item.updated",
                 driver: member.driver,
                 turnItem: {
-                  id: TurnItemId.make(`turn-item:${instanceId}:${turnInput.runId}`),
+                  id: TurnItemId.make(`turn-item:${instanceId}:${turnInput.attemptId}`),
                   threadId: turnInput.threadId,
                   runId: turnInput.runId,
                   nodeId: turnInput.rootNodeId,
@@ -231,7 +241,7 @@ const makeProviderInstance = (
                   completedAt: at,
                   updatedAt: at,
                   type: "assistant_message",
-                  messageId: MessageId.make(`message:${instanceId}:${turnInput.runId}`),
+                  messageId: MessageId.make(`message:${instanceId}:${turnInput.attemptId}`),
                   text: `Partial work from ${instanceId}`,
                   streaming: false,
                 },
@@ -829,11 +839,45 @@ describe("usage limit failover through the real runtime", () => {
     }),
   );
 
-  it.live.each([false, true])(
-    "starts a queued run on a fresh pooled thread (resume compatible: %s)",
-    (compatible) =>
+  it.live.each(
+    [false, true].flatMap((compatible) =>
+      (["while queued", "before queuing", "before an immediate start"] as const).flatMap((spend) =>
+        (["user message", "monitor update"] as const).map((sender) => ({
+          compatible,
+          spend,
+          sender,
+        })),
+      ),
+    ),
+  )(
+    "moves a $sender to a fresh pooled thread when spent $spend (resume compatible: $compatible)",
+    ({ compatible, spend, sender }) =>
       Effect.gen(function* () {
         const gate = yield* Deferred.make<void>();
+        // The PR watch wakes a thread through the orchestrator, not the dispatch chokepoint.
+        const sendNext = (threadId: ThreadId) =>
+          sender === "user message"
+            ? send(threadId, "queued:next", "Then this.", {
+                queue: spend !== "before an immediate start",
+              })
+            : Orchestrator.OrchestratorV2.use((o) =>
+                o.dispatch({
+                  type: "message.dispatch",
+                  commandId: CommandId.make("queued:next"),
+                  messageId: MessageId.make("queued:next"),
+                  threadId,
+                  text: "Then this.",
+                  notification: {
+                    source: { kind: "monitor" },
+                    outcome: "updated",
+                    summary: "PR update",
+                  },
+                  attachments: [],
+                  dispatchMode: { type: "queue_after_active" },
+                  createdBy: "agent",
+                  creationSource: "server",
+                }),
+              );
         yield* runPool(
           {
             // Most headroom, so the pooled thread starts here rather than on "cursor_fresh".
@@ -852,13 +896,23 @@ describe("usage limit failover through the real runtime", () => {
           ({ deliveries, resumes }) =>
             Effect.gen(function* () {
               const threadId = yield* startThread("queued", spent);
-              yield* send(threadId, "queued:next", "Then this.", { queue: true });
-              // Another thread spends the shared quota while this one still works.
-              assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              if (spend === "before an immediate start") {
+                yield* Deferred.succeed(gate, undefined);
+                yield* awaitThread(threadId, settled(1));
+              }
+              // Another thread spends the shared quota while this one works or idles.
+              if (spend !== "while queued") {
+                assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              }
+              yield* sendNext(threadId);
+              if (spend === "while queued") {
+                assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              }
               yield* Deferred.succeed(gate, undefined);
 
               const thread = yield* awaitThread(threadId, settled(2));
               const queued = thread.runs[1]!;
+              assert.equal(queued.movedOffSpentInstanceId, spent);
               const providerThread = thread.providerThreads.find(
                 (entry) => entry.id === queued.providerThreadId,
               );
@@ -888,6 +942,141 @@ describe("usage limit failover through the real runtime", () => {
             }),
         );
       }),
+  );
+
+  it.live.each([false, true])(
+    "fails over onto a fresh pooled thread with a handoff (resume compatible: %s)",
+    (compatible) => {
+      const gate = Deferred.makeUnsafe<void>();
+      return runPool(
+        {
+          [spent]: {
+            driver: cursor,
+            usedPercent: 0,
+            failure: quotaSpent,
+            gate,
+            continuationKey: compatible ? "shared" : `account:${spent}`,
+          },
+          [fresh]: {
+            driver: cursor,
+            usedPercent: 10,
+            continuationKey: compatible ? "shared" : `account:${fresh}`,
+          },
+        },
+        ({ resumes }) =>
+          Effect.gen(function* () {
+            const threadId = yield* startThreadThenSpendQuota("failover-handoff", spent, gate);
+            const thread = yield* awaitThread(threadId, settled(2));
+            const failover = thread.runs[1]!;
+            assert.deepEqual(
+              thread.runs.map((run) => [run.providerInstanceId, run.status]),
+              [
+                [spent, "failed"],
+                [fresh, "completed"],
+              ],
+            );
+            assert.equal(failover.movedOffSpentInstanceId, spent);
+            assert.equal(
+              thread.providerThreads.find((entry) => entry.id === failover.providerThreadId)
+                ?.nativeThreadRef?.nativeId,
+              `${fresh}:${threadId}`,
+            );
+            assert.isTrue(
+              thread.contextHandoffs.some(
+                (handoff) =>
+                  handoff.strategy === "full_thread_summary" &&
+                  handoff.toProviderThreadId === failover.providerThreadId,
+              ),
+            );
+            assert.notInclude(yield* Ref.get(resumes), fresh);
+          }),
+      );
+    },
+  );
+
+  it.live("forgets a queued run's move once the spent instance is restored", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      yield* runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 10, gate, continuationKey: "shared" },
+          [fresh]: { driver: cursor, usedPercent: 50, continuationKey: "shared" },
+        },
+        ({ resumes }) =>
+          Effect.gen(function* () {
+            const threadId = yield* startThread("restored", spent);
+            assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+            yield* send(threadId, "restored:next", "Then this.", { queue: true });
+            const queuedBefore = (yield* Orchestrator.OrchestratorV2.use((o) =>
+              o.getThreadProjection(threadId),
+            )).runs[1];
+            assert.equal(queuedBefore?.movedOffSpentInstanceId, spent);
+            assert.isTrue(yield* restoreSpentInstance(spent));
+            yield* Deferred.succeed(gate, undefined);
+
+            const thread = yield* awaitThread(threadId, settled(2));
+            const queued = thread.runs[1]!;
+            assert.equal(queued.providerInstanceId, fresh);
+            assert.isUndefined(queued.movedOffSpentInstanceId);
+            // Nothing is spent any more, so the compatible account resumes the native thread.
+            assert.include(yield* Ref.get(resumes), fresh);
+          }),
+      );
+    }),
+  );
+
+  it.live("restarts a running turn off a spent target instance", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      yield* runPool(
+        {
+          [fresh]: { driver: cursor, usedPercent: 10, gate },
+          [spent]: { driver: cursor, usedPercent: 50 },
+        },
+        ({ startedTurns }) =>
+          Effect.gen(function* () {
+            const threadId = yield* startThread("restart", fresh);
+            const running = yield* awaitThread(threadId, (thread) =>
+              thread.providerTurns.some((turn) => turn.status === "running"),
+            );
+            assert.isTrue(yield* markInstanceSpent(spent));
+            // Server paths reach the orchestrator without the dispatch chokepoint.
+            yield* Orchestrator.OrchestratorV2.use((o) =>
+              o.dispatch({
+                type: "message.dispatch",
+                commandId: CommandId.make("restart:spent"),
+                messageId: MessageId.make("restart:spent"),
+                threadId,
+                text: "Start over there.",
+                attachments: [],
+                modelSelection: selection(spent),
+                dispatchMode: { type: "restart_active", targetRunId: running.runs[0]!.id },
+                createdBy: "user",
+                creationSource: "web",
+              }),
+            );
+            const restarted = yield* awaitThread(
+              threadId,
+              (thread) => thread.attempts.length === 2,
+            );
+            assert.deepEqual(
+              restarted.attempts.map((attempt) => attempt.providerInstanceId),
+              [fresh, fresh],
+            );
+            // The restart waits on the interrupted turn, which the stand-in ends only when released.
+            yield* Deferred.succeed(gate, undefined);
+            const thread = yield* awaitThread(
+              threadId,
+              (thread) => thread.attempts[1]?.status === "running",
+            );
+            assert.deepEqual(
+              thread.runs.map((run) => run.providerInstanceId),
+              [fresh],
+            );
+            assert.notInclude(yield* Ref.get(startedTurns), spent);
+          }),
+      );
+    }),
   );
 
   it.live("holds spent queued work despite a project enabled override", () =>

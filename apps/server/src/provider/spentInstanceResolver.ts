@@ -4,6 +4,7 @@ import {
   type ProjectId,
   type ProviderDriverKind,
   type ProviderInstanceId,
+  type ServerSettings as ServerSettingsValue,
 } from "@t3tools/contracts";
 import {
   pickUsageLimitPoolStart,
@@ -29,6 +30,13 @@ class NamedInstanceUnavailable extends Data.TaggedError("NamedInstanceUnavailabl
   readonly instanceId: ProviderInstanceId;
   readonly reason: string;
 }> {}
+
+export const isSpentInstance = (
+  settings: Pick<ServerSettingsValue, "providerInstances">,
+  instanceId: ProviderInstanceId,
+) =>
+  Object.hasOwn(settings.providerInstances, instanceId) &&
+  settings.providerInstances[instanceId]?.usageLimitDisabled != null;
 
 type Registry = ProviderRegistry.ProviderRegistry["Service"];
 
@@ -64,7 +72,7 @@ export const makeSpentInstanceResolver = Effect.gen(function* () {
       ? settings.providerInstances[selection.instanceId]
       : undefined;
     const pool = instance?.disableOnUsageLimit === true ? instance.driver : undefined;
-    const spent = instance?.usageLimitDisabled != null;
+    const spent = isSpentInstance(settings, selection.instanceId);
     const poolStart =
       options?.named === undefined &&
       options?.threadStart === true &&

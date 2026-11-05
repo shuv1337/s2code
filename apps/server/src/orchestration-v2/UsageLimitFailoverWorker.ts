@@ -97,6 +97,7 @@ export function usageLimitFailoverCommand(input: {
     threadId: thread.id,
     manualContinuationOfRunId: run.id,
     failoverChainId: run.id,
+    movedOffSpentInstanceId: run.providerInstanceId,
     modelSelection,
     text: "Continue where you left off.",
     attachments: [],

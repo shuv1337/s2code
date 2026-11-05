@@ -68,6 +68,7 @@ import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
+  isSpentInstance,
   makeSpentInstanceResolver,
   type InstanceResolution,
 } from "../provider/spentInstanceResolver.ts";
@@ -810,7 +811,18 @@ const make = Effect.gen(function* () {
           resolution?.threadStart ??
           (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId))),
       }).pipe(Effect.orDie);
-      return replacement === selection ? command : { ...command, modelSelection: replacement };
+      if (replacement === selection) return command;
+      if (command.type === "delegated_task.request") {
+        return { ...command, modelSelection: replacement };
+      }
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      return {
+        ...command,
+        modelSelection: replacement,
+        ...(isSpentInstance(settings, selection.instanceId)
+          ? { movedOffSpentInstanceId: selection.instanceId }
+          : {}),
+      };
     },
   );
 
