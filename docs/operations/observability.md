@@ -20,7 +20,7 @@ Logs are human-facing:
 
 - destination: stdout
 - format: `Logger.consolePretty()`
-- normal local persistence: none
+- normal local persistence: voice session JSONL only (below); other logs stay on stdout
 - SSH-managed launch persistence: `~/.t3/ssh-launch/<state>/server.log`
 - remote export: OTLP only, when configured
 
@@ -31,6 +31,23 @@ every message instead of only the ones inside an active span and carry the trace
 they still line up with the trace. `Logger.tracerLogger` is dropped in that mode, so the same
 message is not exported twice and the trace file stops carrying log messages. stdout output and
 SSH-managed launch persistence stay unchanged either way.
+
+### Voice session logs
+
+GPT Live calls and dictation append one JSON object per line under
+`<stateDir>/logs/voice/<YYYYMMDD>-<sessionId>.jsonl` (`~/.t3/userdata/logs/voice/` by
+default). Each line has `v`, `ts`, `sessionId`, `mode`, `seq`, and `type`. Read a file
+with `jq -c . path/to/session.jsonl`.
+
+Lines cover session start and end, connect latency, turns, final transcripts, tool
+calls, confirmations, and error causes. They do not include audio, SDP, or API keys.
+Tool arguments keep `threadId`, `environmentId`, and `projectId`; every other argument
+is only its name and value length. Strings are truncated (200 characters, transcripts
+2,000), and `sk-…` / `Bearer …` text is removed.
+
+A file stops after 5MB, ending with a `truncated` line. Starting a session deletes
+files older than 14 days, then the oldest files until the folder is within 200MB.
+A logging failure does not end the call.
 
 ### Traces
 

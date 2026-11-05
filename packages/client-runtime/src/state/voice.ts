@@ -29,5 +29,9 @@ export function createVoiceEnvironmentAtoms<R, E>(
       label: "voice:confirm",
       tag: WS_METHODS.voiceConfirm,
     }),
+    report: createEnvironmentRpcCommand(runtime, {
+      label: "voice:report",
+      tag: WS_METHODS.voiceReport,
+    }),
   };
 }

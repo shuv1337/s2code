@@ -1,4 +1,5 @@
 import * as VoiceSession from "./voice/VoiceSession.ts";
+import * as VoiceAuditLog from "./voice/VoiceAuditLog.ts";
 import * as VoiceProvider from "./voice/VoiceProvider.ts";
 import * as VoiceTools from "./voice/VoiceTools.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -2678,6 +2679,7 @@ export const layerWsRpc = (
         [WS_METHODS.voiceEnd]: ({ sessionId }) => voice.end(currentSession, sessionId),
         [WS_METHODS.voiceExecute]: (input) => voice.execute(currentSession, input),
         [WS_METHODS.voiceConfirm]: (input) => voice.confirm(currentSession, input),
+        [WS_METHODS.voiceReport]: (input) => voice.report(currentSession, input),
         [WS_METHODS.peerLinksList]: (_input) =>
           peerLinks.list.pipe(Effect.map((links) => ({ links }))),
         [WS_METHODS.peerLinksLink]: (input) => peerLinks.link(input),
@@ -3485,6 +3487,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const voiceTools = yield* VoiceTools.VoiceTools;
     const voiceProvider = yield* VoiceProvider.VoiceProvider;
+    const voiceAudit = yield* VoiceAuditLog.VoiceAuditLog;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
@@ -3529,6 +3532,7 @@ export const layer = Layer.unwrap(
               Layer.mergeAll(
                 Layer.succeed(VoiceTools.VoiceTools, voiceTools),
                 Layer.succeed(VoiceProvider.VoiceProvider, voiceProvider),
+                Layer.succeed(VoiceAuditLog.VoiceAuditLog, voiceAudit),
               ),
             ),
           ),

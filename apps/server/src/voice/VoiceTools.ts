@@ -1,5 +1,6 @@
 import { VoiceError, type AuthEnvironmentScope } from "@t3tools/contracts";
 import { clientRequestIdPolicyFor, environmentPolicyFor } from "@t3tools/shared/voice/allowlist";
+import { voiceErrorFacts } from "@t3tools/shared/voice/logRedaction";
 import { summarizeToolResult } from "@t3tools/shared/voice/resultSummary";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -9,6 +10,7 @@ import * as McpSchema from "effect/ai/McpSchema";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
+import * as VoiceAuditLog from "./VoiceAuditLog.ts";
 
 export interface VoiceCaller {
   readonly sessionId: string;
@@ -50,6 +52,7 @@ const applyEnvironment = (
 };
 
 const make = Effect.gen(function* () {
+  const audit = yield* VoiceAuditLog.VoiceAuditLog;
   const mcp = yield* McpToolCaller.McpToolCaller;
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const settings = yield* ServerSettings.ServerSettingsService;
@@ -59,6 +62,7 @@ const make = Effect.gen(function* () {
     args: Readonly<Record<string, unknown>>,
     callId: string,
   ) {
+    const voiceSessionId = callId.includes(":") ? callId.slice(0, callId.indexOf(":")) : callId;
     const required: AuthEnvironmentScope[] = ["orchestration:read", "orchestration:operate"];
     if (name.startsWith("t3_environment_")) required.push("access:read");
     if (name === "t3_environment_link" || name === "t3_environment_unlink")
@@ -66,8 +70,16 @@ const make = Effect.gen(function* () {
     if (name === "t3_project_clone" || name === "t3_worktree_handoff")
       required.push("source-control:write");
     if (name.startsWith("t3_preview_")) required.push("preview:operate");
-    if (required.some((scope) => !caller.scopes.includes(scope)))
+    if (required.some((scope) => !caller.scopes.includes(scope))) {
+      yield* audit.append(voiceSessionId, {
+        type: "error",
+        mode: "call",
+        where: "tools.scope",
+        reason: "forbidden",
+        message: "missing voice scope",
+      });
       return yield* new VoiceError({ reason: "forbidden" });
+    }
     const parameters = { ...args };
     if (clientRequestIdPolicyFor(name) === "overwrite") parameters.clientRequestId = callId;
     else delete parameters.clientRequestId;
@@ -99,6 +111,17 @@ const make = Effect.gen(function* () {
             clientInfo: { name: "voice", version: "1" },
           },
           getClient: Effect.die("Voice has no MCP client requests"),
+        }),
+        Effect.tapError((error) => {
+          const facts = voiceErrorFacts(error);
+          return audit.append(voiceSessionId, {
+            type: "error",
+            mode: "call",
+            where: "tools.mcp",
+            reason: "invalid_call",
+            ...(facts.providerType === undefined ? {} : { providerType: facts.providerType }),
+            message: facts.message,
+          });
         }),
         Effect.mapError(() => new VoiceError({ reason: "invalid_call" })),
       );

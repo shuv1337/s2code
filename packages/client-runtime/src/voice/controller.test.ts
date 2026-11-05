@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type VoiceReportInput } from "@t3tools/contracts";
 import { VoiceController, type VoiceDependencies, type VoiceTransport } from "./controller.ts";
 
 function setup(
@@ -11,6 +11,7 @@ function setup(
   const close = vi.fn();
   const execute = vi.fn(async () => ({ status: "completed" as const, output: "ok" }));
   const end = vi.fn(async () => {});
+  const report = vi.fn(async () => {});
   const controller = new VoiceController({
     transport: () => ({
       connect: async (input) => {
@@ -28,6 +29,7 @@ function setup(
     end,
     execute,
     confirm: async () => ({ status: "completed", output: "confirmed" }),
+    report,
     ...overrides,
   });
   return {
@@ -36,6 +38,7 @@ function setup(
     close,
     execute,
     end,
+    report: overrides.report ?? report,
     event: (event: unknown) => callbacks?.onData(JSON.stringify(event)),
   };
 }
@@ -294,6 +297,52 @@ it("reports lookups that fail or stall instead of leaving the call silent", asyn
       "response.event/response.failed",
     );
     await controller.end();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("redacts batched voice reports and never sends audio, sdp, or keys", async () => {
+  vi.useFakeTimers();
+  try {
+    const report = vi.fn(async (_environmentId: EnvironmentId, _input: VoiceReportInput) => {});
+    const { controller, event } = setup({
+      report,
+      start: async () => ({
+        sessionId: "live-1",
+        sdp: "v=0\r\na=fingerprint:SECRETSDP\r\n",
+      }),
+    });
+    await controller.start(target);
+    event({ type: "session.started" });
+    event({
+      type: "session.input_transcript.delta",
+      delta: "hello sk-abcdefghijklmnopqrstuvwxyz Bearer supersecrettokenvalue",
+    });
+    event({ type: "response.output_audio.delta", delta: "AUDIO_PAYLOAD_SECRET" });
+    expect(report).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(report).toHaveBeenCalled();
+    event({
+      type: "error",
+      error: { message: "nope Bearer supersecrettokenvalue sk-abcdefghijklmnopqrstuvwxyz" },
+    });
+    expect(controller.getSnapshot().error).toBe(
+      "The voice provider reported an error. Start a new session.",
+    );
+    const blob = JSON.stringify(report.mock.calls);
+    expect(blob).not.toContain("sk-");
+    expect(blob).not.toContain("Bearer");
+    expect(blob).not.toContain("SECRETSDP");
+    expect(blob).not.toContain("AUDIO_PAYLOAD_SECRET");
+    expect(blob).not.toContain("v=0");
+    expect(blob).toContain("live-1");
+    expect(blob).toContain("[redacted]");
+    const events = report.mock.calls.flatMap((call) => call[1].events);
+    expect(events.some((entry) => entry.type === "connect")).toBe(true);
+    expect(events.some((entry) => entry.type === "transcript" && entry.role === "user")).toBe(true);
+    expect(events.some((entry) => entry.type === "error")).toBe(true);
+    expect(events.some((entry) => entry.type === "disconnect")).toBe(true);
   } finally {
     vi.useRealTimers();
   }

@@ -46,6 +46,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         run(voiceEnvironment.end, { environmentId, input: { sessionId } }),
       execute: (environmentId, input) => run(voiceEnvironment.execute, { environmentId, input }),
       confirm: (environmentId, input) => run(voiceEnvironment.confirm, { environmentId, input }),
+      report: async (environmentId, input) => {
+        await run(voiceEnvironment.report, { environmentId, input });
+      },
     });
   });
   const [open, setOpen] = useState(false);

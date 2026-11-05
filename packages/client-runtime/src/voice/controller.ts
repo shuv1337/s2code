@@ -1,5 +1,7 @@
 import type {
   EnvironmentId,
+  VoiceReportEvent,
+  VoiceReportInput,
   VoiceStartInput,
   VoiceStartResult,
   VoiceToolInput,
@@ -7,6 +9,7 @@ import type {
 } from "@t3tools/contracts";
 import { parseSpokenAnswer } from "@t3tools/shared/voice/confirmation";
 import { isLongRunningVoiceTool, isSideEffectVoiceTool } from "@t3tools/shared/voice/allowlist";
+import { redactVoiceLogText } from "@t3tools/shared/voice/logRedaction";
 import { toolPayload } from "@t3tools/shared/voice/resultSummary";
 
 export interface VoiceTransport {
@@ -61,6 +64,7 @@ export interface VoiceDependencies {
     environmentId: EnvironmentId,
     input: { sessionId: string; callId: string; accepted: boolean },
   ) => Promise<VoiceToolResult>;
+  readonly report: (environmentId: EnvironmentId, input: VoiceReportInput) => Promise<void>;
 }
 const initial: VoiceState = {
   phase: "idle",
@@ -76,6 +80,8 @@ const initial: VoiceState = {
 };
 const EVENT_LOG_SIZE = 30;
 const LOOKUP_STALL_MS = 15_000;
+const REPORT_FLUSH_MS = 2_000;
+const reportMs = (value: number) => Math.min(86_400_000, Math.max(0, Math.round(value)));
 const LOOKUP_FAILURES = new Set(["response.failed", "response.incomplete", "error"]);
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -108,6 +114,21 @@ export class VoiceController {
     { timer: ReturnType<typeof setTimeout> | undefined; calledTool: boolean }
   >();
   #callLookups = new Map<string, string>();
+  #reportSessionId: string | null = null;
+  #reportTarget: VoiceTarget | null = null;
+  #reportMode: "call" | "dictation" = "call";
+  #pending: VoiceReportEvent[] = [];
+  #flushTimer: ReturnType<typeof setTimeout> | undefined;
+  #reportedConnect = false;
+  #reportedDisconnect = false;
+  #connectAttempt = 1;
+  #sawDrop = false;
+  #dropAt = 0;
+  #turnCount = 0;
+  #turns: {
+    user?: { id: string; startedAt: number; text: string; audioAt?: number };
+    assistant?: { id: string; startedAt: number; text: string; audioAt?: number };
+  } = {};
   readonly dependencies: VoiceDependencies;
   constructor(dependencies: VoiceDependencies) {
     this.dependencies = dependencies;
@@ -135,6 +156,7 @@ export class VoiceController {
     this.#seen.clear();
     this.#confirmText = "";
     this.#clearLookups();
+    this.#resetReport(target, mode);
     // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
     this.#startedAt = Date.now();
     this.#update({ ...initial, phase: "connecting", target, mode });
@@ -152,17 +174,24 @@ export class VoiceController {
             return result.sdp;
           }
           this.#sessionId = result.sessionId;
+          this.#reportSessionId = result.sessionId;
           return result.sdp;
         },
         onData: (data) => {
           if (epoch === this.#epoch) this.#receive(data);
         },
         onConnectionStateChange: (state) => {
-          if (
-            epoch === this.#epoch &&
-            (state === "failed" || state === "disconnected" || state === "closed")
-          )
+          if (epoch !== this.#epoch) return;
+          if (state === "connected") {
+            this.#noteReconnect();
+            return;
+          }
+          if (state === "failed" || state === "disconnected" || state === "closed") {
+            this.#sawDrop = true;
+            // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+            this.#dropAt = Date.now();
             void this.#fail("Voice connection lost. Start a new call to reconnect.");
+          }
         },
         onMicrophoneEnded: () => {
           if (epoch === this.#epoch)
@@ -178,6 +207,12 @@ export class VoiceController {
     }
   }
   async #fail(message: string) {
+    this.#enqueue({
+      type: "error",
+      where: "client",
+      reason: "failed",
+      message: redactVoiceLogText(message, 200),
+    });
     const closing = this.end();
     this.#update({ phase: "error", error: message });
     await closing;
@@ -205,7 +240,11 @@ export class VoiceController {
     transport?.setMuted(true);
     if (this.#state.mode === "call") transport?.send({ type: "session.close" });
     transport?.close();
+    this.#finishTurns();
+    this.#reportDisconnect();
+    const flushing = this.#flush();
     this.#update({ phase: "ended", muted: false, confirmation: null });
+    await flushing;
     if (sessionId && target)
       await this.dependencies.end(target.environmentId, sessionId).catch(() => undefined);
   }
@@ -313,7 +352,184 @@ export class VoiceController {
       void this.#tool(item.call_id, item.name, args);
     }
   }
+  #resetReport(target: VoiceTarget, mode: "call" | "dictation") {
+    clearTimeout(this.#flushTimer);
+    this.#flushTimer = undefined;
+    this.#pending = [];
+    this.#reportSessionId = null;
+    this.#reportTarget = target;
+    this.#reportMode = mode;
+    this.#reportedConnect = false;
+    this.#reportedDisconnect = false;
+    this.#connectAttempt = 1;
+    this.#sawDrop = false;
+    this.#turnCount = 0;
+    this.#turns = {};
+  }
+  #enqueue(event: VoiceReportEvent) {
+    this.#pending.push(event);
+    if (this.#flushTimer !== undefined) return;
+    // @effect-diagnostics-next-line globalTimers:off - batches voice diagnostics in the imperative media controller
+    this.#flushTimer = setTimeout(() => {
+      void this.#flush();
+    }, REPORT_FLUSH_MS);
+  }
+  async #flush() {
+    clearTimeout(this.#flushTimer);
+    this.#flushTimer = undefined;
+    const events = this.#pending.splice(0);
+    const sessionId = this.#reportSessionId;
+    const target = this.#reportTarget;
+    if (events.length === 0 || sessionId === null || target === null) return;
+    await this.dependencies
+      .report(target.environmentId, { sessionId, mode: this.#reportMode, events })
+      .catch(() => undefined);
+    if (this.#pending.length > 0 && this.#flushTimer === undefined) {
+      // @effect-diagnostics-next-line globalTimers:off - batches voice diagnostics in the imperative media controller
+      this.#flushTimer = setTimeout(() => {
+        void this.#flush();
+      }, REPORT_FLUSH_MS);
+    }
+  }
+  #reportConnect() {
+    if (this.#reportedConnect || this.#reportSessionId === null) return;
+    this.#reportedConnect = true;
+    this.#enqueue({
+      type: "connect",
+      attempt: Math.min(100, this.#connectAttempt),
+      // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+      latencyMs: reportMs(Date.now() - this.#startedAt),
+    });
+  }
+  #reportDisconnect() {
+    if (this.#reportedDisconnect || this.#reportSessionId === null) return;
+    this.#reportedDisconnect = true;
+    this.#enqueue({
+      type: "disconnect",
+      attempt: Math.min(100, this.#connectAttempt),
+      // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+      latencyMs: reportMs(Date.now() - this.#startedAt),
+    });
+  }
+  #noteReconnect() {
+    if (!this.#reportedConnect || !this.#sawDrop) return;
+    this.#sawDrop = false;
+    this.#reportedDisconnect = false;
+    this.#connectAttempt += 1;
+    this.#enqueue({
+      type: "reconnect",
+      attempt: Math.min(100, this.#connectAttempt),
+      // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+      latencyMs: reportMs(Date.now() - this.#dropAt),
+    });
+  }
+  #beginTurn(role: "user" | "assistant") {
+    if (this.#turns[role]) return;
+    if (role === "assistant") this.#endTurn("user");
+    if (role === "user") this.#endTurn("assistant");
+    const id = `${role === "user" ? "u" : "a"}${++this.#turnCount}`;
+    // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+    this.#turns[role] = { id, startedAt: Date.now(), text: "" };
+    this.#enqueue({ type: "turn.start", turnId: id, role });
+  }
+  #appendTurn(role: "user" | "assistant", text: string) {
+    this.#beginTurn(role);
+    const turn = this.#turns[role];
+    if (!turn || turn.text.length >= 2000) return;
+    turn.text = (turn.text + text).slice(0, 2000);
+  }
+  #endTurn(role: "user" | "assistant", finalText?: string) {
+    const turn = this.#turns[role];
+    if (!turn) return;
+    delete this.#turns[role];
+    // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+    const durationMs = reportMs(Date.now() - turn.startedAt);
+    const firstAudioMs =
+      role === "assistant" && turn.audioAt !== undefined
+        ? reportMs(turn.audioAt - turn.startedAt)
+        : undefined;
+    this.#enqueue({
+      type: "turn.end",
+      turnId: turn.id,
+      role,
+      durationMs,
+      ...(firstAudioMs === undefined ? {} : { firstAudioMs }),
+    });
+    const text = redactVoiceLogText(finalText ?? turn.text, 2000);
+    if (text.trim()) this.#enqueue({ type: "transcript", role, text });
+  }
+  #finishTurns() {
+    this.#endTurn("user");
+    this.#endTurn("assistant");
+  }
+  #markAudio() {
+    this.#beginTurn("assistant");
+    const turn = this.#turns.assistant;
+    // @effect-diagnostics-next-line globalDate:off - event-log offsets in the imperative media controller
+    if (turn && turn.audioAt === undefined) turn.audioAt = Date.now();
+  }
+  #auditEvent(event: Record<string, unknown>) {
+    const nested = event.type === "response.event" ? object(event.event) : undefined;
+    const source = nested ?? event;
+    const type = String(source.type ?? event.type ?? "");
+    if (type.includes("audio")) {
+      this.#markAudio();
+      return;
+    }
+    if (type === "session.started" || type === "session.created") {
+      this.#reportConnect();
+      return;
+    }
+    if (type === "error" || type === "client.playback-error") {
+      this.#enqueue({
+        type: "error",
+        where: "provider",
+        reason: "provider",
+        providerType: type.slice(0, 200),
+        message: redactVoiceLogText(
+          lookupFailureMessage(source) ?? "The voice provider reported an error.",
+          200,
+        ),
+      });
+      return;
+    }
+    if (
+      type === "input_audio_buffer.speech_started" ||
+      type === "session.input_audio.speech_started" ||
+      type === "session.input_transcript.delta" ||
+      type === "conversation.item.input_audio_transcription.delta"
+    ) {
+      if (typeof source.delta === "string") this.#appendTurn("user", source.delta);
+      else this.#beginTurn("user");
+      return;
+    }
+    if (
+      type === "input_audio_buffer.speech_stopped" ||
+      type === "session.input_transcript.done" ||
+      type === "conversation.item.input_audio_transcription.completed"
+    ) {
+      this.#endTurn("user", typeof source.transcript === "string" ? source.transcript : undefined);
+      return;
+    }
+    if (
+      type === "response.created" ||
+      type === "session.output_transcript.delta" ||
+      type.endsWith("transcript.delta")
+    ) {
+      if (typeof source.delta === "string" && type.includes("transcript"))
+        this.#appendTurn("assistant", source.delta);
+      else this.#beginTurn("assistant");
+      return;
+    }
+    if (
+      type === "response.done" ||
+      type === "response.completed" ||
+      type === "session.output_transcript.done"
+    )
+      this.#endTurn("assistant");
+  }
   #log(event: Record<string, unknown>) {
+    this.#auditEvent(event);
     const nested = event.type === "response.event" ? object(event.event) : undefined;
     const type = String(nested?.type ?? event.type ?? "unknown");
     if (/delta$|audio|usage\.updated/.test(type)) return;
