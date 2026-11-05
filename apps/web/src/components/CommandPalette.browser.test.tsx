@@ -93,7 +93,11 @@ describe("CommandPalette open intents", () => {
         }),
       ],
     });
-    await using screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({ query: "Acme" });
     await page.getByRole("option", { name: /Acme/ }).first().click();
