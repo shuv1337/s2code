@@ -190,8 +190,7 @@ type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>;
 type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>;
 
 function isNotGitRepositoryError(error: GitCommandError): boolean {
-  // Git 2.56 reports a dangling .git file as "gitfile does not point to a valid repository".
-  return /not a git repository|gitfile does not point to a valid repository/i.test(error.message);
+  return error.reason === "not_a_repository";
 }
 
 interface OpenPrInfo {

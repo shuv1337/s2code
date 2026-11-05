@@ -260,7 +260,8 @@ const git = (
       operation: "GitVcsDriver.test.git",
       cwd,
       args,
-      ...(env ? { env } : {}),
+      // Host config such as fetch.prune=true must not change fixture setup.
+      env: { GIT_CONFIG_GLOBAL: NodeOS.devNull, GIT_CONFIG_NOSYSTEM: "1", ...env },
       timeoutMs: 10_000,
     });
     return result.stdout.trim();
@@ -285,7 +286,6 @@ const initRepoWithCommit = (
     return { initialBranch };
   });
 
-// Git 2.56 reports this as "gitfile does not point to a valid repository", not "not a git repository".
 const makeDanglingWorktree = Effect.gen(function* () {
   const parent = yield* makeTmpDir();
   const pathService = yield* Path.Path;

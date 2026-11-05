@@ -949,7 +949,6 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         const cwd = NodePath.join(rootDir, "deleted-repo");
         yield* makeDirectory(cwd);
         yield* removePath(cwd);
-        // Git 2.56 reports a dangling .git file as "gitfile does not point to a valid repository".
         const repoDir = NodePath.join(rootDir, "repo");
         const danglingWorktree = NodePath.join(rootDir, "dangling");
         yield* makeDirectory(repoDir);

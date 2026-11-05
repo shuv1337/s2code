@@ -562,7 +562,7 @@ function isMissingGitCwdError(error: GitCommandError): boolean {
 }
 
 // Git 2.56 reports a dangling .git file as "gitfile does not point to a valid repository".
-const NON_REPOSITORY_GIT_STDERR_PATTERN =
+export const NON_REPOSITORY_GIT_STDERR_PATTERN =
   /not a git repository|gitfile does not point to a valid repository/i;
 
 function isNonRepositoryGitStderr(stderr: string): boolean {
