@@ -183,6 +183,7 @@ import {
   environmentContextReference,
 } from "~/lib/composerContextRecords";
 import { rememberCopiedComposerAttachments } from "~/lib/copiedComposerAttachments";
+import { hasExplicitComposerModelSelection } from "~/lib/chatThreadActions";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
 import { readThreadShell } from "~/state/entities";
 import { useLinkedEnvironments } from "~/state/peerLinks";
@@ -332,6 +333,7 @@ export interface ChatComposerHandle {
     environmentContexts: EnvironmentContextRecord[];
     selectedPromptEffort: string | null;
     selectedModelSelection: ModelSelection;
+    modelSelectionExplicit: boolean;
     multipleModelSelections: ReadonlyArray<ModelSelection> | null;
     providerAvailable: boolean;
     selectedProvider: ProviderDriverKind;
@@ -970,6 +972,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedModel,
     selectedModelOptionsForDispatch,
   );
+  const modelSelectionExplicit =
+    hasExplicitComposerModelSelection(composerDraft) &&
+    composerDraft.activeProvider === selectedInstanceId;
   const selectedModelForPicker = selectedModel;
   const modelOptionsByInstance = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
   for (const entry of providerInstanceEntries) {
@@ -3000,6 +3005,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         environmentContexts: composerEnvironmentContexts,
         selectedPromptEffort,
         selectedModelSelection,
+        modelSelectionExplicit,
         multipleModelSelections:
           routeKind === "draft" && multipleModelSelections !== null
             ? multipleModelSelections.map((selection) =>
@@ -3072,6 +3078,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       reportedModelSelection,
       settings.planModeEnabled,
       selectedModelSelection,
+      modelSelectionExplicit,
       multipleModelSelections,
       setMultipleModelSelections,
       routeKind,

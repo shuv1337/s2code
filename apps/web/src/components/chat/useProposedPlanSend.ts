@@ -194,6 +194,7 @@ export function usePlanFollowUpSend(input: PlanFollowUpSendInput) {
             attachments: [],
           },
           modelSelection: sendCtx.selectedModelSelection,
+          modelSelectionExplicit: sendCtx.modelSelectionExplicit,
           titleSeed: activeThread.title,
           runtimeMode,
           interactionMode: nextInteractionMode,

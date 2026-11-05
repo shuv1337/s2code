@@ -55,6 +55,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   context: Schema.optional(OrchestrationMessageContext),
   attachments: Schema.Array(DraftComposerAttachmentSchema),
   modelSelection: Schema.optional(ModelSelection),
+  modelSelectionExplicit: Schema.optional(Schema.Boolean),
   dispatchMode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
   compactBeforeSend: Schema.optional(Schema.Boolean),
   runtimeMode: Schema.optional(RuntimeMode),
@@ -86,6 +87,8 @@ export interface QueuedThreadMessage {
   readonly context?: OrchestrationMessageContext;
   readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly modelSelection?: ModelSelectionType;
+  /** The user picked `modelSelection`; otherwise it is the thread's selection at enqueue. */
+  readonly modelSelectionExplicit?: boolean;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
   /** Captured at enqueue because draining may occur long after the tap. */

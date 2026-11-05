@@ -19,6 +19,8 @@ import {
 
 import * as DateTime from "effect/DateTime";
 
+import { draftModelPickMatchesThread } from "./model.ts";
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -229,6 +231,32 @@ export function usageLimitPoolDriver(
     (candidate) => candidate.driver === instance.driver && candidate.disableOnUsageLimit === true,
   );
   return members.length > 1 ? instance.driver : null;
+}
+
+export function areUsageLimitPoolPeers(
+  settings: Pick<ServerSettings, "providerInstances">,
+  left: ProviderInstanceId,
+  right: ProviderInstanceId,
+): boolean {
+  if (left === right) return false;
+  const pool = usageLimitPoolDriver(settings, left);
+  return pool !== null && usageLimitPoolDriver(settings, right) === pool;
+}
+
+/**
+ * Pickers offer a pool as one entry, so a draft pick of another member is already the thread's
+ * pick when it carries the same model the pool placed the thread on.
+ */
+export function draftModelPickMatchesPoolSeat(
+  settings: Pick<ServerSettings, "providerInstances"> | null,
+  pick: ModelSelection,
+  seat: ModelSelection,
+): boolean {
+  return (
+    settings !== null &&
+    areUsageLimitPoolPeers(settings, pick.instanceId, seat.instanceId) &&
+    draftModelPickMatchesThread({ ...pick, instanceId: seat.instanceId }, seat)
+  );
 }
 
 export function usageLimitPoolLabel(driver: ProviderDriverKind): string {

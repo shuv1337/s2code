@@ -50,6 +50,7 @@ import { appAtomRegistry } from "./state/atom-registry";
 import { subscribeComposerDraftModelReconciliation } from "./state/use-composer-drafts";
 import { environmentThreadShells } from "./state/threads";
 import { environmentShell } from "./state/shell";
+import { serverEnvironment } from "./state/server";
 import { OverlayPortalHost } from "./components/ui/OverlayPortal";
 import { shouldHandleAppLink, restoreDraftLinkState } from "./lib/appLinking";
 import { hasCloudPublicConfig } from "./features/cloud/publicConfig";
@@ -189,6 +190,7 @@ const appServiceDisposers = [
     threadShellAtom: environmentThreadShells.threadShellAtom,
     threadRefsAtom: environmentThreadShells.threadRefsAtom,
     shellStateAtom: environmentShell.stateAtom,
+    settingsAtom: serverEnvironment.settingsValueAtom,
   }),
   installAppearanceRuntime(),
   installSubscriptionUsageRefresh(),
