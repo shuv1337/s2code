@@ -2,10 +2,20 @@ import {
   ConnectionCatalogDocument,
   type ConnectionCatalogDocument as ConnectionCatalogDocumentType,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
+  StoredConnectionCredential,
 } from "@t3tools/client-runtime/platform";
-import { ConnectionTransientError } from "@t3tools/client-runtime/connection";
+import { TokenStore } from "@t3tools/client-runtime/authorization";
+import {
+  ConnectionProfile,
+  ConnectionTransientError,
+  PersistedConnectionTarget,
+  StoredPullRequestRoutingPermission,
+} from "@t3tools/client-runtime/connection";
+import { EnvironmentId } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -24,14 +34,8 @@ function catalogError(operation: string, cause: unknown) {
 }
 
 const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
-const decodeConnectionCatalogDocument = Schema.decodeEffect(ConnectionCatalogDocumentJson);
 const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
-
-const decodeCatalog = Effect.fn("mobile.connectionStorage.decodeCatalog")(function* (raw: string) {
-  return yield* decodeConnectionCatalogDocument(raw).pipe(
-    Effect.mapError((cause) => catalogError("decode", cause)),
-  );
-});
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(function* (
   catalog: ConnectionCatalogDocumentType,
@@ -40,6 +44,59 @@ const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(functi
     Effect.mapError((cause) => catalogError("encode", cause)),
   );
 });
+
+/**
+ * Builds from other branches or versions share this keychain item, so one record this build
+ * cannot read must cost that record, never every saved environment.
+ */
+function decodeCatalogLeniently(raw: string) {
+  const parsed = Option.getOrUndefined(parseJson(raw));
+  const fields: Record<string, unknown> = Predicate.isObject(parsed) ? parsed : {};
+  let lossless = Predicate.isObject(parsed);
+  const entries = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, key: string) => {
+    const value = fields[key];
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+      lossless = false;
+      return [];
+    }
+    const decode = Schema.decodeUnknownOption(schema);
+    const decoded = value.flatMap((entry) => Option.toArray(decode(entry)));
+    if (decoded.length !== value.length) lossless = false;
+    return decoded;
+  };
+  const githubRoutingPermissions =
+    fields.githubRoutingPermissions === undefined
+      ? undefined
+      : entries(StoredPullRequestRoutingPermission, "githubRoutingPermissions");
+  const catalog: ConnectionCatalogDocumentType = {
+    schemaVersion: 1,
+    targets: entries(PersistedConnectionTarget, "targets"),
+    profiles: entries(ConnectionProfile, "profiles"),
+    credentials: entries(StoredConnectionCredential, "credentials"),
+    remoteDpopTokens: entries(TokenStore.RemoteDpopAccessToken, "remoteDpopTokens"),
+    ...(githubRoutingPermissions === undefined ? {} : { githubRoutingPermissions }),
+    disabledEnvironmentIds: entries(EnvironmentId, "disabledEnvironmentIds"),
+  };
+  return { catalog, lossless };
+}
+
+function isEmptyCatalog(catalog: ConnectionCatalogDocumentType) {
+  return (
+    catalog.targets.length === 0 &&
+    catalog.profiles.length === 0 &&
+    catalog.credentials.length === 0 &&
+    catalog.remoteDpopTokens.length === 0 &&
+    (catalog.githubRoutingPermissions ?? []).length === 0 &&
+    catalog.disabledEnvironmentIds.length === 0
+  );
+}
+
+interface LoadedCatalog {
+  readonly catalog: ConnectionCatalogDocumentType;
+  /** The stored value holds records this build could not read, so an empty catalog must not replace it. */
+  readonly storedUnreadable: boolean;
+}
 
 interface CatalogStore {
   readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
@@ -56,7 +113,7 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
     storage.setItem(key, value).pipe(Effect.mapError((cause) => catalogError("save", cause)));
   const deleteItem = (key: string) =>
     storage.removeItem(key).pipe(Effect.mapError((cause) => catalogError("delete", cause)));
-  const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
+  const state = yield* Ref.make<Option.Option<LoadedCatalog>>(Option.none());
   const lock = yield* Semaphore.make(1);
 
   const loadLegacyCatalog = Effect.fn("mobile.connectionStorage.loadLegacyCatalog")(function* () {
@@ -80,38 +137,50 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
     return catalog;
   });
 
+  const decodeStoredCatalog = Effect.fn("mobile.connectionStorage.decodeCatalog")(function* (
+    raw: string,
+  ) {
+    const { catalog, lossless } = decodeCatalogLeniently(raw);
+    if (lossless) {
+      return { catalog, storedUnreadable: false } satisfies LoadedCatalog;
+    }
+    const backupKey = `${CONNECTION_CATALOG_KEY}.unreadable.${yield* Clock.currentTimeMillis}`;
+    yield* setItem(backupKey, raw);
+    yield* Effect.logWarning("Kept the readable part of the mobile connection catalog", {
+      backupKey,
+      environments: new Set(catalog.targets.map((target) => target.environmentId)).size,
+    });
+    return { catalog, storedUnreadable: isEmptyCatalog(catalog) } satisfies LoadedCatalog;
+  });
+
   const loadUnlocked = Effect.fn("mobile.connectionStorage.loadCatalog")(function* () {
     const cached = yield* Ref.get(state);
     if (Option.isSome(cached)) {
       return cached.value;
     }
     const raw = yield* getItem(CONNECTION_CATALOG_KEY);
-    let catalog: ConnectionCatalogDocumentType;
-    if (raw !== null && raw.trim() !== "") {
-      catalog = yield* decodeCatalog(raw).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Discarding corrupt mobile connection catalog", error).pipe(
-            Effect.andThen(deleteItem(CONNECTION_CATALOG_KEY)),
-            Effect.andThen(loadLegacyCatalog()),
-          ),
-        ),
-      );
-    } else {
-      catalog = yield* loadLegacyCatalog();
-    }
-    yield* Ref.set(state, Option.some(catalog));
-    return catalog;
+    const loaded: LoadedCatalog =
+      raw !== null && raw.trim() !== ""
+        ? yield* decodeStoredCatalog(raw)
+        : { catalog: yield* loadLegacyCatalog(), storedUnreadable: false };
+    yield* Ref.set(state, Option.some(loaded));
+    return loaded;
   });
 
-  const read = lock.withPermits(1)(loadUnlocked());
+  const read = lock.withPermits(1)(loadUnlocked().pipe(Effect.map((loaded) => loaded.catalog)));
   const update: CatalogStore["update"] = Effect.fn("mobile.connectionStorage.updateCatalog")(
     function* (transform) {
       yield* lock.withPermits(1)(
         Effect.gen(function* () {
-          const next = transform(yield* loadUnlocked());
+          const loaded = yield* loadUnlocked();
+          const next = transform(loaded.catalog);
+          if (loaded.storedUnreadable && isEmptyCatalog(next)) {
+            yield* Ref.set(state, Option.some({ catalog: next, storedUnreadable: true }));
+            return;
+          }
           const encoded = yield* encodeCatalog(next);
           yield* setItem(CONNECTION_CATALOG_KEY, encoded);
-          yield* Ref.set(state, Option.some(next));
+          yield* Ref.set(state, Option.some({ catalog: next, storedUnreadable: false }));
         }),
       );
     },
