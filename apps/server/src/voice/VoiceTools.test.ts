@@ -15,6 +15,8 @@ import * as VoiceTools from "./VoiceTools.ts";
 const silentAudit = Layer.succeed(VoiceAuditLog.VoiceAuditLog, {
   append: () => Effect.void,
   retain: () => Effect.void,
+  close: () => Effect.void,
+  flush: Effect.void,
 });
 
 it.effect("requires each tool's grants before invoking it and bounds sensitive results", () =>

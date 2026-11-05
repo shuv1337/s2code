@@ -347,3 +347,25 @@ it("redacts batched voice reports and never sends audio, sdp, or keys", async ()
     vi.useRealTimers();
   }
 });
+
+it("keeps a failure that happens before the provider assigns a session id", async () => {
+  vi.useFakeTimers();
+  try {
+    const report = vi.fn(async (_environmentId: EnvironmentId, _input: VoiceReportInput) => {});
+    const { controller } = setup({
+      report,
+      start: () => new Promise(() => undefined),
+    });
+    void controller.start(target);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(report).toHaveBeenCalled();
+    const reported = report.mock.calls.map((call) => call[1]);
+    expect(reported.some((input) => input.sessionId === "pre-session")).toBe(true);
+    expect(reported.some((input) => input.events.some((event) => event.type === "error"))).toBe(
+      true,
+    );
+    expect(JSON.stringify(reported)).not.toContain("sk-");
+  } finally {
+    vi.useRealTimers();
+  }
+});

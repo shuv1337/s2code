@@ -40,7 +40,8 @@ default). Each line has `v`, `ts`, `sessionId`, `mode`, `seq`, and `type`. Read 
 with `jq -c . path/to/session.jsonl`.
 
 Lines cover session start and end, connect latency, turns, final transcripts, tool
-calls, confirmations, and error causes. They do not include audio, SDP, or API keys.
+calls, confirmations, and error causes. Transcripts are on by default
+(`voiceLogTranscripts` in server settings). They do not include audio, SDP, or API keys.
 Tool arguments keep `threadId`, `environmentId`, and `projectId`; every other argument
 is only its name and value length. Strings are truncated (200 characters, transcripts
 2,000), and `sk-…` / `Bearer …` text is removed.

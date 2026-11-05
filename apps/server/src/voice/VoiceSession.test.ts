@@ -24,6 +24,8 @@ import * as VoiceTools from "./VoiceTools.ts";
 const silentAudit = Layer.succeed(VoiceAuditLog.VoiceAuditLog, {
   append: () => Effect.void,
   retain: () => Effect.void,
+  close: () => Effect.void,
+  flush: Effect.void,
 });
 
 it.effect("binds calls to their owner, deduplicates actions, and refuses tools after End", () =>
@@ -165,24 +167,44 @@ const offer = "v=0\r\na=fingerprint:SECRETSDP\r\n";
 const secret = "sk-abcdefghijklmnopqrstuvwxyz";
 const bearer = "Bearer supersecrettokenvalue";
 
-const auditedLayer = <E, R>(sessionId: string, tools: Layer.Layer<VoiceTools.VoiceTools, E, R>) =>
-  VoiceSession.layer.pipe(
+const auditedLayer = <E, R>(
+  sessionId: string,
+  tools: Layer.Layer<VoiceTools.VoiceTools, E, R>,
+  options?: {
+    readonly voiceLogTranscripts?: boolean;
+    readonly start?: () => Effect.Effect<{ sessionId: string; sdp: string }>;
+    readonly filesystem?: Layer.Layer<FileSystem.FileSystem, never, FileSystem.FileSystem>;
+  },
+) => {
+  const audit = options?.filesystem
+    ? VoiceAuditLog.layer.pipe(Layer.provide(options.filesystem))
+    : VoiceAuditLog.layer;
+  return VoiceSession.layer.pipe(
     Layer.provide(tools),
     Layer.provide(
       Layer.succeed(VoiceProvider.VoiceProvider, {
         status: Effect.succeed({ configured: true }),
         configure: () => Effect.void,
-        start: () => Effect.succeed({ sessionId, sdp: offer }),
+        start: options?.start ?? (() => Effect.succeed({ sessionId, sdp: offer })),
         end: () => Effect.void,
       }),
     ),
-    Layer.provide(VoiceAuditLog.layer),
+    Layer.provideMerge(audit),
+    Layer.provide(
+      ServerSettings.layerTest(
+        options?.voiceLogTranscripts === undefined
+          ? {}
+          : { voiceLogTranscripts: options.voiceLogTranscripts },
+      ),
+    ),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-voice-log-" })),
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(TestClock.layer()),
   );
+};
 
 const readVoiceLog = Effect.fn("readVoiceLog")(function* (sessionId: string) {
+  yield* (yield* VoiceAuditLog.VoiceAuditLog).flush;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
@@ -228,7 +250,7 @@ it.effect("writes redacted jsonl and keeps going when the log cannot be written"
       });
       yield* voice.report(owner, {
         sessionId: session.sessionId,
-        mode: "call",
+        mode: "dictation",
         events: [
           {
             type: "transcript",
@@ -365,6 +387,7 @@ it.effect("drops voice logs older than 14 days or past 200MB", () =>
       yield* stamp(huge, now - 2 * 86_400_000);
       yield* stamp(tiny, now - 3_600_000);
       yield* voice.start(owner, { sdp: offer, mode: "call" });
+      yield* (yield* VoiceAuditLog.VoiceAuditLog).flush;
       const names = yield* fs.readDirectory(dir);
       assert.isFalse(names.includes("19700101-ancient.jsonl"));
       assert.isFalse(names.includes("19700201-huge.jsonl"));
@@ -390,6 +413,7 @@ it.effect("stops a voice log at 5MB with a truncated event", () =>
       yield* fs.writeFileString(file, "");
       yield* fs.truncate(file, VoiceAuditLog.VOICE_LOG_MAX_FILE_BYTES);
       yield* voice.start(owner, { sdp: offer, mode: "call" });
+      yield* (yield* VoiceAuditLog.VoiceAuditLog).flush;
       const added = (yield* fs.readFileString(file)).slice(VoiceAuditLog.VOICE_LOG_MAX_FILE_BYTES);
       const line = added.trim().split("\n").at(-1);
       assert.strictEqual(JSON.parse(line ?? "").type, "truncated");
@@ -398,8 +422,119 @@ it.effect("stops a voice log at 5MB with a truncated event", () =>
       assert.isFalse(added.includes("v=0"));
       const size = (yield* fs.stat(file)).size;
       yield* voice.end(owner, "live-cap");
+      yield* (yield* VoiceAuditLog.VoiceAuditLog).flush;
       assert.strictEqual((yield* fs.stat(file)).size, size);
       assert.isFalse((yield* fs.readFileString(file)).includes("session.end"));
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("voice.start completes when the voice log write hangs", () =>
+  Effect.gen(function* () {
+    const hangWrites = Layer.effect(
+      FileSystem.FileSystem,
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return { ...fs, writeFileString: () => Effect.never };
+      }),
+    );
+    const layer = auditedLayer(
+      "live-hang",
+      Layer.succeed(VoiceTools.VoiceTools, { execute: () => Effect.succeed("{}") }),
+      { filesystem: hangWrites },
+    );
+    yield* Effect.gen(function* () {
+      const voice = yield* VoiceSession.VoiceSession;
+      const session = yield* voice.start(owner, { sdp: offer, mode: "call" });
+      assert.strictEqual(session.sessionId, "live-hang");
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("sweeps a voice log this process still has open", () =>
+  Effect.gen(function* () {
+    let next = 0;
+    const layer = auditedLayer(
+      "unused",
+      Layer.succeed(VoiceTools.VoiceTools, { execute: () => Effect.succeed("{}") }),
+      {
+        start: () =>
+          Effect.sync(() => ({
+            sessionId: next++ === 0 ? "live-open" : "live-next",
+            sdp: "answer",
+          })),
+      },
+    );
+    yield* Effect.gen(function* () {
+      yield* TestClock.adjust(Duration.days(40));
+      const voice = yield* VoiceSession.VoiceSession;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = (yield* ServerConfig.ServerConfig).voiceLogsDir;
+      const first = yield* voice.start(owner, { sdp: offer, mode: "call" });
+      assert.strictEqual(first.sessionId, "live-open");
+      yield* (yield* VoiceAuditLog.VoiceAuditLog).flush;
+      const openName = (yield* fs.readDirectory(dir)).find((name) =>
+        name.endsWith("-live-open.jsonl"),
+      );
+      assert.ok(openName);
+      const now = DateTime.toEpochMillis(yield* DateTime.now);
+      const old = (now - VoiceAuditLog.VOICE_LOG_MAX_AGE_MS - 86_400_000) / 1000;
+      yield* fs.utimes(path.join(dir, openName), old, old);
+      const second = yield* voice.start(owner, { sdp: offer, mode: "call" });
+      assert.strictEqual(second.sessionId, "live-next");
+      yield* (yield* VoiceAuditLog.VoiceAuditLog).flush;
+      const names = yield* fs.readDirectory(dir);
+      assert.isFalse(names.includes(openName));
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("drops transcripts when voiceLogTranscripts is off and forgets ended sessions", () =>
+  Effect.gen(function* () {
+    const layer = auditedLayer(
+      "live-quiet",
+      Layer.succeed(VoiceTools.VoiceTools, { execute: () => Effect.succeed("{}") }),
+      { voiceLogTranscripts: false },
+    );
+    yield* Effect.gen(function* () {
+      const voice = yield* VoiceSession.VoiceSession;
+      const session = yield* voice.start(owner, { sdp: offer, mode: "call" });
+      yield* voice.report(owner, {
+        sessionId: session.sessionId,
+        mode: "dictation",
+        events: [
+          { type: "transcript", role: "user", text: "secret words" },
+          { type: "connect", attempt: 1, latencyMs: 4 },
+        ],
+      });
+      yield* voice.end(owner, session.sessionId);
+      yield* voice.report(owner, {
+        sessionId: session.sessionId,
+        mode: "dictation",
+        events: [{ type: "disconnect", attempt: 1, latencyMs: 5 }],
+      });
+      const { text, lines } = yield* readVoiceLog("live-quiet");
+      assert.isFalse(lines.some((line) => line.type === "transcript"));
+      assert.isFalse(text.includes("secret words"));
+      assert.isTrue(lines.every((line) => line.mode === "call"));
+      yield* TestClock.adjust(Duration.seconds(6));
+      const late = yield* voice
+        .report(owner, {
+          sessionId: session.sessionId,
+          mode: "call",
+          events: [{ type: "disconnect", attempt: 1, latencyMs: 6 }],
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(late.reason, "session_closed");
+      const unknown = yield* voice
+        .report(owner, {
+          sessionId: "missing-session",
+          mode: "call",
+          events: [{ type: "disconnect", attempt: 1, latencyMs: 1 }],
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(unknown.reason, "session_closed");
     }).pipe(Effect.provide(layer));
   }),
 );

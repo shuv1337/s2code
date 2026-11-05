@@ -1,11 +1,12 @@
-import type {
-  EnvironmentId,
-  VoiceReportEvent,
-  VoiceReportInput,
-  VoiceStartInput,
-  VoiceStartResult,
-  VoiceToolInput,
-  VoiceToolResult,
+import {
+  VOICE_PRE_SESSION_ID,
+  type EnvironmentId,
+  type VoiceReportEvent,
+  type VoiceReportInput,
+  type VoiceStartInput,
+  type VoiceStartResult,
+  type VoiceToolInput,
+  type VoiceToolResult,
 } from "@t3tools/contracts";
 import { parseSpokenAnswer } from "@t3tools/shared/voice/confirmation";
 import { isLongRunningVoiceTool, isSideEffectVoiceTool } from "@t3tools/shared/voice/allowlist";
@@ -175,6 +176,7 @@ export class VoiceController {
           }
           this.#sessionId = result.sessionId;
           this.#reportSessionId = result.sessionId;
+          void this.#flush();
           return result.sdp;
         },
         onData: (data) => {
@@ -242,7 +244,7 @@ export class VoiceController {
     transport?.close();
     this.#finishTurns();
     this.#reportDisconnect();
-    const flushing = this.#flush();
+    const flushing = this.#flush(this.#reportSessionId === null);
     this.#update({ phase: "ended", muted: false, confirmation: null });
     await flushing;
     if (sessionId && target)
@@ -368,28 +370,30 @@ export class VoiceController {
   }
   #enqueue(event: VoiceReportEvent) {
     this.#pending.push(event);
+    this.#armFlush();
+  }
+  #armFlush() {
     if (this.#flushTimer !== undefined) return;
     // @effect-diagnostics-next-line globalTimers:off - batches voice diagnostics in the imperative media controller
     this.#flushTimer = setTimeout(() => {
       void this.#flush();
     }, REPORT_FLUSH_MS);
   }
-  async #flush() {
+  async #flush(allowPreSession = false) {
     clearTimeout(this.#flushTimer);
     this.#flushTimer = undefined;
-    const events = this.#pending.splice(0);
-    const sessionId = this.#reportSessionId;
+    const sessionId = this.#reportSessionId ?? (allowPreSession ? VOICE_PRE_SESSION_ID : null);
     const target = this.#reportTarget;
-    if (events.length === 0 || sessionId === null || target === null) return;
+    if (sessionId === null || target === null) {
+      if (this.#pending.length > 0) this.#armFlush();
+      return;
+    }
+    const events = this.#pending.splice(0);
+    if (events.length === 0) return;
     await this.dependencies
       .report(target.environmentId, { sessionId, mode: this.#reportMode, events })
       .catch(() => undefined);
-    if (this.#pending.length > 0 && this.#flushTimer === undefined) {
-      // @effect-diagnostics-next-line globalTimers:off - batches voice diagnostics in the imperative media controller
-      this.#flushTimer = setTimeout(() => {
-        void this.#flush();
-      }, REPORT_FLUSH_MS);
-    }
+    if (this.#pending.length > 0) this.#armFlush();
   }
   #reportConnect() {
     if (this.#reportedConnect || this.#reportSessionId === null) return;

@@ -1,19 +1,24 @@
 import type { VoiceReportEvent, VoiceStartInput } from "@t3tools/contracts";
-import { redactVoiceLogText, voiceErrorFacts } from "@t3tools/shared/voice/logRedaction";
+import { redactVoiceLogText } from "@t3tools/shared/voice/logRedaction";
 import * as ByteSize from "effect/ByteSize";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Semaphore from "effect/Semaphore";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 export const VOICE_LOG_MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const VOICE_LOG_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 export const VOICE_LOG_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const VOICE_LOG_QUEUE_CAPACITY = 256;
+const VOICE_LOG_WRITE_TIMEOUT = "2 seconds";
 
 export type VoiceAuditMode = VoiceStartInput["mode"];
 export type VoiceToolStatus = "completed" | "confirmation_required" | "cancelled" | "error";
@@ -84,8 +89,15 @@ export class VoiceAuditLog extends Context.Service<
   {
     readonly append: (sessionId: string, event: VoiceAuditEvent) => Effect.Effect<void>;
     readonly retain: () => Effect.Effect<void>;
+    readonly close: (sessionId: string) => Effect.Effect<void>;
+    /** Waits until queued writes finish. Session code does not call this. */
+    readonly flush: Effect.Effect<void>;
   }
 >()("t3/voice/VoiceAuditLog") {}
+
+type LogJob =
+  | { readonly _tag: "event"; readonly sessionId: string; readonly event: VoiceAuditEvent }
+  | { readonly _tag: "close"; readonly sessionId: string };
 
 const encoder = new TextEncoder();
 const fileSessionId = (sessionId: string) => {
@@ -202,10 +214,14 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const directory = config.voiceLogsDir;
   const open = new Map<string, OpenFile>();
   let directoryReady = false;
-  const gate = yield* Semaphore.make(1);
+  const jobs = yield* Queue.dropping<LogJob>(VOICE_LOG_QUEUE_CAPACITY);
+  const outstanding = yield* Ref.make(0);
+  const dropped = yield* Ref.make(0);
+  const waiters = yield* Ref.make<Array<Deferred.Deferred<void>>>([]);
 
   const prepareDirectory = Effect.gen(function* () {
     if (directoryReady) return;
@@ -214,8 +230,31 @@ const make = Effect.gen(function* () {
     directoryReady = true;
   });
 
-  // Per-line spans would flood the trace; session operations already have their own.
+  const release = Effect.fnUntraced(function* () {
+    const left = yield* Ref.updateAndGet(outstanding, (count) => count - 1);
+    if (left > 0) return;
+    const pending = yield* Ref.getAndSet(waiters, []);
+    for (const waiter of pending) yield* Deferred.succeed(waiter, undefined);
+  });
+  const enqueue = Effect.fnUntraced(function* (job: LogJob) {
+    yield* Ref.update(outstanding, (count) => count + 1);
+    const accepted = yield* Queue.offer(jobs, job);
+    if (accepted) return;
+    const count = yield* Ref.updateAndGet(dropped, (value) => value + 1);
+    yield* Effect.logDebug("Voice audit log dropped an event because the queue is full.", {
+      dropped: count,
+    });
+    yield* release();
+  });
+  // Disk writes run here, off the session fiber. Per-line spans would flood the trace.
   const write = Effect.fnUntraced(function* (sessionId: string, event: VoiceAuditEvent) {
+    if (event.type === "transcript") {
+      const enabled = yield* settings.getSettings.pipe(
+        Effect.map((value) => value.voiceLogTranscripts),
+        Effect.orElseSucceed(() => true),
+      );
+      if (!enabled) return;
+    }
     yield* prepareDirectory;
     const now = yield* DateTime.now;
     const day = DateTime.formatIsoDateUtc(now).replaceAll("-", "");
@@ -283,12 +322,10 @@ const make = Effect.gen(function* () {
     yield* prepareDirectory;
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
     const names = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed((): string[] => []));
-    const active = new Set([...open.values()].map((file) => file.path));
     const files: { path: string; bytes: number; mtimeMs: number }[] = [];
     for (const name of names) {
       if (!name.endsWith(".jsonl")) continue;
       const filePath = path.join(directory, name);
-      if (active.has(filePath)) continue;
       const info = yield* fs.stat(filePath).pipe(Effect.option);
       if (Option.isNone(info) || info.value.type !== "File") continue;
       const mtimeMs = Option.match(info.value.mtime, {
@@ -305,6 +342,7 @@ const make = Effect.gen(function* () {
     for (const file of files) {
       if (nowMs - file.mtimeMs > VOICE_LOG_MAX_AGE_MS) {
         yield* fs.remove(file.path).pipe(Effect.ignore);
+        open.delete(file.path);
       } else {
         kept.push(file);
       }
@@ -314,24 +352,59 @@ const make = Effect.gen(function* () {
     for (const file of kept) {
       if (total <= VOICE_LOG_MAX_TOTAL_BYTES) break;
       yield* fs.remove(file.path).pipe(Effect.ignore);
+      open.delete(file.path);
       total -= file.bytes;
     }
   });
-
+  const runJob = Effect.fnUntraced(function* (job: LogJob) {
+    if (job._tag === "close") {
+      const suffix = `-${fileSessionId(job.sessionId)}.jsonl`;
+      const closedPaths: string[] = [];
+      for (const filePath of open.keys()) {
+        if (filePath.endsWith(suffix)) closedPaths.push(filePath);
+      }
+      for (const filePath of closedPaths) open.delete(filePath);
+      return;
+    }
+    yield* write(job.sessionId, job.event).pipe(
+      Effect.timeout(VOICE_LOG_WRITE_TIMEOUT),
+      Effect.ignoreCause({ log: true }),
+    );
+  });
+  yield* Effect.forkScoped(
+    Effect.forever(
+      Effect.gen(function* () {
+        const job = yield* Queue.take(jobs);
+        yield* runJob(job).pipe(Effect.ignoreCause({ log: true }));
+        yield* release();
+      }),
+    ),
+  );
   const append = Effect.fn("VoiceAuditLog.append")(function* (
     sessionId: string,
     event: VoiceAuditEvent,
   ) {
-    yield* gate
-      .withPermits(1)(write(sessionId, event))
-      .pipe(Effect.ignoreCause({ log: true }));
+    yield* enqueue({ _tag: "event", sessionId, event });
+  });
+  const close = Effect.fn("VoiceAuditLog.close")(function* (sessionId: string) {
+    yield* enqueue({ _tag: "close", sessionId });
   });
   const retain = Effect.fn("VoiceAuditLog.retain")(function* () {
-    yield* gate
-      .withPermits(1)(sweep())
-      .pipe(Effect.ignoreCause({ log: true }));
+    yield* sweep().pipe(Effect.ignoreCause({ log: true }));
   });
-  return VoiceAuditLog.of({ append, retain });
+  const flush = Effect.fn("VoiceAuditLog.flush")(function* () {
+    if ((yield* Ref.get(outstanding)) === 0) return;
+    const gate = yield* Deferred.make<void>();
+    yield* Ref.update(waiters, (pending) => [...pending, gate]);
+    if ((yield* Ref.get(outstanding)) === 0) yield* Deferred.succeed(gate, undefined);
+    yield* Deferred.await(gate);
+  });
+  return VoiceAuditLog.of({
+    append,
+    retain,
+    close,
+    flush: Effect.suspend(() => flush()),
+  });
 });
 
 export const layer = Layer.effect(VoiceAuditLog, make);

@@ -7,17 +7,15 @@ import { redactText } from "./resultSummary.ts";
 const ALLOWED_ARG_KEYS = new Set(["threadId", "environmentId", "projectId"]);
 const SENSITIVE_KEY =
   /sdp|audio|authorization|api[-_]?key|token|secret|password|bearer|ephemeral|cookie/i;
+const SDP_LINE = /^(?:v=0|a=(?:ice-pwd|ice-ufrag|fingerprint)\b)/i;
 
 export const redactVoiceLogText = (value: string, maxChars: number): string => {
-  if (
-    value.startsWith("v=0") ||
-    value.includes("\nv=") ||
-    value.includes("a=fingerprint") ||
-    value.includes("a=ice-ufrag")
-  ) {
-    return "[redacted]";
-  }
-  const redacted = redactText(value)
+  const newline = value.includes("\r\n") ? "\r\n" : "\n";
+  const lines = value.split(/\r?\n/);
+  const body = lines.some((line) => line.trim().startsWith("v=0"))
+    ? "[redacted]"
+    : lines.map((line) => (SDP_LINE.test(line.trim()) ? "[redacted]" : line)).join(newline);
+  const redacted = redactText(body)
     .replace(/Bearer \[redacted\]/giu, "[redacted]")
     .replace(/\bek[-_][a-z0-9_-]{8,}\b/giu, "[redacted]");
   return redacted.length > maxChars ? redacted.slice(0, maxChars) : redacted;

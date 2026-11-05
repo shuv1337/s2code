@@ -89,3 +89,6 @@ export const VoiceReportInput = Schema.Struct({
   events: Schema.Array(VoiceReportEvent).check(Schema.isMaxLength(100)),
 });
 export type VoiceReportInput = typeof VoiceReportInput.Type;
+
+/** Client reports that happen before the provider assigns a session id. */
+export const VOICE_PRE_SESSION_ID = "pre-session";

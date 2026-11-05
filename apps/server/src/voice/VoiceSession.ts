@@ -1,4 +1,5 @@
 import {
+  VOICE_PRE_SESSION_ID,
   VoiceError,
   type VoiceReportInput,
   type VoiceStartInput,
@@ -57,12 +58,25 @@ interface Session {
   calls: Map<string, Deferred.Deferred<VoiceToolResult, VoiceError>>;
   pending: Map<string, VoiceToolInput>;
 }
+/** Late client batches can still land, then the session is forgotten. */
+const REPORT_GRACE_MS = 5_000;
+interface ClosedSession {
+  owner: string;
+  mode: VoiceStartInput["mode"];
+  endedAt: number;
+}
 const make = Effect.gen(function* () {
   const provider = yield* VoiceProvider.VoiceProvider;
   const tools = yield* VoiceTools.VoiceTools;
   const audit = yield* VoiceAuditLog.VoiceAuditLog;
   const sessions = new Map<string, Session>();
   const owners = new Map<string, string>();
+  const closed = new Map<string, ClosedSession>();
+  const pruneClosed = (now: number) => {
+    for (const [id, entry] of closed) {
+      if (now - entry.endedAt > REPORT_GRACE_MS) closed.delete(id);
+    }
+  };
   const elapsed = (startedAt: number) =>
     Effect.map(DateTime.now, (now) => Math.max(0, DateTime.toEpochMillis(now) - startedAt));
   const closeSession = Effect.fn("VoiceSession.close")(function* (
@@ -84,7 +98,14 @@ const make = Effect.gen(function* () {
     return Effect.forEach(
       open,
       ([id, session]) =>
-        closeSession(session, id, "scope_closed").pipe(Effect.andThen(provider.end(id))),
+        Effect.gen(function* () {
+          const now = DateTime.toEpochMillis(yield* DateTime.now);
+          owners.delete(id);
+          closed.set(id, { owner: session.owner, mode: session.mode, endedAt: now });
+          yield* closeSession(session, id, "scope_closed");
+          yield* audit.close(id);
+          yield* provider.end(id);
+        }),
       { discard: true },
     ).pipe(Effect.ignore);
   });
@@ -131,13 +152,19 @@ const make = Effect.gen(function* () {
       pending: new Map(),
     });
     owners.set(result.sessionId, caller.sessionId);
+    closed.delete(result.sessionId);
     yield* audit.append(result.sessionId, { type: "session.start", mode: input.mode, model });
     return result;
   });
   const end = Effect.fn("VoiceSession.end")(function* (caller: VoiceCaller, id: string) {
     const session = yield* owned(caller, id);
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
     sessions.delete(id);
+    owners.delete(id);
+    closed.set(id, { owner: session.owner, mode: session.mode, endedAt: now });
+    pruneClosed(now);
     yield* closeSession(session, id, "client");
+    yield* audit.close(id);
     yield* provider.end(id);
   });
   const run = Effect.fn("VoiceSession.run")(function* (
@@ -243,10 +270,30 @@ const make = Effect.gen(function* () {
   ) {
     if (!caller.scopes.includes("orchestration:operate"))
       return yield* new VoiceError({ reason: "forbidden" });
-    const owner = owners.get(input.sessionId);
-    if (owner === undefined) return yield* new VoiceError({ reason: "session_closed" });
+    if (input.sessionId === VOICE_PRE_SESSION_ID) {
+      for (const event of input.events) {
+        yield* audit.append(
+          VOICE_PRE_SESSION_ID,
+          VoiceAuditLog.auditEventFromReport(input.mode, event),
+        );
+      }
+      return;
+    }
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    pruneClosed(now);
+    const live = sessions.get(input.sessionId);
+    const recent = closed.get(input.sessionId);
+    const mode = live?.mode ?? recent?.mode;
+    const owner = live?.owner ?? recent?.owner;
+    if (
+      mode === undefined ||
+      owner === undefined ||
+      (live === undefined && recent !== undefined && now - recent.endedAt > REPORT_GRACE_MS)
+    ) {
+      closed.delete(input.sessionId);
+      return yield* new VoiceError({ reason: "session_closed" });
+    }
     if (owner !== caller.sessionId) return yield* new VoiceError({ reason: "forbidden" });
-    const mode = sessions.get(input.sessionId)?.mode ?? input.mode;
     for (const event of input.events) {
       yield* audit.append(input.sessionId, VoiceAuditLog.auditEventFromReport(mode, event));
     }
