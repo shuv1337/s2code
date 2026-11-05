@@ -202,8 +202,8 @@ jobs:
           cat "$RUNNER_TEMP/typecheck.log"
           exit "$(cat "$RUNNER_TEMP/typecheck-status")"
 
-  # Everything except `t3` (apps/server) and the web app, which has its own job
-  # below. `--parallel` drops the package dependency ordering that `vp run`
+  # Everything except `t3` (apps/server), the web app, and mobile, which have
+  # their own jobs. `--parallel` drops the package dependency ordering that `vp run`
   # applies by default: these `test` tasks declare no `dependsOn` and resolve
   # workspace deps from source, so ordering only bought us idle runners between
   # dependency layers. The concurrency limit stays at the default 4 so peak load
@@ -271,12 +271,18 @@ jobs:
         env:
           TEST_PACKAGES: ${{ needs.changes.outputs.test_packages }}
         run: |
-          filters=(--filter '!t3' --filter '!@t3tools/monorepo' --filter '!@t3tools/web')
+          filters=(--filter '!t3' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' --filter '!@t3tools/mobile')
           if [[ -n "$TEST_PACKAGES" ]]; then
             filters=()
-            for package in $TEST_PACKAGES; do filters+=(--filter "$package"); done
+            for package in $TEST_PACKAGES; do
+              [[ "$package" == "@t3tools/mobile" ]] && continue
+              filters+=(--filter "$package")
+            done
           fi
-          vp run --parallel --concurrency-limit 4 "${filters[@]}" test
+          # No filters means `vp run test` runs every package, including mobile.
+          if ((${#filters[@]})); then
+            vp run --parallel --concurrency-limit 4 "${filters[@]}" test
+          fi
 
   # The web suite is the largest outside the server. In the shared Test job it
   # started last and ran alone for about 40s after everything else finished.
@@ -338,6 +344,36 @@ jobs:
         run: |
           vp run --filter @t3tools/web build
           node apps/web/scripts/verify-built-boot.ts
+
+  # Mobile's unit + react projects, then the Android FilePreviewModal pass, were
+  # still running when Test hit its 10 minute limit. Same checkout and Vite+
+  # setup as Test Web; the suite does not need Chromium or Electron.
+  test_mobile:
+    permissions:
+      contents: read
+      id-token: write
+    name: Test Mobile
+    needs: changes
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
+
+      - name: Test
+        run: vp run --filter @t3tools/mobile test
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
@@ -572,6 +608,7 @@ jobs:
         build,
         test,
         test_web,
+        test_mobile,
         test_server,
         rust,
         mobile_native_static_analysis,
