@@ -4,6 +4,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { act, render } from "../../test/render";
 import { CommandPalette } from "./CommandPalette";
+import { VoiceProvider } from "../voice/VoiceProvider";
 import { openCommandPalette } from "../commandPaletteBus";
 import { primaryServerKeybindingsAtom } from "../state/server";
 
@@ -46,6 +47,8 @@ vi.mock("../state/use-atom-query-runner", () => ({
 }));
 vi.mock("../state/environments", async (original) => ({
   ...(await original<typeof import("../state/environments")>()),
+  // VoiceProvider calls this. The atom mock is not an environment presentation.
+  useEnvironment: () => null,
   useEnvironments: () => ({
     environments: [
       {
@@ -105,7 +108,11 @@ describe.each(["repository", "folder", "destination"] as const)("add-project %s"
     { isComposing: true, keyCode: 13 },
     { isComposing: false, keyCode: 229 },
   ])("keeps Enter in the input during composition: %j", async (composition) => {
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
     await act(() => openCommandPalette({ open: "add-project" }));
     await page.getByText(step === "folder" ? "Local folder" : "Git URL", { exact: true }).click();
     const input = () => page.getByRole("combobox");
