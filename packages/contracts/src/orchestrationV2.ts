@@ -696,6 +696,8 @@ export const OrchestrationV2Run = Schema.Struct({
   restartContinuationOfRunId: Schema.optional(RunId),
   /** The run whose usage limit started this chain's failover; continuations inherit it. */
   failoverChainId: Schema.optional(RunId),
+  /** The quota-spent instance this run was moved off; it never resumes that instance's thread. */
+  movedOffSpentInstanceId: Schema.optional(ProviderInstanceId),
   delegatedTaskId: Schema.optional(NodeId),
   workStartedAt: Schema.optional(Schema.DateTimeUtc),
   restartCancelledBackgroundWork: Schema.optional(
@@ -3203,6 +3205,8 @@ export const OrchestrationV2Command = Schema.Union([
     manualContinuationOfRunId: Schema.optional(RunId),
     /** Set by the usage-limit failover worker: the failed run whose chain this dispatch continues. */
     failoverChainId: Schema.optional(RunId),
+    /** Set by the dispatch chokepoint when it moved `modelSelection` off a quota-spent instance. */
+    movedOffSpentInstanceId: Schema.optional(ProviderInstanceId),
     usageLimitRecoveryRequestId: Schema.optional(CommandId),
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
     delegatedCompletion: Schema.optional(

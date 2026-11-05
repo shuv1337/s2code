@@ -829,11 +829,45 @@ describe("usage limit failover through the real runtime", () => {
     }),
   );
 
-  it.live.each([false, true])(
-    "starts a queued run on a fresh pooled thread (resume compatible: %s)",
-    (compatible) =>
+  it.live.each(
+    [false, true].flatMap((compatible) =>
+      (["while queued", "before queuing", "before an immediate start"] as const).flatMap((spend) =>
+        (["user message", "monitor update"] as const).map((sender) => ({
+          compatible,
+          spend,
+          sender,
+        })),
+      ),
+    ),
+  )(
+    "moves a $sender to a fresh pooled thread when spent $spend (resume compatible: $compatible)",
+    ({ compatible, spend, sender }) =>
       Effect.gen(function* () {
         const gate = yield* Deferred.make<void>();
+        // The PR watch wakes a thread through the orchestrator, not the dispatch chokepoint.
+        const sendNext = (threadId: ThreadId) =>
+          sender === "user message"
+            ? send(threadId, "queued:next", "Then this.", {
+                queue: spend !== "before an immediate start",
+              })
+            : Orchestrator.OrchestratorV2.use((o) =>
+                o.dispatch({
+                  type: "message.dispatch",
+                  commandId: CommandId.make("queued:next"),
+                  messageId: MessageId.make("queued:next"),
+                  threadId,
+                  text: "Then this.",
+                  notification: {
+                    source: { kind: "monitor" },
+                    outcome: "updated",
+                    summary: "PR update",
+                  },
+                  attachments: [],
+                  dispatchMode: { type: "queue_after_active" },
+                  createdBy: "agent",
+                  creationSource: "server",
+                }),
+              );
         yield* runPool(
           {
             // Most headroom, so the pooled thread starts here rather than on "cursor_fresh".
@@ -852,13 +886,23 @@ describe("usage limit failover through the real runtime", () => {
           ({ deliveries, resumes }) =>
             Effect.gen(function* () {
               const threadId = yield* startThread("queued", spent);
-              yield* send(threadId, "queued:next", "Then this.", { queue: true });
-              // Another thread spends the shared quota while this one still works.
-              assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              if (spend === "before an immediate start") {
+                yield* Deferred.succeed(gate, undefined);
+                yield* awaitThread(threadId, settled(1));
+              }
+              // Another thread spends the shared quota while this one works or idles.
+              if (spend !== "while queued") {
+                assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              }
+              yield* sendNext(threadId);
+              if (spend === "while queued") {
+                assert.isTrue(yield* disableInstanceOnExhaustedQuota(spent, quotaSpent));
+              }
               yield* Deferred.succeed(gate, undefined);
 
               const thread = yield* awaitThread(threadId, settled(2));
               const queued = thread.runs[1]!;
+              assert.equal(queued.movedOffSpentInstanceId, spent);
               const providerThread = thread.providerThreads.find(
                 (entry) => entry.id === queued.providerThreadId,
               );
