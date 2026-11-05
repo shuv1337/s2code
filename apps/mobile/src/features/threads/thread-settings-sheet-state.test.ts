@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 
-import { ProviderInstanceId, type ProviderOptionSelection } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderOptionSelection,
+  type ServerConfig,
+} from "@t3tools/contracts";
 import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 
 import type { ModelOption } from "../../lib/modelOptions";
@@ -14,6 +20,7 @@ import {
 import {
   applySavedModelOptions,
   canCommitPendingModel,
+  existingThreadModelSelection,
   pendingModelAfterPress,
 } from "./thread-settings-sheet-state";
 
@@ -138,13 +145,46 @@ describe("thread settings sheet state", () => {
   });
 
   it("keeps an option edit on the saved pool member, not the member the sheet shows", () => {
-    const saved = { instanceId: ProviderInstanceId.make("cursor_spent"), model: "composer-max" };
-    const shown = { ...saved, instanceId: ProviderInstanceId.make("cursor_fresh") };
+    const cursor = ProviderDriverKind.make("cursor");
+    const spent = ProviderInstanceId.make("cursor_spent");
+    const fresh = ProviderInstanceId.make("cursor_fresh");
+    const model = {
+      slug: "composer-max",
+      name: "Composer Max",
+      isCustom: false,
+      capabilities: null,
+    };
+    const config = {
+      providers: [spent, fresh].map((instanceId) => ({
+        instanceId,
+        driver: cursor,
+        enabled: instanceId === fresh,
+        installed: true,
+        auth: { status: "authenticated" },
+        models: [model],
+      })),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          [spent]: {
+            driver: cursor,
+            enabled: false,
+            disableOnUsageLimit: true,
+            usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+          },
+          [fresh]: { driver: cursor, enabled: true, disableOnUsageLimit: true },
+        },
+      },
+    } as unknown as ServerConfig;
+    const saved = { instanceId: spent, model: model.slug };
     const options = [{ id: "effort", value: "high" }];
 
+    const selection = existingThreadModelSelection(config, saved, null);
+    expect(selection.shown).toEqual({ ...saved, instanceId: fresh });
+    expect(selection.withOptions(options)).toEqual({ ...saved, options });
     expect(applySavedModelOptions(saved, options)).toEqual({ ...saved, options });
     expect(withRememberedModelOptions(saved)).toEqual({ ...saved, options });
-    expect(withRememberedModelOptions(shown)).toBe(shown);
+    expect(withRememberedModelOptions(selection.shown)).toBe(selection.shown);
   });
 
   // regression: #16816 sync model favorites and visibility across clients

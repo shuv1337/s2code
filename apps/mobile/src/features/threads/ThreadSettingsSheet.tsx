@@ -69,7 +69,6 @@ import { useReduceMotionEnabled } from "../../lib/appState";
 import {
   buildModelOptions,
   groupByProvider,
-  resolveUsageLimitPoolSelection,
   type ModelOption,
   type ProviderGroup,
 } from "../../lib/modelOptions";
@@ -122,8 +121,8 @@ import {
   selectableChoices,
 } from "./thread-settings-options";
 import {
-  applySavedModelOptions,
   canCommitPendingModel,
+  existingThreadModelSelection,
   favoritesFirst,
   modelFavoriteKey,
   modelMatchesCatalogQuery,
@@ -1529,12 +1528,12 @@ export function ExistingThreadSettingsRouteScreen({
   }
 
   const serverConfig = selectedEnvironmentRuntime?.serverConfig ?? null;
-  const savedModelSelection = draftSettings.modelSelection ?? selectedThread.modelSelection;
-  const modelSelection = resolveUsageLimitPoolSelection(
-    serverConfig,
-    savedModelSelection,
-    selectedThread.projectId,
-  );
+  const { shown: modelSelection, withOptions: withSavedModelOptions } =
+    existingThreadModelSelection(
+      serverConfig,
+      draftSettings.modelSelection ?? selectedThread.modelSelection,
+      selectedThread.projectId,
+    );
   const lockedProviderInstanceId = threadAllowsProviderSwitch({
     thread: selectedThread,
     projection: structure?.projection,
@@ -1573,9 +1572,7 @@ export function ExistingThreadSettingsRouteScreen({
         capabilities: currentModelOption?.capabilities,
         selections: modelSelection.options,
       })}
-      onUpdateOptionSelections={(options) =>
-        updateModelSelection(applySavedModelOptions(savedModelSelection, options))
-      }
+      onUpdateOptionSelections={(options) => updateModelSelection(withSavedModelOptions(options))}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
       onClose={() => navigation.goBack()}
