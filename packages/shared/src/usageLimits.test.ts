@@ -25,8 +25,10 @@ import {
   hiddenUsageLimitPoolMembers,
   pickUsageLimitPoolStart,
   pickUsageLimitReplacement,
+  poolModelIntersection,
   resolveNewThreadModelSelection,
   usageLimitPoolDriver,
+  usageLimitPools,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -329,6 +331,104 @@ describe("usage limit replacement", () => {
         ProviderInstanceId.make("idle"),
       ),
     ).toBeNull();
+  });
+
+  it("intersects pool members' models in the first member's order", () => {
+    const models = (...slugs: string[]) => ({
+      models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+    });
+    expect(
+      poolModelIntersection([models("a", "b", "c"), models("c", "b"), models("b", "c")]),
+    ).toEqual(["b", "c"]);
+    expect(poolModelIntersection([models("a"), models()])).toEqual([]);
+    expect(poolModelIntersection([])).toEqual([]);
+  });
+
+  describe("pool listing", () => {
+    const opus = { slug: model, name: "Opus", isCustom: false, capabilities: null };
+    const composer = {
+      slug: "composer-2.5",
+      name: "Composer",
+      isCustom: false,
+      capabilities: null,
+    };
+    const busy = member("busy", 70, { models: [opus, composer] });
+    const idle = member("idle", 10, { models: [composer, opus] });
+    const pools = (
+      providers: readonly ServerProvider[],
+      eligible?: (provider: ServerProvider) => boolean,
+    ) =>
+      usageLimitPools({
+        settings: settings({ solo: { disableOnUsageLimit: false } }),
+        providers,
+        projectId: null,
+        now,
+        ...(eligible === undefined ? {} : { eligible }),
+      }).map((pool) => [pool.memberInstanceIds, pool.models]);
+
+    it.each([
+      [
+        "members of one driver that opted in",
+        [busy, idle, member("solo", 0, { models: [opus, composer] }), provider({})],
+        [
+          [
+            ["busy", "idle"],
+            [model, "composer-2.5"],
+          ],
+        ],
+      ],
+      [
+        "no disabled member, even one that reported no models",
+        [busy, idle, member("unknown", undefined, { enabled: false, models: [] })],
+        [
+          [
+            ["busy", "idle"],
+            [model, "composer-2.5"],
+          ],
+        ],
+      ],
+      [
+        "an available member that has not reported its models, without narrowing the models",
+        [busy, idle, member("unknown", undefined, { models: [] })],
+        [
+          [
+            ["busy", "idle", "unknown"],
+            [model, "composer-2.5"],
+          ],
+        ],
+      ],
+      [
+        "no pool with fewer than two members that can take work",
+        [busy, member("idle", 10, { auth: { status: "unauthenticated" } })],
+        [],
+      ],
+    ] as const)("lists %s", (_name, providers, expected) => {
+      expect(pools(providers)).toEqual(expected);
+    });
+
+    it("lists a member only when the caller's check passes it", () => {
+      expect(pools([busy, idle], (provider) => provider.instanceId !== "idle")).toEqual([]);
+    });
+
+    it("leaves out a member spent since startup, which reports no models", () => {
+      expect(
+        usageLimitPools({
+          settings: settings({
+            spent: { usageLimitDisabled: { at: "2026-09-03T11:00:00.000Z", message: "Spent" } },
+          }),
+          providers: [busy, idle, member("spent", undefined, { models: [] })],
+          projectId: null,
+          now,
+        }),
+      ).toEqual([
+        {
+          driver: cursor,
+          label: "Cursor pool",
+          memberInstanceIds: ["busy", "idle"],
+          models: [model, "composer-2.5"],
+        },
+      ]);
+    });
   });
 });
 

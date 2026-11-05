@@ -69,7 +69,7 @@ import {
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
-import { collectProviderUsageLimits } from "@t3tools/shared/usageLimits";
+import { collectProviderUsageLimits, usageLimitPools } from "@t3tools/shared/usageLimits";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
@@ -2356,6 +2356,49 @@ const make = Effect.gen(function* () {
             canRunChildTask: constraints.length === 0,
             canRunCrossProviderChildTask: constraints.length === 0,
             constraints: [...constraints],
+          };
+        }),
+        pools: usageLimitPools({
+          settings,
+          providers,
+          projectId: parent?.thread.projectId ?? null,
+          now: yield* Clock.currentTimeMillis,
+          eligible: (provider) =>
+            providerConstraints(provider, orchestrationCapableInstanceIds.has(provider.instanceId))
+              .length === 0,
+        }).map((pool) => {
+          const members = providers.filter((provider) =>
+            pool.memberInstanceIds.includes(provider.instanceId),
+          );
+          const first = members.find((member) => member.models.length > 0) ?? members[0]!;
+          const shared = new Set(pool.models);
+          const preferences = (instanceId: ServerProvider["instanceId"]) =>
+            settings.providerModelPreferences?.[instanceId];
+          // A model hidden on any member stays hidden for the pool.
+          const { listed, omitted } = listCapabilityModels({
+            provider: { ...first, models: first.models.filter((model) => shared.has(model.slug)) },
+            preferences: {
+              hiddenModels: members.flatMap(
+                (member) => preferences(member.instanceId)?.hiddenModels ?? [],
+              ),
+              modelOrder: preferences(first.instanceId)?.modelOrder ?? [],
+            },
+            searchTerms,
+            isPinned: (model) =>
+              model.isCustom ||
+              members.some(
+                (member) =>
+                  (inherited?.instanceId === member.instanceId && inherited.model === model.slug) ||
+                  (settings.favorites ?? []).some(
+                    (favorite) =>
+                      favorite.provider === member.instanceId && favorite.model === model.slug,
+                  ),
+              ),
+          });
+          return {
+            ...pool,
+            models: listed.map((model) => model.slug),
+            ...(omitted === 0 ? {} : { omittedModels: omitted }),
           };
         }),
         features: {
