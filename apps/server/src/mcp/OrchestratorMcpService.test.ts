@@ -2346,6 +2346,13 @@ describe("OrchestratorMcpService provider resolution", () => {
               models: [model],
             },
           ]);
+          yield* settings.updateSettings({
+            providerModelPreferences: {
+              [altInstanceId]: { hiddenModels: [model], modelOrder: [] },
+            },
+          });
+          assert.deepEqual((yield* service.capabilities(scope)).pools?.[0]?.models, []);
+          yield* settings.updateSettings({ providerModelPreferences: {} });
           const threadsBefore = yield* orchestrator.countThreads();
           const create = (
             clientRequestId: string,
@@ -2410,6 +2417,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           ).pipe(Effect.flip);
           assert.include(disabled.message, "is disabled for this project");
           assert.equal(yield* orchestrator.countThreads(), threadsAfterMove);
+          assert.deepEqual((yield* service.capabilities(scope)).pools, []);
           yield* settings.updateSettings({ projectSettingsOverrides: {} });
 
           const bare = yield* create("no-adapter", {

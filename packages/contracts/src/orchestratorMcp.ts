@@ -697,13 +697,15 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 });
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
-/** Instances of one driver that share work by usage-limit headroom. */
 export const OrchestratorMcpProviderPool = Schema.Struct({
   driver: ProviderDriverKind,
   label: Schema.String,
   memberInstanceIds: Schema.Array(ProviderInstanceId),
-  /** Models every member has. */
   models: Schema.Array(Schema.String),
+  omittedModels: Schema.optional(NonNegativeInt),
+}).annotate({
+  description:
+    "Members that can take work now. `models`: those every member has. Name a member's providerInstanceId to use one.",
 });
 export type OrchestratorMcpProviderPool = typeof OrchestratorMcpProviderPool.Type;
 
