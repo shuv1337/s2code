@@ -260,7 +260,8 @@ const git = (
       operation: "GitVcsDriver.test.git",
       cwd,
       args,
-      ...(env ? { env } : {}),
+      // Host config such as fetch.prune=true must not change fixture setup.
+      env: { GIT_CONFIG_GLOBAL: NodeOS.devNull, GIT_CONFIG_NOSYSTEM: "1", ...env },
       timeoutMs: 10_000,
     });
     return result.stdout.trim();
@@ -284,6 +285,21 @@ const initRepoWithCommit = (
     const initialBranch = yield* git(cwd, ["branch", "--show-current"]);
     return { initialBranch };
   });
+
+const makeDanglingWorktree = Effect.gen(function* () {
+  const parent = yield* makeTmpDir();
+  const pathService = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const repo = pathService.join(parent, "repo");
+  const worktree = pathService.join(parent, "dangling");
+  yield* fileSystem.makeDirectory(repo);
+  yield* initRepoWithCommit(repo);
+  yield* git(repo, ["worktree", "add", worktree, "-b", "dangling"]);
+  yield* fileSystem.remove(pathService.join(repo, ".git", "worktrees", "dangling"), {
+    recursive: true,
+  });
+  return worktree;
+});
 
 it.effect.each(["root", "nested", "worktree"] as const)(
   "skips clean filters while the %s index is locked and resumes after unlock",
@@ -1851,24 +1867,25 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
     // regression: #8645 name the cause of a failed git command
     it.effect("names a missing repository behind a failed command", () =>
       Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
         const driver = yield* GitVcsDriver.GitVcsDriver;
 
-        const error = yield* driver
-          .execute({
-            operation: "GitVcsDriver.test.notARepository",
-            cwd,
-            args: ["rev-parse", "--abbrev-ref", "HEAD"],
-            env: { LC_ALL: "C" },
-          })
-          .pipe(Effect.flip);
+        for (const cwd of [yield* makeTmpDir(), yield* makeDanglingWorktree]) {
+          const error = yield* driver
+            .execute({
+              operation: "GitVcsDriver.test.notARepository",
+              cwd,
+              args: ["rev-parse", "--abbrev-ref", "HEAD"],
+              env: { LC_ALL: "C" },
+            })
+            .pipe(Effect.flip);
 
-        assert.deepInclude(error, {
-          _tag: "GitCommandError",
-          operation: "GitVcsDriver.test.notARepository",
-          reason: "not_a_repository",
-        });
-        assert.include(error.message, "(not_a_repository)");
+          assert.deepInclude(error, {
+            _tag: "GitCommandError",
+            operation: "GitVcsDriver.test.notARepository",
+            reason: "not_a_repository",
+          });
+          assert.include(error.message, "(not_a_repository)");
+        }
       }),
     );
 
@@ -2137,23 +2154,24 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("recovers a structurally identified missing cwd as a non-repository", () =>
+    it.effect("recovers a missing cwd or a dangling worktree as a non-repository", () =>
       Effect.gen(function* () {
         const parent = yield* makeTmpDir();
         const pathService = yield* Path.Path;
-        const cwd = pathService.join(parent, "missing");
         const driver = yield* GitVcsDriver.GitVcsDriver;
 
-        const [localStatus, remoteStatus, refs] = yield* Effect.all([
-          driver.statusDetails(cwd),
-          driver.statusDetailsRemote(cwd, { refreshUpstream: false }),
-          driver.listRefs({ cwd }),
-        ]);
+        for (const cwd of [pathService.join(parent, "missing"), yield* makeDanglingWorktree]) {
+          const [localStatus, remoteStatus, refs] = yield* Effect.all([
+            driver.statusDetails(cwd),
+            driver.statusDetailsRemote(cwd, { refreshUpstream: false }),
+            driver.listRefs({ cwd }),
+          ]);
 
-        assert.equal(localStatus.isRepo, false);
-        assert.equal(remoteStatus.isRepo, false);
-        assert.equal(refs.isRepo, false);
-        assert.deepStrictEqual(refs.refs, []);
+          assert.equal(localStatus.isRepo, false);
+          assert.equal(remoteStatus.isRepo, false);
+          assert.equal(refs.isRepo, false);
+          assert.deepStrictEqual(refs.refs, []);
+        }
       }),
     );
   });
