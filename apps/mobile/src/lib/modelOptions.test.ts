@@ -621,6 +621,48 @@ describe("mobile model options", () => {
     expect(resolveUsageLimitPoolSelection(config, shown, null)).toBe(shown);
   });
 
+  it("sends on an auto-disabled pool member only while another member can take the turn", () => {
+    const cursor = ProviderDriverKind.make("cursor");
+    const spent = ProviderInstanceId.make("cursor_spent");
+    const fresh = ProviderInstanceId.make("cursor_fresh");
+    const model = {
+      slug: "composer-max",
+      name: "Composer Max",
+      isCustom: false,
+      capabilities: null,
+    };
+    const configWith = (freshEnabled: boolean) =>
+      ({
+        providers: [spent, fresh].map((instanceId) => ({
+          instanceId,
+          driver: cursor,
+          enabled: instanceId === fresh && freshEnabled,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [model],
+        })),
+        settings: {
+          ...DEFAULT_SERVER_SETTINGS,
+          providerInstances: {
+            [spent]: {
+              driver: cursor,
+              enabled: false,
+              disableOnUsageLimit: true,
+              usageLimitDisabled: {
+                at: "2026-11-02T00:00:00.000Z",
+                message: "Usage limit reached.",
+              },
+            },
+            [fresh]: { driver: cursor, enabled: freshEnabled, disableOnUsageLimit: true },
+          },
+        },
+      }) as unknown as ServerConfig;
+    const onSpent = { instanceId: spent, model: model.slug };
+
+    expect(isModelSelectionUnavailable(configWith(true), onSpent, null)).toBe(false);
+    expect(isModelSelectionUnavailable(configWith(false), onSpent, null)).toBe(true);
+  });
+
   describe("project-aware enablement", () => {
     const projectId = ProjectId.make("project-a");
     const instanceId = ProviderInstanceId.make("codex_work");

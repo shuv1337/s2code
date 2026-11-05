@@ -20,6 +20,7 @@ import {
 } from "@t3tools/contracts";
 import {
   hiddenUsageLimitPoolMembers,
+  pickUsageLimitReplacement,
   usageLimitPoolDriver,
   usageLimitPoolLabel,
 } from "@t3tools/shared/usageLimits";
@@ -165,6 +166,25 @@ function normalizeSelectionOptions(
       };
 }
 
+/** The server moves a turn off an auto-disabled pool member when another member can take it. */
+function serverReroutesSpentPoolMember(
+  config: T3ServerConfig,
+  selection: ModelSelection,
+  projectId: ProjectId | null,
+): boolean {
+  const settings = config.settings;
+  return (
+    settings?.providerInstances[selection.instanceId]?.usageLimitDisabled != null &&
+    pickUsageLimitReplacement({
+      selection,
+      providers: config.providers,
+      settings,
+      projectId,
+      now: Date.now(),
+    }) !== null
+  );
+}
+
 /** Require explicit projectId or null so omissions cannot bypass project provider disablement. */
 export function isModelSelectionUnavailable(
   config: T3ServerConfig | null | undefined,
@@ -177,7 +197,10 @@ export function isModelSelectionUnavailable(
   const provider = config.providers.find(
     (candidate) => candidate.instanceId === selection.instanceId,
   );
-  if (isDisabledForProject(config, provider, selection.instanceId, projectId)) {
+  if (
+    isDisabledForProject(config, provider, selection.instanceId, projectId) &&
+    !serverReroutesSpentPoolMember(config, selection, projectId)
+  ) {
     return true;
   }
   const driver =
