@@ -274,6 +274,55 @@ it.effect.each(["message.dispatch", "delegated_task.request"] as const)(
   },
 );
 
+it.effect("a later turn naming another pool member stays on the thread's pool seat", () => {
+  const seat = ProviderInstanceId.make("codex_work");
+  const stale = ProviderInstanceId.make("codex_spare");
+  const pooled = { driver: ProviderDriverKind.make("codex"), disableOnUsageLimit: true };
+  const run = (id: string, seatSettings: Record<string, unknown>, explicit?: true) => {
+    const dispatched: Array<string> = [];
+    return Effect.gen(function* () {
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`command:thread-management:seat-${id}`),
+        threadId: ThreadId.make("thread:thread-management:chokepoint"),
+        messageId: MessageId.make(`message:thread-management:seat-${id}`),
+        text: "Next step",
+        attachments: [],
+        modelSelection: { instanceId: stale, model: "test" },
+        ...(explicit ? { modelSelectionExplicit: explicit } : {}),
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      return dispatched;
+    }).pipe(
+      Effect.provide(
+        layerDispatchChokepointTest(
+          ServerSettings.layerTest({
+            providerInstances: {
+              [seat]: { ...pooled, enabled: true, ...seatSettings },
+              [stale]: { ...pooled, enabled: true },
+            },
+          }),
+        )(dispatched),
+      ),
+    );
+  };
+
+  return Effect.gen(function* () {
+    // The orchestrator switches providers, with a handoff, only when the instance differs.
+    expect(yield* run("stale", {})).toEqual([`message.dispatch:${seat}`]);
+    const spent = {
+      enabled: false,
+      usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+    };
+    expect(yield* run("seat-spent", spent)).toEqual([`message.dispatch:${stale}`]);
+    expect(yield* run("seat-off", { enabled: false })).toEqual([`message.dispatch:${stale}`]);
+    expect(yield* run("explicit", {}, true)).toEqual([`message.dispatch:${stale}`]);
+  });
+});
+
 it.effect(
   "the dispatch chokepoint refuses a continuation message.dispatch on a project-disabled instance before reaching the orchestrator",
   () => {

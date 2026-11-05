@@ -43,6 +43,7 @@ import {
 } from "@t3tools/contracts";
 import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
+import { areUsageLimitPoolPeers } from "@t3tools/shared/usageLimits";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -803,26 +804,44 @@ const make = Effect.gen(function* () {
       const threadId =
         command.type === "message.dispatch" ? command.threadId : command.parentThreadId;
       const { thread } = yield* orchestrator.getThreadRecords(threadId, []);
-      const selection =
+      const requested =
         command.type === "message.dispatch"
           ? (command.modelSelection ?? thread.modelSelection)
           : command.modelSelection;
+      const threadStart =
+        resolution?.threadStart ??
+        (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId)));
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const seat = thread.modelSelection.instanceId;
+      // Composers can carry the pool member they asked for before the pool placed the thread.
+      const keepSeat =
+        command.type === "message.dispatch" &&
+        !threadStart &&
+        command.modelSelectionExplicit !== true &&
+        command.movedOffSpentInstanceId === undefined &&
+        areUsageLimitPoolPeers(settings, requested.instanceId, seat) &&
+        resolveProjectProviderInstanceEnabled(settings, thread.projectId, seat);
+      if (keepSeat) {
+        yield* Effect.logInfo("Kept thread on its pool seat", {
+          threadId,
+          requestedInstanceId: requested.instanceId,
+          seatInstanceId: seat,
+        });
+      }
+      const selection = keepSeat ? { ...requested, instanceId: seat } : requested;
       // Without `named` the resolver never refuses; named refusals come from resolveThreadStartInstance.
-      const replacement = yield* resolveInstance(selection, thread.projectId, {
-        threadStart:
-          resolution?.threadStart ??
-          (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId))),
-      }).pipe(Effect.orDie);
-      if (replacement === selection) return command;
+      const replacement = yield* resolveInstance(selection, thread.projectId, { threadStart }).pipe(
+        Effect.orDie,
+      );
+      if (replacement === requested) return command;
       if (command.type === "delegated_task.request") {
         return { ...command, modelSelection: replacement };
       }
-      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
       return {
         ...command,
         modelSelection: replacement,
-        ...(isSpentInstance(settings, selection.instanceId)
-          ? { movedOffSpentInstanceId: selection.instanceId }
+        ...(isSpentInstance(settings, requested.instanceId)
+          ? { movedOffSpentInstanceId: requested.instanceId }
           : {}),
       };
     },

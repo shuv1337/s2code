@@ -34,6 +34,7 @@ import {
   type PreviewAnnotationPayload,
   type ProviderOptionSelection,
   type ScopedThreadRef,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
@@ -1272,6 +1273,7 @@ function modelReconciliationHarness(
   environmentId: EnvironmentId,
   threadId: ThreadId,
   initialStatus: EnvironmentShellStatus = "live",
+  settings: Pick<ServerSettings, "providerInstances"> | null = null,
 ) {
   const tasks: Array<() => void> = [];
   const registry = AtomRegistry.make({
@@ -1313,6 +1315,7 @@ function modelReconciliationHarness(
     status: initialStatus,
   });
   const shellResultAtom = Atom.map(shellStateAtom, AsyncResult.success);
+  const settingsAtom = Atom.make(settings);
   const snapshotAtom = createEnvironmentSnapshotAtom(() => shellResultAtom)(environmentId);
   const catalogValueAtom = Atom.make({
     isReady: true,
@@ -1345,6 +1348,7 @@ function modelReconciliationHarness(
       threadShellAtom: shells.threadShellAtom,
       threadRefsAtom: shells.threadRefsAtom,
       shellStateAtom: () => shellResultAtom,
+      settingsAtom: () => settingsAtom,
     }),
   );
   flush();
@@ -1656,6 +1660,21 @@ describe("composerDraftStore modelSelection", () => {
       expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toEqual(before);
     }
     h.update({ modelSelection: { ...pick, options: pick.options!.toReversed() } });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+  });
+
+  it("releases a pick of one pool member once the pool places the thread on another", () => {
+    const pooled = { driver: CODEX_DRIVER, disableOnUsageLimit: true };
+    const h = modelReconciliationHarness(TEST_ENVIRONMENT_ID, threadId, "live", {
+      providerInstances: { [CODEX_INSTANCE]: pooled, [CODEX_SECONDARY_INSTANCE]: pooled },
+    });
+    const pick = createModelSelection(CODEX_SECONDARY_INSTANCE, "pool-model");
+    useComposerDraftStore.getState().setModelSelection(threadRef, pick, { explicit: true });
+    const before = draftFor(threadId, TEST_ENVIRONMENT_ID);
+
+    h.update({ modelSelection: { ...pick, instanceId: CODEX_INSTANCE, model: "other-model" } });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toEqual(before);
+    h.update({ modelSelection: { ...pick, instanceId: CODEX_INSTANCE } });
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
   });
 

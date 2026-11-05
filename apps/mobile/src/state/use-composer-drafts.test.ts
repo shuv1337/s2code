@@ -316,6 +316,7 @@ function modelReconciliationHarness(
     hiddenThreadTagsAtom: () => Atom.make(null),
   });
   const selectedShell = shells.threadShellAtom({ environmentId, threadId: selectedThreadId });
+  const settingsAtom = Atom.make(null);
   onTestFinished(registry.mount(selectedShell));
   onTestFinished(
     subscribeComposerDraftModelReconciliation({
@@ -323,6 +324,7 @@ function modelReconciliationHarness(
       threadShellAtom: shells.threadShellAtom,
       threadRefsAtom: shells.threadRefsAtom,
       shellStateAtom: () => shellResultAtom,
+      settingsAtom: () => settingsAtom,
     }),
   );
   flush();

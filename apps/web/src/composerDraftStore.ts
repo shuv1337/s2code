@@ -22,6 +22,7 @@ import {
   ThreadContextRecord,
   EnvironmentContextRecord,
   type ServerProvider,
+  type ServerSettings,
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
@@ -45,6 +46,7 @@ import {
   normalizeCustomModelSlug,
   normalizeModelSlug,
 } from "@t3tools/shared/model";
+import { draftModelPickMatchesPoolSeat } from "@t3tools/shared/usageLimits";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import type {
@@ -4250,6 +4252,9 @@ export function subscribeComposerDraftModelReconciliation(input: {
   readonly shellStateAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<AsyncResult.AsyncResult<EnvironmentShellState, unknown>>;
+  readonly settingsAtom: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<Pick<ServerSettings, "providerInstances"> | null>;
 }): () => void {
   const draftsAtom = Atom.make(composerDraftStore.getState());
   const unsubscribeDrafts = composerDraftStore.subscribe((state) =>
@@ -4269,18 +4274,18 @@ export function subscribeComposerDraftModelReconciliation(input: {
       const ref = parseScopedThreadKey(key);
       const pick = draft.modelSelectionByProvider[draft.activeProvider];
       if (!ref || !pick || !threadKeys.has(key)) continue;
+      const pickMatches = (selection: ModelSelection) =>
+        draftModelPickMatchesThread(pick, selection) ||
+        draftModelPickMatchesPoolSeat(get(input.settingsAtom(ref.environmentId)), pick, selection);
       const thread = get(input.threadShellAtom(ref));
-      if (!thread || !draftModelPickMatchesThread(pick, thread.modelSelection)) continue;
+      if (!thread || !pickMatches(thread.modelSelection)) continue;
       // Status and selection must come from the same emission; derived atoms can update apart.
       const shell = AsyncResult.getOrElse(get(input.shellStateAtom(ref.environmentId)), () => null);
       if (shell?.status !== "live") continue;
       const authoritativeThread = Option.getOrNull(shell.snapshot)?.threads.find(
         (candidate) => candidate.id === ref.threadId,
       );
-      if (
-        authoritativeThread &&
-        draftModelPickMatchesThread(pick, authoritativeThread.modelSelection)
-      ) {
+      if (authoritativeThread && pickMatches(authoritativeThread.modelSelection)) {
         matches.push([key, draft]);
       }
     }

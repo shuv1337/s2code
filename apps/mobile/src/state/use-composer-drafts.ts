@@ -19,6 +19,7 @@ import {
   type ProviderOptionSelection,
   type RuntimeMode,
   type ScopedThreadRef,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { useEffect, useState } from "react";
@@ -30,6 +31,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import { draftModelPickMatchesThread } from "@t3tools/shared/model";
+import { draftModelPickMatchesPoolSeat } from "@t3tools/shared/usageLimits";
 
 import { writeFileAtomically } from "../lib/atomic-file";
 import { createComposerContextHistory, referencedComposerContext } from "../lib/composerContext";
@@ -1539,6 +1541,9 @@ export function subscribeComposerDraftModelReconciliation(input: {
   readonly shellStateAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<AsyncResult.AsyncResult<EnvironmentShellState, unknown>>;
+  readonly settingsAtom: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<Pick<ServerSettings, "providerInstances"> | null>;
 }): () => void {
   const draftsAtom = Atom.make(appAtomRegistry.get(composerDraftsAtom));
   const unsubscribeDrafts = appAtomRegistry.subscribe(composerDraftsAtom, (drafts) =>
@@ -1552,22 +1557,22 @@ export function subscribeComposerDraftModelReconciliation(input: {
     const threadKeys = get(threadKeysAtom);
     const matches: Array<readonly [string, ComposerDraft]> = [];
     for (const [key, draft] of Object.entries(get(draftsAtom))) {
-      if (!draft.modelSelection || isNewTaskDraftKey(key) || isQueuedEditDraftKey(key)) continue;
+      const pick = draft.modelSelection;
+      if (!pick || isNewTaskDraftKey(key) || isQueuedEditDraftKey(key)) continue;
       const ref = parseScopedThreadKey(key);
       if (!ref || !threadKeys.has(key)) continue;
+      const pickMatches = (selection: ModelSelection) =>
+        draftModelPickMatchesThread(pick, selection) ||
+        draftModelPickMatchesPoolSeat(get(input.settingsAtom(ref.environmentId)), pick, selection);
       const thread = get(input.threadShellAtom(ref));
-      if (!thread || !draftModelPickMatchesThread(draft.modelSelection, thread.modelSelection))
-        continue;
+      if (!thread || !pickMatches(thread.modelSelection)) continue;
       // Status and selection must come from the same emission; derived atoms can update apart.
       const shell = AsyncResult.getOrElse(get(input.shellStateAtom(ref.environmentId)), () => null);
       if (shell?.status !== "live") continue;
       const authoritativeThread = Option.getOrNull(shell.snapshot)?.threads.find(
         (candidate) => candidate.id === ref.threadId,
       );
-      if (
-        authoritativeThread &&
-        draftModelPickMatchesThread(draft.modelSelection, authoritativeThread.modelSelection)
-      ) {
+      if (authoritativeThread && pickMatches(authoritativeThread.modelSelection)) {
         matches.push([key, draft]);
       }
     }
