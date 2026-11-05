@@ -2,9 +2,15 @@
 import * as NodeCrypto from "node:crypto";
 import type { EnvironmentId, PeerEnvironmentProof } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+
+export class PeerProofSignError extends Schema.TaggedError<PeerProofSignError>()(
+  "PeerProofSignError",
+  { cause: Schema.Defect() },
+) {}
 
 // This key also signs cloud proofs; the prefix prevents cross-protocol signature reuse.
 const message = (environmentId: string, nonce: string) =>
@@ -50,5 +56,8 @@ export const create = Effect.fn("PeerProof.create")(function* (nonce: string) {
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const keys = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   const environmentId = yield* environment.getEnvironmentId;
-  return yield* Effect.try(() => sign(environmentId, nonce, keys));
+  return yield* Effect.try({
+    try: () => sign(environmentId, nonce, keys),
+    catch: (cause) => new PeerProofSignError({ cause }),
+  });
 });

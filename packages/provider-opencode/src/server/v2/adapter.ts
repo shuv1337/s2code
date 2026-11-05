@@ -1046,7 +1046,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       turn: ActiveTurn,
       id: string,
       status: "running" | "completed" | "failed" | "interrupted",
-      result?: { readonly output: string | undefined; readonly metadata: unknown },
+      result?: {
+        readonly output: string | undefined;
+        readonly metadata: unknown;
+        readonly files?: ReadonlyArray<{ readonly uri: string; readonly mime: string }>;
+      },
     ) {
       const tool = turn.tools.get(id);
       if (tool === undefined) return;
@@ -1068,6 +1072,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             name: tool.name,
             input: tool.input,
             output: result?.output,
+            files: result?.files,
             completedMetadata: status === "completed" ? result?.metadata : undefined,
           },
         ),
@@ -2147,6 +2152,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           const output = textOf(event.data.content);
           yield* emitTool(state, turn, event.data.id, "completed", {
             output,
+            files: event.data.content.flatMap((part) => (part.type === "file" ? [part] : [])),
             metadata: event.data.metadata,
           });
           turn.tools.delete(event.data.id);
@@ -2605,6 +2611,9 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           if (part.state.status === "completed") {
             yield* emitTool(state, turn, part.id, "completed", {
               output: textOf(part.state.content),
+              files: part.state.content.flatMap((content) =>
+                content.type === "file" ? [content] : [],
+              ),
               metadata: part.state.metadata,
             });
             turn.tools.delete(part.id);

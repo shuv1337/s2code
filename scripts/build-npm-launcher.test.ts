@@ -80,7 +80,7 @@ exit 7
   yield* fs.chmod(path.join(root, "release", stem, "t3"), 0o755);
   const tar = yield* run("tar", ["-czf", archiveName, stem], {
     cwd: path.join(root, "release"),
-    env: { PATH: process.env.PATH },
+    env: { PATH: (yield* HostProcess.Environment).PATH },
   });
   assert.equal(tar.exitCode, 0, tar.stderr);
   let archive = yield* fs.readFile(path.join(root, "release", archiveName));
@@ -200,14 +200,14 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         yield* fs.makeDirectory(installed);
         const unpack = yield* run("tar", ["-xzf", output.tarball, "-C", installed], {
           cwd: root,
-          env: { PATH: process.env.PATH },
+          env: { PATH: (yield* HostProcess.Environment).PATH },
         });
         assert.equal(unpack.exitCode, 0, unpack.stderr);
         const packageDir = path.join(installed, "package");
 
         const home = path.join(root, "home");
         const env = {
-          PATH: process.env.PATH,
+          PATH: (yield* HostProcess.Environment).PATH,
           HOME: home,
           T3CODE_TEST_CALLS: path.join(root, "calls"),
           S2CODE_RELEASE_BASE_URL: release.baseUrl,
@@ -450,11 +450,12 @@ fs.readFileSync = (file, ...rest) => {
           VERSION,
           `${yield* HostProcess.Platform}-${yield* HostProcess.Architecture}` as (typeof CLI_ARCHIVE_PLATFORM_KEYS)[number],
         );
+        const hostPath = (yield* HostProcess.Environment).PATH;
         const launch = (home: string, extra: Record<string, string> = {}) =>
           run(process.execPath, [launcher, "--version"], {
             cwd: root,
             env: {
-              PATH: process.env.PATH,
+              PATH: hostPath,
               HOME: home,
               S2CODE_RELEASE_BASE_URL: release.baseUrl,
               S2CODE_DOWNLOAD_TIMEOUT_SECONDS: "2",
@@ -517,7 +518,7 @@ fs.readFileSync = (file, ...rest) => {
         );
         const tooOld = yield* run(process.execPath, ["--import", oldNode, launcher, "--version"], {
           cwd: root,
-          env: { PATH: process.env.PATH, HOME: path.join(root, "old-node-home") },
+          env: { PATH: hostPath, HOME: path.join(root, "old-node-home") },
         });
         assert.equal(tooOld.exitCode, 1);
         assert.include(tooOld.stderr, "needs Node.js 18 or newer");
@@ -589,7 +590,7 @@ syncBuiltinESMExports();
 `,
           );
           const env = {
-            PATH: process.env.PATH,
+            PATH: (yield* HostProcess.Environment).PATH,
             HOME: home,
             S2CODE_RELEASE_BASE_URL: release.baseUrl,
             T3CODE_TEST_READY: path.join(root, "probe-ready"),

@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off globalDate:off -- Guarded release CLI boundary; publishing is reachable only with explicit CI execution.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off globalDate:off extendsNativeError:off -- Guarded release CLI boundary; publishing is reachable only with explicit CI execution.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";

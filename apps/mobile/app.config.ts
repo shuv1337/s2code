@@ -1,6 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 import { applyDevelopmentProductOverrides } from "@t3tools/shared/productIdentity";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Expo config runs before any Effect runtime.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
 import { materializeMobileFirebaseConfig } from "../../scripts/lib/mobile-firebase-config.ts";
@@ -21,6 +22,8 @@ type AppVariant = "development" | "preview" | "production";
 const repoEnv = loadRepoEnv();
 applyDevelopmentProductOverrides(repoEnv);
 Object.assign(process.env, repoEnv);
+// Expo's TypeScript setup otherwise installs `typescript` on every start; we typecheck with tsrs.
+process.env.EXPO_NO_TYPESCRIPT_SETUP = "1";
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const expoIdentity = resolveExpoIdentity(repoEnv);

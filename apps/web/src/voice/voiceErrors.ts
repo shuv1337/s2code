@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line extendsNativeError:off -- Thrown and rejected by browser voice APIs, never in an Effect failure channel.
 export class VoiceSessionError extends Error {
   readonly code: string;
   readonly recoverable: boolean;

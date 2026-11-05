@@ -5,18 +5,19 @@ import { VoiceSettings } from "../voice/VoiceSettings";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import {
-  AndroidSettingsEnvironmentFilter,
+  useSettingsEnvironmentMenu,
   SettingsEnvironmentFilterHeader,
 } from "./components/SettingsEnvironmentFilterHeader";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 
 export function SettingsVoiceRouteScreen() {
   const { selectedTargets } = useSettingsEnvironmentFilter();
+  const environmentMenu = useSettingsEnvironmentMenu();
   const insets = useSafeAreaInsets();
   return (
     <>
       <SettingsEnvironmentFilterHeader />
-      <SettingsScreen title="Voice" trailing={<AndroidSettingsEnvironmentFilter />}>
+      <SettingsScreen title="Voice" menus={[environmentMenu]}>
         <ScreenScrollView
           contentInsetAdjustmentBehavior="automatic"
           contentContainerClassName="gap-6 px-5 pt-4"

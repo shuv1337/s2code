@@ -64,11 +64,10 @@ const make = Effect.gen(function* () {
       return yield* new TranscriptionError({ code: "invalid_audio" });
     }
     const work = Effect.gen(function* () {
-      const ffmpeg = yield* Effect.try(loadFfmpeg).pipe(
-        Effect.mapError(
-          (cause) => new TranscriptionError({ code: "transcription_unavailable", cause }),
-        ),
-      );
+      const ffmpeg = yield* Effect.try({
+        try: loadFfmpeg,
+        catch: (cause) => new TranscriptionError({ code: "transcription_unavailable", cause }),
+      });
       // ffmpeg-static resolves to a path on every supported platform whether or
       // not its install wrote the executable, so an absent file is as
       // unavailable as an absent package rather than a spawn failure.
@@ -131,40 +130,38 @@ const make = Effect.gen(function* () {
             (cause) => new TranscriptionError({ code: "speech_model_unavailable", cause }),
           ),
         );
-        recognizer = yield* Effect.tryPromise(async () => {
-          const sherpa = loadSherpa();
-          return sherpa.OfflineRecognizer.createAsync({
-            featConfig: { sampleRate: 16000, featureDim: 80 },
-            modelConfig: {
-              transducer: {
-                encoder: path.join(directory, "encoder.int8.onnx"),
-                decoder: path.join(directory, "decoder.int8.onnx"),
-                joiner: path.join(directory, "joiner.int8.onnx"),
+        recognizer = yield* Effect.tryPromise({
+          try: async () => {
+            const sherpa = loadSherpa();
+            return sherpa.OfflineRecognizer.createAsync({
+              featConfig: { sampleRate: 16000, featureDim: 80 },
+              modelConfig: {
+                transducer: {
+                  encoder: path.join(directory, "encoder.int8.onnx"),
+                  decoder: path.join(directory, "decoder.int8.onnx"),
+                  joiner: path.join(directory, "joiner.int8.onnx"),
+                },
+                tokens: path.join(directory, "tokens.txt"),
+                numThreads: 2,
+                provider: "cpu",
+                modelType: "nemo_transducer",
               },
-              tokens: path.join(directory, "tokens.txt"),
-              numThreads: 2,
-              provider: "cpu",
-              modelType: "nemo_transducer",
-            },
-          });
-        }).pipe(
-          Effect.uninterruptible,
-          Effect.mapError(
-            (cause) => new TranscriptionError({ code: "transcription_unavailable", cause }),
-          ),
-        );
+            });
+          },
+          catch: (cause) => new TranscriptionError({ code: "transcription_unavailable", cause }),
+        }).pipe(Effect.uninterruptible);
       }
       const activeRecognizer = recognizer;
       // The addon is asynchronous but cannot cancel a decode. Retain its permit
       // until it settles so a disconnected Watch cannot start concurrent decodes.
-      const text = yield* Effect.tryPromise(async () => {
-        const stream = activeRecognizer.createStream();
-        stream.acceptWaveform({ sampleRate: 16000, samples });
-        return (await activeRecognizer.decodeAsync(stream)).text.trim();
-      }).pipe(
-        Effect.uninterruptible,
-        Effect.mapError((cause) => new TranscriptionError({ code: "transcription_failed", cause })),
-      );
+      const text = yield* Effect.tryPromise({
+        try: async () => {
+          const stream = activeRecognizer.createStream();
+          stream.acceptWaveform({ sampleRate: 16000, samples });
+          return (await activeRecognizer.decodeAsync(stream)).text.trim();
+        },
+        catch: (cause) => new TranscriptionError({ code: "transcription_failed", cause }),
+      }).pipe(Effect.uninterruptible);
       if (!text) return yield* new TranscriptionError({ code: "no_speech" });
       return text;
     }).pipe(
