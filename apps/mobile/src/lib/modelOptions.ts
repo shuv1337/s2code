@@ -166,23 +166,48 @@ function normalizeSelectionOptions(
       };
 }
 
-/** The server moves a turn off an auto-disabled pool member when another member can take it. */
-function serverReroutesSpentPoolMember(
+function isUsageLimitDisabled(
+  config: T3ServerConfig | null | undefined,
+  instanceId: ModelSelection["instanceId"],
+): boolean {
+  return config?.settings?.providerInstances[instanceId]?.usageLimitDisabled != null;
+}
+
+/** Where the server runs a turn: off an auto-disabled pool member when another member can take it. */
+function serverRunSelection(
   config: T3ServerConfig,
   selection: ModelSelection,
   projectId: ProjectId | null,
-): boolean {
+): ModelSelection {
   const settings = config.settings;
+  if (!settings || !isUsageLimitDisabled(config, selection.instanceId)) return selection;
   return (
-    settings?.providerInstances[selection.instanceId]?.usageLimitDisabled != null &&
     pickUsageLimitReplacement({
       selection,
       providers: config.providers,
       settings,
       projectId,
       now: Date.now(),
-    }) !== null
+    }) ?? selection
   );
+}
+
+function serverReroutesSpentPoolMember(
+  config: T3ServerConfig,
+  selection: ModelSelection,
+  projectId: ProjectId | null,
+): boolean {
+  return serverRunSelection(config, selection, projectId) !== selection;
+}
+
+/** The selection a pending-handoff preview compares against: where the next turn will run. */
+export function resolvePendingHandoffTarget(
+  config: T3ServerConfig | null | undefined,
+  selection: ModelSelection | null,
+  projectId: ProjectId | null,
+): ModelSelection | null {
+  if (!selection || isModelSelectionUnavailable(config, selection, projectId)) return null;
+  return config ? serverRunSelection(config, selection, projectId) : selection;
 }
 
 /** Require explicit projectId or null so omissions cannot bypass project provider disablement. */
@@ -238,6 +263,16 @@ export function describeUnavailableModelSelection(
     return {
       title: "Provider not allowed",
       detail: `${disallowedProviderMessage(config?.managedPolicy?.organization, label)} Choose another model.`,
+    };
+  }
+  const pool =
+    config?.settings && isUsageLimitDisabled(config, selection.instanceId)
+      ? usageLimitPoolDriver(config.settings, selection.instanceId)
+      : null;
+  if (pool !== null) {
+    return {
+      title: `${usageLimitPoolLabel(pool)} out of quota`,
+      detail: `No ${usageLimitPoolLabel(pool)} member can take this model right now. Choose another model.`,
     };
   }
   return isDisabledForProject(config, provider, selection.instanceId, projectId)

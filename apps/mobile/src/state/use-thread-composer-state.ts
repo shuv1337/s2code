@@ -43,6 +43,7 @@ import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
   describeUnavailableModelSelection,
   isModelSelectionUnavailable,
+  resolvePendingHandoffTarget,
 } from "../lib/modelOptions";
 import { resolveProviderInteractionMode } from "./legacy-plan-mode";
 
@@ -295,9 +296,7 @@ export function useThreadComposerState() {
   const serverConfig = selectedEnvironmentRuntime?.serverConfig;
   const pendingHandoff = resolvePendingHandoff(
     selectedThreadProjection?.projection,
-    isModelSelectionUnavailable(serverConfig, modelSelection, selectedThread?.projectId ?? null)
-      ? null
-      : modelSelection,
+    resolvePendingHandoffTarget(serverConfig, modelSelection, selectedThread?.projectId ?? null),
     serverConfig?.providers ?? [],
   );
   const runtimeMode = selectedDraft.runtimeMode ?? selectedThread?.runtimeMode ?? null;

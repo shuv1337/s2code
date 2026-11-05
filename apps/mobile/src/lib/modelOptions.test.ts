@@ -6,9 +6,11 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ModelSelection,
+  type OrchestrationV2ThreadProjection,
   type ServerConfig,
   type ServerSettings,
 } from "@t3tools/contracts";
+import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
 
 import {
   buildModelOptions,
@@ -17,10 +19,58 @@ import {
   isModelSelectionUnavailable,
   resolveDefaultableModelSelection,
   resolveNewTaskModelSelection,
+  resolvePendingHandoffTarget,
   resolveSelectableModelSelection,
   resolveUsageLimitPoolSelection,
   type ModelOption,
 } from "./modelOptions";
+
+const cursorDriver = ProviderDriverKind.make("cursor");
+const spentMember = ProviderInstanceId.make("cursor_spent");
+const freshMember = ProviderInstanceId.make("cursor_fresh");
+const poolModel = {
+  slug: "composer-max",
+  name: "Composer Max",
+  isCustom: false,
+  capabilities: null,
+};
+const onSpentMember = { instanceId: spentMember, model: poolModel.slug };
+
+/** A Cursor pool whose spent member was turned off at its usage limit. */
+function spentPoolConfig(
+  fresh: {
+    readonly enabled?: boolean;
+    readonly models?: ReadonlyArray<typeof poolModel>;
+    readonly projectDisabled?: ProjectId;
+  } = {},
+): ServerConfig {
+  const freshEnabled = fresh.enabled !== false;
+  return {
+    providers: [spentMember, freshMember].map((instanceId) => ({
+      instanceId,
+      driver: cursorDriver,
+      enabled: instanceId === freshMember && freshEnabled,
+      installed: true,
+      auth: { status: "authenticated" },
+      models: instanceId === freshMember ? (fresh.models ?? [poolModel]) : [poolModel],
+    })),
+    settings: {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [spentMember]: {
+          driver: cursorDriver,
+          enabled: false,
+          disableOnUsageLimit: true,
+          usageLimitDisabled: { at: "2026-11-02T00:00:00.000Z", message: "Usage limit reached." },
+        },
+        [freshMember]: { driver: cursorDriver, enabled: freshEnabled, disableOnUsageLimit: true },
+      },
+      projectSettingsOverrides: fresh.projectDisabled
+        ? { [fresh.projectDisabled]: { providerInstances: { [freshMember]: { enabled: false } } } }
+        : {},
+    },
+  } as unknown as ServerConfig;
+}
 
 describe("mobile model options", () => {
   it("distinguishes same-name OpenCode models without changing their routing", () => {
@@ -622,45 +672,40 @@ describe("mobile model options", () => {
   });
 
   it("sends on an auto-disabled pool member only while another member can take the turn", () => {
-    const cursor = ProviderDriverKind.make("cursor");
-    const spent = ProviderInstanceId.make("cursor_spent");
-    const fresh = ProviderInstanceId.make("cursor_fresh");
-    const model = {
-      slug: "composer-max",
-      name: "Composer Max",
-      isCustom: false,
-      capabilities: null,
-    };
-    const configWith = (freshEnabled: boolean) =>
-      ({
-        providers: [spent, fresh].map((instanceId) => ({
-          instanceId,
-          driver: cursor,
-          enabled: instanceId === fresh && freshEnabled,
-          installed: true,
-          auth: { status: "authenticated" },
-          models: [model],
-        })),
-        settings: {
-          ...DEFAULT_SERVER_SETTINGS,
-          providerInstances: {
-            [spent]: {
-              driver: cursor,
-              enabled: false,
-              disableOnUsageLimit: true,
-              usageLimitDisabled: {
-                at: "2026-11-02T00:00:00.000Z",
-                message: "Usage limit reached.",
-              },
-            },
-            [fresh]: { driver: cursor, enabled: freshEnabled, disableOnUsageLimit: true },
-          },
-        },
-      }) as unknown as ServerConfig;
-    const onSpent = { instanceId: spent, model: model.slug };
+    const projectId = ProjectId.make("project-a");
 
-    expect(isModelSelectionUnavailable(configWith(true), onSpent, null)).toBe(false);
-    expect(isModelSelectionUnavailable(configWith(false), onSpent, null)).toBe(true);
+    expect(isModelSelectionUnavailable(spentPoolConfig(), onSpentMember, projectId)).toBe(false);
+    for (const blocked of [
+      spentPoolConfig({ enabled: false }),
+      spentPoolConfig({ models: [] }),
+      spentPoolConfig({ projectDisabled: projectId }),
+    ]) {
+      expect(isModelSelectionUnavailable(blocked, onSpentMember, projectId)).toBe(true);
+      expect(describeUnavailableModelSelection(blocked, onSpentMember, projectId)).toEqual({
+        title: "Cursor pool out of quota",
+        detail: "No Cursor pool member can take this model right now. Choose another model.",
+      });
+    }
+  });
+
+  it("previews a handoff against the pool member the server will run the turn on", () => {
+    const config = spentPoolConfig();
+    const projection = {
+      runs: [
+        {
+          id: "run-1",
+          status: "completed",
+          contextHandoffId: null,
+          startedAt: "2026-11-02T00:00:00.000Z",
+          modelSelection: { instanceId: freshMember, model: poolModel.slug },
+        },
+      ],
+      visibleTurnItems: [{ item: { type: "user_message" } }],
+    } as unknown as OrchestrationV2ThreadProjection;
+    const target = resolvePendingHandoffTarget(config, onSpentMember, null);
+
+    expect(target).toEqual({ instanceId: freshMember, model: poolModel.slug });
+    expect(resolvePendingHandoff(projection, target, config.providers)).toBeNull();
   });
 
   describe("project-aware enablement", () => {
