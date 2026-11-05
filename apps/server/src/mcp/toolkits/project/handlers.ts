@@ -26,13 +26,10 @@ import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
-import {
-  resolveNewThreadModelSelection,
-  usageLimitPoolDriver,
-  usageLimitPoolStart,
-} from "@t3tools/shared/usageLimits";
+import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
+import { poolStartSelection } from "../../poolStart.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
@@ -89,34 +86,17 @@ const poolLaunchSelection = Effect.fn("mcp.poolLaunchSelection")(function* (inpu
   readonly projectId: ProjectId;
   readonly inherited: ModelSelection | undefined;
 }) {
-  const settings = yield* ServerSettings.ServerSettingsService.pipe(
-    Effect.flatMap((service) => service.getSettings),
-    Effect.mapError(unavailable),
-  );
-  const model =
-    input.model ??
-    (input.inherited !== undefined &&
-    usageLimitPoolDriver(settings, input.inherited.instanceId) === input.pool
-      ? input.inherited.model
-      : undefined);
-  if (model === undefined)
-    return yield* new OrchestratorMcpFailure({
-      code: "invalid_request",
-      message: "Pass model with pool.",
-    });
-  const started = usageLimitPoolStart({
-    pool: input.pool,
-    model,
+  return yield* poolStartSelection({
+    ...input,
+    settings: yield* ServerSettings.ServerSettingsService.pipe(
+      Effect.flatMap((service) => service.getSettings),
+      Effect.mapError(unavailable),
+    ),
     providers: yield* ProviderRegistry.ProviderRegistry.pipe(
       Effect.flatMap((registry) => registry.getProviders),
     ),
-    settings,
-    projectId: input.projectId,
     now: DateTime.toEpochMillis(yield* DateTime.now),
   });
-  if ("error" in started)
-    return yield* new OrchestratorMcpFailure({ code: "invalid_request", message: started.error });
-  return started.selection;
 });
 
 const access = Effect.gen(function* () {

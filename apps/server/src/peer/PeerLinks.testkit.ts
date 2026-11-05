@@ -64,6 +64,7 @@ export const descriptorOf = (
 export const servePeer = <E, R>(
   initial: ExecutionEnvironmentDescriptor,
   tools: Layer.Layer<never, E, R>,
+  settings: Parameters<typeof ServerSettings.layerTest>[0] = {},
 ) =>
   Effect.gen(function* () {
     const descriptor = yield* Ref.make(initial);
@@ -75,7 +76,9 @@ export const servePeer = <E, R>(
     });
     const authContext = yield* EnvironmentAuth.layer.pipe(
       Layer.provide(ManagedPolicy.layerTest()),
-      Layer.provideMerge(ServerSettings.layerTest({ linkedEnvironmentsEnabled: true })),
+      Layer.provideMerge(
+        ServerSettings.layerTest({ ...settings, linkedEnvironmentsEnabled: true }),
+      ),
       Layer.provide(Sqlite.layerMemory),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provideMerge(ServerEnvironment.layerIdentity),

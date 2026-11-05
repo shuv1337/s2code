@@ -478,8 +478,9 @@ it.effect(
         resolvedInstanceId: "cursor_idle",
       });
       expect(launched.map((input) => input.namedInstance)).toEqual([undefined]);
+      expect(yield* launch({})).toMatchObject({ code: "target_required" });
       expect(yield* launch({ model: "composer-2.5" })).toMatchObject({
-        code: "invalid_request",
+        code: "model_unavailable",
         message:
           "Not every Cursor pool member has composer-2.5. orchestrator_capabilities lists the models they share.",
       });

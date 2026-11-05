@@ -143,6 +143,24 @@ export function pickUsageLimitPoolStart(input: UsageLimitPoolInput): ModelSelect
 /** Why the selected instance cannot take new work for its model now, or null when it can. */
 export function usageLimitInstanceIssue(input: UsageLimitPoolInput): string | null {
   const { instanceId, model } = input.selection;
+  const issue = usageLimitMemberIssue({ ...input, instanceId });
+  if (issue !== null) return issue;
+  const provider = input.providers.find((entry) => entry.instanceId === instanceId);
+  if (provider === undefined) return null;
+  const exhausted = exhaustedUsageWindow(provider, input.now, model);
+  if (exhausted === undefined) return null;
+  return exhausted.resetsAt
+    ? `is out of quota for ${model} until ${exhausted.resetsAt}`
+    : `is out of quota for ${model}`;
+}
+
+/** Why the instance cannot take any new work now, whatever the model; quota is per model. */
+function usageLimitMemberIssue(
+  input: Pick<UsageLimitPoolInput, "providers" | "settings" | "projectId"> & {
+    readonly instanceId: ProviderInstanceId;
+  },
+): string | null {
+  const { instanceId } = input;
   const config = Object.hasOwn(input.settings.providerInstances, instanceId)
     ? input.settings.providerInstances[instanceId]
     : undefined;
@@ -158,11 +176,7 @@ export function usageLimitInstanceIssue(input: UsageLimitPoolInput): string | nu
   if (!isProviderAvailable(provider)) return provider.unavailableReason ?? "is unavailable";
   if (provider.status === "disabled") return "is disabled";
   if (provider.status === "error") return `is failing: ${provider.message ?? "status error"}`;
-  const exhausted = exhaustedUsageWindow(provider, input.now, model);
-  if (exhausted === undefined) return null;
-  return exhausted.resetsAt
-    ? `is out of quota for ${model} until ${exhausted.resetsAt}`
-    : `is out of quota for ${model}`;
+  return null;
 }
 
 function pickPoolMember(input: UsageLimitPoolInput, includeSelected: boolean) {
@@ -239,22 +253,48 @@ export interface UsageLimitPool {
   readonly models: readonly string[];
 }
 
-/** The registered members of each pool, by driver. */
-export function usageLimitPools(
-  settings: Pick<ServerSettings, "providerInstances">,
-  providers: readonly ServerProvider[],
-): UsageLimitPool[] {
+type UsageLimitPoolsInput = Omit<UsageLimitPoolInput, "selection" | "rotation"> & {
+  /** A further check a member must pass, such as being able to run the caller's work. */
+  readonly eligible?: (provider: ServerProvider) => boolean;
+};
+
+/** Each driver's opted-in members that can take work now, whatever the model. */
+function eligiblePoolMembers(
+  input: UsageLimitPoolsInput,
+): Map<ProviderDriverKind, ServerProvider[]> {
   const byDriver = new Map<ProviderDriverKind, ServerProvider[]>();
-  for (const provider of providers) {
-    const driver = usageLimitPoolDriver(settings, provider.instanceId);
-    if (driver !== null) byDriver.set(driver, [...(byDriver.get(driver) ?? []), provider]);
+  for (const provider of input.providers) {
+    const config = Object.hasOwn(input.settings.providerInstances, provider.instanceId)
+      ? input.settings.providerInstances[provider.instanceId]
+      : undefined;
+    if (config?.disableOnUsageLimit !== true || config.driver !== provider.driver) continue;
+    if (
+      usageLimitMemberIssue({ ...input, instanceId: provider.instanceId }) !== null ||
+      input.eligible?.(provider) === false
+    ) {
+      continue;
+    }
+    const members = byDriver.get(provider.driver);
+    if (members) members.push(provider);
+    else byDriver.set(provider.driver, [provider]);
   }
-  return [...byDriver].map(([driver, members]) => ({
-    driver,
-    label: usageLimitPoolLabel(driver),
-    memberInstanceIds: members.map((member) => member.instanceId),
-    models: poolModelIntersection(members),
-  }));
+  return byDriver;
+}
+
+/** A member that has not reported its models yet narrows nothing. */
+const sharedPoolModels = (members: readonly ServerProvider[]) =>
+  poolModelIntersection(members.filter((member) => member.models.length > 0));
+
+/** Pools with two or more members that can take work now; members that cannot are left out. */
+export function usageLimitPools(input: UsageLimitPoolsInput): UsageLimitPool[] {
+  return [...eligiblePoolMembers(input)]
+    .filter(([, members]) => members.length > 1)
+    .map(([driver, members]) => ({
+      driver,
+      label: usageLimitPoolLabel(driver),
+      memberInstanceIds: members.map((member) => member.instanceId),
+      models: sharedPoolModels(members),
+    }));
 }
 
 /** The member a pooled start of `model` lands on, or why the pool cannot take it. */
@@ -266,25 +306,28 @@ export function usageLimitPoolStart(
 ):
   | { readonly selection: ModelSelection }
   | { readonly reason: "no_pool" | "model_not_shared" | "no_member"; readonly error: string } {
-  const pool = usageLimitPools(input.settings, input.providers).find(
-    (candidate) => candidate.driver === input.pool,
+  const label = usageLimitPoolLabel(input.pool);
+  const configured = Object.values(input.settings.providerInstances).filter(
+    (instance) => instance.driver === input.pool && instance.disableOnUsageLimit === true,
   );
-  if (pool === undefined) {
-    return { reason: "no_pool", error: `There is no ${usageLimitPoolLabel(input.pool)}.` };
-  }
-  if (!pool.models.includes(input.model)) {
+  if (configured.length < 2) return { reason: "no_pool", error: `There is no ${label}.` };
+  const noMember = {
+    reason: "no_member",
+    error: `No ${label} member can take ${input.model} now.`,
+  } as const;
+  const members = eligiblePoolMembers(input).get(input.pool) ?? [];
+  if (members.length === 0) return noMember;
+  if (!sharedPoolModels(members).includes(input.model)) {
     return {
       reason: "model_not_shared",
-      error: `Not every ${pool.label} member has ${input.model}. orchestrator_capabilities lists the models they share.`,
+      error: `Not every ${label} member has ${input.model}. orchestrator_capabilities lists the models they share.`,
     };
   }
   const selection = pickUsageLimitPoolStart({
     ...input,
-    selection: { instanceId: pool.memberInstanceIds[0]!, model: input.model },
+    selection: { instanceId: members[0]!.instanceId, model: input.model },
   });
-  return selection === null
-    ? { reason: "no_member", error: `No ${pool.label} member can take ${input.model} now.` }
-    : { selection };
+  return selection === null ? noMember : { selection };
 }
 
 /**

@@ -69,12 +69,7 @@ import {
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
-import {
-  collectProviderUsageLimits,
-  usageLimitPoolDriver,
-  usageLimitPools,
-  usageLimitPoolStart,
-} from "@t3tools/shared/usageLimits";
+import { collectProviderUsageLimits, usageLimitPools } from "@t3tools/shared/usageLimits";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
@@ -110,6 +105,8 @@ import { runOutcome } from "../orchestration-v2/RestartBackgroundNote.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { poolStartSelection } from "./poolStart.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -1387,31 +1384,19 @@ const make = Effect.gen(function* () {
           "Pass target.pool, or providerInstanceId or driverKind, not both.",
         );
       }
-      const settings = yield* serverSettings.getSettings.pipe(
-        Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
-      );
-      requestedModel ??=
-        usageLimitPoolDriver(settings, inheritedSelection.instanceId) === pool
-          ? inheritedSelection.model
-          : undefined;
-      if (requestedModel === undefined) {
-        return yield* failure("target_required", "Pass target.model with target.pool.");
-      }
-      const started = usageLimitPoolStart({
+      const started = yield* poolStartSelection({
         pool,
         model: requestedModel,
+        inherited: inheritedSelection,
+        settings: yield* serverSettings.getSettings.pipe(
+          Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
+        ),
         providers: input.providers,
-        settings,
-        projectId: input.parent.thread.projectId,
+        projectId: input.skipProjectEnablementFilter ? null : input.parent.thread.projectId,
         now: yield* Clock.currentTimeMillis,
       });
-      if ("error" in started) {
-        return yield* failure(
-          started.reason === "model_not_shared" ? "model_unavailable" : "provider_unavailable",
-          started.error,
-        );
-      }
-      instanceId = started.selection.instanceId;
+      instanceId = started.instanceId;
+      requestedModel = started.model;
     }
 
     if (instanceId === undefined && requestedDriver !== undefined) {
@@ -2413,7 +2398,49 @@ const make = Effect.gen(function* () {
             constraints: [...constraints],
           };
         }),
-        pools: usageLimitPools(settings, providers),
+        pools: usageLimitPools({
+          settings,
+          providers,
+          projectId: parent?.thread.projectId ?? null,
+          now: yield* Clock.currentTimeMillis,
+          eligible: (provider) =>
+            providerConstraints(provider, orchestrationCapableInstanceIds.has(provider.instanceId))
+              .length === 0,
+        }).map((pool) => {
+          const members = providers.filter((provider) =>
+            pool.memberInstanceIds.includes(provider.instanceId),
+          );
+          const first = members.find((member) => member.models.length > 0) ?? members[0]!;
+          const shared = new Set(pool.models);
+          const preferences = (instanceId: ServerProvider["instanceId"]) =>
+            settings.providerModelPreferences?.[instanceId];
+          // A model hidden on any member stays hidden for the pool.
+          const { listed, omitted } = listCapabilityModels({
+            provider: { ...first, models: first.models.filter((model) => shared.has(model.slug)) },
+            preferences: {
+              hiddenModels: members.flatMap(
+                (member) => preferences(member.instanceId)?.hiddenModels ?? [],
+              ),
+              modelOrder: preferences(first.instanceId)?.modelOrder ?? [],
+            },
+            searchTerms,
+            isPinned: (model) =>
+              model.isCustom ||
+              members.some(
+                (member) =>
+                  (inherited?.instanceId === member.instanceId && inherited.model === model.slug) ||
+                  (settings.favorites ?? []).some(
+                    (favorite) =>
+                      favorite.provider === member.instanceId && favorite.model === model.slug,
+                  ),
+              ),
+          });
+          return {
+            ...pool,
+            models: listed.map((model) => model.slug),
+            ...(omitted === 0 ? {} : { omittedModels: omitted }),
+          };
+        }),
         features: {
           appOwnedSubagents: true,
           asyncPolling: true,
@@ -2575,9 +2602,23 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+      // A retry keeps the member the pool picked, even if another now has more headroom.
+      const pooledChild =
+        isRetryOfAcceptedDelegation && input.target?.pool !== undefined
+          ? yield* threadManagement
+              .getThreadShell(IdAllocator.derive.delegatedTaskThread({ commandId }))
+              .pipe(Effect.mapError(threadManagementFailure))
+          : null;
       const target = yield* resolveTargetRechecking({
         parent,
-        target: input.target,
+        target:
+          pooledChild === null
+            ? input.target
+            : {
+                ...Struct.omit(input.target ?? {}, ["pool"]),
+                providerInstanceId: pooledChild.modelSelection.instanceId,
+                model: pooledChild.modelSelection.model,
+              },
         providers,
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
       });

@@ -7,6 +7,7 @@ import {
   EventId,
   MessageId,
   NodeId,
+  type ModelSelection,
   type OrchestrationV2Run,
   ProjectId,
   ProviderDriverKind,
@@ -15,6 +16,7 @@ import {
   type Project,
   type RepositoryIdentity,
   RunId,
+  type ServerProvider,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -129,6 +131,8 @@ interface BoxThread {
   readonly sent: Ref.Ref<ReadonlyArray<string>>;
   /** Runs as the launch there is answered, before the laptop hears back. */
   readonly afterLaunch: Ref.Ref<Effect.Effect<void>>;
+  /** Where the thread there runs instead of where it was asked to, as a box older than pools. */
+  readonly ranOn: Ref.Ref<ModelSelection | null>;
 }
 
 const makeBoxThread = Effect.gen(function* () {
@@ -163,6 +167,7 @@ const makeBoxThread = Effect.gen(function* () {
     releaseStop: yield* Deferred.make<void>(),
     sent: yield* Ref.make<ReadonlyArray<string>>([]),
     afterLaunch: yield* Ref.make<Effect.Effect<void>>(Effect.void),
+    ranOn: yield* Ref.make<ModelSelection | null>(null),
   } satisfies BoxThread;
 });
 
@@ -199,14 +204,45 @@ const boxProjects: ReadonlyArray<Project> = [
   },
 ];
 
-const serveBox = (thread: BoxThread) => {
-  return servePeer(box, boxToolkitLayer(thread));
+const boxPoolMember = (id: string, usedPercent: number): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(id),
+  driver,
+  enabled: true,
+  installed: true,
+  status: "ready",
+  version: null,
+  auth: { status: "authenticated" },
+  checkedAt: "2026-10-01T00:00:00.000Z",
+  models: [{ slug: modelSelection.model, name: "GPT", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+  usageLimits: {
+    checkedAt: "2026-10-01T00:00:00.000Z",
+    windows: [{ id: "five_hour", kind: "session", label: "5h", usedPercent }],
+  },
+});
+
+/** With `pooled`, the box has a pool of two members, "codex-alt" with more headroom. */
+const serveBox = (thread: BoxThread, pooled = false) => {
+  const member = { driver, enabled: true, disableOnUsageLimit: true };
+  return servePeer(
+    box,
+    boxToolkitLayer(thread, pooled),
+    pooled
+      ? {
+          providerInstances: {
+            [instanceId]: member,
+            [ProviderInstanceId.make("codex-alt")]: member,
+          },
+        }
+      : {},
+  );
 };
 
 const boxRunId = RunId.make("run:box");
 const boxLaterRunId = RunId.make("run:box-later");
 
-const boxToolkitLayer = (thread: BoxThread) => {
+const boxToolkitLayer = (thread: BoxThread, pooled: boolean) => {
   const runId = boxRunId;
   const interrupts = new Set<string>();
   const shellOf = (threadId: ThreadId) =>
@@ -438,14 +474,15 @@ const boxToolkitLayer = (thread: BoxThread) => {
               }),
             ),
             Effect.andThen(Effect.flatten(Ref.get(thread.afterLaunch))),
-            Effect.as({
+            Effect.andThen(Ref.get(thread.ranOn)),
+            Effect.map((ranOn) => ({
               threadId: input.threadId,
               projection: {
                 thread: {
                   id: input.threadId,
                   projectId: input.projectId,
                   title: input.title,
-                  modelSelection: input.modelSelection,
+                  modelSelection: ranOn ?? input.modelSelection,
                 },
                 runs:
                   input.initialMessage?.messageId && !runless
@@ -459,7 +496,8 @@ const boxToolkitLayer = (thread: BoxThread) => {
                     : [],
               },
               resumed: false,
-            } as unknown as ThreadLaunch.ThreadLaunchResult),
+            })),
+            Effect.map((result) => result as unknown as ThreadLaunch.ThreadLaunchResult),
           ),
         ),
       ),
@@ -487,7 +525,11 @@ const boxToolkitLayer = (thread: BoxThread) => {
       ),
     ),
     Layer.provide(
-      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({
+        getProviders: Effect.succeed(
+          pooled ? [boxPoolMember("codex", 80), boxPoolMember("codex-alt", 10)] : [],
+        ),
+      }),
     ),
     Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
     Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
@@ -1117,6 +1159,48 @@ it.effect("a task named only by environment inherits the parent's model, within 
         clientRequestId: "broader",
       });
       expect(broader.isError).toBe(true);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a pooled task starts on the box's pick, and one an older box ignored is stopped", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread, true);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+      const pooled = (clientRequestId: string, target: object = {}) =>
+        a.call("delegate_task", {
+          task: "Run the suite on the box.",
+          target: { environmentId: box.environmentId, pool: driver, model: "gpt-5.4", ...target },
+          mode: "async",
+          clientRequestId,
+        });
+
+      const conflict = yield* pooled("conflict", { driverKind: driver });
+      expect(conflict.isError).toBe(true);
+      expect(JSON.stringify(conflict.content)).toContain("omit providerInstanceId, driverKind");
+      expect(yield* Ref.get(thread.launched)).toBeNull();
+
+      const started = yield* pooled("pooled");
+      expect(started.isError, JSON.stringify(started.content)).toBe(false);
+      expect(started.structuredContent).toMatchObject({ resolvedInstanceId: "codex-alt" });
+      const launchedWith = yield* Ref.get(thread.launchedWith);
+      expect(launchedWith?.modelSelection).toEqual({ instanceId: "codex-alt", model: "gpt-5.4" });
+      expect(launchedWith?.namedInstance).toBeUndefined();
+
+      yield* Ref.set(thread.ranOn, { instanceId, model: "gpt-5.5" });
+      const ignored = yield* pooled("ignored");
+      expect(ignored.isError).toBe(true);
+      expect(JSON.stringify(ignored.content)).toContain("does not support target.pool");
+      expect(yield* Ref.get(thread.stops)).toContain("thread.stop");
+      expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toHaveLength(1);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

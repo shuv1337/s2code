@@ -221,6 +221,18 @@ const make = Effect.gen(function* () {
       }
       // The provider and model inherit as they do for a task here. Another
       // provider there has no model to inherit, so the caller names one.
+      if (
+        target.pool !== undefined &&
+        (target.providerInstanceId !== undefined ||
+          target.driverKind !== undefined ||
+          target.options !== undefined)
+      ) {
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message:
+            "In a linked environment, target.pool takes only target.model; omit providerInstanceId, driverKind and options.",
+        });
+      }
       const inherited = parent.thread.modelSelection;
       const instanceId = target.providerInstanceId ?? inherited.instanceId;
       const model =
@@ -232,16 +244,6 @@ const make = Effect.gen(function* () {
         return yield* new OrchestratorMcpFailure({
           code: "target_required",
           message: "Pass target.model from orchestrator_capabilities with this environmentId.",
-        });
-      }
-      if (
-        target.pool !== undefined &&
-        (target.providerInstanceId !== undefined || target.options !== undefined)
-      ) {
-        return yield* new OrchestratorMcpFailure({
-          code: "invalid_request",
-          message:
-            "In a linked environment, target.pool takes only target.model; omit providerInstanceId and options.",
         });
       }
       const options =
@@ -318,6 +320,20 @@ const make = Effect.gen(function* () {
         label: link?.label ?? target.environmentId,
         ...(launched.runId === null ? {} : { runId: launched.runId }),
       };
+      // An environment older than pools drops `pool` and `model` and starts on its default.
+      if (
+        target.pool !== undefined &&
+        (launched.resolvedInstanceId === undefined || launched.modelSelection.model !== model)
+      ) {
+        yield* stopThere(followScope(scope.thread, remoteChild), remoteChild, "stop").pipe(
+          Effect.ignoreCause({ log: true }),
+        );
+        return yield* new OrchestratorMcpFailure({
+          code: "provider_unavailable",
+          message:
+            "That environment does not support target.pool yet. Pass target.providerInstanceId there instead.",
+        });
+      }
       const recorded = yield* threads
         .dispatch({
           type: "delegated_task.remote.request",

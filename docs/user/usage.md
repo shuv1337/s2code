@@ -188,7 +188,8 @@ out. To let the pool take over when the named account cannot, the agent passes
 
 An agent can also ask for the pool itself, such as `pool: "cursor"` with a model. S2Code places the
 work on the pool account with the most headroom and reports which one it picked. The model must be
-one every account in the pool offers; `orchestrator_capabilities` lists each pool's shared models.
+one every available account in the pool offers; `orchestrator_capabilities` lists each pool's
+shared models.
 
 ## Connect a CLIProxyAPI hub
 

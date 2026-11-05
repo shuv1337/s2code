@@ -2348,24 +2348,32 @@ describe("OrchestratorMcpService provider resolution", () => {
               models: [model],
             },
           ]);
-          const fromPool = (clientRequestId: string, poolModel: string) =>
+          yield* settings.updateSettings({
+            providerModelPreferences: {
+              [altInstanceId]: { hiddenModels: [model], modelOrder: [] },
+            },
+          });
+          assert.deepEqual((yield* service.capabilities(scope)).pools?.[0]?.models, []);
+          yield* settings.updateSettings({ providerModelPreferences: {} });
+          const fromPool = (clientRequestId: string, target: Omit<OrchestratorMcpTarget, "pool">) =>
             service.createThreads(scope, {
-              threads: [{ target: { pool: driver, model: poolModel }, prompt: "Start work." }],
+              threads: [{ target: { pool: driver, ...target }, prompt: "Start work." }],
               clientRequestId,
             });
           // "codex-alt" sorts after "codex" but is spent, and "codex-bare" is outside the pool.
-          const pooledThread = (yield* fromPool("pool-start", model)).threads[0]!;
+          // The parent runs in the pool, so its model is the pooled thread's.
+          const pooledThread = (yield* fromPool("pool-start", {})).threads[0]!;
           assert.deepEqual(
             [pooledThread.providerInstanceId, pooledThread.resolvedInstanceId],
             [codexInstanceId, codexInstanceId],
           );
-          assert.equal(
-            (yield* orchestrator.getThreadProjection(pooledThread.threadId)).runs[0]?.modelSelection
-              .instanceId,
-            codexInstanceId,
+          assert.deepEqual(
+            (yield* orchestrator.getThreadProjection(pooledThread.threadId)).runs[0]
+              ?.modelSelection,
+            { instanceId: codexInstanceId, model },
           );
           const threadsBefore = yield* orchestrator.countThreads();
-          const notShared = yield* fromPool("pool-model", "gpt-5.5").pipe(Effect.flip);
+          const notShared = yield* fromPool("pool-model", { model: "gpt-5.5" }).pipe(Effect.flip);
           assert.deepEqual(
             [notShared.code, notShared.message],
             [
@@ -2373,7 +2381,33 @@ describe("OrchestratorMcpService provider resolution", () => {
               "Not every Codex pool member has gpt-5.5. orchestrator_capabilities lists the models they share.",
             ],
           );
+          for (const conflict of [{ providerInstanceId: altInstanceId }, { driverKind: driver }]) {
+            const refused = yield* fromPool("pool-conflict", conflict).pipe(Effect.flip);
+            assert.equal(refused.code, "invalid_request");
+          }
           assert.equal(yield* orchestrator.countThreads(), threadsBefore);
+
+          const delegate = () =>
+            service.delegateTask(scope, {
+              task: "Review the change.",
+              target: { pool: driver },
+              mode: "async",
+              clientRequestId: "pool-delegate",
+            });
+          const delegated = yield* delegate();
+          assert.deepEqual(
+            [delegated.providerInstanceId, delegated.resolvedInstanceId],
+            [codexInstanceId, codexInstanceId],
+          );
+          // Every member is spent now, yet the accepted task's retry still answers.
+          usage.set(codexInstanceId, 100);
+          const retried = yield* delegate();
+          assert.deepEqual(
+            [retried.taskId, retried.resolvedInstanceId],
+            [delegated.taskId, codexInstanceId],
+          );
+          usage.set(codexInstanceId, 10);
+          const threadsAfterDelegate = yield* orchestrator.countThreads();
           const create = (
             clientRequestId: string,
             target: {
@@ -2391,7 +2425,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           const named = yield* create("named-spent", { providerInstanceId: altInstanceId }).pipe(
             Effect.flip,
           );
-          assert.equal(yield* orchestrator.countThreads(), threadsBefore);
+          assert.equal(yield* orchestrator.countThreads(), threadsAfterDelegate);
           assert.equal(named.code, "invalid_request");
           assert.equal(
             named.message,
@@ -2408,7 +2442,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.equal(movedProjection.thread.modelSelection.instanceId, codexInstanceId);
           assert.equal(movedProjection.runs[0]?.modelSelection.instanceId, codexInstanceId);
           const threadsAfterMove = yield* orchestrator.countThreads();
-          assert.equal(threadsAfterMove, threadsBefore + 1);
+          assert.equal(threadsAfterMove, threadsAfterDelegate + 1);
 
           usage.set(codexInstanceId, 100);
           const nowhere = yield* create("nowhere", {
@@ -2437,6 +2471,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           ).pipe(Effect.flip);
           assert.include(disabled.message, "is disabled for this project");
           assert.equal(yield* orchestrator.countThreads(), threadsAfterMove);
+          assert.deepEqual((yield* service.capabilities(scope)).pools, []);
           yield* settings.updateSettings({ projectSettingsOverrides: {} });
 
           const bare = yield* create("no-adapter", {
