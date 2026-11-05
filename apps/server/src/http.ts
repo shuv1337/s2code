@@ -8,7 +8,7 @@ import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { injectMcpAppCookieBootstrap, injectMcpAppThemeBootstrap } from "@t3tools/shared/mcpApp";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as ByteSize from "effect/ByteSize";
-import * as Data from "effect/Data";
+import * as Signature from "effect/crypto/Signature";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -320,6 +320,7 @@ export const layerServerEnvironmentHttpApi = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
     const secrets = yield* ServerSecretStore.ServerSecretStore;
+    const signature = yield* Signature.Signature;
     return handlers
       .handle(
         "descriptor",
@@ -332,15 +333,17 @@ export const layerServerEnvironmentHttpApi = HttpApiBuilder.group(
         PeerProof.create(payload.nonce).pipe(
           Effect.provideService(ServerEnvironment.ServerEnvironment, serverEnvironment),
           Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
+          Effect.provideService(Signature.Signature, signature),
           Effect.catch((cause) => failEnvironmentInternal("internal_error", cause)),
         ),
       );
   }),
 );
 
-class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
-  readonly cause: unknown;
-}> {}
+class DecodeOtlpTraceRecordsError extends Schema.TaggedError<DecodeOtlpTraceRecordsError>()(
+  "DecodeOtlpTraceRecordsError",
+  { cause: Schema.Defect() },
+) {}
 
 // Tracing once-per-second renderer exports would create more spans than it forwards.
 export const layerOtlpTracesProxyRoute = HttpRouter.add(

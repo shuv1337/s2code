@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { LOCAL_SERVER_ATTACHMENT_FILE } from "@t3tools/shared/localServerAttachment";
@@ -47,7 +48,11 @@ const http = HttpClient.make((request) =>
     ),
   ),
 );
-const layer = Layer.mergeAll(NodeServices.layer, Layer.succeed(HttpClient.HttpClient, http));
+const layer = Layer.mergeAll(
+  NodeServices.layer,
+  NodeCrypto.layerMac,
+  Layer.succeed(HttpClient.HttpClient, http),
+);
 
 describe("local desktop attachment", () => {
   it.effect("preserves the downgrade refusal instead of showing only its final stack frame", () =>

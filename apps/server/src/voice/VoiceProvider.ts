@@ -1,4 +1,5 @@
 import { VoiceError, type VoiceStartInput, type VoiceStartResult } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { buildLiveFunctionTools, LIVE_SYSTEM_INSTRUCTIONS } from "@t3tools/shared/voice/liveTools";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -45,7 +46,7 @@ const make = Effect.gen(function* () {
     return Option.isSome(stored)
       ? new TextDecoder().decode(stored.value)
       : // Product call for Lauren: an unset saved voice key falls back to OPENAI_API_KEY.
-        (process.env.OPENAI_API_KEY?.trim() ?? "");
+        ((yield* HostProcess.Environment).OPENAI_API_KEY?.trim() ?? "");
   });
   const configure = Effect.fn("VoiceProvider.configure")(function* (apiKey: string) {
     yield* (

@@ -137,7 +137,7 @@ export const discover = Effect.fn("desktop.localServerAttach.discover")(function
     }
     yield* bootstrapRemoteBearerSession({
       httpBaseUrl,
-      credential: currentDesktopBootstrapToken(
+      credential: yield* currentDesktopBootstrapToken(
         record.bootstrapSecret,
         yield* Clock.currentTimeMillis,
       ),

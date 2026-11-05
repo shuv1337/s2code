@@ -5,7 +5,7 @@ import type {
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
 import * as Config from "effect/Config";
-import type * as Cause from "effect/Cause";
+import * as Cause from "effect/Cause";
 import { ensureProductHome } from "@t3tools/shared/productHome";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -164,14 +164,16 @@ const make = Effect.fn("desktop.environment.make")(function* (
       : input.platform === "darwin"
         ? path.join(homeDirectory, "Library", "Application Support")
         : Option.getOrElse(config.xdgConfigHome, () => path.join(homeDirectory, ".config"));
-  const baseDir = yield* Effect.try(() =>
-    resolveDesktopBaseDir({
-      homeDirectory,
-      joinPath: path.join,
-      t3Home: config.t3Home,
-      appVersion: input.appVersion,
-    }),
-  );
+  const baseDir = yield* Effect.try({
+    try: () =>
+      resolveDesktopBaseDir({
+        homeDirectory,
+        joinPath: path.join,
+        t3Home: config.t3Home,
+        appVersion: input.appVersion,
+      }),
+    catch: (cause) => new Cause.UnknownError(cause),
+  });
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
   const serverRoot =
@@ -295,6 +297,9 @@ export const layer = (input: MakeDesktopEnvironmentInput) =>
 export const layerOwned = (input: MakeDesktopEnvironmentInput) =>
   layer(input).pipe(
     Layer.tap((context) =>
-      Effect.try(() => ensureProductHome(Context.get(context, DesktopEnvironment).baseDir)),
+      Effect.try({
+        try: () => ensureProductHome(Context.get(context, DesktopEnvironment).baseDir),
+        catch: (cause) => new Cause.UnknownError(cause),
+      }),
     ),
   );

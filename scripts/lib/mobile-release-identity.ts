@@ -29,6 +29,7 @@ export const MOBILE_VARIANTS = {
   },
 } as const;
 type Environment = Readonly<Record<string, string | undefined>>;
+// @effect-diagnostics-next-line extendsNativeError:off -- Thrown synchronously from Expo config and release preflight, outside Effect.
 export class MobileReleaseConfigurationError extends Error {}
 export const requiredMobileSetting = (env: Environment, key: string) => {
   const value = env[key]?.trim();

@@ -3,7 +3,7 @@ import {
   type ModelSelection,
   type ProjectId,
   type ProviderDriverKind,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ServerSettings as ServerSettingsValue,
 } from "@t3tools/contracts";
 import {
@@ -12,9 +12,9 @@ import {
   usageLimitInstanceIssue,
 } from "@t3tools/shared/usageLimits";
 import * as Clock from "effect/Clock";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
@@ -26,10 +26,10 @@ export interface InstanceResolution {
   readonly named?: { readonly allowPoolFailover: boolean };
 }
 
-class NamedInstanceUnavailable extends Data.TaggedError("NamedInstanceUnavailable")<{
-  readonly instanceId: ProviderInstanceId;
-  readonly reason: string;
-}> {}
+class NamedInstanceUnavailable extends Schema.TaggedError<NamedInstanceUnavailable>()(
+  "NamedInstanceUnavailable",
+  { instanceId: ProviderInstanceId, reason: Schema.String },
+) {}
 
 export const isSpentInstance = (
   settings: Pick<ServerSettingsValue, "providerInstances">,
