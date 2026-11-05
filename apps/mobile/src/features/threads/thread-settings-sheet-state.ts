@@ -1,9 +1,15 @@
-import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
+import {
+  resolveUsageLimitPoolSelection,
+  type ModelOption,
+  type ProviderGroup,
+} from "../../lib/modelOptions";
 import { rememberModelOptions } from "../../state/use-model-option-memory";
 import type {
   ModelSelection,
+  ProjectId,
   ProviderInstanceId,
   ProviderOptionSelection,
+  ServerConfig,
 } from "@t3tools/contracts";
 
 export function modelFavoriteKey(provider: ProviderInstanceId, model: string): string {
@@ -64,6 +70,19 @@ export function applySavedModelOptions(
 ): ModelSelection {
   rememberModelOptions(saved.instanceId, saved.model, options);
   return { ...saved, options };
+}
+
+/** A thread's sheet shows its saved pick as the pool's shown member but saves edits to the pick. */
+export function existingThreadModelSelection(
+  config: ServerConfig | null | undefined,
+  saved: ModelSelection,
+  projectId: ProjectId | null,
+) {
+  return {
+    shown: resolveUsageLimitPoolSelection(config, saved, projectId),
+    withOptions: (options: ReadonlyArray<ProviderOptionSelection>) =>
+      applySavedModelOptions(saved, options),
+  };
 }
 
 export function canCommitPendingModel(
