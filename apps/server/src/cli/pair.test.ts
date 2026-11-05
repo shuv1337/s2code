@@ -34,6 +34,7 @@ import {
   persistServerRuntimeState,
   type PersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
+import { forkCliCommand } from "./invocation.ts";
 import { DevServerNotProxiableError, resolveTailscaleLocalTarget } from "./pair.ts";
 
 import packageJson from "../../package.json" with { type: "json" };
@@ -220,7 +221,7 @@ describe("t3 pair", () => {
         assert.isTrue(output.includes("█") || output.includes("▀") || output.includes("▄"));
         assert.include(
           output,
-          "only reachable from this machine. To reach it from your other devices, run `s2code up`",
+          `only reachable from this machine. To reach it from your other devices, run \`${forkCliCommand("up")}\``,
         );
 
         const token = /#token=([A-Z2-9]+)/.exec(output)?.[1];
