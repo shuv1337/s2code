@@ -192,7 +192,7 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
+import { isSpentInstance, makeSpentInstanceResolver } from "../provider/spentInstanceResolver.ts";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -1692,12 +1692,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         requestedSelection,
         projection.thread.projectId,
       );
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const { movedOffSpentInstanceId: recordedMove, ...storedRun } = storedQueuedRun;
+      // A move recorded at queue time lapses once that instance is restored or runs the work.
       const movedOffSpentInstanceId =
-        modelSelection.instanceId === requestedSelection.instanceId
-          ? storedQueuedRun.movedOffSpentInstanceId
-          : requestedSelection.instanceId;
+        modelSelection.instanceId !== requestedSelection.instanceId
+          ? requestedSelection.instanceId
+          : recordedMove !== undefined &&
+              recordedMove !== modelSelection.instanceId &&
+              isSpentInstance(settings, recordedMove)
+            ? recordedMove
+            : undefined;
       const queuedRun = {
-        ...storedQueuedRun,
+        ...storedRun,
         modelSelection,
         providerInstanceId: modelSelection.instanceId,
         ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
@@ -1720,7 +1727,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         failedRun?.id === options?.endedRunId &&
         failedRun?.workspacePreparation?.type === "worktree" &&
         projection.thread.worktreePath === null;
-      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
       const projectOverride =
         settings.projectSettingsOverrides[projection.thread.projectId]?.providerInstances?.[
           queuedRun.providerInstanceId
@@ -4764,7 +4770,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
-  const dispatchSteerIntoRun = Effect.fn("Orchestrator.dispatchSteerIntoRun")(function* (input: {
+  const dispatchSteerIntoRun = Effect.fn("Orchestrator.dispatchSteerIntoRun")(function* (request: {
     readonly command: Extract<
       OrchestrationV2Command,
       { readonly type: "message.dispatch" | "queued-message.promote-to-steer" }
@@ -4799,6 +4805,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly notification?: OrchestrationV2ConversationMessage["notification"];
     readonly forceRestart: boolean;
   }) {
+    // Steering onto another instance restarts the turn there, so a spent target moves like a new run.
+    const changesInstance = request.projection.runs.some(
+      (run) =>
+        run.id === request.targetRunId &&
+        run.providerInstanceId !== request.modelSelection.instanceId,
+    );
+    const input = changesInstance
+      ? {
+          ...request,
+          modelSelection: yield* resolveSpentInstance(
+            request.modelSelection,
+            request.projection.thread.projectId,
+          ).pipe(Effect.orDie),
+        }
+      : request;
     const targetRun = input.projection.runs.find((candidate) => candidate.id === input.targetRunId);
     if (targetRun === undefined) {
       return yield* new OrchestratorDispatchError({
