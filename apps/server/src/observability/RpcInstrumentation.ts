@@ -17,6 +17,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.voiceEnd]: "voice",
   [WS_METHODS.voiceExecute]: "voice",
   [WS_METHODS.voiceConfirm]: "voice",
+  [WS_METHODS.voiceReport]: "voice",
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: "orchestration",

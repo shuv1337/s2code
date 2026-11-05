@@ -36,7 +36,8 @@ export function VoiceSettings({ environmentId }: { environmentId: EnvironmentId 
     <View className="gap-3 p-4">
       <Text>
         Audio is sent to OpenAI and billed to your API account. Dictation adds text to your draft
-        without sending it.
+        without sending it. Transcripts are saved in this server's local voice log. Set
+        voiceLogTranscripts to false in server settings to stop saving the words.
       </Text>
       <Text>
         {status.data?.configured

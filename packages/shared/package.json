@@ -575,6 +575,10 @@
       "types": "./src/voice/confirmation.ts",
       "import": "./src/voice/confirmation.ts"
     },
+    "./voice/logRedaction": {
+      "types": "./src/voice/logRedaction.ts",
+      "import": "./src/voice/logRedaction.ts"
+    },
     "./voice/resultSummary": {
       "types": "./src/voice/resultSummary.ts",
       "import": "./src/voice/resultSummary.ts"

@@ -1,3 +1,4 @@
+import * as VoiceAuditLog from "./voice/VoiceAuditLog.ts";
 import * as VoiceProvider from "./voice/VoiceProvider.ts";
 import * as VoiceTools from "./voice/VoiceTools.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -812,6 +813,7 @@ const layerMakeRoutes = Layer.mergeAll(
           ),
         ),
       ),
+      Layer.provide(VoiceAuditLog.layer),
     ),
   ),
   McpHttpServer.layer.pipe(

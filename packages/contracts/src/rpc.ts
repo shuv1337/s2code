@@ -1,5 +1,6 @@
 import {
   VoiceError,
+  VoiceReportInput,
   VoiceStartInput,
   VoiceStartResult,
   VoiceToolInput,
@@ -528,6 +529,7 @@ export const WS_METHODS = {
   voiceEnd: "voice.end",
   voiceExecute: "voice.execute",
   voiceConfirm: "voice.confirm",
+  voiceReport: "voice.report",
   peerLinksList: "peerLinks.list",
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
@@ -851,6 +853,10 @@ const WsVoiceExecuteRpc = Rpc.make(WS_METHODS.voiceExecute, {
 const WsVoiceConfirmRpc = Rpc.make(WS_METHODS.voiceConfirm, {
   payload: { sessionId: Schema.String, callId: Schema.String, accepted: Schema.Boolean },
   success: VoiceToolResult,
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceReportRpc = Rpc.make(WS_METHODS.voiceReport, {
+  payload: VoiceReportInput,
   error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
 });
 
@@ -2093,6 +2099,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVoiceEndRpc,
   WsVoiceExecuteRpc,
   WsVoiceConfirmRpc,
+  WsVoiceReportRpc,
   WsPeerLinksListRpc,
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,
