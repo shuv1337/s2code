@@ -18,6 +18,8 @@ import {
   OrchestratorMcpClientRequestId,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
+  OrchestratorMcpPoolSelector,
+  ProviderInstanceId,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
 } from "@t3tools/contracts";
@@ -137,6 +139,8 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
+    pool: OrchestratorMcpPoolSelector,
+    model: Schema.optional(TrimmedNonEmptyString).annotate({ description: "With `pool`." }),
     allowPoolFailover: Schema.optional(OrchestratorMcpAllowPoolFailover),
     /** `modelSelection` is a default its pool may place, not a named instance (a linked environment's inherited one). */
     poolStart: Schema.optional(Schema.Boolean),
@@ -163,6 +167,8 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     link: Schema.optional(Schema.String),
     projectId: ProjectId,
     modelSelection: ModelSelection,
+    /** The member a `pool` launch landed on. */
+    resolvedInstanceId: Schema.optional(ProviderInstanceId),
     runId: Schema.NullOr(RunId),
     status: Schema.NullOr(OrchestrationV2RunStatus),
     /** A usage problem that did not stop the launch, such as a flag with nothing to act on. */

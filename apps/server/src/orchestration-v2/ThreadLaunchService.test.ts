@@ -590,6 +590,8 @@ function poolHarness(usedPercent: {
   readonly spare: number;
   readonly pooled?: boolean;
   readonly claudeUsedPercent?: number;
+  /** `codex_spare` advertises only this model instead. */
+  readonly spareModel?: string;
 }) {
   const member = (
     selection: { readonly instanceId: ProviderInstanceId; readonly model: string },
@@ -640,7 +642,11 @@ function poolHarness(usedPercent: {
     },
     providers: [
       member(modelSelection, adapter.driver, usedPercent.codex),
-      member(spare, adapter.driver, usedPercent.spare),
+      member(
+        { ...spare, model: usedPercent.spareModel ?? spare.model },
+        adapter.driver,
+        usedPercent.spare,
+      ),
       ...(claude === undefined
         ? []
         : [
@@ -713,6 +719,12 @@ it.effect("rotates unnamed thread starts among pool members tied for the most he
     assert.notStrictEqual(started[0], started[1]);
     assert.notStrictEqual(started[1], started[2]);
   }).pipe(Effect.provide(poolHarness({ codex: 30, spare: 30 }).layer)),
+);
+
+it.effect("starts a pooled thread only on a member that has its model", () =>
+  Effect.gen(function* () {
+    assert.strictEqual(yield* launchedInstance("model-filter"), modelSelection.instanceId);
+  }).pipe(Effect.provide(poolHarness({ codex: 80, spare: 10, spareModel: "gpt-5.5" }).layer)),
 );
 
 it.effect("starts a named pool instance as asked, though another has more headroom", () =>

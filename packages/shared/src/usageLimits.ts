@@ -297,6 +297,39 @@ export function usageLimitPools(input: UsageLimitPoolsInput): UsageLimitPool[] {
     }));
 }
 
+/** The member a pooled start of `model` lands on, or why the pool cannot take it. */
+export function usageLimitPoolStart(
+  input: Omit<UsageLimitPoolInput, "selection"> & {
+    readonly pool: ProviderDriverKind;
+    readonly model: string;
+  },
+):
+  | { readonly selection: ModelSelection }
+  | { readonly reason: "no_pool" | "model_not_shared" | "no_member"; readonly error: string } {
+  const label = usageLimitPoolLabel(input.pool);
+  const configured = Object.values(input.settings.providerInstances).filter(
+    (instance) => instance.driver === input.pool && instance.disableOnUsageLimit === true,
+  );
+  if (configured.length < 2) return { reason: "no_pool", error: `There is no ${label}.` };
+  const noMember = {
+    reason: "no_member",
+    error: `No ${label} member can take ${input.model} now.`,
+  } as const;
+  const members = eligiblePoolMembers(input).get(input.pool) ?? [];
+  if (members.length === 0) return noMember;
+  if (!sharedPoolModels(members).includes(input.model)) {
+    return {
+      reason: "model_not_shared",
+      error: `Not every ${label} member has ${input.model}. orchestrator_capabilities lists the models they share.`,
+    };
+  }
+  const selection = pickUsageLimitPoolStart({
+    ...input,
+    selection: { instanceId: members[0]!.instanceId, model: input.model },
+  });
+  return selection === null ? noMember : { selection };
+}
+
 /**
  * Pickers show each pool as one member: the first eligible preferred id in it, else its first
  * eligible candidate, else its first. Returns the members to hide.

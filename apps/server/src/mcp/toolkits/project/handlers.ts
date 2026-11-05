@@ -1,9 +1,11 @@
 import {
   CommandId,
   MessageId,
+  type ModelSelection,
   ThreadId,
   OrchestratorMcpFailure,
   ProjectId,
+  type ProviderDriverKind,
 } from "@t3tools/contracts";
 import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
@@ -27,6 +29,7 @@ import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
+import { poolStartSelection } from "../../poolStart.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
@@ -75,6 +78,25 @@ const launchCommandId = Effect.fn("mcp.launchCommandId")(function* (
   const bytes = new TextEncoder().encode(JSON.stringify([namespace, key]));
   const digest = yield* crypto.digest(Digest.sha256, bytes).pipe(Effect.mapError(unavailable));
   return CommandId.make(`mcp:launch:${Hex.encode(digest)}`);
+});
+
+const poolLaunchSelection = Effect.fn("mcp.poolLaunchSelection")(function* (input: {
+  readonly pool: ProviderDriverKind;
+  readonly model: string | undefined;
+  readonly projectId: ProjectId;
+  readonly inherited: ModelSelection | undefined;
+}) {
+  return yield* poolStartSelection({
+    ...input,
+    settings: yield* ServerSettings.ServerSettingsService.pipe(
+      Effect.flatMap((service) => service.getSettings),
+      Effect.mapError(unavailable),
+    ),
+    providers: yield* ProviderRegistry.ProviderRegistry.pipe(
+      Effect.flatMap((registry) => registry.getProviders),
+    ),
+    now: DateTime.toEpochMillis(yield* DateTime.now),
+  });
 });
 
 const access = Effect.gen(function* () {
@@ -185,9 +207,26 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 ),
               )
             : undefined;
+        if (
+          input.pool === undefined
+            ? input.model !== undefined
+            : input.modelSelection !== undefined || input.poolStart === true
+        )
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "Pass pool with model, or modelSelection, not both.",
+          });
         const modelSelection =
           input.modelSelection ??
           launchedModel ??
+          (input.pool === undefined
+            ? undefined
+            : yield* poolLaunchSelection({
+                pool: input.pool,
+                model: input.model,
+                projectId,
+                inherited: caller?.modelSelection,
+              })) ??
           caller?.modelSelection ??
           (projectDefaults
             ? resolveNewThreadModelSelection({
@@ -285,6 +324,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           link: McpInvocationContext.threadLinkFor(scope, thread.id),
           projectId: thread.projectId,
           modelSelection: thread.modelSelection,
+          ...(input.pool === undefined
+            ? {}
+            : { resolvedInstanceId: thread.modelSelection.instanceId }),
           runId: run?.id ?? null,
           status: run?.status ?? null,
           ...(input.allowPoolFailover === true && !named
