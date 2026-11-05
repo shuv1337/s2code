@@ -814,12 +814,15 @@ const make = Effect.gen(function* () {
       const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
       const seat = thread.modelSelection.instanceId;
       // Composers can carry the pool member they asked for before the pool placed the thread.
+      // A member switched off by hand still refuses the turn rather than handing it to the seat.
       const keepSeat =
         command.type === "message.dispatch" &&
         !threadStart &&
         command.modelSelectionExplicit !== true &&
         command.movedOffSpentInstanceId === undefined &&
         areUsageLimitPoolPeers(settings, requested.instanceId, seat) &&
+        (resolveProjectProviderInstanceEnabled(settings, thread.projectId, requested.instanceId) ||
+          isSpentInstance(settings, requested.instanceId)) &&
         resolveProjectProviderInstanceEnabled(settings, thread.projectId, seat);
       if (keepSeat) {
         yield* Effect.logInfo("Kept thread on its pool seat", {
