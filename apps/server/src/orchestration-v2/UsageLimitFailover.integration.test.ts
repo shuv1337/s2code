@@ -36,6 +36,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import { markInstanceSpent, restoreSpentInstance } from "../cli/pool.ts";
 import * as ServerConfig from "../config.ts";
 import { disableInstanceOnExhaustedQuota } from "../provider/usageLimitAutoDisable.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -681,6 +682,38 @@ describe("usage limit failover through the real runtime", () => {
         }),
     );
   });
+
+  it.live(
+    "skips a member the dev writer marked spent and launches on another, until restored",
+    () =>
+      runPool(
+        {
+          [spent]: { driver: cursor, usedPercent: 0 },
+          [fresh]: { driver: cursor, usedPercent: 10 },
+        },
+        ({ startedTurns }) =>
+          Effect.gen(function* () {
+            assert.isTrue(yield* markInstanceSpent(spent));
+            const marked = yield* instanceSettings(spent);
+            assert.isFalse(marked?.enabled);
+            assert.isDefined(marked?.usageLimitDisabled);
+
+            // "cursor_spent" has the most headroom and is the thread's own instance.
+            const threadId = yield* startThread("marked", spent);
+            const thread = yield* awaitThread(threadId, settled(1));
+            assert.deepEqual(
+              thread.runs.map((run) => [run.providerInstanceId, run.status]),
+              [[fresh, "completed"]],
+            );
+            assert.notInclude(yield* Ref.get(startedTurns), spent);
+
+            assert.isTrue(yield* restoreSpentInstance(spent));
+            const restored = yield* instanceSettings(spent);
+            assert.deepEqual([restored?.enabled, restored?.usageLimitDisabled], [true, undefined]);
+            assert.isFalse(yield* restoreSpentInstance(spent));
+          }),
+      ),
+  );
 
   it.live.each([
     ["retryable", true],
