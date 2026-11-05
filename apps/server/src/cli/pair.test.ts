@@ -218,7 +218,10 @@ describe("t3 pair", () => {
         assert.include(output, `Pairing with pair-test (${origin})`);
         assert.include(output, `Pairing URL: ${origin}/pair#token=`);
         assert.isTrue(output.includes("█") || output.includes("▀") || output.includes("▄"));
-        assert.include(output, "only reachable from this machine");
+        assert.include(
+          output,
+          "only reachable from this machine. To reach it from your other devices, run `s2code up`",
+        );
 
         const token = /#token=([A-Z2-9]+)/.exec(output)?.[1];
         assert.isString(token);
