@@ -11,6 +11,8 @@ export default defineConfig({
     process.env.S2CODE_MARKETING_URL?.trim() ||
     process.env.SHUV2CODE_MARKETING_URL?.trim() ||
     undefined,
+  // Vercel 308s `/path/` to `/path` (see vercel.ts), so every internal link and canonical uses one form.
+  trailingSlash: "never",
   server: {
     port: Number(process.env.PORT ?? 4173),
   },
