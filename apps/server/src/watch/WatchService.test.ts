@@ -7,6 +7,7 @@ import {
   EnvironmentHttpApi,
   CommandId,
   EnvironmentId,
+  EnvironmentVoiceBodyLimit,
   EventId,
   MessageId,
   ProjectId,
@@ -122,6 +123,7 @@ const httpLayer = WatchHttp.layer.pipe(
     ),
   ),
   Layer.provide(HttpServer.layerServices),
+  Layer.merge(Layer.succeed(EnvironmentVoiceBodyLimit, (effect) => effect)),
 );
 
 it.effect("serves compact HTTP capabilities and applies authenticated restrictions", () =>

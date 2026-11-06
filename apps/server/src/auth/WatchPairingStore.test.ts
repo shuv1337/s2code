@@ -2,6 +2,7 @@ import {
   EnvironmentAuthenticatedAuth,
   EnvironmentHttpApi,
   EnvironmentId,
+  EnvironmentVoiceBodyLimit,
   ProjectId,
   ThreadId,
   WatchPairingStartResponse,
@@ -58,6 +59,7 @@ const layerHttp = WatchHttp.layer.pipe(
   ),
   Layer.provide(HttpServer.layerServices),
   Layer.provideMerge(layerStore),
+  Layer.merge(Layer.succeed(EnvironmentVoiceBodyLimit, (effect) => effect)),
 );
 
 const encodeStart = Schema.encodeSync(WatchPairingStartResponse);
