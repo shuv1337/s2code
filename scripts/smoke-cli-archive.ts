@@ -257,6 +257,23 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       });
   }
 
+  // The service launcher loads outside the embedded CLI. Without S2CODE_HOME it pauses rather than
+  // exit, so give it an empty home: it then fails fast on the missing service state.
+  const launcherArgs = ["__service-launcher"] as const;
+  const launcher = yield* runExecutable(executable, launcherArgs, contentDir, {
+    S2CODE_HOME: path.join(scratch, "launcher-home"),
+  });
+  if (
+    launcher.exitCode !== 1 ||
+    !launcher.stderr.includes("[service-launcher]") ||
+    !launcher.stderr.includes("service-state.json")
+  ) {
+    return yield* new CliArchiveSmokeError({
+      step: "running __service-launcher",
+      detail: formatCommandFailure(executable, launcherArgs, launcher),
+    });
+  }
+
   const net = yield* NetService.NetService;
   const port = yield* net.findAvailablePort(47700);
   const home = path.join(scratch, "home");
@@ -313,7 +330,9 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       detail: `no 200 from / within 30s\n${stdout}${stderr}`,
     });
   }
-  yield* Effect.log(`[cli-smoke] ${root}: --version passed and serve answered on ${String(port)}.`);
+  yield* Effect.log(
+    `[cli-smoke] ${root}: --version and __service-launcher passed, and serve answered on ${String(port)}.`,
+  );
 });
 
 const command = Command.make(
