@@ -697,10 +697,10 @@ it.effect("starts a pooled thread on the member with the most headroom and keeps
       modelSelection,
     });
     const projection = yield* threads.getThreadProjection(threadId);
-    // A turn after the start never rebalances, even onto a busier member the user picked.
+    // A later turn naming another member without an explicit pick stays on the placed seat.
     assert.deepStrictEqual(
       projection.runs.map((run) => run.providerInstanceId),
-      [spare.instanceId, modelSelection.instanceId],
+      [spare.instanceId, spare.instanceId],
     );
   }).pipe(Effect.provide(harness.layer));
 });
