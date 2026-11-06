@@ -12,7 +12,6 @@ import {
   StoredPullRequestRoutingPermission,
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
-import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
@@ -24,6 +23,7 @@ import * as MobileSecureStorage from "../persistence/mobile-secure-storage";
 import { migrateLegacyConnectionCatalog } from "./migration";
 
 export const CONNECTION_CATALOG_KEY = "t3code.connection-catalog.v1";
+export const CONNECTION_CATALOG_BACKUP_KEY = `${CONNECTION_CATALOG_KEY}.unreadable`;
 export const LEGACY_CONNECTIONS_KEY = "t3code.connections";
 
 function catalogError(operation: string, cause: unknown) {
@@ -45,6 +45,17 @@ const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(functi
   );
 });
 
+type CatalogList = Exclude<keyof ConnectionCatalogDocumentType, "schemaVersion">;
+
+const CATALOG_LISTS: ReadonlyArray<CatalogList> = [
+  "targets",
+  "profiles",
+  "credentials",
+  "remoteDpopTokens",
+  "githubRoutingPermissions",
+  "disabledEnvironmentIds",
+];
+
 /**
  * Builds from other branches or versions share this keychain item, so one record this build
  * cannot read must cost that record, never every saved environment.
@@ -52,17 +63,17 @@ const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(functi
 function decodeCatalogLeniently(raw: string) {
   const parsed = Option.getOrUndefined(parseJson(raw));
   const fields: Record<string, unknown> = Predicate.isObject(parsed) ? parsed : {};
-  let lossless = Predicate.isObject(parsed);
-  const entries = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, key: string) => {
+  const lostLists = new Set<CatalogList>();
+  const entries = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, key: CatalogList) => {
     const value = fields[key];
     if (value === undefined) return [];
     if (!Array.isArray(value)) {
-      lossless = false;
+      lostLists.add(key);
       return [];
     }
     const decode = Schema.decodeUnknownOption(schema);
     const decoded = value.flatMap((entry) => Option.toArray(decode(entry)));
-    if (decoded.length !== value.length) lossless = false;
+    if (decoded.length !== value.length) lostLists.add(key);
     return decoded;
   };
   const githubRoutingPermissions =
@@ -78,24 +89,34 @@ function decodeCatalogLeniently(raw: string) {
     ...(githubRoutingPermissions === undefined ? {} : { githubRoutingPermissions }),
     disabledEnvironmentIds: entries(EnvironmentId, "disabledEnvironmentIds"),
   };
-  return { catalog, lossless };
+  const lossless = Predicate.isObject(parsed) && fields.schemaVersion === 1 && lostLists.size === 0;
+  return { catalog, lossless, lostLists };
 }
 
 function isEmptyCatalog(catalog: ConnectionCatalogDocumentType) {
-  return (
-    catalog.targets.length === 0 &&
-    catalog.profiles.length === 0 &&
-    catalog.credentials.length === 0 &&
-    catalog.remoteDpopTokens.length === 0 &&
-    (catalog.githubRoutingPermissions ?? []).length === 0 &&
-    catalog.disabledEnvironmentIds.length === 0
-  );
+  return CATALOG_LISTS.every((list) => (catalog[list] ?? []).length === 0);
+}
+
+interface UnreadableStoredCatalog {
+  readonly raw: string;
+  /** Lists that lost entries; a write that empties one would erase records only the stored value holds. */
+  readonly lostLists: ReadonlySet<CatalogList>;
+  readonly backedUp: boolean;
 }
 
 interface LoadedCatalog {
   readonly catalog: ConnectionCatalogDocumentType;
-  /** The stored value holds records this build could not read, so an empty catalog must not replace it. */
-  readonly storedUnreadable: boolean;
+  readonly unreadable: UnreadableStoredCatalog | null;
+}
+
+function wouldEraseUnreadable(
+  unreadable: UnreadableStoredCatalog,
+  next: ConnectionCatalogDocumentType,
+) {
+  return (
+    isEmptyCatalog(next) ||
+    [...unreadable.lostLists].some((list) => (next[list] ?? []).length === 0)
+  );
 }
 
 interface CatalogStore {
@@ -137,20 +158,34 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
     return catalog;
   });
 
+  const backUpUnreadable = Effect.fn("mobile.connectionStorage.backUpUnreadableCatalog")(function* (
+    raw: string,
+  ) {
+    if ((yield* getItem(CONNECTION_CATALOG_BACKUP_KEY)) === raw) return;
+    yield* setItem(CONNECTION_CATALOG_BACKUP_KEY, raw);
+  });
+
   const decodeStoredCatalog = Effect.fn("mobile.connectionStorage.decodeCatalog")(function* (
     raw: string,
   ) {
-    const { catalog, lossless } = decodeCatalogLeniently(raw);
+    const { catalog, lossless, lostLists } = decodeCatalogLeniently(raw);
     if (lossless) {
-      return { catalog, storedUnreadable: false } satisfies LoadedCatalog;
+      return { catalog, unreadable: null } satisfies LoadedCatalog;
     }
-    const backupKey = `${CONNECTION_CATALOG_KEY}.unreadable.${yield* Clock.currentTimeMillis}`;
-    yield* setItem(backupKey, raw);
+    const backedUp = yield* backUpUnreadable(raw).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        Effect.logWarning("Could not back up the mobile connection catalog", error).pipe(
+          Effect.as(false),
+        ),
+      ),
+    );
     yield* Effect.logWarning("Kept the readable part of the mobile connection catalog", {
-      backupKey,
+      backedUp,
+      lostLists: [...lostLists],
       environments: new Set(catalog.targets.map((target) => target.environmentId)).size,
     });
-    return { catalog, storedUnreadable: isEmptyCatalog(catalog) } satisfies LoadedCatalog;
+    return { catalog, unreadable: { raw, lostLists, backedUp } } satisfies LoadedCatalog;
   });
 
   const loadUnlocked = Effect.fn("mobile.connectionStorage.loadCatalog")(function* () {
@@ -162,7 +197,7 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
     const loaded: LoadedCatalog =
       raw !== null && raw.trim() !== ""
         ? yield* decodeStoredCatalog(raw)
-        : { catalog: yield* loadLegacyCatalog(), storedUnreadable: false };
+        : { catalog: yield* loadLegacyCatalog(), unreadable: null };
     yield* Ref.set(state, Option.some(loaded));
     return loaded;
   });
@@ -172,15 +207,18 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
     function* (transform) {
       yield* lock.withPermits(1)(
         Effect.gen(function* () {
-          const loaded = yield* loadUnlocked();
-          const next = transform(loaded.catalog);
-          if (loaded.storedUnreadable && isEmptyCatalog(next)) {
-            yield* Ref.set(state, Option.some({ catalog: next, storedUnreadable: true }));
+          const { catalog, unreadable } = yield* loadUnlocked();
+          const next = transform(catalog);
+          if (unreadable !== null && wouldEraseUnreadable(unreadable, next)) {
+            yield* Ref.set(state, Option.some({ catalog: next, unreadable }));
             return;
+          }
+          if (unreadable !== null && !unreadable.backedUp) {
+            yield* backUpUnreadable(unreadable.raw);
           }
           const encoded = yield* encodeCatalog(next);
           yield* setItem(CONNECTION_CATALOG_KEY, encoded);
-          yield* Ref.set(state, Option.some({ catalog: next, storedUnreadable: false }));
+          yield* Ref.set(state, Option.some({ catalog: next, unreadable: null }));
         }),
       );
     },

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
+import { PersistedConnectionTarget } from "@t3tools/client-runtime/connection";
 import { vi } from "vite-plus/test";
 
 vi.mock("react-native", () => ({
@@ -13,10 +15,15 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: vi.fn(),
 }));
 
-import { CONNECTION_CATALOG_KEY, LEGACY_CONNECTIONS_KEY, make } from "./catalog-store";
+import {
+  CONNECTION_CATALOG_BACKUP_KEY,
+  CONNECTION_CATALOG_KEY,
+  LEGACY_CONNECTIONS_KEY,
+  make,
+} from "./catalog-store";
 import * as MobileSecureStorage from "../persistence/mobile-secure-storage";
 
-const UNREADABLE_BACKUP_KEY = `${CONNECTION_CATALOG_KEY}.unreadable.0`;
+const decodeTarget = Schema.decodeUnknownSync(PersistedConnectionTarget);
 
 function makeStorage(initial: Readonly<Record<string, string>>) {
   const values = new Map(Object.entries(initial));
@@ -111,10 +118,79 @@ describe("mobile connection catalog storage", () => {
         expect(document.profiles.map((profile) => profile.environmentId)).toEqual(["nightly"]);
         expect(document.credentials).toHaveLength(1);
         expect(document.remoteDpopTokens).toEqual([]);
-        expect(memory.values.get(UNREADABLE_BACKUP_KEY)).toBe(raw);
+        expect(memory.values.get(CONNECTION_CATALOG_BACKUP_KEY)).toBe(raw);
         expect(memory.values.get(CONNECTION_CATALOG_KEY)).toBe(raw);
         expect(memory.deleted).toEqual([]);
+
+        const nextLaunch = yield* make().pipe(
+          Effect.provideService(MobileSecureStorage.MobileSecureStorage, memory.storage),
+        );
+        yield* nextLaunch.read;
+        expect(memory.written).toEqual([CONNECTION_CATALOG_BACKUP_KEY]);
       }),
+  );
+
+  it.effect("does not persist emptied targets while the stored targets are unreadable", () =>
+    Effect.gen(function* () {
+      const raw = JSON.stringify({
+        schemaVersion: 1,
+        targets: [{ _tag: "FutureConnectionTarget", environmentId: "nightly", label: "Nightly" }],
+        profiles: [bearerProfile("nightly")],
+        credentials: [bearerCredential("nightly")],
+        remoteDpopTokens: [],
+      });
+      const memory = makeStorage({ [CONNECTION_CATALOG_KEY]: raw });
+      const catalog = yield* make().pipe(
+        Effect.provideService(MobileSecureStorage.MobileSecureStorage, memory.storage),
+      );
+
+      yield* catalog.update((document) => ({ ...document, githubRoutingPermissions: [] }));
+      expect(memory.values.get(CONNECTION_CATALOG_KEY)).toBe(raw);
+
+      yield* catalog.update((document) => ({
+        ...document,
+        targets: [decodeTarget(bearerTarget("laptop"))],
+      }));
+      expect(memory.values.get(CONNECTION_CATALOG_KEY)).not.toBe(raw);
+      expect(memory.values.get(CONNECTION_CATALOG_BACKUP_KEY)).toBe(raw);
+    }),
+  );
+
+  it.effect("reads past a failed backup but writes nothing until the backup succeeds", () =>
+    Effect.gen(function* () {
+      const raw = JSON.stringify({
+        schemaVersion: 1,
+        targets: [bearerTarget("nightly"), { _tag: "FutureConnectionTarget" }],
+        profiles: [],
+        credentials: [],
+        remoteDpopTokens: [],
+      });
+      const memory = makeStorage({ [CONNECTION_CATALOG_KEY]: raw });
+      const storage = MobileSecureStorage.MobileSecureStorage.of({
+        ...memory.storage,
+        setItem: (key) =>
+          Effect.fail(
+            new MobileSecureStorage.MobileSecureStorageError({
+              operation: "write",
+              key,
+              cause: new Error("errSecInteractionNotAllowed"),
+            }),
+          ),
+      });
+      const catalog = yield* make().pipe(
+        Effect.provideService(MobileSecureStorage.MobileSecureStorage, storage),
+      );
+
+      expect((yield* catalog.read).targets.map((target) => target.environmentId)).toEqual([
+        "nightly",
+      ]);
+      const pairing = catalog.update((document) => ({
+        ...document,
+        targets: [...document.targets, decodeTarget(bearerTarget("laptop"))],
+      }));
+      expect(Exit.isFailure(yield* Effect.exit(pairing))).toBe(true);
+      expect(memory.values.get(CONNECTION_CATALOG_KEY)).toBe(raw);
+    }),
   );
 
   it.effect("backs up an unreadable catalog and never replaces it with an empty one", () =>
@@ -130,7 +206,7 @@ describe("mobile connection catalog storage", () => {
       yield* catalog.update((document) => ({ ...document, githubRoutingPermissions: [] }));
 
       expect(memory.values.get(CONNECTION_CATALOG_KEY)).toBe("{not-json");
-      expect(memory.values.get(UNREADABLE_BACKUP_KEY)).toBe("{not-json");
+      expect(memory.values.get(CONNECTION_CATALOG_BACKUP_KEY)).toBe("{not-json");
       expect(memory.deleted).toEqual([]);
     }),
   );
