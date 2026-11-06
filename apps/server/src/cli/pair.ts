@@ -55,7 +55,7 @@ import {
 } from "../startupAccess.ts";
 import { authScopesFlag } from "./authScopes.ts";
 import { baseDirFlag, DurationFromString } from "./config.ts";
-import { forkCliCommand, resolveCliCommand } from "./invocation.ts";
+import { forkCliCommand, resolveHostCliCommand } from "./invocation.ts";
 import { NPM_PACKAGE_NAME } from "@t3tools/shared/productIdentity";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
@@ -127,8 +127,9 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
   "NoRunningServerError",
   {
     checkedStatePaths: Schema.Array(Schema.String),
-    startCommand: Schema.optional(Schema.String),
     inLinkedWorktree: Schema.Boolean,
+    serveCommand: Schema.String,
+    connectCommand: Schema.String,
   },
 ) {
   override get message(): string {
@@ -138,7 +139,7 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
       ...(this.inLinkedWorktree
         ? ["In a linked worktree, pass --base-dir to pair with a server outside it."]
         : []),
-      `Start one with \`${this.startCommand ?? forkCliCommand("serve")}\`.`,
+      `Start one with \`${this.serveCommand}\`, or connect this machine with T3 Connect: \`${this.connectCommand}\`.`,
     ].join("\n");
   }
 }
@@ -309,7 +310,8 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
 ) {
   const bases: Array<string> = [];
   let inLinkedWorktree = false;
-  if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
+  const hasExplicitBaseDir = explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0;
+  if (hasExplicitBaseDir) {
     bases.push(yield* resolveBaseDir(explicitBaseDir));
   } else {
     // Same precedence as dev-runner: inside a linked worktree only its own
@@ -356,10 +358,12 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
       } satisfies DiscoveredPairTarget;
     }
   }
+  const baseDirArgs = hasExplicitBaseDir ? ["--base-dir", explicitBaseDir] : [];
   return yield* new NoRunningServerError({
     checkedStatePaths,
     inLinkedWorktree,
-    startCommand: yield* resolveCliCommand("serve", bases[0]),
+    serveCommand: (yield* resolveHostCliCommand("serve", baseDirArgs)).command,
+    connectCommand: (yield* resolveHostCliCommand("connect", baseDirArgs)).command,
   });
 });
 

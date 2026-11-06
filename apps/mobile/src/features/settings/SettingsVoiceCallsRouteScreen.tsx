@@ -1,0 +1,33 @@
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
+import { VoiceSettings } from "../voice/VoiceSettings";
+import { SettingsScreen } from "./components/SettingsScreen";
+import { SettingsSection } from "./components/SettingsSection";
+import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
+import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+
+export function SettingsVoiceCallsRouteScreen() {
+  const { selectedTargets } = useSettingsEnvironmentFilter();
+  const environmentMenu = useSettingsEnvironmentMenu();
+  const insets = useSafeAreaInsets();
+  return (
+    <SettingsScreen title="Voice calls" menus={[environmentMenu]}>
+      <ScreenScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerClassName="gap-6 px-5 pt-4"
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
+      >
+        {selectedTargets.length ? (
+          selectedTargets.map((environment) => (
+            <SettingsSection key={environment.environmentId} title={environment.label}>
+              <VoiceSettings environmentId={environment.environmentId} />
+            </SettingsSection>
+          ))
+        ) : (
+          <Text>Select a connected environment.</Text>
+        )}
+      </ScreenScrollView>
+    </SettingsScreen>
+  );
+}
