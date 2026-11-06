@@ -73,6 +73,7 @@ describe("command permissions", () => {
     WS_METHODS.voiceEnd,
     WS_METHODS.voiceExecute,
     WS_METHODS.voiceConfirm,
+    WS_METHODS.voiceReport,
   ])("requires the destination operate grant for %s", (method) =>
     Effect.scoped(
       Effect.gen(function* () {

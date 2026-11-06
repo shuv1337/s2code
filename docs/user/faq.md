@@ -73,11 +73,11 @@ No. Your code and prompts go from your machine to your provider (Anthropic, Open
 
 ## Worktrees are eating my disk. How do I clean them up?
 
-Open **Settings > Storage** and turn on automatic worktree cleanup. You can also run it now from there. Worktrees add up fast. One user cleared 500 GB. [Storage cleanup](./project-settings.md#storage-cleanup)
+Open **Settings → Worktrees → Cleanup** and turn on automatic worktree cleanup. You can also run it now from there. Worktrees add up fast. One user cleared 500 GB. [Storage cleanup](./project-settings.md#storage-cleanup)
 
 ## Is there voice input?
 
-Yes. Use the composer microphone for draft-only dictation, or Call for a two-way voice session. Configure cloud voice in Settings → Voice. Supported iPhones also offer on-device dictation. [Voice calls and dictation](./composer.md#voice-calls-and-dictation)
+Yes. On iPhone and Android, dictation uses on-device speech by default; you can opt in to a paired environment instead. Web and desktop require you to choose an environment first. The transcript goes into your draft for review. See [Voice input](./voice-input.md). For a two-way voice session, use Call after adding an OpenAI key in Settings → Voice calls. [Voice calls and dictation](./composer.md#voice-calls-and-dictation)
 
 ## Does it work on Windows, Mac, and Linux?
 

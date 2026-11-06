@@ -35,7 +35,9 @@ export function VoiceSettings({ environmentId }: { environmentId: EnvironmentId 
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Two-way calls use GPT-Live. Dictation adds text to your draft. Audio is sent to OpenAI and
-        billed to your API account.
+        billed to your API account. Transcripts are saved in this server's local voice log so a call
+        can be troubleshot later. Set voiceLogTranscripts to false in server settings to stop saving
+        the words.
       </p>
       <p className="text-sm">
         {status.data?.configured

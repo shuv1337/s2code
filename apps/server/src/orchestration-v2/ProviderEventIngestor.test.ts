@@ -280,6 +280,7 @@ it.effect.each(["readable", "unreadable"] as const)(
             generatePrContent: () => Effect.die("unused"),
             generateThreadTitle: () => Effect.die("unused"),
             generateReviewGuide: () => Effect.die("unused"),
+            generateTranscriptionPostProcessing: () => Effect.die("unused"),
           },
           snapshot: {
             refreshUsage: Deferred.succeed(refreshed, undefined).pipe(Effect.asVoid),
@@ -611,8 +612,12 @@ layer("ProviderEventIngestorV2", (it) => {
           event: { type: "node.updated", driver: CODEX_DRIVER, node: sent },
         });
 
-      assert.lengthOf(yield* ingestNode(node), 1);
-      assert.isEmpty(yield* ingestNode({ ...node }));
+      yield* eventSink.withProviderBatch(
+        Effect.gen(function* () {
+          assert.lengthOf(yield* ingestNode(node), 1);
+          assert.isEmpty(yield* ingestNode({ ...node }));
+        }),
+      );
       yield* eventSink.write({
         events: [
           {

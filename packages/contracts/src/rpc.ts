@@ -1,5 +1,6 @@
 import {
   VoiceError,
+  VoiceReportInput,
   VoiceStartInput,
   VoiceStartResult,
   VoiceToolInput,
@@ -213,6 +214,7 @@ import {
   PullRequestLinkedThreadsResult,
   PullRequestSummary,
   PullRequestReviewerCandidateList,
+  PullRequestReviewerCandidatesInput,
   PullRequestReviewerRequestInput,
   PullRequestLabelCandidateList,
   PullRequestLabelChangeInput,
@@ -528,6 +530,7 @@ export const WS_METHODS = {
   voiceEnd: "voice.end",
   voiceExecute: "voice.execute",
   voiceConfirm: "voice.confirm",
+  voiceReport: "voice.report",
   peerLinksList: "peerLinks.list",
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
@@ -683,6 +686,8 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
     workspaceSnapshotsOnDemand: Schema.optional(Schema.Boolean),
     /** As on `subscribeServerConfig`: add /usage-limits to the replied snapshot. */
     usageLimitsCommand: Schema.optional(Schema.Boolean),
+    /** As on `subscribeServerConfig`: a failed cwd scan replies with the machine catalog as a pending snapshot. */
+    providerCatalogsOnDemand: Schema.optional(Schema.Boolean),
   }),
   success: ServerProviderUpdatedPayload,
   error: Schema.Union([EnvironmentAuthorizationError, ProviderSetupError]),
@@ -851,6 +856,10 @@ const WsVoiceExecuteRpc = Rpc.make(WS_METHODS.voiceExecute, {
 const WsVoiceConfirmRpc = Rpc.make(WS_METHODS.voiceConfirm, {
   payload: { sessionId: Schema.String, callId: Schema.String, accepted: Schema.Boolean },
   success: VoiceToolResult,
+  error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
+});
+const WsVoiceReportRpc = Rpc.make(WS_METHODS.voiceReport, {
+  payload: VoiceReportInput,
   error: Schema.Union([VoiceError, EnvironmentAuthorizationError]),
 });
 
@@ -1180,7 +1189,8 @@ const WsPullRequestsSetFilesViewedRpc = Rpc.make(WS_METHODS.pullRequestsSetFiles
 
 const WsPullRequestsRunActionRpc = Rpc.make(WS_METHODS.pullRequestsRunAction, {
   payload: PullRequestActionInput,
-  success: Schema.Void,
+  // Undefined unless asked for with replyWithSummary, or when the host's reply lacked it.
+  success: Schema.UndefinedOr(PullRequestSummary),
   error: PullRequestRpcError,
 });
 
@@ -1247,7 +1257,7 @@ const WsPullRequestsSubscribeRefreshesRpc = Rpc.make(WS_METHODS.pullRequestsSubs
 
 // Fetch reviewer candidates only when the menu opens to avoid unused host requests.
 const WsPullRequestsReviewerCandidatesRpc = Rpc.make(WS_METHODS.pullRequestsReviewerCandidates, {
-  payload: PullRequestRef,
+  payload: PullRequestReviewerCandidatesInput,
   success: PullRequestReviewerCandidateList,
   error: PullRequestRpcError,
 });
@@ -1955,6 +1965,8 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
     usageLimitsCommand: Schema.optional(Schema.Boolean),
     /** Omit per-cwd provider snapshots; the client fetches its cwd through `server.refreshProviders`. */
     workspaceSnapshotsOnDemand: Schema.optional(Schema.Boolean),
+    /** With on-demand snapshots, also omit machine slash commands and skills a cwd snapshot replaces. */
+    providerCatalogsOnDemand: Schema.optional(Schema.Boolean),
   }),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
@@ -2093,6 +2105,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVoiceEndRpc,
   WsVoiceExecuteRpc,
   WsVoiceConfirmRpc,
+  WsVoiceReportRpc,
   WsPeerLinksListRpc,
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,

@@ -43,6 +43,7 @@ import {
 } from "@t3tools/contracts";
 import { delegatedTaskProgress } from "@t3tools/provider-core/server/subagentProjection";
 import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
+import { areUsageLimitPoolPeers } from "@t3tools/shared/usageLimits";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -152,6 +153,8 @@ export interface ThreadManagementSendInput {
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly modelSelection?: ModelSelection;
   readonly mode: ThreadManagementSendMode;
+  /** Start a new provider session; the orchestrator queues it instead of steering. */
+  readonly freshContext?: boolean;
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
 }
@@ -474,8 +477,8 @@ export interface ThreadManagementServiceShape {
   readonly waitForThread: (
     input: ThreadManagementWaitInput,
   ) => Effect.Effect<ThreadManagementWaitResult, ThreadManagementError>;
-  /** Waits for the agent's run to end before settling its thread and stopping the session.
-   * Other endings or settle refusals leave the thread active. */
+  /** Waits for the agent's run and automatic follow-ups before settling.
+   * A new user turn or an unsuccessful ending leaves the thread active. */
   readonly settleAfterRun: (input: {
     readonly projectId: ProjectId;
     readonly threadId: ThreadId;
@@ -803,26 +806,47 @@ const make = Effect.gen(function* () {
       const threadId =
         command.type === "message.dispatch" ? command.threadId : command.parentThreadId;
       const { thread } = yield* orchestrator.getThreadRecords(threadId, []);
-      const selection =
+      const requested =
         command.type === "message.dispatch"
           ? (command.modelSelection ?? thread.modelSelection)
           : command.modelSelection;
+      const threadStart =
+        resolution?.threadStart ??
+        (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId)));
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const seat = thread.modelSelection.instanceId;
+      // Composers can carry the pool member they asked for before the pool placed the thread.
+      // A member switched off by hand still refuses the turn rather than handing it to the seat.
+      const keepSeat =
+        command.type === "message.dispatch" &&
+        !threadStart &&
+        command.modelSelectionExplicit !== true &&
+        command.movedOffSpentInstanceId === undefined &&
+        areUsageLimitPoolPeers(settings, requested.instanceId, seat) &&
+        (resolveProjectProviderInstanceEnabled(settings, thread.projectId, requested.instanceId) ||
+          isSpentInstance(settings, requested.instanceId)) &&
+        resolveProjectProviderInstanceEnabled(settings, thread.projectId, seat);
+      if (keepSeat) {
+        yield* Effect.logInfo("Kept thread on its pool seat", {
+          threadId,
+          requestedInstanceId: requested.instanceId,
+          seatInstanceId: seat,
+        });
+      }
+      const selection = keepSeat ? { ...requested, instanceId: seat } : requested;
       // Without `named` the resolver never refuses; named refusals come from resolveThreadStartInstance.
-      const replacement = yield* resolveInstance(selection, thread.projectId, {
-        threadStart:
-          resolution?.threadStart ??
-          (command.type === "delegated_task.request" || !(yield* orchestrator.hasRuns(threadId))),
-      }).pipe(Effect.orDie);
-      if (replacement === selection) return command;
+      const replacement = yield* resolveInstance(selection, thread.projectId, { threadStart }).pipe(
+        Effect.orDie,
+      );
+      if (replacement === requested) return command;
       if (command.type === "delegated_task.request") {
         return { ...command, modelSelection: replacement };
       }
-      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
       return {
         ...command,
         modelSelection: replacement,
-        ...(isSpentInstance(settings, selection.instanceId)
-          ? { movedOffSpentInstanceId: selection.instanceId }
+        ...(isSpentInstance(settings, requested.instanceId)
+          ? { movedOffSpentInstanceId: requested.instanceId }
           : {}),
       };
     },
@@ -925,26 +949,31 @@ const make = Effect.gen(function* () {
       });
     }
     const steerableRun = latestSteerableRun(target);
+    // A fresh send never joins a running turn, so it needs none to steer or restart.
+    const mode =
+      input.freshContext && (input.mode === "steer" || input.mode === "restart")
+        ? "queue"
+        : input.mode;
     let dispatchMode: Extract<
       OrchestrationV2Command,
       { readonly type: "message.dispatch" }
     >["dispatchMode"];
-    if (input.mode === "steer" || input.mode === "restart") {
+    if (mode === "steer" || mode === "restart") {
       if (steerableRun === undefined) {
         return yield* new ThreadManagementNoSteerableRunError({
           threadId: input.threadId,
-          mode: input.mode,
+          mode,
         });
       }
       dispatchMode = {
-        type: input.mode === "steer" ? "steer_active" : "restart_active",
+        type: mode === "steer" ? "steer_active" : "restart_active",
         targetRunId: steerableRun.id,
       };
-    } else if (input.mode === "auto" && steerableRun !== undefined) {
+    } else if (mode === "auto" && steerableRun !== undefined) {
       dispatchMode = { type: "steer_active", targetRunId: steerableRun.id };
     } else {
       dispatchMode = {
-        type: input.mode === "queue" ? "queue_after_active" : "start_immediately",
+        type: mode === "queue" ? "queue_after_active" : "start_immediately",
       };
     }
 
@@ -958,6 +987,7 @@ const make = Effect.gen(function* () {
       text: input.text,
       attachments: input.attachments,
       ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+      ...(input.freshContext ? { freshContext: true } : {}),
       dispatchMode,
       createdBy: input.createdBy,
       creationSource: input.creationSource,
@@ -993,7 +1023,7 @@ const make = Effect.gen(function* () {
         ? "queued"
         : turnItem.inputIntent === "turn_start"
           ? "started"
-          : input.mode === "restart"
+          : mode === "restart"
             ? "restarted"
             : "steered";
     return { dispatch: dispatched, projection, message, run, turnItem, delivery };
@@ -1141,11 +1171,74 @@ const make = Effect.gen(function* () {
   )(function* (input) {
     const { run } = yield* waitForThread({ ...input, timeoutMs: SETTLE_AFTER_RUN_WAIT_MS });
     if (run?.status !== "completed") return;
-    yield* dispatch({
-      type: "thread.settle",
-      commandId: CommandId.make(`server:settle-after-run:${input.runId}`),
-      threadId: input.threadId,
+    const afterSequence = yield* orchestrator.getThreadEventSequence(input.threadId);
+    const trySettle = Effect.gen(function* () {
+      const sequence = yield* orchestrator.getThreadEventSequence(input.threadId);
+      const records = yield* getProjectThreadRecords(input, ["runs"]);
+      const following = records.runs.filter((candidate) => candidate.ordinal > run.ordinal);
+      if (following.length > 0) {
+        const { messages } = yield* getProjectThreadRecords(input, ["messages"], {
+          messageRunIds: following.map((candidate) => candidate.id),
+          messageRoles: ["user"],
+        });
+        const automaticMessageIds = new Set(
+          messages
+            .filter(
+              (message) =>
+                message.role === "user" &&
+                (message.notification !== undefined || message.delegatedCompletion !== undefined),
+            )
+            .map((message) => message.id),
+        );
+        if (
+          messages.some((message) => !automaticMessageIds.has(message.id)) ||
+          following.some((candidate) => !automaticMessageIds.has(candidate.userMessageId))
+        ) {
+          return true;
+        }
+        if (
+          following.some(
+            (candidate) => candidate.status !== "queued" && !isTerminalRunStatus(candidate.status),
+          )
+        )
+          return false;
+        if (
+          following.some(
+            (candidate) => candidate.status !== "queued" && candidate.status !== "completed",
+          )
+        )
+          return true;
+      }
+      const latest = latestRun(records);
+      if (latest === undefined) return true;
+      return yield* dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make(`server:settle-after-run:${input.runId}:${sequence}`),
+        threadId: input.threadId,
+        expectedLatestRunId: latest.id,
+      }).pipe(
+        Effect.as(true),
+        // A notification can start between the projection read and the guarded dispatch.
+        Effect.catchTags({
+          OrchestratorDispatchError: () => Effect.succeed(false),
+          OrchestratorCommandPreviouslyRejectedError: () => Effect.succeed(false),
+        }),
+      );
     });
+    yield* Stream.fromEffect(trySettle).pipe(
+      Stream.concat(
+        orchestrator
+          .streamStoredEventsFrom({
+            threadId: input.threadId,
+            afterSequence,
+            eventType: "run.updated",
+          })
+          .pipe(Stream.mapEffect(() => trySettle)),
+      ),
+      Stream.filter((done) => done),
+      Stream.runHead,
+      Effect.timeoutOption(Duration.millis(SETTLE_AFTER_RUN_WAIT_MS)),
+    );
   });
 
   const settleThread: ThreadManagementServiceShape["settleThread"] = Effect.fn(

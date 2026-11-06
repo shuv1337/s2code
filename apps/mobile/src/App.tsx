@@ -50,6 +50,7 @@ import { appAtomRegistry } from "./state/atom-registry";
 import { subscribeComposerDraftModelReconciliation } from "./state/use-composer-drafts";
 import { environmentThreadShells } from "./state/threads";
 import { environmentShell } from "./state/shell";
+import { serverEnvironment } from "./state/server";
 import { OverlayPortalHost } from "./components/ui/OverlayPortal";
 import { shouldHandleAppLink, restoreDraftLinkState } from "./lib/appLinking";
 import { hasCloudPublicConfig } from "./features/cloud/publicConfig";
@@ -82,8 +83,8 @@ import {
   launchWorkspaceURL,
   recordWorkspaceSelections,
   settingsLinkPage,
-} from "./features/workspace/workspace-selection-store";
-import { workspaceDetailLinkAction } from "./features/workspace/workspace-detail-selection";
+} from "./features/layout/workspace/workspace-selection-store";
+import { workspaceDetailLinkAction } from "./features/layout/workspace/workspace-detail-selection";
 import { NativeLayoutMetricsProvider } from "./native/native-layout-metrics";
 import {
   attachRootNavigation,
@@ -189,6 +190,7 @@ const appServiceDisposers = [
     threadShellAtom: environmentThreadShells.threadShellAtom,
     threadRefsAtom: environmentThreadShells.threadRefsAtom,
     shellStateAtom: environmentShell.stateAtom,
+    settingsAtom: serverEnvironment.settingsValueAtom,
   }),
   installAppearanceRuntime(),
   installSubscriptionUsageRefresh(),

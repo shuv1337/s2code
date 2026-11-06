@@ -20,7 +20,7 @@ Logs are human-facing:
 
 - destination: stdout
 - format: `Logger.consolePretty()`
-- normal local persistence: none
+- normal local persistence: voice session JSONL only (below); other logs stay on stdout
 - SSH-managed launch persistence: `~/.t3/ssh-launch/<state>/server.log`
 - remote export: OTLP only, when configured
 
@@ -31,6 +31,24 @@ every message instead of only the ones inside an active span and carry the trace
 they still line up with the trace. `Logger.tracerLogger` is dropped in that mode, so the same
 message is not exported twice and the trace file stops carrying log messages. stdout output and
 SSH-managed launch persistence stay unchanged either way.
+
+### Voice session logs
+
+GPT Live calls and dictation append one JSON object per line under
+`<stateDir>/logs/voice/<YYYYMMDD>-<sessionId>.jsonl` (`~/.t3/userdata/logs/voice/` by
+default). Each line has `v`, `ts`, `sessionId`, `mode`, `seq`, and `type`. Read a file
+with `jq -c . path/to/session.jsonl`.
+
+Lines cover session start and end, connect latency, turns, final transcripts, tool
+calls, confirmations, and error causes. Transcripts are on by default
+(`voiceLogTranscripts` in server settings). They do not include audio, SDP, or API keys.
+Tool arguments keep `threadId`, `environmentId`, and `projectId`; every other argument
+is only its name and value length. Strings are truncated (200 characters, transcripts
+2,000), and `sk-…` / `Bearer …` text is removed.
+
+A file stops after 5MB, ending with a `truncated` line. Starting a session deletes
+files older than 14 days, then the oldest files until the folder is within 200MB.
+A logging failure does not end the call.
 
 ### Traces
 
@@ -62,6 +80,11 @@ or `reader` for the read-only connection in a worker thread. `db.lock_wait_ms` i
 span spent waiting for that connection, behind other SQL. That wait does not block the event loop,
 so subtract it before you blame a slow span on the query. Statements inside a transaction use its
 connection and do not carry these attributes.
+
+An MCP request over HTTP has a `McpHttpServer.authenticateRequest` span that covers only admitting
+it: the credential check, the mode limit, and the Linked environments gate. The request runs after
+it, under the `McpServer.…/<method>` span, and each tool call has its own `mcp.tool.<name>` span
+that times it. That span's attributes name the tool, never its arguments.
 
 DPoP proof failures include the safe `environment.dpop.failure_code` span
 attribute. A `time_window` failure means that a signed proof was too old or too

@@ -9,7 +9,15 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import * as McpToolCaller from "../mcp/McpToolCaller.ts";
+import * as VoiceAuditLog from "./VoiceAuditLog.ts";
 import * as VoiceTools from "./VoiceTools.ts";
+
+const silentAudit = Layer.succeed(VoiceAuditLog.VoiceAuditLog, {
+  append: () => Effect.void,
+  retain: () => Effect.void,
+  close: () => Effect.void,
+  flush: Effect.void,
+});
 
 it.effect("requires each tool's grants before invoking it and bounds sensitive results", () =>
   Effect.gen(function* () {
@@ -39,6 +47,7 @@ it.effect("requires each tool's grants before invoking it and bounds sensitive r
                 });
               }),
           }),
+          silentAudit,
         ),
       ),
     );
@@ -82,6 +91,7 @@ it.effect("strips environmentId when the tool rejects it and reports links as of
             getDescriptor: Effect.die("unused"),
           }),
           ServerSettings.layerTest({ linkedEnvironmentsEnabled: false }),
+          silentAudit,
           Layer.succeed(McpToolCaller.McpToolCaller, {
             call: (input) =>
               Effect.sync(() => {

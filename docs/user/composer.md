@@ -184,10 +184,16 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
+## Voice input on web and desktop
+
+Use the composer's microphone or `mod+shift+d` to dictate into your draft. Audio
+is transcribed on an environment you choose in **Settings → Voice**; nothing is
+sent until you choose one. See [Voice input](./voice-input.md).
+
 ## Voice calls and dictation
 
-Configure an OpenAI API key with GPT-Live access in **Settings → Voice** for the
-environment you want to use. Voice audio is sent to OpenAI and billed to that API
+Configure an OpenAI API key with GPT-Live access in **Settings → Voice calls** for
+the environment you want to use. Voice audio is sent to OpenAI and billed to that API
 account. Web browsers need HTTPS or localhost and microphone permission.
 
 Use **Call** beside the web or desktop composer, or the headphones action on
@@ -197,34 +203,38 @@ The call stays with its starting environment and thread when you navigate.
 **Mute** stops microphone input; **End** closes voice without stopping work
 already sent to an agent. Mobile calls end when the app backgrounds.
 
-The microphone action dictates into your draft. On supported phones it uses the
-on-device transcription described below; other clients use OpenAI transcription.
-Choose **Use transcript** to add cloud dictation to its original draft, then
+**Dictate into draft** beside **Call** uses OpenAI transcription instead of the
+voice input described above and below. Choose **Use transcript** to add cloud dictation to its original draft, then
 review and send it yourself. If the draft changed while you spoke, the transcript
 stays in the voice panel for you to copy. Canceling never submits a message.
 
 ## Voice input on mobile
 
-On supported iPhones with iOS 26 or later and Android devices with Android 12 or
-later, use the composer's microphone to record, then confirm to transcribe. Text is
+Use the composer's microphone to record, then confirm to transcribe. Text is
 inserted where your selection was when recording started, ready for you to review
 and edit before sending.
 
-Voice input uses on-device speech transcription: Apple's on iOS, and compatible
-Google speech services on Android. When it is unavailable for the device or its
-language, the composer has no microphone button and **Settings → Microphone** says
-voice input isn't available. On Android, keep S2Code open while recording and
-transcribing.
+By default, audio stays on the phone. Local transcription needs a supported iPhone
+with iOS 26 or later, or Android 12 or later with compatible Google speech services.
+To use a paired environment instead, open **Settings → Voice → Transcribe on**,
+choose the environment, and confirm. Finished recordings go only to that environment,
+even when a draft belongs to another one. This also works on phones without local
+speech recognition. If the chosen environment disconnects, dictation stops; it never
+switches hosts. Choose **This device** to revoke access and discard pending audio.
+On Android, keep S2Code open while recording and transcribing.
 
-The first use may download a speech model and needs a network connection.
-Later transcription works offline for that language. On Android, transcription
-processes the full recording at roughly its original duration. Recordings can be up to five
+On-device dictation may need a network connection to download a speech model the
+first time. After that it works offline for that language. iPhone dictates in the
+first of your preferred languages (**Settings → General → Language & Region**)
+that Apple’s speech model supports. If none is supported, it tries the app’s
+language. Android transcribes on the device while you
+record and finishes after you stop. Recordings can be up to five
 minutes long. Canceling or an audio interruption discards the recording and
 preserves your existing draft. Navigating to another screen keeps dictation active;
 use the floating controls to finish or cancel. While recording, the screen stays
 awake; it can sleep normally once recording stops.
 
-Choose a preferred order in **Settings → Microphone**. Voice input requests the first
+Choose a preferred order in **Settings → Voice**. Voice input requests the first
 connected microphone in the list. The list mixes kinds (built-in, other wired, other
 Bluetooth, and CarPlay on iOS) with wired and Bluetooth devices you have dictated
 with, listed by name. Drag to rank them together:
@@ -234,8 +244,8 @@ microphone on iOS. Swipe a device left to forget it. Android may use another inp
 when the preferred microphone cannot be routed. Devices with the same name may share
 a saved preference, but simultaneous same-name inputs remain separately selectable.
 
-Transcription runs on your device. S2Code deletes the temporary audio after
-transcription or cancellation; only the message text is sent when you submit.
+S2Code deletes the temporary recording from your phone after transcription or
+cancellation. The transcript stays in your draft until you send the message to the agent.
 
 ## Queued messages
 
@@ -282,6 +292,12 @@ Provider commands must start the message to run. S2Code commands such as
 
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it, even with the context meter turned off.
+
+Send `/clear` on its own, or pick it from the slash menu, to start a fresh session
+in the same thread. Your next message goes to a new provider session that doesn't see the
+earlier messages, and the thread marks where it began with **New session**.
+Earlier messages and diffs stay in the thread. Dismiss the notice above the
+composer to keep the current session instead.
 
 On web and desktop, turn on **Settings → Labs → Legacy → Context
 window indicator (legacy)** to see context usage. The meter is off by default
