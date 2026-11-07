@@ -21,6 +21,8 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
+import cursorPackageJson from "../packages/provider-cursor/package.json" with { type: "json" };
+
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import {
@@ -665,6 +667,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   );
 
   it("pins floating patched dependencies to the version the patch names", () => {
+    assert.strictEqual(
+      serverPackageJson.dependencies["@cursor/sdk"],
+      cursorPackageJson.dependencies["@cursor/sdk"],
+    );
     const patches = {
       "@ff-labs/fff-node@0.11.0": "patches/@ff-labs__fff-node@0.11.0.patch",
       "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
