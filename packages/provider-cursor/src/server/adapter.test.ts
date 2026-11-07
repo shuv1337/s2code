@@ -377,6 +377,29 @@ describe("CursorAdapterV2", () => {
       failure: null,
     },
     {
+      reason: "an unconfirmed checkpoint after an answer without reusing the native session",
+      updates: [
+        { type: "text-delta", text: "The answer." },
+        { type: "turn-ended" },
+      ] satisfies ReadonlyArray<InteractionUpdate>,
+      wait: Effect.succeed({
+        id: "native-cursor-run",
+        status: "error" as const,
+        error: {
+          message:
+            "Cursor could not confirm that this answer was saved. Automatic replay was stopped; the next message will recover in a fresh Cursor session.",
+        },
+      }),
+      failure: {
+        class: "provider_error",
+        message:
+          "Cursor could not confirm that this answer was saved. Automatic replay was stopped; the next message will recover in a fresh Cursor session.",
+        retryable: false,
+      },
+      threadDisposition: "broken" as const,
+      answers: ["The answer.", "The answer."],
+    },
+    {
       reason: "the error a continuation after the turn ended stopped with",
       updates: [
         { type: "text-delta", text: "The answer." },
@@ -411,7 +434,7 @@ describe("CursorAdapterV2", () => {
       failure: null,
       answers: [],
     },
-  ])("ends the turn with $reason", ({ updates = [], wait, failure, answers }) =>
+  ])("ends the turn with $reason", ({ updates = [], wait, failure, answers, threadDisposition }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cursor-v2-failure-" });
@@ -511,6 +534,7 @@ describe("CursorAdapterV2", () => {
       assert.equal(terminal?.status, failure === null ? "completed" : "failed");
       assert.equal(terminal?.failure?.class, failure?.class);
       assert.equal(terminal?.failure?.message, failure?.message);
+      assert.equal(terminal?.threadDisposition, threadDisposition ?? "reusable");
       if (failure !== null) {
         assert.equal(
           terminal?.failure?.retryable,

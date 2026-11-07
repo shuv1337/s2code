@@ -26,6 +26,7 @@ import {
   makeCursorAgentSdkReplayRunner,
 } from "../Adapters/CursorAdapterV2.testkit.ts";
 import * as CursorAdapterV2Testkit from "../Adapters/CursorAdapterV2.testkit.ts";
+import type * as CursorAgentSdk from "@t3tools/provider-cursor/server/CursorAgentSdk";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as EffectWorker from "../EffectWorker.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
@@ -151,16 +152,83 @@ const readClaudeCancelledSubagentResumeTranscript = Effect.fn(
     });
   return yield* ClaudeOrchestratorReplayHarness.decodeTranscript({ ...recorded, entries });
 });
-const readCursorTranscript = Effect.fn("readCursorRecoveryTranscript")(function* () {
+const readCursorTranscript = Effect.fn("readCursorRecoveryTranscript")(function* (
+  checkpointFailure: boolean,
+) {
   const transcript = yield* readRawTranscript(
     new URL("./fixtures/provider_thread_resume/cursor_transcript.ndjson", import.meta.url),
   );
-  return yield* CursorOrchestratorReplayHarness.decodeTranscript(
+  const recorded = yield* CursorOrchestratorReplayHarness.decodeTranscript(
     materializeReplayTranscriptRuntimeInstructions(transcript, {
       driver: ProviderDriverKind.make("cursor"),
       model: CURSOR_MODEL_SELECTION.model,
     }),
   );
+  if (!checkpointFailure) return recorded;
+  let secondSession = false;
+  const oldAgent = String(recorded.metadata?.nativeAgentId);
+  const newAgent = "agent-after-checkpoint-failure";
+  return yield* CursorOrchestratorReplayHarness.decodeTranscript({
+    ...recorded,
+    entries: recorded.entries.flatMap<CursorAgentSdkReplayTranscript["entries"][number]>(
+      (entry) => {
+        if (entry.type !== "emit_inbound" && entry.type !== "expect_outbound") return entry;
+        let frame = entry.frame as CursorAgentSdk.CursorAgentSdkProtocolLogEvent["payload"];
+        if (entry.label === "run.completed:1" && frame.type === "run.completed") {
+          return [
+            {
+              type: "emit_inbound",
+              label: "run.retry:1",
+              frame: {
+                type: "run.retry",
+                runId: frame.result.id,
+                diagnostic: {
+                  requestId: frame.result.requestId,
+                  originalRequestId: frame.result.requestId,
+                  attempt: 0,
+                  decision: "blocked_after_turn_ended",
+                  turnEnded: true,
+                  checkpoint: "none",
+                  cause: { name: "Error", message: "Checkpoint persistence failed" },
+                },
+              },
+            },
+            {
+              ...entry,
+              frame: {
+                ...frame,
+                result: {
+                  ...frame.result,
+                  status: "error",
+                  error: {
+                    message:
+                      "Cursor could not confirm that this answer was saved. Automatic replay was stopped; the next message will recover in a fresh Cursor session.",
+                  },
+                },
+              },
+            },
+          ];
+        }
+        if (frame.type === "agent.open" && frame.operation === "resume") {
+          secondSession = true;
+          const { agentId: _agentId, ...rest } = frame;
+          frame = { ...rest, operation: "create" };
+        }
+        if (entry.label === "run.start:2" && frame.type === "run.start") {
+          frame = {
+            ...frame,
+            message: `Context handoff (full_thread_summary):\n<dynamic-summary>\n\nUser message:\n${frame.message}`,
+          };
+        }
+        return {
+          ...entry,
+          frame: secondSession
+            ? JSON.parse(JSON.stringify(frame).replaceAll(oldAgent, newAgent))
+            : frame,
+        };
+      },
+    ),
+  });
 });
 
 function splitAfterFirstIdle(materialized: MaterializedOrchestratorFixtureInput) {
@@ -182,6 +250,7 @@ function splitAfterFirstIdle(materialized: MaterializedOrchestratorFixtureInput)
 const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
   readonly transcript: CursorAgentSdkReplayTranscript;
   readonly runner: ReturnType<typeof makeCursorAgentSdkReplayRunner>;
+  readonly checkpointFailure: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -211,16 +280,32 @@ const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
       Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     ),
   };
+  const sentMessages: string[] = [];
+  const runner: typeof input.runner = {
+    ...input.runner,
+    open: (openInput) =>
+      input.runner.open(openInput).pipe(
+        Effect.map((session) => ({
+          ...session,
+          send: (sendInput) => {
+            sentMessages.push(
+              typeof sendInput.message === "string" ? sendInput.message : sendInput.message.text,
+            );
+            return session.send(sendInput);
+          },
+        })),
+      ),
+  };
   const harness = {
     ...CursorOrchestratorReplayHarness,
     makeProviderAdapterRegistryLayer: () =>
       CursorAdapterV2Testkit.layer(input.transcript, {
-        runner: input.runner,
+        runner,
         assertCompleteOnFinalize: false,
       }),
   };
 
-  yield* Effect.scoped(
+  const before = yield* Effect.scoped(
     runOrchestratorV2ProviderReplayScenario(
       {
         name: "provider_thread_resume/cursor:first-runtime",
@@ -234,6 +319,11 @@ const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
       options,
     ),
   );
+  if (input.checkpointFailure) {
+    const first = projectionFor(before, input.transcript.scenario);
+    assert.equal(first.providerThreads[0]?.status, "error");
+    assertAssistantTextIncludes(first, FIRST_FINAL);
+  }
 
   const result = yield* Effect.scoped(
     runOrchestratorV2ProviderReplayScenario(
@@ -255,7 +345,7 @@ const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
     result,
     transcript: input.transcript,
     runCount: 2,
-    runStatuses: ["completed", "completed"],
+    runStatuses: [input.checkpointFailure ? "failed" : "completed", "completed"],
   });
   const projection = projectionFor(result, input.transcript.scenario);
   assertSemanticProjectionIntegrity(projection);
@@ -269,6 +359,20 @@ const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
   assertAssistantTextIncludes(projection, FIRST_FINAL);
   assertAssistantTextIncludes(projection, SECOND_FINAL);
   assert.lengthOf(projection.providerThreads, 1);
+  if (input.checkpointFailure) {
+    assert.include(sentMessages[1], "Context handoff (full_thread_summary):");
+    assert.include(sentMessages[1], FIRST_FINAL);
+    assert.match(
+      sentMessages[1]!,
+      /\[Historical assistant;[^\]]+\]\nprovider thread resume fixture first turn complete/,
+    );
+    assert.include(sentMessages[1], PROVIDER_THREAD_RESUME_SECOND_PROMPT);
+    assert.equal(
+      projection.providerThreads[0]?.nativeThreadRef?.nativeId,
+      "agent-after-checkpoint-failure",
+    );
+    assert.equal(projection.contextHandoffs.at(-1)?.delivery?.status, "inline");
+  }
 });
 
 describe("orchestrator replay recovery", () => {
@@ -370,14 +474,14 @@ describe("orchestrator replay recovery", () => {
       ),
   );
 
-  it.effect(
-    "resumes a provider-native Cursor thread after recreating the orchestrator runtime",
-    () =>
+  it.effect.each([false, true])(
+    "recovers a Cursor thread after recreating the orchestrator runtime (unconfirmed checkpoint: %s)",
+    (checkpointFailure) =>
       Effect.scoped(
         Effect.gen(function* () {
-          const transcript = yield* readCursorTranscript();
+          const transcript = yield* readCursorTranscript(checkpointFailure);
           const runner = makeCursorAgentSdkReplayRunner(transcript);
-          yield* runCursorRecovery({ transcript, runner });
+          yield* runCursorRecovery({ transcript, runner, checkpointFailure });
           yield* runner.assertComplete;
         }).pipe(
           provideDeterministicTestRuntime,

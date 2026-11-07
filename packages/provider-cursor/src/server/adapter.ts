@@ -68,6 +68,7 @@ import {
   subagentThreadTitle,
 } from "@t3tools/provider-core/server/subagentProjection";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
+import { CURSOR_CHECKPOINT_UNCERTAIN_MESSAGE } from "./cursorRetry.ts";
 import { isCursorSdkError } from "./sdk.ts";
 export { cursorSdkModelSelection } from "./sdkModel.ts";
 
@@ -2529,12 +2530,15 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                     );
                   }
                   if (context !== null) {
+                    const checkpointUncertain =
+                      result.error?.message === CURSOR_CHECKPOINT_UNCERTAIN_MESSAGE;
                     const transportFailure = context.assistantReply.failure;
                     const status =
                       transportFailure === undefined ? terminalStatus(context, result) : "failed";
                     yield* finalizeTurn({
                       context,
                       status,
+                      ...(checkpointUncertain ? { threadDisposition: "broken" } : {}),
                       ...(status === "failed"
                         ? {
                             failure:
@@ -2544,6 +2548,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                                     // makeProviderFailure never reads a cause's own text.
                                     message: result.error?.message,
                                     ...usageLimitFailure(result.error, "provider_error"),
+                                    ...(checkpointUncertain ? { retryable: false } : {}),
                                   })
                                 : makeProviderFailure({
                                     cause: transportFailure,
@@ -2659,6 +2664,12 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           ),
           resumeThread: Effect.fn("CursorAdapterV2.resumeThread")(
             function* (threadInput: { readonly providerThread: OrchestrationV2ProviderThread }) {
+              if (threadInput.providerThread.status === "error") {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver: CursorAgentSdk.CURSOR_PROVIDER,
+                  detail: CURSOR_CHECKPOINT_UNCERTAIN_MESSAGE,
+                });
+              }
               const agentId = nativeThreadId(threadInput.providerThread);
               yield* openAgent({
                 operation: "resume",
