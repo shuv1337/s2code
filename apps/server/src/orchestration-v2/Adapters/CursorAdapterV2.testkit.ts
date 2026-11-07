@@ -346,13 +346,13 @@ export function makeCursorAgentSdkReplayRunner(
             new CursorReplayFrameMismatchError({
               scenario: transcript.scenario,
               cursor,
-              expected: { type: "interaction.update | run.completed" },
+              expected: { type: "interaction.update | run.retry | run.completed" },
               actual: entry.frame,
             }),
           );
         }
         const frame = entry.frame as CursorProtocolPayload;
-        if (frame.type === "interaction.update") {
+        if (frame.type === "interaction.update" || frame.type === "run.retry") {
           if (frame.runId !== runId) {
             return yield* recordFailure(
               new CursorReplayFrameMismatchError({
@@ -364,6 +364,7 @@ export function makeCursorAgentSdkReplayRunner(
             );
           }
           advance();
+          if (frame.type === "run.retry") continue;
           yield* (sendInput.onDelta?.(frame.update) ?? Effect.void).pipe(
             Effect.mapError((cause) =>
               recordFailure(
@@ -396,7 +397,7 @@ export function makeCursorAgentSdkReplayRunner(
           new CursorReplayFrameMismatchError({
             scenario: transcript.scenario,
             cursor,
-            expected: { type: "interaction.update | run.completed" },
+            expected: { type: "interaction.update | run.retry | run.completed" },
             actual: frame,
           }),
         );
@@ -753,6 +754,14 @@ export const recordCursorAgentSdkReplayTranscript = Effect.fn(
         };
       case "run.completed":
         return { ...frame, result: sanitizeReplayValue(frame.result, replacements) as RunResult };
+      case "run.retry":
+        return {
+          ...frame,
+          diagnostic: sanitizeReplayValue(
+            frame.diagnostic,
+            replacements,
+          ) as typeof frame.diagnostic,
+        };
       default:
         return frame;
     }

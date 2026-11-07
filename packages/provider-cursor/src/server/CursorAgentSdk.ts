@@ -19,6 +19,11 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as CursorSdk from "./CursorSdk.ts";
+import {
+  cursorRetryCause,
+  withCursorRetryDiagnostics,
+  type CursorRetryDiagnostic,
+} from "./cursorRetry.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 
 export const CURSOR_AGENT_SDK_PROTOCOL = "cursor-agent-sdk.local" as const;
@@ -213,6 +218,17 @@ export type CursorAgentSdkProtocolLogEvent =
       readonly payload: {
         readonly type: "run.completed";
         readonly result: RunResult;
+      };
+    }
+  | {
+      readonly direction: "incoming";
+      readonly stage: "decoded";
+      readonly payload: {
+        readonly type: "run.retry";
+        readonly runId: string;
+        readonly diagnostic: Omit<CursorRetryDiagnostic, "cause"> & {
+          readonly cause: ReturnType<typeof cursorRetryCause>;
+        };
       };
     }
   | {
@@ -456,7 +472,7 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
           });
 
           let callbacksReady = false;
-          const pendingUpdates: Array<InteractionUpdate> = [];
+          const pendingCallbacks: Array<() => Promise<void>> = [];
           let callbackFailure: { readonly cause: unknown } | undefined;
           let callbackChain = Promise.resolve();
           let runId = "";
@@ -487,18 +503,48 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
           const startRun = () =>
             Effect.tryPromise({
               try: () =>
-                sendInput.summarize === true
-                  ? agent.summarize()
-                  : agent.send(sendInput.message, {
-                      ...sendInput.options,
-                      onDelta: async ({ update }) => {
-                        if (!callbacksReady) {
-                          pendingUpdates.push(update);
-                          return;
-                        }
-                        await dispatchUpdate(update);
-                      },
-                    }),
+                withCursorRetryDiagnostics(
+                  (diagnostic) => {
+                    const dispatch = () => {
+                      callbackChain = callbackChain
+                        .then(() =>
+                          Effect.runPromiseWith(context)(
+                            log({
+                              direction: "incoming",
+                              stage: "decoded",
+                              payload: {
+                                type: "run.retry",
+                                runId,
+                                diagnostic: {
+                                  ...diagnostic,
+                                  cause: cursorRetryCause(diagnostic.cause),
+                                },
+                              },
+                            }).pipe(Effect.ignore),
+                          ),
+                        )
+                        .catch((cause) => {
+                          callbackFailure ??= { cause };
+                        });
+                      return callbackChain;
+                    };
+                    if (!callbacksReady) pendingCallbacks.push(dispatch);
+                    else void dispatch();
+                  },
+                  () =>
+                    sendInput.summarize === true
+                      ? agent.summarize()
+                      : agent.send(sendInput.message, {
+                          ...sendInput.options,
+                          onDelta: async ({ update }) => {
+                            if (!callbacksReady) {
+                              pendingCallbacks.push(() => dispatchUpdate(update));
+                              return;
+                            }
+                            await dispatchUpdate(update);
+                          },
+                        }),
+                ),
               catch: (cause) => runnerError(cause, "run.start"),
             });
           const run = yield* startRun().pipe(
@@ -542,9 +588,9 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
             },
           });
           callbacksReady = true;
-          for (const update of pendingUpdates) {
+          for (const dispatch of pendingCallbacks) {
             yield* Effect.tryPromise({
-              try: () => dispatchUpdate(update),
+              try: dispatch,
               catch: (cause) => runnerError(cause, "run.onDelta"),
             });
           }

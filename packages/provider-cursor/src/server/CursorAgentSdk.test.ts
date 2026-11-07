@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Exit from "effect/Exit";
 import * as Cause from "effect/Cause";
 import { vi } from "vite-plus/test";
+import * as NodeDiagnosticsChannel from "node:diagnostics_channel";
 
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as CursorAgentSdk from "./CursorAgentSdk.ts";
@@ -136,6 +137,60 @@ const layerTest = CursorAgentSdk.layer.pipe(
 );
 
 describe("CursorAgentSdkRunner", () => {
+  it.effect("logs an early retry failure under its run without recording request state", () =>
+    Effect.gen(function* () {
+      const events: CursorAgentSdk.CursorAgentSdkProtocolLogEvent[] = [];
+      const retryCause = Object.assign(new Error("Checkpoint persistence failed"), {
+        cause: Object.assign(new Error("disk full"), { code: "ENOSPC" }),
+        request: { authorization: "must-not-be-logged", prompt: "private prompt" },
+      });
+      cursorSdkMock.send.mockImplementationOnce(async () => {
+        NodeDiagnosticsChannel.channel("s2code.cursor.retry").publish({
+          requestId: "request-cursor-agent-sdk-test",
+          originalRequestId: "request-cursor-agent-sdk-test",
+          attempt: 0,
+          decision: "blocked_after_turn_ended",
+          turnEnded: true,
+          checkpoint: "none",
+          cause: retryCause,
+        });
+        return {
+          id: "run-cursor-agent-sdk-test",
+          agentId: "agent-cursor-agent-sdk-test",
+          wait: cursorSdkMock.runWait,
+          cancel: cursorSdkMock.runCancel,
+        };
+      });
+      const runner = yield* CursorAgentSdk.makeCursorAgentSdkRunner(
+        () => (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+      );
+      const session = yield* runner.open({
+        operation: "create",
+        options: {},
+        threadId: ThreadId.make("cursor-diagnostics"),
+        providerSessionId: ProviderSessionId.make("cursor-diagnostics"),
+      });
+      const run = yield* session.send({ message: "hi" });
+      yield* run.wait;
+      const retry = events.find((event) => event.payload.type === "run.retry");
+      assert.equal(retry?.payload.type, "run.retry");
+      if (retry?.payload.type !== "run.retry") return;
+      assert.equal(retry.payload.runId, "run-cursor-agent-sdk-test");
+      assert.deepEqual(retry.payload.diagnostic.cause, {
+        name: "Error",
+        message: "Checkpoint persistence failed",
+        cause: { name: "Error", message: "disk full", code: "ENOSPC" },
+      });
+      assert.deepEqual(
+        events.map((event) => event.payload.type),
+        ["agent.open", "agent.opened", "run.start", "run.started", "run.retry", "run.completed"],
+      );
+    }).pipe(Effect.provide(CursorSdk.layer)),
+  );
+
   it.effect("constructs without loading and reports first-use load failures as runner errors", () =>
     Effect.gen(function* () {
       const failure = new Error("missing SDK chunk");
