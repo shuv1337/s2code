@@ -116,7 +116,16 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
       checkpoint: false,
       continuation: false,
       terminal: false,
-      cancelled: true,
+      thrown: { message: "Request cancelled", kind: "CancelledError" },
+      expectedAttempts: 1,
+      failure: true,
+    },
+    {
+      scenario: "authentication failure after an answer",
+      checkpoint: true,
+      continuation: false,
+      terminal: false,
+      thrown: { message: "Sign in to Cursor again", kind: "AuthenticationError" },
       expectedAttempts: 1,
       failure: true,
     },
@@ -165,10 +174,12 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
       cancellation: { toCancelledError: () => new Error("cancelled") },
       hooks: {
         classify: (error: unknown, info: { attempt: number }) =>
-          "cancelled" in fixture && fixture.cancelled
+          "thrown" in fixture
             ? {
                 action: "throw",
-                error: Object.assign(new Error("Request cancelled"), { kind: "CancelledError" }),
+                error: Object.assign(new Error(fixture.thrown.message, { cause: error }), {
+                  kind: fixture.thrown.kind,
+                }),
               }
             : info.attempt < 1
               ? {
@@ -208,7 +219,7 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
     );
     if (fixture.failure)
       await expect(result).rejects.toThrow(
-        "cancelled" in fixture ? "Request cancelled" : checkpointError,
+        "thrown" in fixture ? fixture.thrown.message : checkpointError,
       );
     else await result;
     expect(actions).toHaveLength(fixture.expectedAttempts);
@@ -219,7 +230,7 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]?.originalRequestId).toBe("original-request");
     expect(diagnostics[0]?.decision).toBe(
-      "cancelled" in fixture
+      "thrown" in fixture
         ? "throw"
         : fixture.failure
           ? "blocked_after_turn_ended"
@@ -227,6 +238,10 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
             ? "completed_from_checkpoint"
             : "retry",
     );
+    if ("thrown" in fixture) {
+      await expect(result).rejects.toMatchObject({ kind: fixture.thrown.kind });
+      expect(diagnostics[0]?.cause).toMatchObject({ message: "ECONNRESET after the answer" });
+    }
     if ("writeFailure" in fixture) {
       expect(diagnostics[0]?.checkpoint).toBe("eligible");
       expect(diagnostics[0]?.cause).toMatchObject({ code: "SQLITE_FULL" });
