@@ -24,6 +24,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import cursorPackageJson from "../packages/provider-cursor/package.json" with { type: "json" };
 
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import {
   buildDesktopBundles,
@@ -37,6 +38,7 @@ import {
   pinPatchedOverrideSpecs,
   pinPatchedStageDependencies,
   StagePatchedDependencyMismatchError,
+  stagePatchedDependenciesFrom,
   withPinnedFffNativeDependencies,
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_EXTRA_RESOURCES,
@@ -738,6 +740,37 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         );
       assert.strictEqual(pinned["node-pty"], locked?.[1]);
       assert.deepStrictEqual(pinPatchedOverrideSpecs(overrides, patchedDependencies), overrides);
+    }),
+  );
+
+  it.effect("stages every workspace manifest's patched dependencies at a patched version", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { patchedDependencies = {}, catalog = {} } = yield* readWorkspaceConfig();
+      const repoRoot = path.join(import.meta.dirname, "..");
+      const dirs = ["evals", "oxlint-plugin-t3code", "scripts"];
+      for (const parent of ["apps", "infra", "packages"]) {
+        for (const child of yield* fs.readDirectory(path.join(repoRoot, parent))) {
+          dirs.push(path.join(parent, child));
+        }
+      }
+      for (const dir of dirs) {
+        const manifestPath = path.join(repoRoot, dir, "package.json");
+        if (!(yield* fs.exists(manifestPath))) continue;
+        const manifest = JSON.parse(yield* fs.readFileString(manifestPath));
+        for (const field of ["dependencies", "optionalDependencies", "devDependencies"]) {
+          const dependencies = resolveCatalogDependencies(manifest[field] ?? {}, catalog, dir);
+          yield* stagePatchedDependenciesFrom(
+            patchedDependencies,
+            pinPatchedStageDependencies(dependencies, patchedDependencies),
+          ).pipe(
+            Effect.catch((cause) =>
+              Effect.sync(() => assert.fail(`${dir}/package.json ${field}: ${cause.message}`)),
+            ),
+          );
+        }
+      }
     }),
   );
 
