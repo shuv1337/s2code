@@ -59,6 +59,40 @@ function loadRetryLoop(format: "cjs" | "esm") {
   return NodeVM.runInNewContext(`${loop}; ${name}`, globals) as (input: object) => Promise<void>;
 }
 
+describe("Cursor SDK retry guard after the turn ended", () => {
+  it.each([
+    { action: "retry", kind: undefined, blocked: true },
+    { action: "throw", kind: "AuthenticationError", blocked: false },
+    { action: "throw", kind: "CancelledError", blocked: false },
+    { action: "throw", kind: "NonRetriableError", blocked: false },
+  ])("turns only retries into checkpoint failures ($action $kind)", async (fixture) => {
+    const require = NodeModule.createRequire(import.meta.url);
+    const directory = NodePath.dirname(require.resolve("@cursor/sdk"));
+    const { guard } = require(NodePath.join(directory, "..", "s2code-retry.cjs"));
+    const cause = new Error("ECONNRESET after the answer");
+    const decision =
+      fixture.action === "retry"
+        ? { action: "retry", immediate: true }
+        : { action: "throw", error: Object.assign(new Error("original"), { kind: fixture.kind }) };
+    const guarded = guard({
+      interaction: { sendUpdate: async () => {} },
+      checkpointError: (error: unknown) => ({ kind: "NonRetriableError", cause: error }),
+      hooks: { classify: () => decision, runAttempt: async () => {} },
+    });
+    await guarded.interaction.sendUpdate({}, { message: { case: "turnEnded" } });
+    const result = guarded.hooks.classify(cause, {
+      attemptRequestId: "attempt",
+      originalRequestId: "original-request",
+      attempt: 0,
+    });
+    if (fixture.blocked) {
+      expect(result).toEqual({ action: "throw", error: { kind: "NonRetriableError", cause } });
+    } else {
+      expect(result).toBe(decision);
+    }
+  });
+});
+
 describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) => {
   it.each([
     {

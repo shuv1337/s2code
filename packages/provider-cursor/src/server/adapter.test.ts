@@ -535,6 +535,10 @@ describe("CursorAdapterV2", () => {
       assert.equal(terminal?.failure?.class, failure?.class);
       assert.equal(terminal?.failure?.message, failure?.message);
       assert.equal(terminal?.threadDisposition, threadDisposition ?? "reusable");
+      assert.equal(
+        events.findLast((event) => event.type === "provider_thread.updated")?.providerThread.status,
+        threadDisposition === "broken" ? "error" : "active",
+      );
       if (failure !== null) {
         assert.equal(
           terminal?.failure?.retryable,
