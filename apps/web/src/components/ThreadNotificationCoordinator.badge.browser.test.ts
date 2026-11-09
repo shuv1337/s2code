@@ -1,5 +1,7 @@
 import type { AnyRouter } from "@tanstack/react-router";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
+import { PrimaryConnectionTarget } from "@t3tools/client-runtime/connection";
+import { createEnvironmentThreadShellAtoms } from "@t3tools/client-runtime/state/threads";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -50,9 +52,11 @@ vi.mock(import("../state/threads"), async (original) => {
     ...actual,
     environmentThreadShells: {
       ...actual.environmentThreadShells,
-      pendingSubagentRequestsAtom: (() => noRequestsAtom) as never,
+      get pendingSubagentRequestsAtom() {
+        return testThreadShells.pendingSubagentRequestsAtom;
+      },
       get delegatedUnderParentAtom() {
-        return noDelegatedAtom as never;
+        return testThreadShells.delegatedUnderParentAtom;
       },
     },
   };
@@ -80,8 +84,38 @@ import { startThreadNotifications } from "./ThreadNotificationCoordinator";
 let registry: AtomRegistry.AtomRegistry;
 const shellAtom = Atom.family((_id: string) => Atom.make<unknown>(null));
 const environmentIdsAtom = Atom.make<ReadonlyArray<string>>([]);
-const noRequestsAtom = Atom.make(new Map());
-const noDelegatedAtom = Atom.make<ReadonlySet<string>>(new Set<string>());
+const testThreadShells = createEnvironmentThreadShellAtoms({
+  catalogValueAtom: Atom.make((get) => ({
+    isReady: true,
+    entries: new Map(
+      get(environmentIdsAtom).map((id) => {
+        const environmentId = EnvironmentId.make(id);
+        return [
+          environmentId,
+          {
+            target: new PrimaryConnectionTarget({
+              environmentId,
+              label: id,
+              httpBaseUrl: "https://example.test",
+              wsBaseUrl: "wss://example.test",
+            }),
+            profile: Option.none(),
+            enabled: true,
+          },
+        ] as const;
+      }),
+    ),
+  })),
+  snapshotAtom: Atom.family((id: EnvironmentId) =>
+    Atom.make((get) => {
+      const value = get(shellAtom(id)) as {
+        snapshot: Option.Option<OrchestrationV2ShellSnapshot>;
+      } | null;
+      return value ? Option.getOrNull(value.snapshot) : null;
+    }),
+  ),
+  hiddenThreadTagsAtom: () => Atom.make(null),
+});
 state.shells = { set: (id, value) => registry.set(shellAtom(id), value) };
 
 class TestNotification extends EventTarget {
@@ -239,6 +273,42 @@ it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
     expect(notification.close).toHaveBeenCalled();
   },
 );
+
+it("notifies on the parent when a same-environment cross-project child needs approval", async () => {
+  await using app = setup();
+  const parent = toV2ThreadShell(thread);
+  const child = {
+    ...toV2ThreadShell({ ...thread, id: "child", title: "Child task" }),
+    projectId: "other-project",
+    delegatedFrom: {
+      environmentId: EnvironmentId.make("one"),
+      threadId: parent.id,
+      title: parent.title,
+    },
+  };
+  state.shells.set("one", { status: "live", snapshot: Option.some({ threads: [parent, child] }) });
+  app.start();
+  state.shells.set("one", {
+    status: "live",
+    snapshot: Option.some({
+      threads: [
+        parent,
+        {
+          ...child,
+          pendingRuntimeRequest: { id: "approval", kind: "command", createdAt: SHELL_NOW },
+        },
+      ],
+    }),
+  });
+  expect(TestNotification.sent.map((sent) => [sent.title, sent.options.body])).toEqual([
+    ["Approval needed", parent.title],
+  ]);
+  TestNotification.sent[0]!.dispatchEvent(new Event("click"));
+  expect(state.navigate).toHaveBeenCalledWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId: "one", threadId: parent.id },
+  });
+});
 
 it("presents completion notifications and sound as soon as the shell completes", async () => {
   await using app = setup();

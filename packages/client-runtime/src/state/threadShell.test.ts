@@ -403,6 +403,53 @@ describe("v2 thread shell lists", () => {
     registry.dispose();
   });
 
+  it("rolls a same-environment cross-project task's approvals up to its listed parent", () => {
+    const { registry, threads, snapshotAtom } = makeHarness();
+    const parent = v2ThreadShell;
+    const task = {
+      ...v2ThreadShell,
+      id: ThreadId.make("local-task"),
+      projectId: otherProjectId,
+      status: "running" as const,
+      activityRunStatus: "running" as const,
+      delegatedFrom: { environmentId, threadId: parent.id, title: parent.title },
+    };
+    const ref = { environmentId, threadId: parent.id };
+    registry.set(snapshotAtom(environmentId), { ...v2ShellSnapshot, threads: [parent, task] });
+    const dispose = registry.mount(threads.threadShellAtom(ref));
+    const disposeNavigation = registry.mount(threads.navigationThreadShellsAtom);
+    expect(registry.get(threads.navigationThreadShellsAtom).map((thread) => thread.id)).toEqual([
+      parent.id,
+    ]);
+    for (const kind of ["command", "user_input"] as const) {
+      registry.set(snapshotAtom(environmentId), {
+        ...v2ShellSnapshot,
+        threads: [
+          parent,
+          {
+            ...task,
+            pendingRuntimeRequest: {
+              id: RuntimeRequestId.make("local-request"),
+              kind,
+              createdAt: v2Now,
+            },
+          },
+        ],
+      });
+      expect(registry.get(threads.threadShellAtom(ref))?.pendingSubagentRequest).toBe(
+        kind === "command" ? "approval" : null,
+      );
+      expect(registry.get(threads.childThreadInputsAtom(ref)).map((thread) => thread.id)).toEqual([
+        task.id,
+      ]);
+    }
+    registry.set(snapshotAtom(environmentId), { ...v2ShellSnapshot, threads: [parent, task] });
+    expect(registry.get(threads.threadShellAtom(ref))?.pendingSubagentRequest).toBeNull();
+    disposeNavigation();
+    dispose();
+    registry.dispose();
+  });
+
   it("brings an approval up a chain of tasks across three environments to its root", () => {
     const thirdEnvironmentId = EnvironmentId.make("third-environment-v2");
     const { registry, threads, snapshotAtom } = makeHarness([
