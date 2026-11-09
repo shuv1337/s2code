@@ -3496,6 +3496,59 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect(
+    "rejects cross-project worktree isolation before launch when the target has no commit",
+    () =>
+      Effect.gen(function* () {
+        const otherProjectId = ProjectId.make("project:empty");
+        const dependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadRecords: () => Effect.succeed(parentProjection([])),
+            getThreadShell: () => Effect.succeed(null),
+          }),
+          Layer.mock(ProjectService.ProjectService)({
+            getById: () => Effect.succeedSome({ workspaceRoot: "/empty-repo" } as never),
+          }),
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            resolveCommit: ({ cwd, revision }) => {
+              assert.equal(cwd, "/empty-repo");
+              assert.equal(revision, "HEAD");
+              return Effect.fail(
+                new GitCommandError({
+                  operation: "GitVcsDriver.resolveCommit",
+                  command: "git",
+                  cwd,
+                  detail: "No commit",
+                }),
+              );
+            },
+          }),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          providerRegistryLayer([]),
+          adapterRegistryLayer([]),
+          ServerSettings.layerTest(),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const error = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+          Effect.flatMap((service) =>
+            service.delegateTask(scope, {
+              task: "Work elsewhere.",
+              target: { projectId: otherProjectId },
+              isolation: "worktree",
+            }),
+          ),
+          Effect.flip,
+          Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))),
+        );
+        assert.equal(error.code, "invalid_request");
+        assert.include(error.message, "target project's repository");
+      }),
+  );
+
   it.effect("accepts the inherited options it reports back as a delegate target", () =>
     Effect.gen(function* () {
       // t3_thread_launch keeps a model selection as given, so a thread can hold an option its model lacks.
