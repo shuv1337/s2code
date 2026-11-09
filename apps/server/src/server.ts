@@ -826,7 +826,7 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
-  // Follows delegated tasks running in linked environments, including after a restart.
+  // Follows cross-project and linked-environment tasks, including after a restart.
   Layer.effectDiscard(
     RemoteDelegation.RemoteDelegation.pipe(Effect.flatMap((remote) => remote.start())),
   ),

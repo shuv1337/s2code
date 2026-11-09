@@ -46,7 +46,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 
-/** How long one follow of a remote task waits on its thread there before checking again. */
+/** How long a follower waits on an ordinary child thread before checking again. */
 const FOLLOW_WAIT_MS = 10 * 60 * 1_000;
 /** A linked environment that stops answering is retried, backing off to this. */
 const FOLLOW_MAX_BACKOFF = Duration.minutes(5);
@@ -93,9 +93,9 @@ export class RemoteDelegation extends Context.Service<
       },
     ) => Effect.Effect<{ readonly taskId: NodeId }, OrchestratorMcpFailure>;
     /**
-     * Stops the task's thread there, then completes it here as cancelled. A
-     * task that already has its result keeps it; its thread there is still
-     * stopped, as cancelling a local task stops follow-up work on its child.
+     * Stops the local or remote child thread, then completes its task as cancelled.
+     * A task that already has its result keeps it; stopping its child still
+     * cancels follow-up work.
      */
     readonly cancel: (
       scope: ThreadScope,
@@ -106,8 +106,8 @@ export class RemoteDelegation extends Context.Service<
       },
     ) => Effect.Effect<OrchestratorMcpTaskCancelResult, OrchestratorMcpFailure>;
     /**
-     * Follows every open remote task until it ends, including after a
-     * restart, and a finished one again when a Stop here owes it a stop there.
+     * Follows every open ordinary-child task until it ends, including after a
+     * restart, and a finished one again when its child still needs to be stopped.
      */
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
   }
@@ -439,7 +439,7 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Completes `task` here with its thread there's final state. Each attempt is its own
+   * Completes `task` with its local or remote child thread's final state. Each attempt is its own
    * command, so a failed one never blocks the next; a report refused because the task already
    * has its result (a cancel, a Stop or an earlier report) is done. `stoppedThere` records that
    * nothing is left to stop there, even on a task that already has its result.
@@ -495,7 +495,7 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Stops the task's own thread there as its Stop button does: its running turn, queued
+   * Stops the task's local or remote child as its Stop button does: its running turn, queued
    * messages, pull request watches and delegated tasks. `key` names the stop (the follower
    * sends one, each cancel its own), and each is recorded there once however often it is sent.
    */
