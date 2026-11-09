@@ -1788,8 +1788,8 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * A task that runs in a linked environment, answered from its row here:
-   * the follower records its result once its thread there ends.
+   * An ordinary child thread, local or remote, answered from the parent's task row.
+   * The follower records its result once the child's delegated work settles.
    */
   const readRemoteTask = Effect.fn("OrchestratorMcpService.readRemoteTask")(function* (
     scope: McpThreadInvocationScope,
@@ -1849,13 +1849,23 @@ const make = Effect.gen(function* () {
           ),
         );
     }
+    const localChild =
+      !terminal && task.remoteChild?.environmentId === scope.environmentId
+        ? yield* threadManagement
+            .getThreadRecords(task.remoteChild.threadId, ["runs", "nodes", "runtimeRequests"])
+            .pipe(Effect.mapError(threadManagementFailure))
+        : null;
     return {
       taskId: task.id,
-      childThreadId: null,
+      childThreadId:
+        task.remoteChild?.environmentId === scope.environmentId ? task.remoteChild.threadId : null,
       ...(task.remoteChild === undefined
         ? {}
         : { remoteChild: task.remoteChild, link: formatThreadLink(task.remoteChild) }),
-      childRunId: null,
+      childRunId:
+        task.remoteChild?.environmentId === scope.environmentId
+          ? (task.remoteChild.runId ?? null)
+          : null,
       childNodeId: task.id,
       status,
       workState: terminal ? "result_available" : "working",
@@ -1870,9 +1880,22 @@ const make = Effect.gen(function* () {
         : null,
       latestTerminalSummary: terminal ? task.result : null,
       latestTerminalResultContextTransferId: null,
-      // Its questions and approvals are answered in the environment it runs in.
-      hasPendingQuestion: false,
-      pendingApproval: null,
+      hasPendingQuestion:
+        localChild?.runtimeRequests.some(
+          (request) =>
+            request.kind === "user_input" &&
+            request.status === "pending" &&
+            request.responseCapability.type === "live",
+        ) ?? false,
+      pendingApproval:
+        localChild === null || task.completionDelivery?.state === "disposed"
+          ? null
+          : pendingTaskApproval(
+              localChild,
+              task.id,
+              localChild.runs.find((run) => run.id === task.remoteChild?.runId) ??
+                ThreadManagementService.latestActiveRun(localChild),
+            ),
       waitTimedOut,
     } satisfies OrchestratorMcpDelegateTaskResult;
   });
@@ -1893,7 +1916,7 @@ const make = Effect.gen(function* () {
         return Option.some(initial);
       }
       // One stream per event type, so transcript events never fill a buffer.
-      // A remote task has no child here; its completion lands on the parent.
+      // Ordinary child threads report completion on the parent through their follower.
       const childThreadId = initial.childThreadId;
       const wakeEvents =
         childThreadId === null
@@ -2405,7 +2428,7 @@ const make = Effect.gen(function* () {
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
         providers: providers.map((provider) => {
-          // Snapshots list instances any project enables; delegate_task checks the caller's project.
+          // Capabilities describe this project; delegate_task checks the selected target project.
           const enabledForCaller =
             parent === undefined ||
             resolveProjectProviderInstanceEnabled(
@@ -2631,9 +2654,125 @@ const make = Effect.gen(function* () {
         input.target?.projectId !== undefined &&
         input.target.projectId !== parent.thread.projectId
       ) {
-        return yield* failure(
-          "invalid_request",
-          "A local task runs in this thread's project. Omit target.projectId, or pass target.environmentId to run it in that environment's project.",
+        const parentRun = ThreadManagementService.latestActiveRun(parent);
+        if (
+          parentRun?.rootNodeId == null ||
+          parentRun.providerInstanceId !== scope.thread.providerInstanceId
+        ) {
+          return yield* failure(
+            "parent_not_active",
+            "Delegated tasks require an active run owned by this MCP provider session.",
+          );
+        }
+        const projectId = input.target.projectId;
+        const project = yield* requireProject(projectId);
+        const key = yield* requestKey(input.clientRequestId);
+        const commandId = stableCommandId({
+          scope,
+          requestKey: key,
+          operation: "cross-project-launch",
+        });
+        const childThreadId = IdAllocator.derive.delegatedTaskThread({ commandId });
+        const existing = yield* threadManagement
+          .getThreadShell(childThreadId)
+          .pipe(Effect.mapError(threadManagementFailure));
+        const existingRun =
+          existing === null
+            ? undefined
+            : (yield* threadManagement
+                .getThreadRecords(childThreadId, ["runs"])
+                .pipe(Effect.mapError(threadManagementFailure))).runs.toSorted(
+                (left, right) => left.ordinal - right.ordinal,
+              )[0];
+        let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy =
+          existingRun?.workspacePreparation ?? { type: "root" };
+        if (existingRun === undefined) {
+          if (input.isolation === "worktree") {
+            const base = yield* gitDriver
+              .resolveCommit({
+                cwd: project.workspaceRoot,
+                revision: "HEAD",
+              })
+              .pipe(
+                Effect.mapError(() =>
+                  failure(
+                    "invalid_request",
+                    "Cannot use worktree isolation: the target project is not a Git repository with a commit.",
+                  ),
+                ),
+              );
+            workspaceStrategy = {
+              type: "worktree",
+              baseRef: base.commitSha,
+              startFromOrigin: false,
+            };
+          }
+        }
+        const target =
+          existing === null
+            ? yield* resolveTargetRechecking({
+                parent: { thread: { ...parent.thread, projectId } },
+                target: input.target,
+                providers: yield* loadProviders,
+              })
+            : { modelSelection: existing.modelSelection, supportedRuntimeModes: undefined };
+        const runtimeMode = yield* resolveRuntimeMode(
+          parent.thread.runtimeMode,
+          input.runtimeMode,
+          target,
+        );
+        const interactionMode = yield* resolveInteractionMode(
+          parent.thread.interactionMode,
+          input.interactionMode,
+        );
+        const launched = yield* threadLaunch
+          .launch({
+            commandId,
+            threadId: childThreadId,
+            projectId,
+            title: input.title ?? parent.thread.title,
+            modelSelection: target.modelSelection,
+            ...(existing !== null || namedInstance(input.target) === undefined
+              ? {}
+              : { namedInstance: namedInstance(input.target)! }),
+            runtimeMode,
+            interactionMode,
+            workspaceStrategy,
+            initialMessage: {
+              text: taskPrompt(input),
+              attachments: [],
+              senderThreadId: parent.thread.id,
+            },
+            createdBy: "agent",
+            creationSource: "mcp",
+            ...(parent.thread.linkOrigin === undefined
+              ? {}
+              : { linkOrigin: parent.thread.linkOrigin }),
+            delegatedFrom: {
+              environmentId: scope.environmentId,
+              threadId: parent.thread.id,
+              title: parent.thread.title,
+            },
+          })
+          .pipe(Effect.mapError(threadManagementFailure));
+        const run = launched.projection.runs[0];
+        const { taskId } = yield* remoteDelegation.record(scope, {
+          ...input,
+          clientRequestId: key,
+          parentRunId: parentRun.id,
+          parentNodeId: parentRun.rootNodeId,
+          modelSelection: launched.projection.thread.modelSelection,
+          remoteChild: {
+            environmentId: scope.environmentId,
+            threadId: launched.threadId,
+            label: project.title,
+            ...(run === undefined ? {} : { runId: run.id }),
+          },
+        });
+        return withResolvedInstance(
+          yield* input.mode === "wait"
+            ? awaitTask(scope, taskId, input.timeoutMs)
+            : readTask(scope, taskId, false, true),
         );
       }
       const parentRun = parent.runs
@@ -2845,8 +2984,8 @@ const make = Effect.gen(function* () {
       const scope = yield* requireThreadScope(callerScope, "task_cancel");
       const current = yield* readTask(scope, input.taskId);
       const childThreadId = current.childThreadId;
-      if (childThreadId === null) {
-        // The task runs in a linked environment: its thread there is stopped through the link.
+      if (current.remoteChild !== undefined || childThreadId === null) {
+        // Ordinary child threads share the follower lifecycle, whether local or remote.
         const subagents = yield* loadTasks(scope.thread.threadId, [input.taskId]);
         const remoteTask = subagents.find(
           (task) =>

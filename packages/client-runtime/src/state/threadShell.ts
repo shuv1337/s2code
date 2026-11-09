@@ -298,7 +298,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     for (const runsIn of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       for (const thread of get(environmentThreadsAtom(runsIn))) {
         const from = thread.delegatedFrom;
-        if (from === undefined || from.environmentId === runsIn) continue;
+        if (from === undefined) continue;
         const task = { runsIn, thread, parentThreadId: from.threadId };
         const tasks = tasksByDelegator.get(from.environmentId);
         if (tasks === undefined) tasksByDelegator.set(from.environmentId, [task]);

@@ -195,6 +195,7 @@ it.effect(
           readonly overrideModel?: ModelSelection;
           readonly hostedAppUrl?: string;
           readonly refusedByCeiling?: true;
+          readonly delegatedFrom?: ThreadLaunch.ThreadLaunchInput["delegatedFrom"];
         },
       ) {
         const { targeted, overrideModel, hostedAppUrl, refusedByCeiling, ...input } = params;
@@ -223,7 +224,13 @@ it.effect(
       const belowCeiling = yield* launchWith("full-access", "approval-required", {
         title: "Fix",
         message: "Fix the bug",
+        delegatedFrom: {
+          environmentId: EnvironmentId.make("forged"),
+          threadId: ThreadId.make("forged-parent"),
+          title: "Not the caller",
+        },
       });
+      expect(belowCeiling.launched[0]?.delegatedFrom).toBeUndefined();
       expect(belowCeiling.result).toMatchObject({
         projectId: belowCeiling.projectId,
         modelSelection: belowCeiling.modelSelection,

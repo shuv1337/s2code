@@ -103,7 +103,7 @@ export interface ThreadLaunchInput {
   readonly creationSource: OrchestrationV2CreationSource;
   /** The linked environment this launch is for, if one asked for it. */
   readonly linkOrigin?: OrchestrationV2LinkOrigin;
-  /** The parent there, when that environment's agent delegated this as a task. */
+  /** The parent of a cross-project or cross-environment delegated task. */
   readonly delegatedFrom?: OrchestrationV2DelegatedFrom;
 }
 

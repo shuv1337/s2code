@@ -1243,8 +1243,12 @@ describe("OrchestratorMcpService provider resolution", () => {
     "child run completion",
     "child question",
     "child approval",
+    "local child question",
+    "local child approval",
   ] as const)("a task wait still returns on %s", (wake) =>
     Effect.gen(function* () {
+      const local = wake.startsWith("local");
+      const question = wake.endsWith("question");
       const events = yield* Queue.unbounded<OrchestrationV2StoredEvent>();
       const subscribed = yield* Deferred.make<void>();
       const nestedId = NodeId.make("node:mcp-wait-nested");
@@ -1254,7 +1258,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       const eventType =
         wake === "child run completion"
           ? "run.updated"
-          : wake === "child question" || wake === "child approval"
+          : wake.endsWith("question") || wake.endsWith("approval")
             ? "runtime-request.updated"
             : "subagent.updated";
       const terminal = wake.endsWith("completion");
@@ -1267,7 +1271,16 @@ describe("OrchestratorMcpService provider resolution", () => {
         origin: "app_owned",
         providerInstanceId: codexInstanceId,
         driver: "codex",
-        childThreadId,
+        childThreadId: local ? null : childThreadId,
+        ...(local
+          ? {
+              remoteChild: {
+                environmentId: scope.environmentId,
+                threadId: childThreadId,
+                runId: childRunId,
+              },
+            }
+          : {}),
         model: "gpt-5.4",
         status: ready && terminal ? "completed" : "running",
         result: ready && wake === "parent completion" ? "done" : null,
@@ -1296,7 +1309,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                   {
                     id: "request:mcp-wait-answer",
                     nodeId: childRootId,
-                    kind: wake === "child question" ? "user_input" : "command",
+                    kind: question ? "user_input" : "command",
                     status: "pending",
                     responseCapability: { type: "live" },
                     createdAt: DateTime.makeUnsafe(0),
@@ -1313,6 +1326,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           isProviderInstanceEnabledForProject: () => Effect.succeed(true),
           getThreadRecords: (threadId) =>
             Effect.sync(() => (threadId === parentThreadId ? parentProjection([task()]) : child())),
+          getThreadShell: () => Effect.succeed(null),
           getThreadEventSequence: () => Effect.succeed(0),
           delegatedTaskResultPending: () => Effect.succeed(false),
           streamStoredEventsFrom: (input) =>
@@ -1337,15 +1351,45 @@ describe("OrchestratorMcpService provider resolution", () => {
           }),
         ]),
         adapterRegistryLayer([codexInstanceId]),
-        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.succeedSome({ workspaceRoot: "/other", title: "Other" } as never),
+        }),
         Layer.mock(SecretRequests.SecretRequests)({}),
-        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({
+          record: () => Effect.succeed({ taskId }),
+        }),
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+          launch: () =>
+            Effect.succeed({
+              threadId: childThreadId,
+              projection: {
+                ...child(),
+                thread: {
+                  ...childProjection.thread,
+                  modelSelection: parentProjection([]).thread.modelSelection,
+                },
+              },
+              resumed: false,
+            }),
+        }),
+        Layer.mock(GitVcsDriver.GitVcsDriver)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       yield* Effect.gen(function* () {
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        if (local) {
+          ready = true;
+          const pending = yield* service.taskStatus(scope, taskId);
+          assert.equal(pending.hasPendingQuestion, question);
+          assert.equal(pending.pendingApproval?.kind ?? null, question ? null : "command");
+          ready = false;
+        }
         const waiting = yield* service
-          .delegateTask(scope, { task: "Review the change.", mode: "wait" })
+          .delegateTask(scope, {
+            task: "Review the change.",
+            mode: "wait",
+            ...(local ? { target: { projectId: ProjectId.make("other-project") } } : {}),
+          })
           .pipe(Effect.forkChild);
         yield* Deferred.await(subscribed);
         ready = true;
@@ -1374,7 +1418,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           if (wake === "parent completion") assert.equal(result.summary, "done");
         } else {
           assert.equal(result.status, "running");
-          if (wake === "child question") assert.isTrue(result.hasPendingQuestion);
+          if (question) assert.isTrue(result.hasPendingQuestion);
           else {
             assert.deepEqual(result.pendingApproval, {
               requestId: "request:mcp-wait-answer",
@@ -1383,7 +1427,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             });
           }
         }
-      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
     }),
   );
 
@@ -3493,6 +3537,133 @@ describe("OrchestratorMcpService provider resolution", () => {
             );
           }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
         }
+      }),
+  );
+
+  it.effect("a cross-project retry keeps the preparing run's worktree strategy", () =>
+    Effect.gen(function* () {
+      const strategy = {
+        type: "worktree",
+        baseRef: "original-target-head",
+        startFromOrigin: false,
+      } as const;
+      const child = {
+        ...childProjection,
+        thread: {
+          ...parentProjection([]).thread,
+          id: childThreadId,
+          projectId: ProjectId.make("other-project"),
+        },
+        runs: [
+          {
+            id: RunId.make("preparing-child"),
+            ordinal: 1,
+            status: "preparing",
+            workspacePreparation: strategy,
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const task = {
+        id: taskId,
+        threadId: parentThreadId,
+        origin: "app_owned",
+        childThreadId: null,
+        remoteChild: { environmentId: scope.environmentId, threadId: childThreadId },
+        providerInstanceId: codexInstanceId,
+        model: "gpt-5.4",
+        status: "running",
+        result: null,
+      };
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (id) =>
+            Effect.succeed(id === parentThreadId ? parentProjection([task]) : child),
+          getThreadShell: () =>
+            Effect.succeed(child.thread as unknown as OrchestrationV2ThreadShell),
+        }),
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+          launch: (input) => {
+            assert.deepEqual(input.workspaceStrategy, strategy);
+            return Effect.succeed({ threadId: childThreadId, projection: child, resumed: true });
+          },
+        }),
+        Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.succeedSome({ title: "Other", workspaceRoot: "/other" } as never),
+        }),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({ record: () => Effect.succeed({ taskId }) }),
+        providerRegistryLayer([]),
+        adapterRegistryLayer([]),
+        ServerSettings.layerTest(),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+        Effect.flatMap((service) =>
+          service.delegateTask(scope, {
+            task: "Retry the worktree launch.",
+            target: { projectId: child.thread.projectId },
+            isolation: "worktree",
+            clientRequestId: "preparing-retry",
+          }),
+        ),
+        Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))),
+      );
+    }),
+  );
+
+  it.effect(
+    "rejects cross-project worktree isolation before launch when the target has no commit",
+    () =>
+      Effect.gen(function* () {
+        const otherProjectId = ProjectId.make("project:empty");
+        const dependencies = Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadRecords: () => Effect.succeed(parentProjection([])),
+            getThreadShell: () => Effect.succeed(null),
+          }),
+          Layer.mock(ProjectService.ProjectService)({
+            getById: () => Effect.succeedSome({ workspaceRoot: "/empty-repo" } as never),
+          }),
+          Layer.mock(GitVcsDriver.GitVcsDriver)({
+            resolveCommit: ({ cwd, revision }) => {
+              assert.equal(cwd, "/empty-repo");
+              assert.equal(revision, "HEAD");
+              return Effect.fail(
+                new GitCommandError({
+                  operation: "GitVcsDriver.resolveCommit",
+                  command: "git",
+                  cwd,
+                  detail: "No commit",
+                }),
+              );
+            },
+          }),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          providerRegistryLayer([]),
+          adapterRegistryLayer([]),
+          ServerSettings.layerTest(),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+        const error = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+          Effect.flatMap((service) =>
+            service.delegateTask(scope, {
+              task: "Work elsewhere.",
+              target: { projectId: otherProjectId },
+              isolation: "worktree",
+            }),
+          ),
+          Effect.flip,
+          Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))),
+        );
+        assert.equal(error.code, "invalid_request");
+        assert.include(error.message, "not a Git repository with a commit");
       }),
   );
 

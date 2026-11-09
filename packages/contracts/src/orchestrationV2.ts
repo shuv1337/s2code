@@ -131,8 +131,8 @@ export const linkOriginIsFenced = (origin: OrchestrationV2LinkOrigin) =>
   origin.access !== "full-access";
 
 /**
- * The thread in a linked environment that delegated this one, when it did:
- * this thread is that parent's subagent, run here instead of there.
+ * The parent of an ordinary delegated thread, in another local project or
+ * a linked environment.
  */
 export const OrchestrationV2DelegatedFrom = Schema.Struct({
   environmentId: EnvironmentId,
@@ -856,9 +856,9 @@ export const OrchestrationV2SubagentWorkflow = Schema.Struct({
 export type OrchestrationV2SubagentWorkflow = typeof OrchestrationV2SubagentWorkflow.Type;
 
 /**
- * Where an app-owned task runs when it runs in a linked environment instead
- * of in a child thread here: that environment and the ordinary thread it runs
- * as there. Such a task has no `childThreadId`.
+ * An ordinary child thread outside the parent's run tree, in another local
+ * project or a linked environment. The durable task has no `childThreadId`;
+ * MCP results expose it when this environment owns the ordinary thread.
  */
 export const OrchestrationV2RemoteTaskChild = Schema.Struct({
   environmentId: EnvironmentId,
@@ -2961,7 +2961,7 @@ export const OrchestrationV2Command = Schema.Union([
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     /** Only the server sets this; a client's thread.create never carries one. */
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
-    /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
+    /** Only the server sets this for a cross-project or cross-environment delegated task. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
     importedNativeThread: Schema.optional(
       Schema.Struct({

@@ -855,7 +855,7 @@ export default function ChatView(props: ChatViewProps) {
           messages: serverProjection.messages,
           parentSubagents: workflowOpeningParentProjection?.projection.subagents ?? null,
         });
-  // A linked environment's agent may have delegated this thread from there.
+  // A parent in another project or environment may have delegated this thread.
   const delegatedFrom = activeThread?.delegatedFrom ?? null;
   const delegatedFromEnvironment = useEnvironment(delegatedFrom?.environmentId ?? null);
   const delegatedFromRef =

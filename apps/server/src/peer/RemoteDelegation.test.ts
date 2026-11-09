@@ -25,6 +25,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -66,6 +67,12 @@ import * as PeerForwarding from "./PeerForwarding.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 import { descriptorOf, layerLinkingEnvironment, linkTo, servePeer } from "./PeerLinks.testkit.ts";
 import * as RemoteDelegation from "./RemoteDelegation.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as TerminalManager from "../terminal/Manager.ts";
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as PeerLinkRequests from "./PeerLinkRequests.ts";
 
 // The laptop's agent delegates a task to the box through a link. The box is
@@ -609,6 +616,73 @@ const makeLaptop = (
       Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
       Layer.provideMerge(Layer.merge(layerOrchestrator, ServerSettings.layerTest())),
     );
+    const localProjects = Layer.mock(ProjectService.ProjectService)({
+      getById: (id) =>
+        Effect.succeed(
+          id === boxProject
+            ? Option.some(boxProjects.at(-1)!)
+            : id === ProjectId.make("project:laptop")
+              ? Option.some({
+                  ...boxProjects.at(-1)!,
+                  id,
+                  title: "Laptop",
+                  workspaceRoot: "/home/me/app",
+                })
+              : Option.none(),
+        ),
+    });
+    const localProviders = Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed([boxPoolMember(instanceId, 0)]),
+      refreshInstance: () => Effect.succeed([boxPoolMember(instanceId, 0)]),
+    });
+    const worktrees: Array<{ cwd: string; refName: string }> = [];
+    const localLaunch = ThreadLaunch.layer.pipe(
+      Layer.provide(layerThreads),
+      Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+      Layer.provide(IdAllocator.layer),
+      Layer.provide(localProjects),
+      Layer.provide(localProviders),
+      Layer.provide(ServerSettings.layerTest()),
+      Layer.provide(WorktreeSetupTracker.layer),
+      Layer.provide(
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
+      ),
+      Layer.provide(Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void })),
+      Layer.provide(
+        Layer.mock(GitWorkflow.GitWorkflowService)({
+          hasCommit: () => Effect.succeed(false),
+          createWorktree: (input) =>
+            Effect.sync(() => {
+              worktrees.push(input);
+              return {
+                worktree: {
+                  path: "/srv/app-worktrees/local-child",
+                  refName: input.newRefName ?? input.refName,
+                },
+              };
+            }),
+          renameBranch: (input) => Effect.succeed({ branch: input.newBranch }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
+          runForThread: () => Effect.succeed({ status: "no-script" }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TextGeneration.TextGeneration)({
+          generateThreadTitle: () => Effect.succeed({ title: "Local child" }),
+          generateBranchName: () => Effect.succeed({ branch: "local-child" }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          namedProjectsRoot: "/projects",
+          isScratchProject: () => Effect.succeed(false),
+          folderForThread: () => Effect.succeedNone,
+        }),
+      ),
+    );
     const layerHere = McpHttpServer.layerOrchestratorToolkit.pipe(
       Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
       Layer.provideMerge(
@@ -640,21 +714,32 @@ const makeLaptop = (
       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
       Layer.provide(NodeCrypto.layer),
       Layer.provideMerge(layerThreads),
-      Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
-      Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
+      Layer.provide(localProviders),
+      Layer.provide(ProviderAdapterRegistry.layerFromAdapters([adapter])),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
-      Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+      Layer.provide(localProjects),
       Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
-      Layer.provide(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
-      Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+      Layer.provideMerge(localLaunch),
+      Layer.provide(
+        Layer.mock(GitVcsDriver.GitVcsDriver)({
+          resolveCommit: ({ cwd, revision }) => {
+            expect(cwd).toBe("/srv/app");
+            expect(revision).toBe("HEAD");
+            return Effect.succeed({ commitSha: "target-head" });
+          },
+        }),
+      ),
       Layer.fresh,
     );
     const here = yield* Layer.build(layerHere);
     const server = Context.get(here, McpServer.McpServer);
     return {
+      worktrees,
       links: Context.get(linking, PeerLinks.PeerLinks),
       settings: Context.get(linking, ServerSettings.ServerSettingsService),
+      threadSettings: Context.get(here, ServerSettings.ServerSettingsService),
+      launch: Context.get(here, ThreadLaunch.ThreadLaunchService),
       orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
       remote: Context.get(here, RemoteDelegation.RemoteDelegation),
       threads: Context.get(here, ThreadManagement.ThreadManagementService),
@@ -837,6 +922,417 @@ const taskResult = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>, ta
           : undefined,
       ),
     );
+
+const finishLocalChild = Effect.fn("test.finishLocalChild")(function* (
+  a: Effect.Success<ReturnType<typeof makeLaptop>>,
+  threadId: ThreadId,
+  text: string,
+) {
+  const child = yield* a.orchestrator.getThreadProjection(threadId);
+  const run = child.runs[0]!;
+  const now = yield* DateTime.now;
+  yield* a.sink.write({
+    commandId: CommandId.make(`finish:${threadId}`),
+    events: [
+      {
+        id: EventId.make(`reply:${threadId}`),
+        type: "message.updated",
+        threadId,
+        runId: run.id,
+        occurredAt: now,
+        payload: {
+          ...child.messages[0]!,
+          id: MessageId.make(`reply:${threadId}`),
+          role: "assistant",
+          text,
+        },
+      },
+      {
+        id: EventId.make(`finished:${threadId}`),
+        type: "run.updated",
+        threadId,
+        runId: run.id,
+        occurredAt: now,
+        payload: { ...run, status: "completed", completedAt: now },
+      },
+    ],
+  });
+});
+
+it.effect.each(["shared", "worktree"] as const)(
+  "a local cross-project task with %s isolation launches once and wakes its parent",
+  (isolation) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+        const a = yield* makeLaptop(database, offers);
+        yield* seedParent(a);
+        yield* a.settings.updateSettings({ linkedEnvironmentsEnabled: false });
+        const input = {
+          task: "Work in the other local project.",
+          target: { projectId: boxProject },
+          isolation,
+          clientRequestId: "local-other-project",
+        };
+        const first = yield* a.call("delegate_task", input);
+        expect(first.isError, JSON.stringify(first.content)).toBe(false);
+        const result = first.structuredContent as { taskId: NodeId; childThreadId: ThreadId };
+        if (isolation === "worktree") {
+          yield* a.orchestrator
+            .streamStoredEventsFrom({
+              threadId: result.childThreadId,
+              afterSequence: 0,
+              eventType: "run.updated",
+            })
+            .pipe(
+              Stream.filter(
+                (stored) =>
+                  stored.event.type === "run.updated" &&
+                  stored.event.payload.status !== "preparing",
+              ),
+              Stream.runHead,
+            );
+          expect(a.worktrees).toMatchObject([{ cwd: "/srv/app", refName: "target-head" }]);
+        }
+        const child = yield* a.orchestrator.getThreadProjection(result.childThreadId);
+        expect(child.thread.worktreePath).toBe(
+          isolation === "worktree" ? "/srv/app-worktrees/local-child" : null,
+        );
+        expect(child.thread.projectId).toBe(boxProject);
+        expect(child.thread.lineage.parentThreadId).toBeNull();
+        expect(child.thread.delegatedFrom).toEqual({
+          environmentId: laptop.environmentId,
+          threadId: parentThreadId,
+          title: "Laptop parent",
+        });
+        const retried = yield* a.call("delegate_task", input);
+        expect(retried.structuredContent).toMatchObject(result);
+        expect(a.worktrees).toHaveLength(isolation === "worktree" ? 1 : 0);
+        expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toHaveLength(
+          1,
+        );
+        expect(first.structuredContent).toMatchObject({
+          link: `<t3-thread://v2/${laptop.environmentId}/${result.childThreadId}>`,
+        });
+        yield* finishLocalChild(a, result.childThreadId, "Local work finished.");
+        expect(yield* taskResult(a, result.taskId)).toMatchObject({
+          status: "completed",
+          result: "Local work finished.",
+        });
+        const offered = yield* SubscriptionRef.changes(offers).pipe(
+          Stream.filter((seen) => seen.some((offer) => offer.threadId === parentThreadId)),
+          Stream.runHead,
+        );
+        expect(Option.isSome(offered)).toBe(true);
+        expect(
+          (yield* a.call("task_status", { taskId: result.taskId })).structuredContent,
+        ).toMatchObject({
+          status: "completed",
+          summary: "Local work finished.",
+          childThreadId: result.childThreadId,
+        });
+        const after = yield* a.orchestrator.getThreadProjection(result.childThreadId);
+        expect(after.runs).toHaveLength(1);
+        expect(after.messages.filter((message) => message.role === "user")).toHaveLength(1);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+);
+
+it.effect("follows a local cross-project task again after a restart without a peer link", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const delegated = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const before = yield* makeLaptop(database, offers);
+          yield* seedParent(before);
+          const result = yield* before.call("delegate_task", {
+            task: "Work locally.",
+            target: { projectId: boxProject },
+            clientRequestId: "restart-local",
+          });
+          expect(result.isError).toBe(false);
+          return result.structuredContent as { taskId: NodeId; childThreadId: ThreadId };
+        }),
+      );
+      const after = yield* makeLaptop(database, offers);
+      yield* finishLocalChild(after, delegated.childThreadId, "Finished after restart.");
+      yield* after.remote.start();
+      expect(yield* taskResult(after, delegated.taskId)).toMatchObject({
+        status: "completed",
+        result: "Finished after restart.",
+      });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("local cross-project wait returns the result without an async wake", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+      yield* seedParent(a);
+      const waiting = yield* a
+        .call("delegate_task", {
+          task: "Work locally.",
+          target: { projectId: boxProject, environmentId: laptop.environmentId },
+          mode: "wait",
+          clientRequestId: "local-wait",
+        })
+        .pipe(Effect.forkScoped);
+      const task = yield* a.orchestrator
+        .streamStoredEventsFrom({
+          threadId: parentThreadId,
+          afterSequence: 0,
+          eventType: "subagent.updated",
+        })
+        .pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "subagent.updated" &&
+              stored.event.payload.remoteChild !== undefined,
+          ),
+          Stream.runHead,
+        );
+      expect(Option.isSome(task)).toBe(true);
+      if (Option.isNone(task) || task.value.event.type !== "subagent.updated") return;
+      const childThreadId = task.value.event.payload.remoteChild!.threadId;
+      yield* finishLocalChild(a, childThreadId, "Waited result.");
+      const result = yield* Fiber.join(waiting);
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent).toMatchObject({
+        childThreadId,
+        status: "completed",
+        summary: "Waited result.",
+        waitTimedOut: false,
+      });
+      expect(yield* SubscriptionRef.get(offers)).toEqual([]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("local cross-project cancel stops the thread and retries preserve its result", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+      yield* seedParent(a);
+      const result = yield* a.call("delegate_task", {
+        task: "Work locally.",
+        target: { projectId: boxProject },
+        clientRequestId: "local-cancel",
+      });
+      expect(result.isError).toBe(false);
+      const { taskId, childThreadId } = result.structuredContent as {
+        taskId: NodeId;
+        childThreadId: ThreadId;
+      };
+      const cancel = { taskId, clientRequestId: "stop-local", reason: "No longer needed" };
+      expect((yield* a.call("task_cancel", cancel)).isError).toBe(false);
+      expect((yield* a.call("task_cancel", cancel)).isError).toBe(false);
+      expect((yield* a.call("task_status", { taskId })).structuredContent).toMatchObject({
+        status: "cancelled",
+        summary: "Cancelled: No longer needed",
+      });
+      const child = yield* a.orchestrator.getThreadProjection(childThreadId);
+      expect(child.runs.every((run) => run.status === "interrupted")).toBe(true);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect(
+  "local delegation rejects a missing project and keeps same-project children in the run tree",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+        yield* seedParent(a);
+        const missing = yield* a.call("delegate_task", {
+          task: "Work.",
+          target: { projectId: "project:missing" },
+        });
+        expect(missing.isError).toBe(true);
+        expect(JSON.stringify(missing.content)).toContain("project:missing");
+        expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toHaveLength(
+          0,
+        );
+        const same = yield* a.call("delegate_task", {
+          task: "Work here.",
+          target: { projectId: "project:laptop" },
+          clientRequestId: "same-project",
+        });
+        expect(same.isError, JSON.stringify(same.content)).toBe(false);
+        const result = same.structuredContent as { childThreadId: ThreadId };
+        expect(same.structuredContent).not.toHaveProperty("remoteChild");
+        const child = yield* a.orchestrator.getThreadProjection(result.childThreadId);
+        expect(child.thread.projectId).toBe("project:laptop");
+        expect(child.thread.lineage.parentThreadId).toBe(parentThreadId);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+);
+
+it.effect.each([
+  "runtime mode",
+  "interaction mode",
+  "inactive parent",
+  "disabled provider",
+] as const)("local cross-project delegation refuses %s before creating a child", (reason) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+      yield* seedParent(a);
+      if (reason === "runtime mode") {
+        yield* a.orchestrator.dispatch({
+          type: "thread.runtime-mode.set",
+          commandId: CommandId.make("lower-runtime"),
+          threadId: parentThreadId,
+          runtimeMode: "approval-required",
+        });
+      } else if (reason === "interaction mode") {
+        yield* a.orchestrator.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.make("lower-interaction"),
+          threadId: parentThreadId,
+          interactionMode: "plan",
+        });
+      } else if (reason === "inactive parent") {
+        const parent = yield* a.orchestrator.getThreadProjection(parentThreadId);
+        const now = yield* DateTime.now;
+        yield* a.sink.write({
+          commandId: CommandId.make("finish-parent"),
+          events: [
+            {
+              id: EventId.make("parent-completed"),
+              type: "run.updated",
+              threadId: parentThreadId,
+              runId: parentRunId,
+              occurredAt: now,
+              payload: { ...parent.runs[0]!, status: "completed", completedAt: now },
+            },
+          ],
+        });
+      } else {
+        yield* a.threadSettings.updateSettings({
+          projectSettingsOverrides: {
+            [boxProject]: { providerInstances: { [instanceId]: { enabled: false } } },
+          },
+        });
+      }
+      const result = yield* a.call("delegate_task", {
+        task: "Work in the other project.",
+        target: { projectId: boxProject, providerInstanceId: instanceId },
+        ...(reason === "runtime mode" ? { runtimeMode: "full-access" } : {}),
+        ...(reason === "interaction mode" ? { interactionMode: "default" } : {}),
+      });
+      expect(result.isError).toBe(true);
+      if (reason !== "disabled provider") {
+        expect(JSON.stringify(result.content)).toContain(
+          reason === "runtime mode"
+            ? "runtime_mode_escalation_denied"
+            : reason === "interaction mode"
+              ? "interaction_mode_escalation_denied"
+              : "parent_not_active",
+        );
+      }
+      expect(yield* a.projections.countThreads()).toBe(1);
+      expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toEqual([]);
+      if (reason === "disabled provider") {
+        yield* a.threadSettings.updateSettings({
+          projectSettingsOverrides: {
+            [boxProject]: { providerInstances: { [instanceId]: { enabled: true } } },
+          },
+        });
+        const enabled = yield* a.call("delegate_task", {
+          task: "Work in the other project.",
+          target: { projectId: boxProject, providerInstanceId: instanceId },
+        });
+        expect(enabled.isError, JSON.stringify(enabled.content)).toBe(false);
+        expect(yield* a.projections.countThreads()).toBe(2);
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("a failed local task record stops the launched child", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+      yield* seedParent(a);
+      const child = yield* a.launch.launch({
+        commandId: CommandId.make("launch-before-record-failure"),
+        projectId: boxProject,
+        title: "Unrecorded child",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        initialMessage: { text: "Work.", attachments: [] },
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      yield* a.orchestrator
+        .streamStoredEventsFrom({
+          threadId: child.threadId,
+          afterSequence: 0,
+          eventType: "run.updated",
+        })
+        .pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" && stored.event.payload.status !== "preparing",
+          ),
+          Stream.runHead,
+        );
+      yield* a.threads.dispatch({
+        type: "thread.stop",
+        commandId: CommandId.make("stop-before-record"),
+        threadId: parentThreadId,
+      });
+      const error = yield* a.remote
+        .record(
+          { ...parentScope, thread: parentScope.thread! },
+          {
+            task: "Work.",
+            parentRunId,
+            parentNodeId: parentRootNode,
+            modelSelection,
+            remoteChild: {
+              environmentId: laptop.environmentId,
+              threadId: child.threadId,
+              label: "app",
+              runId: child.projection.runs[0]!.id,
+            },
+            clientRequestId: "failed-record",
+          },
+        )
+        .pipe(Effect.flip);
+      expect(error.code).toBe("orchestration_error");
+      expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toEqual([]);
+      const stopped = yield* a.orchestrator.getThreadProjection(child.threadId);
+      expect(stopped.runs).toHaveLength(1);
+      expect(stopped.runs[0]!.status).toBe("interrupted");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
 
 it.effect("a task delegated to the box wakes the laptop's parent when it ends there", () =>
   Effect.scoped(
@@ -1501,9 +1997,7 @@ it.effect.each([false, true])(
         yield* Deferred.succeed(thread.finished, undefined);
         expect(yield* taskResult(a, delegated.taskId)).toMatchObject({
           status: "failed",
-          result: ownError
-            ? error
-            : "(The thread in the linked environment ended without a reply.)",
+          result: ownError ? error : "(The delegated thread ended without a reply.)",
         });
         expect(yield* Ref.get(thread.waitedFor)).toEqual([boxRunId]);
       }),
