@@ -279,6 +279,7 @@ provider session. Same-project requests become `delegated_task.request` and keep
 the existing child run-tree lineage.
 
 For another local project, pass `target.projectId` from `t3_project_list`.
+Archived target projects remain allowed, matching `t3_thread_launch`.
 The child is an ordinary thread in that project, with `delegatedFrom` pointing
 back to the parent. It shares the remote delegation record/follower lifecycle:
 `delegated_task.remote.request`, a `remoteChild` whose environment ID is this
