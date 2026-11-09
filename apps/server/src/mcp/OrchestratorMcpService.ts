@@ -1849,6 +1849,12 @@ const make = Effect.gen(function* () {
           ),
         );
     }
+    const localChild =
+      !terminal && task.remoteChild?.environmentId === scope.environmentId
+        ? yield* threadManagement
+            .getThreadRecords(task.remoteChild.threadId, ["runs", "nodes", "runtimeRequests"])
+            .pipe(Effect.mapError(threadManagementFailure))
+        : null;
     return {
       taskId: task.id,
       childThreadId:
@@ -1874,9 +1880,22 @@ const make = Effect.gen(function* () {
         : null,
       latestTerminalSummary: terminal ? task.result : null,
       latestTerminalResultContextTransferId: null,
-      // Its questions and approvals are answered in the environment it runs in.
-      hasPendingQuestion: false,
-      pendingApproval: null,
+      hasPendingQuestion:
+        localChild?.runtimeRequests.some(
+          (request) =>
+            request.kind === "user_input" &&
+            request.status === "pending" &&
+            request.responseCapability.type === "live",
+        ) ?? false,
+      pendingApproval:
+        localChild === null || task.completionDelivery?.state === "disposed"
+          ? null
+          : pendingTaskApproval(
+              localChild,
+              task.id,
+              localChild.runs.find((run) => run.id === task.remoteChild?.runId) ??
+                ThreadManagementService.latestActiveRun(localChild),
+            ),
       waitTimedOut,
     } satisfies OrchestratorMcpDelegateTaskResult;
   });
@@ -1898,7 +1917,7 @@ const make = Effect.gen(function* () {
       }
       // One stream per event type, so transcript events never fill a buffer.
       // Ordinary child threads report completion on the parent through their follower.
-      const childThreadId = initial.remoteChild === undefined ? initial.childThreadId : null;
+      const childThreadId = initial.childThreadId;
       const wakeEvents =
         childThreadId === null
           ? TASK_WAKE_EVENTS.filter(({ thread }) => thread === "parent")

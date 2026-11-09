@@ -1243,8 +1243,12 @@ describe("OrchestratorMcpService provider resolution", () => {
     "child run completion",
     "child question",
     "child approval",
+    "local child question",
+    "local child approval",
   ] as const)("a task wait still returns on %s", (wake) =>
     Effect.gen(function* () {
+      const local = wake.startsWith("local");
+      const question = wake.endsWith("question");
       const events = yield* Queue.unbounded<OrchestrationV2StoredEvent>();
       const subscribed = yield* Deferred.make<void>();
       const nestedId = NodeId.make("node:mcp-wait-nested");
@@ -1254,7 +1258,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       const eventType =
         wake === "child run completion"
           ? "run.updated"
-          : wake === "child question" || wake === "child approval"
+          : wake.endsWith("question") || wake.endsWith("approval")
             ? "runtime-request.updated"
             : "subagent.updated";
       const terminal = wake.endsWith("completion");
@@ -1267,7 +1271,16 @@ describe("OrchestratorMcpService provider resolution", () => {
         origin: "app_owned",
         providerInstanceId: codexInstanceId,
         driver: "codex",
-        childThreadId,
+        childThreadId: local ? null : childThreadId,
+        ...(local
+          ? {
+              remoteChild: {
+                environmentId: scope.environmentId,
+                threadId: childThreadId,
+                runId: childRunId,
+              },
+            }
+          : {}),
         model: "gpt-5.4",
         status: ready && terminal ? "completed" : "running",
         result: ready && wake === "parent completion" ? "done" : null,
@@ -1296,7 +1309,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                   {
                     id: "request:mcp-wait-answer",
                     nodeId: childRootId,
-                    kind: wake === "child question" ? "user_input" : "command",
+                    kind: question ? "user_input" : "command",
                     status: "pending",
                     responseCapability: { type: "live" },
                     createdAt: DateTime.makeUnsafe(0),
@@ -1313,6 +1326,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           isProviderInstanceEnabledForProject: () => Effect.succeed(true),
           getThreadRecords: (threadId) =>
             Effect.sync(() => (threadId === parentThreadId ? parentProjection([task()]) : child())),
+          getThreadShell: () => Effect.succeed(null),
           getThreadEventSequence: () => Effect.succeed(0),
           delegatedTaskResultPending: () => Effect.succeed(false),
           streamStoredEventsFrom: (input) =>
@@ -1337,15 +1351,45 @@ describe("OrchestratorMcpService provider resolution", () => {
           }),
         ]),
         adapterRegistryLayer([codexInstanceId]),
-        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.succeedSome({ workspaceRoot: "/other", title: "Other" } as never),
+        }),
         Layer.mock(SecretRequests.SecretRequests)({}),
-        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({
+          record: () => Effect.succeed({ taskId }),
+        }),
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+          launch: () =>
+            Effect.succeed({
+              threadId: childThreadId,
+              projection: {
+                ...child(),
+                thread: {
+                  ...childProjection.thread,
+                  modelSelection: parentProjection([]).thread.modelSelection,
+                },
+              },
+              resumed: false,
+            }),
+        }),
+        Layer.mock(GitVcsDriver.GitVcsDriver)({}),
         Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
       );
       yield* Effect.gen(function* () {
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        if (local) {
+          ready = true;
+          const pending = yield* service.taskStatus(scope, taskId);
+          assert.equal(pending.hasPendingQuestion, question);
+          assert.equal(pending.pendingApproval?.kind ?? null, question ? null : "command");
+          ready = false;
+        }
         const waiting = yield* service
-          .delegateTask(scope, { task: "Review the change.", mode: "wait" })
+          .delegateTask(scope, {
+            task: "Review the change.",
+            mode: "wait",
+            ...(local ? { target: { projectId: ProjectId.make("other-project") } } : {}),
+          })
           .pipe(Effect.forkChild);
         yield* Deferred.await(subscribed);
         ready = true;
@@ -1374,7 +1418,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           if (wake === "parent completion") assert.equal(result.summary, "done");
         } else {
           assert.equal(result.status, "running");
-          if (wake === "child question") assert.isTrue(result.hasPendingQuestion);
+          if (question) assert.isTrue(result.hasPendingQuestion);
           else {
             assert.deepEqual(result.pendingApproval, {
               requestId: "request:mcp-wait-answer",
@@ -1383,7 +1427,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             });
           }
         }
-      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
     }),
   );
 
