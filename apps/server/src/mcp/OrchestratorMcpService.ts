@@ -2665,6 +2665,7 @@ const make = Effect.gen(function* () {
           );
         }
         const projectId = input.target.projectId;
+        const project = yield* requireProject(projectId);
         const key = yield* requestKey(input.clientRequestId);
         const commandId = stableCommandId({
           scope,
@@ -2686,7 +2687,6 @@ const make = Effect.gen(function* () {
         let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy =
           existingRun?.workspacePreparation ?? { type: "root" };
         if (existingRun === undefined) {
-          const project = yield* requireProject(projectId);
           if (input.isolation === "worktree") {
             const base = yield* gitDriver
               .resolveCommit({
@@ -2765,7 +2765,7 @@ const make = Effect.gen(function* () {
           remoteChild: {
             environmentId: scope.environmentId,
             threadId: launched.threadId,
-            label: "Local",
+            label: project.title,
             ...(run === undefined ? {} : { runId: run.id }),
           },
         });
