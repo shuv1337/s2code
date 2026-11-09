@@ -3540,6 +3540,80 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect("a cross-project retry keeps the preparing run's worktree strategy", () =>
+    Effect.gen(function* () {
+      const strategy = {
+        type: "worktree",
+        baseRef: "original-target-head",
+        startFromOrigin: false,
+      } as const;
+      const child = {
+        ...childProjection,
+        thread: {
+          ...parentProjection([]).thread,
+          id: childThreadId,
+          projectId: ProjectId.make("other-project"),
+        },
+        runs: [
+          {
+            id: RunId.make("preparing-child"),
+            ordinal: 1,
+            status: "preparing",
+            workspacePreparation: strategy,
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const task = {
+        id: taskId,
+        threadId: parentThreadId,
+        origin: "app_owned",
+        childThreadId: null,
+        remoteChild: { environmentId: scope.environmentId, threadId: childThreadId },
+        providerInstanceId: codexInstanceId,
+        model: "gpt-5.4",
+        status: "running",
+        result: null,
+      };
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (id) =>
+            Effect.succeed(id === parentThreadId ? parentProjection([task]) : child),
+          getThreadShell: () =>
+            Effect.succeed(child.thread as unknown as OrchestrationV2ThreadShell),
+        }),
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+          launch: (input) => {
+            assert.deepEqual(input.workspaceStrategy, strategy);
+            return Effect.succeed({ threadId: childThreadId, projection: child, resumed: true });
+          },
+        }),
+        Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.succeedSome({ title: "Other", workspaceRoot: "/other" } as never),
+        }),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({ record: () => Effect.succeed({ taskId }) }),
+        providerRegistryLayer([]),
+        adapterRegistryLayer([]),
+        ServerSettings.layerTest(),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+        Effect.flatMap((service) =>
+          service.delegateTask(scope, {
+            task: "Retry the worktree launch.",
+            target: { projectId: child.thread.projectId },
+            isolation: "worktree",
+            clientRequestId: "preparing-retry",
+          }),
+        ),
+        Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))),
+      );
+    }),
+  );
+
   it.effect(
     "rejects cross-project worktree isolation before launch when the target has no commit",
     () =>

@@ -2675,8 +2675,17 @@ const make = Effect.gen(function* () {
         const existing = yield* threadManagement
           .getThreadShell(childThreadId)
           .pipe(Effect.mapError(threadManagementFailure));
-        let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy = { type: "root" };
-        if (existing === null) {
+        const existingRun =
+          existing === null
+            ? undefined
+            : (yield* threadManagement
+                .getThreadRecords(childThreadId, ["runs"])
+                .pipe(Effect.mapError(threadManagementFailure))).runs.toSorted(
+                (left, right) => left.ordinal - right.ordinal,
+              )[0];
+        let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy =
+          existingRun?.workspacePreparation ?? { type: "root" };
+        if (existingRun === undefined) {
           const project = yield* requireProject(projectId);
           if (input.isolation === "worktree") {
             const base = yield* gitDriver
