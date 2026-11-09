@@ -237,7 +237,10 @@ type DelegateTaskInput = {
     providerInstanceId?: string;
     driverKind?: string;
     model?: string;
+    projectId?: string;
+    environmentId?: string;
   };
+  isolation?: "shared" | "worktree";
   title?: string;
   role?: "implementation" | "research" | "review" | "design" | "test" | "general";
   mode?: "async" | "wait";
@@ -267,13 +270,31 @@ original brief, prior findings, responses, and unresolved objections. Track each
 round by its own `taskId` and use a distinct `clientRequestId` per round, stable
 across retries of that round.
 A follow-up that needs the same child's conversation goes through `t3_thread_send`
-on its `childThreadId`. After the original task completes, that follow-up runs as a
-fresh task in the child thread; it does not reopen the completed task or change its
+on its `childThreadId`. For same-project children, after the original task completes,
+that follow-up runs as a fresh task in the child thread; it does not reopen the completed task or change its
 published result.
 
 Delegation requires an active parent run owned by the MCP credential's
-provider session. The request becomes the V2 command
-`delegated_task.request`.
+provider session. Same-project requests become `delegated_task.request` and keep
+the existing child run-tree lineage.
+
+For another local project, pass `target.projectId` from `t3_project_list`.
+The child is an ordinary thread in that project, with `delegatedFrom` pointing
+back to the parent. It shares the remote delegation record/follower lifecycle:
+`delegated_task.remote.request`, a `remoteChild` whose environment ID is this
+environment, and `delegated_task.remote.complete`. Local waits, reads and stops
+use thread services, not a peer connection; no linked-environments setting is
+required. Async completion wakes the parent, including after a server restart;
+wait mode, cancellation and retries by `clientRequestId` use the same task record.
+The result includes the local `childThreadId` and its thread link.
+
+Cross-project `shared` isolation uses the target project root, not the parent's
+checkout. `worktree` prepares a checkout from the target repository's current
+`HEAD`; uncommitted changes are excluded. A missing project, or worktree isolation in a repository
+without a commit, is rejected before launch. Cross-environment worktree isolation
+remains unsupported. As with remote tasks, questions and approvals are handled
+in the child's thread, and later messages sent there do not reopen the original
+task; start a new delegation for another tracked round.
 
 `mode: "async"` returns the current durable state immediately.
 `mode: "wait"` waits for the task result, including nested work and completion follow-ups, or until
