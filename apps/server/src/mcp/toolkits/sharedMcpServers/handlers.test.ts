@@ -87,8 +87,9 @@ const fixture = Effect.gen(function* () {
       getThreadShell: () =>
         Ref.get(caller).pipe(Effect.tap(() => Deferred.succeed(checked, undefined))),
     }),
-    Layer.mock(ServerSecretStore.ServerSecretStore)({
-      directory: undefined,
+    Layer.succeed(ServerSecretStore.ServerSecretStore, {
+      set: () => Effect.die("unused"),
+      create: () => Effect.die("unused"),
       getOrCreateRandom: () => Effect.succeed(new Uint8Array(32)),
       get: (name) => Effect.sync(() => Option.fromNullishOr(stored.get(name))),
       remove: (name) =>
@@ -299,7 +300,23 @@ it.effect(
         call: (_scope, tool, target, params) =>
           Effect.sync(() => {
             forwarded.push({ name: tool.name, environmentId: target, params });
-            return {} as Tool.Success<typeof tool>;
+            const server = {
+              id,
+              url,
+              enabled: true,
+              hasToken: true,
+              harnessName: "shared-catalog",
+            };
+            const results = {
+              t3_mcp_server_list: {
+                servers: [server],
+                sessionNotice: "New provider sessions only.",
+              },
+              t3_mcp_server_set: { server, sessionNotice: "New provider sessions only." },
+              t3_mcp_server_remove: { id, sessionNotice: "New provider sessions only." },
+              t3_mcp_server_test: { _tag: "Connected", tools: ["lookup"] },
+            };
+            return results[tool.name as keyof typeof results] as Tool.Success<typeof tool>;
           }),
       });
       yield* Effect.gen(function* () {
@@ -322,7 +339,7 @@ it.effect(
         expect(harness.stored.has(secretKey)).toBe(true);
         yield* Ref.update(harness.caller, (shell) => ({
           ...shell,
-          runtimeMode: "approval-required",
+          runtimeMode: "approval-required" as const,
         }));
         expect(
           yield* call("t3_mcp_server_set", { id, enabled: false, environmentId: remote }),
