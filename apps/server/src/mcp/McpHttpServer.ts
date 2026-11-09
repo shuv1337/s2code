@@ -49,6 +49,10 @@ import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
 import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import * as EnvironmentHandlers from "./toolkits/environment/handlers.ts";
+import { SharedMcpServersToolkit } from "./toolkits/sharedMcpServers/tools.ts";
+import * as SharedMcpServersHandlers from "./toolkits/sharedMcpServers/handlers.ts";
+import * as SharedMcpServerManagement from "./SharedMcpServerManagement.ts";
+import * as SharedMcpServers from "./SharedMcpServers.ts";
 import { ProviderAccountSyncToolkit } from "./toolkits/providerAccountSync/tools.ts";
 import * as ProviderAccountSyncHandlers from "./toolkits/providerAccountSync/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
@@ -1175,6 +1179,15 @@ const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentHandlers.layer,
 ).pipe(Layer.provide(ThreadCommandExecutor.layer));
 
+const layerSharedMcpServersToolkit = toolkitRegistration(
+  SharedMcpServersToolkit,
+  SharedMcpServersHandlers.layer,
+).pipe(
+  Layer.provide(SharedMcpServerManagement.layer),
+  Layer.provide(SharedMcpServers.layer),
+  Layer.provide(ThreadCommandExecutor.layer),
+);
+
 export const layerProjectRegistration = toolkitRegistration(ProjectToolkit, ProjectHandlers.layer);
 
 export const layerProviderAccountSyncToolkit = toolkitRegistration(
@@ -1244,6 +1257,7 @@ export const layerTools = Layer.mergeAll(
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerEnvironmentToolkit,
+  layerSharedMcpServersToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,
