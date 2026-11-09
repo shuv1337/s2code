@@ -2697,7 +2697,7 @@ const make = Effect.gen(function* () {
                 Effect.mapError(() =>
                   failure(
                     "invalid_request",
-                    "Isolation worktree requires a commit in the target project's repository.",
+                    "Cannot use worktree isolation: the target project is not a Git repository with a commit.",
                   ),
                 ),
               );

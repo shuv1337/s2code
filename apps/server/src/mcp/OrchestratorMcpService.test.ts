@@ -3663,7 +3663,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))),
         );
         assert.equal(error.code, "invalid_request");
-        assert.include(error.message, "target project's repository");
+        assert.include(error.message, "not a Git repository with a commit");
       }),
   );
 
