@@ -22,10 +22,10 @@ index b56f18ebc41b57f91b4dbf3df510288c056a05b8..c3966b9e0755f2716649eaf524cce581
          function global:__cursorUtf8FromLatin1 {
 diff --git a/dist/s2code-retry.cjs b/dist/s2code-retry.cjs
 new file mode 100644
-index 0000000000000000000000000000000000000000..8a9127a367027533179bc664aa3908b83295b1a2
+index 0000000000000000000000000000000000000000..9e6144112c9f72674320503278375c2620dcc7cc
 --- /dev/null
 +++ b/dist/s2code-retry.cjs
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,55 @@
 +"use strict";
 +
 +const diagnostics = require("node:diagnostics_channel").channel("s2code.cursor.retry");
@@ -60,8 +60,7 @@ index 0000000000000000000000000000000000000000..8a9127a367027533179bc664aa3908b8
 +      },
 +      classify(cause, info) {
 +        let decision = input.hooks.classify(cause, info);
-+        const cancelled = decision.action === "throw" && decision.error.kind === "CancelledError";
-+        const blocked = turnEnded && checkpoint !== "ineligible_terminal_turn" && !cancelled;
++        const blocked = turnEnded && decision.action === "retry" && checkpoint !== "ineligible_terminal_turn";
 +        if (blocked) {
 +          decision = {
 +            action: "throw",

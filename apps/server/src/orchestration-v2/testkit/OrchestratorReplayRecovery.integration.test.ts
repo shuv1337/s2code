@@ -251,6 +251,7 @@ const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
   readonly transcript: CursorAgentSdkReplayTranscript;
   readonly runner: ReturnType<typeof makeCursorAgentSdkReplayRunner>;
   readonly checkpointFailure: boolean;
+  readonly sameRuntime?: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -305,41 +306,59 @@ const runCursorRecovery = Effect.fn("runCursorRecovery")(function* (input: {
       }),
   };
 
-  const before = yield* Effect.scoped(
-    runOrchestratorV2ProviderReplayScenario(
-      {
-        name: "provider_thread_resume/cursor:first-runtime",
-        transcript: input.transcript,
-        commands: phase1Commands,
-        steps: phase1Steps,
-        projectionThreadIds: materialized.projectionThreadIds,
-        runtimePolicyOverride: { cwd: tempDir },
-      },
-      harness,
-      options,
-    ),
-  );
-  if (input.checkpointFailure) {
-    const first = projectionFor(before, input.transcript.scenario);
-    assert.equal(first.providerThreads[0]?.status, "error");
-    assertAssistantTextIncludes(first, FIRST_FINAL);
-  }
+  const runAcrossRestart = Effect.gen(function* () {
+    const before = yield* Effect.scoped(
+      runOrchestratorV2ProviderReplayScenario(
+        {
+          name: "provider_thread_resume/cursor:first-runtime",
+          transcript: input.transcript,
+          commands: phase1Commands,
+          steps: phase1Steps,
+          projectionThreadIds: materialized.projectionThreadIds,
+          runtimePolicyOverride: { cwd: tempDir },
+        },
+        harness,
+        options,
+      ),
+    );
+    if (input.checkpointFailure) {
+      const first = projectionFor(before, input.transcript.scenario);
+      assert.equal(first.providerThreads[0]?.status, "error");
+      assertAssistantTextIncludes(first, FIRST_FINAL);
+    }
 
-  const result = yield* Effect.scoped(
-    runOrchestratorV2ProviderReplayScenario(
-      {
-        name: "provider_thread_resume/cursor:second-runtime",
-        transcript: input.transcript,
-        commands: phase2Commands,
-        steps: phase2Steps,
-        projectionThreadIds: materialized.projectionThreadIds,
-        runtimePolicyOverride: { cwd: tempDir },
-      },
-      harness,
-      // A real restart requeues effects, like checkpoint capture, the first runtime left running.
-      { ...options, recoverOnStartup: true },
-    ),
-  );
+    return yield* Effect.scoped(
+      runOrchestratorV2ProviderReplayScenario(
+        {
+          name: "provider_thread_resume/cursor:second-runtime",
+          transcript: input.transcript,
+          commands: phase2Commands,
+          steps: phase2Steps,
+          projectionThreadIds: materialized.projectionThreadIds,
+          runtimePolicyOverride: { cwd: tempDir },
+        },
+        harness,
+        // A real restart requeues effects, like checkpoint capture, the first runtime left running.
+        { ...options, recoverOnStartup: true },
+      ),
+    );
+  });
+  const result = input.sameRuntime
+    ? yield* Effect.scoped(
+        runOrchestratorV2ProviderReplayScenario(
+          {
+            name: "provider_thread_resume/cursor:same-runtime",
+            transcript: input.transcript,
+            commands: [...phase1Commands, ...phase2Commands],
+            steps: materialized.steps,
+            projectionThreadIds: materialized.projectionThreadIds,
+            runtimePolicyOverride: { cwd: tempDir },
+          },
+          harness,
+          options,
+        ),
+      )
+    : yield* runAcrossRestart;
 
   assertBaseProjection({
     result,
@@ -490,6 +509,26 @@ describe("orchestrator replay recovery", () => {
           ),
         ),
       ),
+  );
+  it.effect("hands the next Cursor turn to a fresh agent after an unconfirmed checkpoint", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const transcript = yield* readCursorTranscript(true);
+        const runner = makeCursorAgentSdkReplayRunner(transcript);
+        yield* runCursorRecovery({
+          transcript,
+          runner,
+          checkpointFailure: true,
+          sameRuntime: true,
+        });
+        yield* runner.assertComplete;
+      }).pipe(
+        provideDeterministicTestRuntime,
+        Effect.provide(
+          Layer.merge(IdAllocator.layer, Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        ),
+      ),
+    ),
   );
   it.effect("keeps a Claude subagent resumed after a server restart in its own thread", () =>
     Effect.scoped(

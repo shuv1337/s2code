@@ -59,6 +59,40 @@ function loadRetryLoop(format: "cjs" | "esm") {
   return NodeVM.runInNewContext(`${loop}; ${name}`, globals) as (input: object) => Promise<void>;
 }
 
+describe("Cursor SDK retry guard after the turn ended", () => {
+  it.each([
+    { action: "retry", kind: undefined, blocked: true },
+    { action: "throw", kind: "AuthenticationError", blocked: false },
+    { action: "throw", kind: "CancelledError", blocked: false },
+    { action: "throw", kind: "NonRetriableError", blocked: false },
+  ])("turns only retries into checkpoint failures ($action $kind)", async (fixture) => {
+    const require = NodeModule.createRequire(import.meta.url);
+    const directory = NodePath.dirname(require.resolve("@cursor/sdk"));
+    const { guard } = require(NodePath.join(directory, "..", "s2code-retry.cjs"));
+    const cause = new Error("ECONNRESET after the answer");
+    const decision =
+      fixture.action === "retry"
+        ? { action: "retry", immediate: true }
+        : { action: "throw", error: Object.assign(new Error("original"), { kind: fixture.kind }) };
+    const guarded = guard({
+      interaction: { sendUpdate: async () => {} },
+      checkpointError: (error: unknown) => ({ kind: "NonRetriableError", cause: error }),
+      hooks: { classify: () => decision, runAttempt: async () => {} },
+    });
+    await guarded.interaction.sendUpdate({}, { message: { case: "turnEnded" } });
+    const result = guarded.hooks.classify(cause, {
+      attemptRequestId: "attempt",
+      originalRequestId: "original-request",
+      attempt: 0,
+    });
+    if (fixture.blocked) {
+      expect(result).toEqual({ action: "throw", error: { kind: "NonRetriableError", cause } });
+    } else {
+      expect(result).toBe(decision);
+    }
+  });
+});
+
 describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) => {
   it.each([
     {
@@ -116,7 +150,16 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
       checkpoint: false,
       continuation: false,
       terminal: false,
-      cancelled: true,
+      thrown: { message: "Request cancelled", kind: "CancelledError" },
+      expectedAttempts: 1,
+      failure: true,
+    },
+    {
+      scenario: "authentication failure after an answer",
+      checkpoint: true,
+      continuation: false,
+      terminal: false,
+      thrown: { message: "Sign in to Cursor again", kind: "AuthenticationError" },
       expectedAttempts: 1,
       failure: true,
     },
@@ -165,10 +208,12 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
       cancellation: { toCancelledError: () => new Error("cancelled") },
       hooks: {
         classify: (error: unknown, info: { attempt: number }) =>
-          "cancelled" in fixture && fixture.cancelled
+          "thrown" in fixture
             ? {
                 action: "throw",
-                error: Object.assign(new Error("Request cancelled"), { kind: "CancelledError" }),
+                error: Object.assign(new Error(fixture.thrown.message, { cause: error }), {
+                  kind: fixture.thrown.kind,
+                }),
               }
             : info.attempt < 1
               ? {
@@ -208,7 +253,7 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
     );
     if (fixture.failure)
       await expect(result).rejects.toThrow(
-        "cancelled" in fixture ? "Request cancelled" : checkpointError,
+        "thrown" in fixture ? fixture.thrown.message : checkpointError,
       );
     else await result;
     expect(actions).toHaveLength(fixture.expectedAttempts);
@@ -219,7 +264,7 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]?.originalRequestId).toBe("original-request");
     expect(diagnostics[0]?.decision).toBe(
-      "cancelled" in fixture
+      "thrown" in fixture
         ? "throw"
         : fixture.failure
           ? "blocked_after_turn_ended"
@@ -227,6 +272,10 @@ describe.each(["cjs", "esm"] as const)("Cursor SDK %s retry boundary", (format) 
             ? "completed_from_checkpoint"
             : "retry",
     );
+    if ("thrown" in fixture) {
+      await expect(result).rejects.toMatchObject({ kind: fixture.thrown.kind });
+      expect(diagnostics[0]?.cause).toMatchObject({ message: "ECONNRESET after the answer" });
+    }
     if ("writeFailure" in fixture) {
       expect(diagnostics[0]?.checkpoint).toBe("eligible");
       expect(diagnostics[0]?.cause).toMatchObject({ code: "SQLITE_FULL" });

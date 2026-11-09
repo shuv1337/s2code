@@ -2172,13 +2172,14 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               completedAt,
             }),
           });
+          const threadDisposition = input.threadDisposition ?? "reusable";
           yield* emitProviderEvent({
             type: "provider_thread.updated",
             driver: CursorAgentSdk.CURSOR_PROVIDER,
             providerThread: {
               ...input.context.input.providerThread,
               providerSessionId: session.id,
-              status: "active",
+              status: threadDisposition === "broken" ? "error" : "active",
               firstRunOrdinal:
                 input.context.input.providerThread.firstRunOrdinal ??
                 input.context.input.runOrdinal,
@@ -2186,7 +2187,6 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               updatedAt: completedAt,
             },
           });
-          const threadDisposition = input.threadDisposition ?? "reusable";
           yield* emitProviderEvent(
             input.status === "failed"
               ? {
