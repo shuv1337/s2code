@@ -720,7 +720,7 @@ const makeLaptop = (
       Layer.provide(localProjects),
       Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
       Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
-      Layer.provide(localLaunch),
+      Layer.provideMerge(localLaunch),
       Layer.provide(
         Layer.mock(GitVcsDriver.GitVcsDriver)({
           resolveCommit: ({ cwd, revision }) => {
@@ -738,6 +738,8 @@ const makeLaptop = (
       worktrees,
       links: Context.get(linking, PeerLinks.PeerLinks),
       settings: Context.get(linking, ServerSettings.ServerSettingsService),
+      threadSettings: Context.get(here, ServerSettings.ServerSettingsService),
+      launch: Context.get(here, ThreadLaunch.ThreadLaunchService),
       orchestrator: Context.get(here, Orchestrator.OrchestratorV2),
       remote: Context.get(here, RemoteDelegation.RemoteDelegation),
       threads: Context.get(here, ThreadManagement.ThreadManagementService),
@@ -1180,6 +1182,156 @@ it.effect(
         expect(child.thread.lineage.parentThreadId).toBe(parentThreadId);
       }).pipe(Effect.provide(NodeServices.layer)),
     ),
+);
+
+it.effect.each([
+  "runtime mode",
+  "interaction mode",
+  "inactive parent",
+  "disabled provider",
+] as const)("local cross-project delegation refuses %s before creating a child", (reason) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+      yield* seedParent(a);
+      if (reason === "runtime mode") {
+        yield* a.orchestrator.dispatch({
+          type: "thread.runtime-mode.set",
+          commandId: CommandId.make("lower-runtime"),
+          threadId: parentThreadId,
+          runtimeMode: "approval-required",
+        });
+      } else if (reason === "interaction mode") {
+        yield* a.orchestrator.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.make("lower-interaction"),
+          threadId: parentThreadId,
+          interactionMode: "plan",
+        });
+      } else if (reason === "inactive parent") {
+        const parent = yield* a.orchestrator.getThreadProjection(parentThreadId);
+        const now = yield* DateTime.now;
+        yield* a.sink.write({
+          commandId: CommandId.make("finish-parent"),
+          events: [
+            {
+              id: EventId.make("parent-completed"),
+              type: "run.updated",
+              threadId: parentThreadId,
+              runId: parentRunId,
+              occurredAt: now,
+              payload: { ...parent.runs[0]!, status: "completed", completedAt: now },
+            },
+          ],
+        });
+      } else {
+        yield* a.threadSettings.updateSettings({
+          projectSettingsOverrides: {
+            [boxProject]: { providerInstances: { [instanceId]: { enabled: false } } },
+          },
+        });
+      }
+      const result = yield* a.call("delegate_task", {
+        task: "Work in the other project.",
+        target: { projectId: boxProject, providerInstanceId: instanceId },
+        ...(reason === "runtime mode" ? { runtimeMode: "full-access" } : {}),
+        ...(reason === "interaction mode" ? { interactionMode: "default" } : {}),
+      });
+      expect(result.isError).toBe(true);
+      if (reason !== "disabled provider") {
+        expect(JSON.stringify(result.content)).toContain(
+          reason === "runtime mode"
+            ? "runtime_mode_escalation_denied"
+            : reason === "interaction mode"
+              ? "interaction_mode_escalation_denied"
+              : "parent_not_active",
+        );
+      }
+      expect(yield* a.projections.countThreads()).toBe(1);
+      expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toEqual([]);
+      if (reason === "disabled provider") {
+        yield* a.threadSettings.updateSettings({
+          projectSettingsOverrides: {
+            [boxProject]: { providerInstances: { [instanceId]: { enabled: true } } },
+          },
+        });
+        const enabled = yield* a.call("delegate_task", {
+          task: "Work in the other project.",
+          target: { projectId: boxProject, providerInstanceId: instanceId },
+        });
+        expect(enabled.isError, JSON.stringify(enabled.content)).toBe(false);
+        expect(yield* a.projections.countThreads()).toBe(2);
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("a failed local task record stops the launched child", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const a = yield* makeLaptop(yield* SqlitePersistence.layerMemory.pipe(Layer.build), offers);
+      yield* seedParent(a);
+      const child = yield* a.launch.launch({
+        commandId: CommandId.make("launch-before-record-failure"),
+        projectId: boxProject,
+        title: "Unrecorded child",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        initialMessage: { text: "Work.", attachments: [] },
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      yield* a.orchestrator
+        .streamStoredEventsFrom({
+          threadId: child.threadId,
+          afterSequence: 0,
+          eventType: "run.updated",
+        })
+        .pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" && stored.event.payload.status !== "preparing",
+          ),
+          Stream.runHead,
+        );
+      yield* a.threads.dispatch({
+        type: "thread.stop",
+        commandId: CommandId.make("stop-before-record"),
+        threadId: parentThreadId,
+      });
+      const error = yield* a.remote
+        .record(
+          { ...parentScope, thread: parentScope.thread! },
+          {
+            task: "Work.",
+            parentRunId,
+            parentNodeId: parentRootNode,
+            modelSelection,
+            remoteChild: {
+              environmentId: laptop.environmentId,
+              threadId: child.threadId,
+              label: "app",
+              runId: child.projection.runs[0]!.id,
+            },
+            clientRequestId: "failed-record",
+          },
+        )
+        .pipe(Effect.flip);
+      expect(error.code).toBe("orchestration_error");
+      expect((yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents).toEqual([]);
+      const stopped = yield* a.orchestrator.getThreadProjection(child.threadId);
+      expect(stopped.runs).toHaveLength(1);
+      expect(stopped.runs[0]!.status).toBe("interrupted");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
 );
 
 it.effect("a task delegated to the box wakes the laptop's parent when it ends there", () =>
