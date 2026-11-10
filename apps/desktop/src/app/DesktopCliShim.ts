@@ -7,6 +7,7 @@ import {
   resolveLegacyChannelIdentity,
 } from "@t3tools/shared/channelIdentity";
 import { PRODUCT_CLI_SHIM_MARKER, isOwnedCliShim } from "@t3tools/shared/productIdentity";
+import * as Random from "effect/Random";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
@@ -165,7 +166,7 @@ export const install = Effect.gen(function* () {
       }
       if (Option.getOrUndefined(existing) !== content) {
         yield* fs.makeDirectory(path.dirname(aliasPath), { recursive: true });
-        const staging = `${aliasPath}.${process.pid}.tmp`;
+        const staging = `${aliasPath}.${process.pid}.${yield* Random.nextIntBetween(0, 0xffffff)}.tmp`;
         yield* fs.writeFileString(staging, content, { mode: 0o755 });
         yield* fs.rename(staging, aliasPath);
         yield* logInfo("installed s2code launcher", { shimPath: aliasPath });

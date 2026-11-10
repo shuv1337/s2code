@@ -3136,6 +3136,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true,
         NSLocalNetworkUsageDescription:
           "S2Code connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
+        NSCalendarsUsageDescription:
+          "Commands you run in S2Code may need access to your calendars.",
+        NSCalendarsFullAccessUsageDescription:
+          "Commands you run in S2Code may need to read and write your calendar events.",
+        NSCalendarsWriteOnlyAccessUsageDescription:
+          "Commands you run in S2Code may need to add events to your calendars.",
         NSScreenCaptureUsageDescription:
           "S2Code captures the active window when you use the window capture shortcut.",
         NSCameraUsageDescription:

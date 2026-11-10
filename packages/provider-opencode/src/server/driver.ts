@@ -93,6 +93,8 @@ export const openCodeUpdateFor = (generation: ProbedOpenCode["generation"]) =>
       isCommandPath: isOpenCodeNativeCommandPath,
       requiresCommandPath: true,
     },
+    // mise's `opencode` follows releases into 2.x, so it would upgrade 1.x across that line.
+    mise: { tool: "opencode", upgrade: generation === "v2" },
   });
 
 const SHUVCODE_PACKAGE_PATTERN =

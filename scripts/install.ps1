@@ -33,6 +33,8 @@ $binDir = if ($env:S2CODE_INSTALL_BIN_DIR) { $env:S2CODE_INSTALL_BIN_DIR } else 
 if ($env:T3CODE_HOME -and -not $env:S2CODE_HOME) {
   [Console]::Error.WriteLine("s2code: ignoring T3CODE_HOME; use S2CODE_HOME to configure the fork's home.")
 }
+# Absolute, so PATH never gets a folder that changes with the working directory.
+$binDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($binDir)
 
 function Fail([string] $message) {
   Write-Error "s2code install: $message"

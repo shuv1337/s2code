@@ -20,6 +20,7 @@ import {
   type RuntimeMode,
   type ScopedThreadRef,
   type ServerSettings,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { useEffect, useState } from "react";
@@ -1543,6 +1544,20 @@ export function updateComposerDraftSettings(
   });
 }
 
+/** Lets the thread's model show again once the server accepted this exact pick. */
+export function releaseComposerDraftModelSelection(
+  draftKey: string,
+  modelSelection: ModelSelection,
+): void {
+  updateComposerDrafts((current) => {
+    const existing = current[draftKey];
+    // A newer pick, even of the same model, is still waiting for its own reply.
+    if (existing?.modelSelection !== modelSelection) return current;
+    const { modelSelection: _modelSelection, ...draft } = existing;
+    return withComposerDraft(current, draftKey, draft);
+  });
+}
+
 export function setFreshSessionPending(draftKey: string, pending: boolean): void {
   if ((getComposerDraftSnapshot(draftKey).freshContext === true) === pending) return;
   updateComposerDraftSettings(draftKey, { freshContext: pending ? true : undefined });
@@ -1562,6 +1577,7 @@ export function subscribeComposerDraftModelReconciliation(input: {
   readonly settingsAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<Pick<ServerSettings, "providerInstances"> | null>;
+  readonly pendingThreadIdsAtom: (environmentId: EnvironmentId) => Atom.Atom<ReadonlySet<ThreadId>>;
 }): () => void {
   const draftsAtom = Atom.make(appAtomRegistry.get(composerDraftsAtom));
   const unsubscribeDrafts = appAtomRegistry.subscribe(composerDraftsAtom, (drafts) =>
@@ -1584,6 +1600,8 @@ export function subscribeComposerDraftModelReconciliation(input: {
         draftModelPickMatchesPoolSeat(get(input.settingsAtom(ref.environmentId)), pick, selection);
       const thread = get(input.threadShellAtom(ref));
       if (!thread || !pickMatches(thread.modelSelection)) continue;
+      // The pick can match an old model while an earlier pick in flight still replaces it.
+      if (get(input.pendingThreadIdsAtom(ref.environmentId)).has(ref.threadId)) continue;
       // Status and selection must come from the same emission; derived atoms can update apart.
       const shell = AsyncResult.getOrElse(get(input.shellStateAtom(ref.environmentId)), () => null);
       if (shell?.status !== "live") continue;
