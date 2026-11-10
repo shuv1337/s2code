@@ -204,6 +204,22 @@ delegation and thread tools. `t3_thread_launch` is documented with them but
 registered by the project toolkit in
 [`toolkits/project/tools.ts`](../../apps/server/src/mcp/toolkits/project/tools.ts).
 
+### Shared MCP servers
+
+Use `t3_mcp_server_list`, `t3_mcp_server_set`, `t3_mcp_server_remove`, and
+`t3_mcp_server_test` to manage the host's shared servers instead of editing each
+harness's configuration. All accept `environmentId` for a linked host and require
+a live full-access/default caller or full-access MCP client. Restricted link
+origins cannot manage these settings.
+
+Secret refs are one-use and host-local: request a token in a thread on the
+destination host before forwarding it. Outside a thread, including forwarded
+calls, pass the ref's destination `projectId`. Changing the URL clears the saved
+token unless a new ref is supplied.
+
+Added or re-enabled servers reach new sessions only. Disabling, removing, or
+changing a server's URL or token applies immediately to existing proxy requests.
+
 ### `orchestrator_capabilities`
 
 Returns:

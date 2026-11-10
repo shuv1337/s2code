@@ -1824,7 +1824,8 @@ export function requiredScopesForServerSettingsPatch(
       key === "providerInstances" ||
       key === "usageLimitSources" ||
       key === "secretProviders" ||
-      // Full-access agents hold settings:write; they must not grant agents new tool servers.
+      // providers:manage guards UI and ws clients; full-access orchestrator callers may
+      // manage shared MCP servers through the t3_mcp_server_* tools.
       key === "mcpServers"
     ) {
       changesProviders = true;
