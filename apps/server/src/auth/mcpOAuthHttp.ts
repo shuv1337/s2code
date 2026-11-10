@@ -78,7 +78,10 @@ export const layer = HttpApiBuilder.group(
     const hostedApprovalUrl = (issuer: string, search: string) =>
       cloudLink.linkState().pipe(
         Effect.flatMap((state) =>
-          state.linked && !state.linkRevoked && state.tunnelHostname === new URL(issuer).hostname
+          hostedAppUrl !== "" &&
+          state.linked &&
+          !state.linkRevoked &&
+          state.tunnelHostname === new URL(issuer).hostname
             ? serverEnvironment.getEnvironmentId.pipe(
                 Effect.map((environmentId) => {
                   const url = new URL(HOSTED_APPROVAL_PATH, hostedAppUrl);
