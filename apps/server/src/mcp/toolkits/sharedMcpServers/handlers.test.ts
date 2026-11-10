@@ -177,10 +177,16 @@ it.effect(
           tools: ["lookup"],
         });
         expect(harness.tested).toEqual([{ id, url }]);
+        yield* call("t3_mcp_server_set", { id, label: null });
+        expect((yield* settings.getSettings).mcpServers[id]?.label).toBeUndefined();
         yield* call("t3_mcp_server_set", { id, clearBearerToken: true });
         expect((yield* settings.getSettings).mcpServers[id]?.bearerToken).toBe("");
         expect(yield* call("t3_mcp_server_remove", { id })).toMatchObject({ id });
         expect((yield* settings.getSettings).mcpServers).toEqual({});
+        const management = yield* Management.SharedMcpServerManagement;
+        expect(yield* management.remove(id).pipe(Effect.flip)).toMatchObject({
+          reason: "not_found",
+        });
         expect(yield* call("t3_mcp_server_test", { id })).toMatchObject({
           code: "invalid_request",
         });

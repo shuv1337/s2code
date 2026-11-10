@@ -127,12 +127,12 @@ const make = Effect.gen(function* () {
                     new SharedMcpServerManagementError({ reason: "secret_unavailable", cause }),
                 ),
               );
+    const label = validated.label === undefined ? saved?.label : (validated.label ?? undefined);
     const updated = yield* settings
       .updateSettings({
         mcpServers: {
           [validated.id]: {
-            ...(saved?.label === undefined ? {} : { label: saved.label }),
-            ...(validated.label === undefined ? {} : { label: validated.label }),
+            ...(label === undefined ? {} : { label }),
             url,
             enabled: validated.enabled ?? saved?.enabled ?? true,
             bearerToken,
@@ -147,6 +147,8 @@ const make = Effect.gen(function* () {
     return summary(validated.id, updated.mcpServers[validated.id]!);
   });
   const remove = Effect.fn("SharedMcpServerManagement.remove")(function* (id: McpServerId) {
+    if (!Object.hasOwn((yield* current).mcpServers, id))
+      return yield* new SharedMcpServerManagementError({ reason: "not_found" });
     yield* settings
       .updateSettings({ mcpServers: { [id]: null } })
       .pipe(

@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { ProjectId, SecretRef } from "./baseSchemas.ts";
+import { ProjectId, SecretRef, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { OrchestratorMcpEnvironmentTarget } from "./orchestratorMcp.ts";
 import { McpServerConfig, McpServerId } from "./settings.ts";
 
@@ -21,7 +21,7 @@ export const SharedMcpServerSetInput = Schema.Struct({
       ),
     ),
   ),
-  label: McpServerConfig.fields.label,
+  label: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   enabled: Schema.optionalKey(Schema.Boolean),
   bearerTokenSecretRef: Schema.optionalKey(SecretRef),
   clearBearerToken: Schema.optionalKey(Schema.Boolean),
