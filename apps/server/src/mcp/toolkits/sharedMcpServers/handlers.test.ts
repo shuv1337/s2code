@@ -1,6 +1,7 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import { vi } from "vitest";
 import {
   EnvironmentId,
   McpServerId,
@@ -24,6 +25,10 @@ import * as Stream from "effect/Stream";
 import { Tool } from "effect/ai";
 
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../../../config.ts";
+import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
+import * as ManagedPolicy from "../../../policy/ManagedPolicy.ts";
+import { SECRET_REDACTED } from "../../../settingsSecrets.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
@@ -81,14 +86,19 @@ const fixture = Effect.gen(function* () {
     NodeCrypto.layer,
     NodeServices.layer,
     ThreadCommandExecutor.layer,
-    Settings.ServerSettingsService.layerTest(),
+    ServerConfig.layerTest(process.cwd(), { prefix: "t3-shared-mcp-test-" }),
+    SqlitePersistence.layerMemory,
+    ManagedPolicy.layerTest(),
     Layer.succeed(McpInvocationContext.McpInvocationContext, scope),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       getThreadShell: () =>
         Ref.get(caller).pipe(Effect.tap(() => Deferred.succeed(checked, undefined))),
     }),
     Layer.succeed(ServerSecretStore.ServerSecretStore, {
-      set: () => Effect.die("unused"),
+      set: (name, value) =>
+        Effect.sync(() => {
+          stored.set(name, value);
+        }),
       create: () => Effect.die("unused"),
       getOrCreateRandom: () => Effect.succeed(new Uint8Array(32)),
       get: (name) => Effect.sync(() => Option.fromNullishOr(stored.get(name))),
@@ -109,7 +119,9 @@ const fixture = Effect.gen(function* () {
   const layer = McpToolAccess.HandlersLayer.layer(Handlers.layer).pipe(
     Layer.provideMerge(Management.layer),
     Layer.provideMerge(SecretRequests.layer),
+    Layer.provideMerge(Settings.layer),
     Layer.provideMerge(dependencies),
+    Layer.provide(NodeServices.layer),
   );
   return { layer, caller, checked, stored, tested };
 });
@@ -147,7 +159,9 @@ it.effect(
         });
         expect(JSON.stringify([saved, listed])).not.toContain(token);
         expect(JSON.stringify([saved, listed])).not.toContain("bearerToken");
+        using update = vi.spyOn(settings, "updateSettings");
         yield* call("t3_mcp_server_set", { id, enabled: false, label: "Paused" });
+        expect(update.mock.lastCall?.[0].mcpServers?.[id]?.bearerToken).toBe(SECRET_REDACTED);
         expect((yield* settings.getSettings).mcpServers[id]).toEqual({
           url,
           label: "Paused",

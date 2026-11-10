@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Settings from "../serverSettings.ts";
+import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as SharedMcpServers from "./SharedMcpServers.ts";
 
 export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcpServerManagementError>()(
@@ -117,9 +118,7 @@ const make = Effect.gen(function* () {
       validated.clearBearerToken === true
         ? ""
         : validated.bearerTokenSecretRef === undefined
-          ? saved?.url === url
-            ? saved.bearerToken
-            : ""
+          ? SECRET_REDACTED
           : yield* secrets
               .consume({ ref: validated.bearerTokenSecretRef, projectId: projectId! })
               .pipe(
