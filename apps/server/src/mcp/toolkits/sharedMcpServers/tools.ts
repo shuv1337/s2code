@@ -27,7 +27,7 @@ const shared = {
 export const SharedMcpServersToolkit = Toolkit.make(
   Tool.make("t3_mcp_server_list", {
     ...shared,
-    description: "List shared MCP servers, never tokens. Full access required.",
+    description: "List shared MCP servers (no tokens).",
     parameters: SharedMcpServerListInput,
     success: SharedMcpServerListResult,
   })
@@ -36,7 +36,7 @@ export const SharedMcpServersToolkit = Toolkit.make(
   Tool.make("t3_mcp_server_set", {
     ...shared,
     description:
-      "Upsert a shared MCP server. Omitted fields stay. Token: request_secret ref on destination host.",
+      "Add/update a shared MCP server; omitted fields keep. Token only via request_secret ref from the target host.",
     parameters: SharedMcpServerSetInput,
     success: SharedMcpServerSetResult,
   })
@@ -50,7 +50,7 @@ export const SharedMcpServersToolkit = Toolkit.make(
   }).annotate(Tool.Destructive, true),
   Tool.make("t3_mcp_server_test", {
     ...shared,
-    description: "Test a saved shared MCP server with its stored token.",
+    description: "Test a saved shared MCP server.",
     parameters: SharedMcpServerIdInput,
     success: McpServerTestResult,
   }).annotate(Tool.Destructive, false),
