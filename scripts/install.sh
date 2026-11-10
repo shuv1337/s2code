@@ -79,6 +79,14 @@ canonical_dir() (
   printf '%s%s\n' "$resolved" "$suffix"
 )
 
+if [ -n "${VITEST:-}" ]; then
+  test_tmp="$(canonical_dir "${TMPDIR:-/tmp}")"
+  case "$(canonical_dir "${HOME:-/}")" in
+    "$test_tmp"/*) ;;
+    *) fail "Tests must set HOME to an explicit temporary directory under TMPDIR." ;;
+  esac
+fi
+
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
 if [ -t 2 ] && [ "${TERM:-}" != dumb ]; then interactive=true; fi
