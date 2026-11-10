@@ -1,7 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { expect, it } from "@effect/vitest";
-import { vi } from "vitest";
+import { expect, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
   McpServerId,
@@ -84,7 +83,6 @@ const fixture = Effect.gen(function* () {
   const tested: McpServerTestInput[] = [];
   const dependencies = Layer.mergeAll(
     NodeCrypto.layer,
-    NodeServices.layer,
     ThreadCommandExecutor.layer,
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-shared-mcp-test-" }),
     SqlitePersistence.layerMemory,
