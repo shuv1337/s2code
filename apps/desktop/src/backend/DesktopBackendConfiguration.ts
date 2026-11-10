@@ -820,6 +820,18 @@ export const make = Effect.gen(function* () {
       Effect.provideService(Path.Path, environment.path),
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(Mac.Mac, mac),
+      Effect.retry({
+        while: (error) => error._tag === "LocalServiceUpdating",
+        schedule: Schedule.spaced("500 millis"),
+        times: 240,
+      }),
+      // A launcher that died mid-update leaves the pending record behind; the ownership lock still blocks a second owner.
+      Effect.catchTags({
+        LocalServiceUpdating: () =>
+          Effect.logWarning(
+            "background service update did not finish; starting the desktop server",
+          ).pipe(Effect.as(null)),
+      }),
     );
     const attachment = yield* discover.pipe(
       Effect.catchTags({

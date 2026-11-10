@@ -26,6 +26,11 @@ const decodeRuntime = Schema.decodeUnknownEffect(
   ),
 );
 const decodeAttachment = Schema.decodeUnknownEffect(Schema.fromJsonString(LocalServerAttachment));
+const decodeServiceState = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({ update: Schema.optional(Schema.Struct({ status: Schema.String })) }),
+  ),
+);
 
 export class LocalServerAttachmentError extends Schema.TaggedError<LocalServerAttachmentError>()(
   "LocalServerAttachmentError",
@@ -46,6 +51,16 @@ export class LocalServiceVersionMismatch extends Schema.TaggedError<LocalService
   }
 }
 
+/** The background service is between stopping its old server and starting the updated one. */
+export class LocalServiceUpdating extends Schema.TaggedError<LocalServiceUpdating>()(
+  "LocalServiceUpdating",
+  {},
+) {
+  override get message() {
+    return "The background service is updating its server.";
+  }
+}
+
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -58,6 +73,7 @@ export function isProcessAlive(pid: number): boolean {
 
 /** A live but incompatible/unreachable server must never trigger a competing DB owner. */
 export const discover = Effect.fn("desktop.localServerAttach.discover")(function* (input: {
+  readonly baseDir: string;
   readonly stateDir: string;
   readonly appVersion: string;
 }) {
@@ -88,6 +104,13 @@ export const discover = Effect.fn("desktop.localServerAttach.discover")(function
             "A server is already running but does not support automatic desktop attachment. Update or stop it first.",
         });
       }
+    }
+    // The launcher backs up the database before starting the new version; owning the home in that gap fails the update.
+    const serviceState = yield* fs
+      .readFileString(path.join(input.baseDir, "runtime", "service-state.json"))
+      .pipe(Effect.flatMap(decodeServiceState), Effect.option);
+    if (Option.isSome(serviceState) && serviceState.value.update?.status === "pending") {
+      return yield* new LocalServiceUpdating();
     }
   });
   if (!(yield* fs.exists(file))) {

@@ -107,6 +107,7 @@ describe("local desktop attachment", () => {
     "legacy-service",
     "unavailable",
     "auth-rejected",
+    "service-updating",
   ] as const)("%s", (scenario) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -121,6 +122,12 @@ describe("local desktop attachment", () => {
         yield* fs.writeFileString(
           path.join(stateDir, "server-runtime.json"),
           JSON.stringify({ pid: process.pid, serviceManaged: true, serverVersion: "older" }),
+        );
+      } else if (scenario === "service-updating") {
+        yield* fs.makeDirectory(path.join(stateDir, "runtime"));
+        yield* fs.writeFileString(
+          path.join(stateDir, "runtime", "service-state.json"),
+          JSON.stringify({ activeVersion: "1.2.2", update: { status: "pending" } }),
         );
       } else if (scenario !== "absent") {
         yield* fs.writeFileString(
@@ -148,7 +155,7 @@ describe("local desktop attachment", () => {
           JSON.stringify({ pid: process.pid }),
         );
       }
-      const result = discover({ stateDir, appVersion: "1.2.3" }).pipe(
+      const result = discover({ baseDir: stateDir, stateDir, appVersion: "1.2.3" }).pipe(
         Effect.provideService(
           HttpClient.HttpClient,
           scenario === "unavailable" || scenario === "auth-rejected"
@@ -169,6 +176,8 @@ describe("local desktop attachment", () => {
       );
       if (scenario === "service-version" || scenario === "legacy-service") {
         assert.equal((yield* Effect.flip(result))._tag, "LocalServiceVersionMismatch");
+      } else if (scenario === "service-updating") {
+        assert.equal((yield* Effect.flip(result))._tag, "LocalServiceUpdating");
       } else if (
         scenario === "version" ||
         scenario === "stale-with-live-runtime" ||
