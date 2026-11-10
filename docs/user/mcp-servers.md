@@ -32,8 +32,8 @@ to manage providers. Full-access agents can also manage shared servers through t
   don't see them, because an agent that can run commands could otherwise call
   the server without asking you. After switching a thread to Full access, use
   **Restart agent**.
-- New agent sessions get the current list. A running agent may keep the
-  servers it started with, so use **Restart agent** after a change.
+- Added or re-enabled servers reach new agent sessions only; use **Restart
+  agent** to pick them up. URL and token changes apply immediately.
 - Agents connect through the environment, which adds the saved token. Turning a
   server off, removing it, or taking a thread out of Full access stops access
   immediately, even for running sessions.

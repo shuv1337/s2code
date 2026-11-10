@@ -212,22 +212,13 @@ harness's configuration. All accept `environmentId` for a linked host and requir
 a live full-access/default caller or full-access MCP client. Restricted link
 origins cannot manage these settings.
 
-Set takes `id`, optional `url`, `label`, and `enabled`; a new entry needs a URL.
-Omitted fields keep their values. Tokens come only from
-`bearerTokenSecretRef` returned by `request_secret`, or are removed with
-`clearBearerToken: true`. These options are mutually exclusive. A reference is
-spent once and must belong to the destination host and project. Within a thread
-the project defaults to the caller's; outside a thread, including forwarded calls,
-pass the destination `projectId`. To install a token remotely, request it in a
-thread on that host first; local refs are not transferred between hosts. Changing
-the URL clears the old token unless a new reference is supplied.
+Secret refs are one-use and host-local: request a token in a thread on the
+destination host before forwarding it. Outside a thread, including forwarded
+calls, pass the ref's destination `projectId`. Changing the URL clears the saved
+token unless a new ref is supplied.
 
-List and set return only public metadata, `hasToken`, and the harness name
-`shared-<id>`, never token bytes. Remove uses the normal settings deletion path;
-test connects using the saved URL and credential. Changes apply to **new provider
-sessions**; existing sessions keep their MCP set. The shared proxy still consults
-current settings on every request, so disabling or removing an entry stops its
-existing proxy calls too.
+Added or re-enabled servers reach new sessions only. Disabling, removing, or
+changing a server's URL or token applies immediately to existing proxy requests.
 
 ### `orchestrator_capabilities`
 
