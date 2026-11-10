@@ -39,7 +39,9 @@ export const SharedMcpServersToolkit = Toolkit.make(
       "Upsert a shared MCP server. Omitted fields stay. Token: request_secret ref on destination host.",
     parameters: SharedMcpServerSetInput,
     success: SharedMcpServerSetResult,
-  }).annotate(Tool.Destructive, true),
+  })
+    .annotate(Tool.Strict, true)
+    .annotate(Tool.Destructive, true),
   Tool.make("t3_mcp_server_remove", {
     ...shared,
     description: "Remove a shared MCP server.",

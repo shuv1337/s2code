@@ -78,7 +78,9 @@ const summary = (id: McpServerId, server: McpServerConfig): SharedMcpServerSumma
   harnessName: sharedMcpServerHarnessName(id),
 });
 
-const decodeSetInput = Schema.decodeUnknownEffect(SharedMcpServerSetInput);
+const decodeSetInput = Schema.decodeUnknownEffect(SharedMcpServerSetInput, {
+  onExcessProperty: "error",
+});
 
 const make = Effect.gen(function* () {
   const settings = yield* Settings.ServerSettingsService;

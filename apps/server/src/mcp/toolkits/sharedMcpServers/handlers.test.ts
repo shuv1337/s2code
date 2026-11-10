@@ -21,7 +21,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import type { Tool } from "effect/ai";
+import { Tool } from "effect/ai";
 
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
@@ -175,7 +175,9 @@ it.effect(
     }),
 );
 
-const decodeSet = Schema.decodeUnknownExit(SharedMcpServerSetInput);
+const decodeSet = Schema.decodeUnknownExit(SharedMcpServerSetInput, {
+  onExcessProperty: Tool.getStrictMode(tools.t3_mcp_server_set) ? "error" : "ignore",
+});
 it("rejects invalid ids and URLs and never decodes raw token arguments", () => {
   for (const invalid of [
     { id: "t3-owned", url },
@@ -184,13 +186,9 @@ it("rejects invalid ids and URLs and never decodes raw token arguments", () => {
     { id, url: "ftp://example.com" },
     { id, url: "https://[" },
     { id, url: "https://user:password@example.com" },
+    { id, url, bearerToken: token },
   ])
     expect(decodeSet(invalid)._tag).toBe("Failure");
-  expect(decodeSet({ id, url, bearerToken: token })).toMatchObject({
-    _tag: "Success",
-    value: { id, url },
-  });
-  expect(JSON.stringify(decodeSet({ id, url, bearerToken: token }))).not.toContain(token);
 });
 
 it.effect(
