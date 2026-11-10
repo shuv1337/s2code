@@ -23,13 +23,9 @@ export const SharedMcpServerSetInput = Schema.Struct({
   ),
   label: McpServerConfig.fields.label,
   enabled: Schema.optionalKey(Schema.Boolean),
-  bearerTokenSecretRef: Schema.optionalKey(SecretRef).annotate({
-    description: "request_secret ref on this host; never a token.",
-  }),
+  bearerTokenSecretRef: Schema.optionalKey(SecretRef),
   clearBearerToken: Schema.optionalKey(Schema.Boolean),
-  projectId: Schema.optionalKey(ProjectId).annotate({
-    description: "Secret ref's project; defaults to caller's. Required outside a thread.",
-  }),
+  projectId: Schema.optionalKey(ProjectId),
 });
 export type SharedMcpServerSetInput = typeof SharedMcpServerSetInput.Type;
 
