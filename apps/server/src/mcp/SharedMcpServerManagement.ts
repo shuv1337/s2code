@@ -46,7 +46,7 @@ export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcp
       case "secret_unavailable":
         return "The secret ref is unavailable, expired, already used, or belongs to another host or project.";
       case "settings_failed":
-        return "Could not update shared MCP server settings.";
+        return "Could not update shared MCP server settings. If a secret ref was passed, it was used; request a new one.";
     }
   }
 }
