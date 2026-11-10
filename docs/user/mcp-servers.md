@@ -22,7 +22,9 @@ environment in **Settings** and choose **MCP servers**.
   with: changing the URL removes it, so enter it again for the new address.
 
 **Test** connects the way an agent would and lists the server's tools. Adding,
-changing, or removing servers needs permission to manage providers.
+changing, or removing servers through Settings or WebSocket clients needs permission
+to manage providers. Full-access agents can also manage shared servers through the
+`t3_mcp_server_*` tools.
 
 ## How agents use it
 
