@@ -1084,7 +1084,8 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
   ];
 }
 
-export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 96;
+// The Windows release has 76 runtime files plus 22 prepared server cache entries and their manifest.
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 99;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {
