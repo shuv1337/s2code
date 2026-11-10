@@ -23,6 +23,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.voiceConfirm]: AuthOrchestrationOperateScope,
   [WS_METHODS.voiceReport]: AuthOrchestrationOperateScope,
   [WS_METHODS.watchIssuePairingCredential]: AuthOrchestrationOperateScope,
+  [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
   [WS_METHODS.previewStopLocalServer]: AuthTerminalOperateScope,

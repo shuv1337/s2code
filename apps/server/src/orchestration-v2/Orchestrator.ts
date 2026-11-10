@@ -6375,6 +6375,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
         ...failoverChain(projection.runs, command),
         ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
+        ...(command.usageLimitContinuationOfRunId === undefined
+          ? {}
+          : { usageLimitContinuationOfRunId: command.usageLimitContinuationOfRunId }),
         ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
         ...(freshContext ? { freshContext: true } : {}),
       };
@@ -6758,6 +6761,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
         ...failoverChain(projection.runs, command),
         ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
+        ...(command.usageLimitContinuationOfRunId === undefined
+          ? {}
+          : { usageLimitContinuationOfRunId: command.usageLimitContinuationOfRunId }),
         ...(dispatchMode.type === "defer_start" && dispatchMode.workspaceStrategy !== undefined
           ? { workspacePreparation: dispatchMode.workspaceStrategy }
           : {}),
@@ -7546,6 +7552,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
       ...failoverChain(projection.runs, command),
       ...(movedOffSpentInstanceId === undefined ? {} : { movedOffSpentInstanceId }),
+      ...(command.usageLimitContinuationOfRunId === undefined
+        ? {}
+        : { usageLimitContinuationOfRunId: command.usageLimitContinuationOfRunId }),
       ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
       ...wakeWorkStartedAt(projection.runs, command),
     };

@@ -698,6 +698,7 @@ export const OrchestrationV2Run = Schema.Struct({
   failoverChainId: Schema.optional(RunId),
   /** The quota-spent instance this run was moved off; it never resumes that instance's thread. */
   movedOffSpentInstanceId: Schema.optional(ProviderInstanceId),
+  usageLimitContinuationOfRunId: Schema.optional(RunId),
   delegatedTaskId: Schema.optional(NodeId),
   workStartedAt: Schema.optional(Schema.DateTimeUtc),
   restartCancelledBackgroundWork: Schema.optional(
