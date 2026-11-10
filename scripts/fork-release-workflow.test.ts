@@ -75,16 +75,22 @@ describe("fork workflow gates", () => {
     const outputs: Record<string, string> = {};
     const notices: string[] = [];
     const github = {
-      paginate: async () => [
-        {
-          draft: false,
-          tag_name: "v1.2.3-nightly.20261014.1",
-          published_at: "2026-10-14T06:00:00.000Z",
+      graphql: async () => ({
+        repository: {
+          releases: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                isDraft: false,
+                tagName: "v1.2.3-nightly.20261014.1",
+                publishedAt: "2026-10-14T06:00:00.000Z",
+              },
+            ],
+          },
         },
-      ],
+      }),
       rest: {
         repos: {
-          listReleases: () => {},
           compareCommitsWithBasehead: async () => ({ data: { status: "identical" } }),
         },
       },

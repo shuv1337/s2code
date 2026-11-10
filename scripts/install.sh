@@ -48,6 +48,11 @@ case "$t3_home" in
     ;;
 esac
 bin_dir="${S2CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
+# Trailing slashes would put `//` in the paths the t3 command guard compares.
+while [ "${t3_home%/}" != "$t3_home" ] && [ "$t3_home" != / ]; do t3_home="${t3_home%/}"; done
+while [ "${bin_dir%/}" != "$bin_dir" ] && [ "$bin_dir" != / ]; do bin_dir="${bin_dir%/}"; done
+# Absolute, so the PATH hint never adds a folder that changes with the working directory.
+case "$bin_dir" in /*) ;; *) bin_dir="$PWD/$bin_dir" ;; esac
 
 fail() {
   printf '\ns2code install: %s\n' "$1" >&2
@@ -73,6 +78,14 @@ canonical_dir() (
   [ "$resolved" != / ] || [ -z "$suffix" ] || resolved=
   printf '%s%s\n' "$resolved" "$suffix"
 )
+
+if [ -n "${VITEST:-}" ]; then
+  test_tmp="$(canonical_dir "${TMPDIR:-/tmp}")"
+  case "$(canonical_dir "${HOME:-/}")" in
+    "$test_tmp"/*) ;;
+    *) fail "Tests must set HOME to an explicit temporary directory under TMPDIR." ;;
+  esac
+fi
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false

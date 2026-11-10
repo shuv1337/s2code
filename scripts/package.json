@@ -19,7 +19,7 @@
     "plist": "catalog:",
     "pngjs": "7.0.0",
     "semver": "7.8.5",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

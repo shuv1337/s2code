@@ -9,7 +9,7 @@ import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "../env";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { useRelayEnvironmentDiscovery } from "../state/environments";
-import { CommandBlock } from "./CommandBlock";
+import { InstallT3Commands } from "./InstallT3Commands";
 import { useT3ConnectAuthPrompt } from "./clerk/useT3ConnectAuthPrompt";
 import { CloudEnvironmentConnectRows } from "./cloud/CloudEnvironmentConnectList";
 import { Button } from "./ui/button";
@@ -149,7 +149,7 @@ function RunOnComputer({ command }: { readonly command: string }) {
   return (
     <>
       <p>Run on your computer:</p>
-      <CommandBlock command={command} className="mt-2" />
+      <InstallT3Commands command={command} className="mt-2" />
       <a
         className="mt-2 inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         href={DESKTOP_DOWNLOAD_URL}

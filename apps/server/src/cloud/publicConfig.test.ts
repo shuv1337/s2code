@@ -16,6 +16,10 @@ const provideEnv = (env: Readonly<Record<string, string>>) =>
 it.effect("has no upstream hosted default and rejects upstream runtime relay overrides", () =>
   Effect.gen(function* () {
     assert.isTrue(Result.isFailure(yield* hostedAppUrlConfig.pipe(provideEnv({}), Effect.result)));
+    assert.equal(
+      yield* hostedAppUrlConfig.pipe(provideEnv({ T3CODE_HOSTED_APP_URL: "https://fork.test" })),
+      "https://fork.test",
+    );
     assert.isTrue(
       Result.isFailure(
         yield* makeRelayUrlConfig("https://fork.test").pipe(

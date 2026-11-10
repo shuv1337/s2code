@@ -103,6 +103,15 @@ export function isCommandMissingCause(error: unknown): boolean {
   return error instanceof PlatformError.PlatformError && error.reason._tag === "NotFound";
 }
 
+/**
+ * Environment for background status probes. A mise shim for a missing tool would otherwise
+ * download it on every refresh and leave a partial download behind when the probe times out.
+ * Sessions and user-started commands keep the plain environment, so mise still installs there.
+ */
+export function providerProbeEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...environment, MISE_OFFLINE: "1" };
+}
+
 export const spawnAndCollect = Effect.fn("snapshotProbe.spawnAndCollect")(function* (
   binaryPath: string,
   command: ChildProcess.Command,
@@ -136,6 +145,14 @@ export function parseGenericCliVersion(output: string): string | null {
     /\bv?(\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)\b/,
   );
   return match?.[1] ?? null;
+}
+
+/** A failed `--version` run reports no version: its output can be a wrapper's, such as mise's. */
+export function parseCliVersionResult(
+  result: CommandResult,
+  parse: (output: string) => string | null = parseGenericCliVersion,
+): string | null {
+  return result.code === 0 ? parse(`${result.stdout}\n${result.stderr}`) : null;
 }
 
 export function providerModelsFromSettings(
