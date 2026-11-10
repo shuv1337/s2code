@@ -159,7 +159,9 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-test-" });
+        const root = yield* fs
+          .makeTempDirectoryScoped({ prefix: "t3-npm-launcher-test-" })
+          .pipe(Effect.flatMap(fs.realPath));
         const release = yield* serveFakeRelease(root);
         const output = yield* buildNpmLauncher({
           version: VERSION,

@@ -16,7 +16,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
 
 import * as CloudLink from "../cloud/CloudLink.ts";
-import { agentApprovalAppUrlConfig } from "../cloud/publicConfig.ts";
+import { hostedAppUrlConfig } from "../cloud/publicConfig.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as McpOAuth from "./McpOAuth.ts";
 import { renderErrorPage } from "./mcpOAuthHtml.ts";
@@ -71,7 +71,7 @@ export const layer = HttpApiBuilder.group(
     const oauth = yield* McpOAuth.McpOAuth;
     const cloudLink = yield* CloudLink.CloudLink;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
-    const hostedAppUrl = yield* agentApprovalAppUrlConfig.pipe(
+    const hostedAppUrl = yield* hostedAppUrlConfig.pipe(
       Effect.orElseSucceed(() => DEFAULT_HOSTED_APP_URL),
     );
     // T3 Connect serves this host, so the owner can approve on the hosted app by signing in there.

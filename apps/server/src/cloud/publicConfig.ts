@@ -136,8 +136,6 @@ export const hostedAppUrlConfig = makePublicValueConfig(
     : __T3CODE_BUILD_HOSTED_APP_URL__,
 ).pipe(Config.mapEffect(validateHostedAppUrl));
 
-export const agentApprovalAppUrlConfig = hostedAppUrlConfig;
-
 function validateHostedAppUrl(value: string) {
   try {
     const origin = forkHostedOrigin(value, true);

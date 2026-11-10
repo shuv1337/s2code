@@ -80,7 +80,7 @@ const create = (config: Partial<OpenCodeSettings>, http: HttpClient.HttpClient) 
   OpenCodeDriver.create({
     instanceId: ProviderInstanceId.make("opencode-test"),
     displayName: undefined,
-    environment: [],
+    environment: [{ name: "OPENCODE_AUTH_CONTENT", sensitive: false, value: "{}" }],
     enabled: true,
     config: { ...OpenCodeDriver.defaultConfig(), ...config },
   }).pipe(Effect.provideService(HttpClient.HttpClient, http));
