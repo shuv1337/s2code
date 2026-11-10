@@ -1657,6 +1657,24 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(result.unpackedFiles, ["node_modules/native/addon.node"]);
         assert.isBelow(result.fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT);
         assert.deepStrictEqual(secondAsar, firstAsar);
+
+        const cacheDir = path.join(fixture.packagedAppDir, "resources", "server-compile-cache");
+        yield* fs.makeDirectory(cacheDir, { recursive: true });
+        for (let index = result.fileCount; index < 99; index++) {
+          yield* fs.writeFileString(path.join(cacheDir, String(index)), "prepared bytecode");
+        }
+        const validate = validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+        });
+        assert.equal((yield* validate).fileCount, 99);
+        yield* fs.writeFileString(path.join(cacheDir, "unexpected"), "extra file");
+        const error = yield* validate.pipe(Effect.flip);
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "file-limit-exceeded");
+        assert.equal(error.fileCount, 100);
       }),
     ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
