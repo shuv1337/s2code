@@ -899,6 +899,13 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     if (duplicateServices)
       return yield* new BootServicePrerequisiteError({ problem: "duplicate-service" });
     const selectedUnit = legacyIdentity ? legacyUnit : currentUnit;
+    if (Option.isSome(selectedUnit) && bootServiceBaseDirOf(selectedUnit.value) === undefined) {
+      return yield* new BootServiceInstallError({
+        cause: new Error(
+          "The service has no home. Select its explicit S2CODE_HOME before updating it.",
+        ),
+      });
+    }
     const installedBaseDir = Option.isSome(selectedUnit)
       ? otherBaseDirOf(selectedUnit.value)
       : undefined;

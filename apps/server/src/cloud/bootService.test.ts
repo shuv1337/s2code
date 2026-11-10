@@ -840,7 +840,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     }),
   );
 
-  it.effect("restart and install leave a service that serves another T3 home alone", () =>
+  it.effect("restart and install leave a service with another or missing home alone", () =>
     Effect.gen(function* () {
       const { service, fs, baseDir, commands, makeService } = yield* makeHarness();
       const plan = yield* service.install();
@@ -858,6 +858,15 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
       expect(commands).toEqual([]);
       expect((yield* other.status).otherBaseDir).toBe(baseDir);
+
+      const withoutHome = unit.replace(/^Environment=S2CODE_HOME=.*\n/m, "");
+      yield* fs.writeFileString(plan.unitPath, withoutHome);
+      const unknown = yield* makeService();
+      commands.length = 0;
+      expect(yield* unknown.restart).toBe("skipped");
+      expect((yield* unknown.install().pipe(Effect.flip))._tag).toBe("BootServiceInstallError");
+      expect(yield* fs.readFileString(plan.unitPath)).toBe(withoutHome);
+      expect(commands).toEqual([]);
     }),
   );
 

@@ -419,7 +419,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
         }
         if (outcome === "skipped") {
           yield* Console.log(
-            "The installed service was not restarted. Run `s2code service status` to see why.",
+            "The installed service runs another S2Code home, so it was not restarted. Pass its --base-dir.",
           );
         }
         started = outcome === "restarted";
