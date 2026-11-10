@@ -161,7 +161,12 @@ function RootRouteBranch() {
 
   if (pathname === GUEST_PAGE_PATH) return <Outlet />;
 
-  if (pathname === "/pair" || pathname === "/connect" || pathname === "/connect-agent") {
+  if (
+    pathname === "/pair" ||
+    pathname === "/connect" ||
+    pathname === "/connect-agent" ||
+    pathname === "/approve-agent"
+  ) {
     return <Outlet />;
   }
 
@@ -210,27 +215,27 @@ function RootRouteBranch() {
   return (
     <>
       <VoiceProvider>
-      <ChatGptWelcomeCoordinator />
-      {isWelcome ? (
-        <>
-          {appHosts}
-          {appShell}
-        </>
-      ) : (
-        <FirstRunGate
-          enabled={primaryEnvironmentAuthenticated}
-          hostedStatic={authGateState.status === "hosted-static"}
-        >
-          {appHosts}
-          {primaryEnvironmentAuthenticated ? (
-            <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
-          ) : null}
-          {appShell}
-        </FirstRunGate>
-      )}
-      {/* Above both shells and the router, so drafts survive navigation, including to /welcome. */}
-      <ThemeEditorHost />
-      <VoiceSurface />
+        <ChatGptWelcomeCoordinator />
+        {isWelcome ? (
+          <>
+            {appHosts}
+            {appShell}
+          </>
+        ) : (
+          <FirstRunGate
+            enabled={primaryEnvironmentAuthenticated}
+            hostedStatic={authGateState.status === "hosted-static"}
+          >
+            {appHosts}
+            {primaryEnvironmentAuthenticated ? (
+              <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
+            ) : null}
+            {appShell}
+          </FirstRunGate>
+        )}
+        {/* Above both shells and the router, so drafts survive navigation, including to /welcome. */}
+        <ThemeEditorHost />
+        <VoiceSurface />
       </VoiceProvider>
     </>
   );

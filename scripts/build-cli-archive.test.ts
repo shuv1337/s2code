@@ -9,7 +9,11 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { awaitCliNotarization, signMacArchiveContents, macCodesignArgs } from "./build-cli-archive.ts";
+import {
+  awaitCliNotarization,
+  signMacArchiveContents,
+  macCodesignArgs,
+} from "./build-cli-archive.ts";
 
 const signedEnv = {
   T3CODE_CLI_MAC_SIGN_IDENTITY: "Developer ID Application: Test (TEAM)",
@@ -213,11 +217,9 @@ it.layer(NodeServices.layer)("build-cli-archive notarization", (it) => {
       assert.isTrue(notarySubcommands(stub.calls)[0]?.includes("--wait"));
     }).pipe(Effect.scoped),
   );
-
 });
 
 import { describe, expect } from "vite-plus/test";
-
 
 describe("macCodesignArgs", () => {
   const identity = "Developer ID Application: Fixture (ABCDE12345)";

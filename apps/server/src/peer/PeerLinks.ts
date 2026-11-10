@@ -313,6 +313,7 @@ const make = Effect.gen(function* () {
       const resource = `${origin}/mcp`;
       const decided = yield* client.mcpOAuth
         .decision({
+          headers: {},
           payload: {
             authorization: {
               response_type: "code",
@@ -637,7 +638,6 @@ const make = Effect.gen(function* () {
           Effect.map((found) => {
             if (Option.isNone(found) || found.value.environmentId !== environmentId) return false;
             capabilities = found.value.capabilities;
-            fenced = linkLimitsHold(found.value);
             label = found.value.label;
             return true;
           }),

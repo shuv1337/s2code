@@ -1885,7 +1885,10 @@ const make = Effect.gen(function* () {
         task.remoteChild?.environmentId === scope.environmentId ? task.remoteChild.threadId : null,
       ...(task.remoteChild === undefined
         ? {}
-        : { remoteChild: task.remoteChild, link: formatThreadLink(task.remoteChild, task.remoteChild.title) }),
+        : {
+            remoteChild: task.remoteChild,
+            link: formatThreadLink(task.remoteChild, task.remoteChild.title),
+          }),
       childRunId:
         task.remoteChild?.environmentId === scope.environmentId
           ? (task.remoteChild.runId ?? null)

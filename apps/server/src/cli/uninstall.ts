@@ -11,7 +11,12 @@ import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import * as BootService from "../cloud/bootService.ts";
-import { generatedWindowsShimTarget, isVersionExecutable, launcherOwnsVersionsDir, pinnedRuntimeVersionsDir } from "../cloud/pinnedRuntime.ts";
+import {
+  generatedWindowsShimTarget,
+  isVersionExecutable,
+  launcherOwnsVersionsDir,
+  pinnedRuntimeVersionsDir,
+} from "../cloud/pinnedRuntime.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
 import { resolveServerInstallation, resolveUninstallGuidance } from "./invocation.ts";
@@ -21,6 +26,7 @@ import {
 } from "@t3tools/shared/channelIdentity";
 import packageJson from "../../package.json" with { type: "json" };
 import { findWindowsShim, readLauncherTarget, resolveLauncherPath } from "./update.ts";
+import { windowsForwarderShim } from "./windowsForwarderShim.ts";
 
 export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
   "CliUninstallError",
@@ -55,6 +61,17 @@ export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(functi
   if (platform === "win32") {
     const shimPath = yield* findWindowsShim(input.launchedAs, input.version);
     if (shimPath === undefined) return undefined;
+    const fs = yield* FileSystem.FileSystem;
+    const contents = yield* fs.readFileString(shimPath).pipe(Effect.orElseSucceed(() => ""));
+    const legacy = path.join(
+      path.dirname(shimPath),
+      `${resolveLegacyChannelIdentity(input.version ?? packageJson.version).executableName}.cmd`,
+    );
+    if (
+      generatedWindowsShimTarget(contents) === undefined &&
+      contents !== windowsForwarderShim(legacy)
+    )
+      return undefined;
     const target = (yield* readLauncherTarget(shimPath, input.version))?.target;
     return target !== undefined && launcherOwnsVersionsDir(path, input.versionsDir, target)
       ? shimPath

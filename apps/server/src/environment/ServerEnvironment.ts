@@ -291,6 +291,7 @@ export const make = Effect.gen(function* () {
       linkFence: true,
       providerAccountSync: true,
       mcpApprovalCodes: true,
+      mcpHostedApproval: true,
     },
   };
 

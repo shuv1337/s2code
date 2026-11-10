@@ -589,9 +589,6 @@ export class EnvironmentAuth extends Context.Service<
       AuthMcpClientAccess,
       ServerAuthMcpApprovalCodeError | ServerAuthInternalError
     >;
-    readonly authenticateBrowserSession: (
-      request: HttpServerRequest.HttpServerRequest,
-    ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
   }
 >()("t3/auth/EnvironmentAuth") {}
 
@@ -1437,22 +1434,6 @@ export const make = Effect.gen(function* () {
         Effect.withSpan("EnvironmentAuth.issueMcpClientSession"),
       );
 
-  const authenticateBrowserSession: EnvironmentAuth["Service"]["authenticateBrowserSession"] = (
-    request,
-  ) => {
-    const credential = resolveRequestCredential(request);
-    if (!credential || !isBrowserCookieCredential(credential.source)) {
-      return Effect.fail(new ServerAuthMissingCredentialError({}));
-    }
-    return authenticateRequest(request).pipe(
-      Effect.filterOrFail(
-        (session) => session.method === "browser-session-cookie",
-        () => new ServerAuthInvalidCredentialError({ diagnostic: "Not a browser session." }),
-      ),
-      Effect.withSpan("EnvironmentAuth.authenticateBrowserSession"),
-    );
-  };
-
   const consumeMcpApprovalCode: EnvironmentAuth["Service"]["consumeMcpApprovalCode"] = (
     code,
     access,
@@ -1507,7 +1488,6 @@ export const make = Effect.gen(function* () {
     authenticateMcpClient,
     issueMcpClientSession,
     consumeMcpApprovalCode,
-    authenticateBrowserSession,
   });
 });
 

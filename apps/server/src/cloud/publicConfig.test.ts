@@ -5,6 +5,7 @@ import * as Result from "effect/Result";
 
 import {
   hostedAppUrlConfig,
+  agentApprovalAppUrlConfig,
   makeCloudCliOAuthConfig,
   makeRelayUrlConfig,
   resolveRelayClientTracingConfig,
@@ -16,6 +17,15 @@ const provideEnv = (env: Readonly<Record<string, string>>) =>
 it.effect("has no upstream hosted default and rejects upstream runtime relay overrides", () =>
   Effect.gen(function* () {
     assert.isTrue(Result.isFailure(yield* hostedAppUrlConfig.pipe(provideEnv({}), Effect.result)));
+    assert.isTrue(
+      Result.isFailure(yield* agentApprovalAppUrlConfig.pipe(provideEnv({}), Effect.result)),
+    );
+    assert.equal(
+      yield* agentApprovalAppUrlConfig.pipe(
+        provideEnv({ T3CODE_HOSTED_APP_URL: "https://fork.test" }),
+      ),
+      "https://fork.test",
+    );
     assert.isTrue(
       Result.isFailure(
         yield* makeRelayUrlConfig("https://fork.test").pipe(

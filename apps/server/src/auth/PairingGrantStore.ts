@@ -436,9 +436,12 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     const mcpApproval = input?.purpose === "watch" ? undefined : input?.mcpApproval;
-    const credential = watchPayload !== undefined
-      ? `watch.${base64UrlEncode(watchPayload)}`
-      : mcpApproval ? mcpApprovalCode(mcpApproval, nonce) : nonce;
+    const credential =
+      watchPayload !== undefined
+        ? `watch.${base64UrlEncode(watchPayload)}`
+        : mcpApproval
+          ? mcpApprovalCode(mcpApproval, nonce)
+          : nonce;
     const isDevStartupToken = config.devUrl !== undefined && input?.purpose === "startup";
     const ttl =
       input?.ttl ??
@@ -453,7 +456,11 @@ const make = Effect.gen(function* () {
       expiresAt,
     };
     const subject =
-      input?.purpose === "watch" ? WATCH_CLIENT_SUBJECT : (mcpApproval ? `${AuthPairingLinks.MCP_APPROVAL_SUBJECT_PREFIX}${mcpApproval}` : (input?.subject ?? "one-time-token"));
+      input?.purpose === "watch"
+        ? WATCH_CLIENT_SUBJECT
+        : mcpApproval
+          ? `${AuthPairingLinks.MCP_APPROVAL_SUBJECT_PREFIX}${mcpApproval}`
+          : (input?.subject ?? "one-time-token");
     const scopes =
       input?.purpose === "watch" ? watchClientScopes : (input?.scopes ?? AuthStandardClientScopes);
     yield* pairingLinks
@@ -480,14 +487,14 @@ const make = Effect.gen(function* () {
         ),
       );
     if (!mcpApproval) {
-    yield* emitUpsert({
-      id,
-      scopes,
-      subject,
-      ...(input?.label ? { label: input.label } : {}),
-      createdAt: now,
-      expiresAt,
-    });
+      yield* emitUpsert({
+        id,
+        scopes,
+        subject,
+        ...(input?.label ? { label: input.label } : {}),
+        createdAt: now,
+        expiresAt,
+      });
     }
     return issued;
   });

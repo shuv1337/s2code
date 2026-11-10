@@ -8,7 +8,12 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as BootService from "../cloud/bootService.ts";
 
-import { findOwnedLauncher, findRecordedLaunchers, runUninstall, spawnWindowsRemoval } from "./uninstall.ts";
+import {
+  findOwnedLauncher,
+  findRecordedLaunchers,
+  runUninstall,
+  spawnWindowsRemoval,
+} from "./uninstall.ts";
 
 it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
   it.effect("claims only a launcher that points into this home's runtime tree", () =>

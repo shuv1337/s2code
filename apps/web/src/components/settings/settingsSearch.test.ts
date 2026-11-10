@@ -183,7 +183,11 @@ describe("searchSettings", () => {
     const ids = (hasPrimaryEnvironment: boolean) =>
       searchSettings(
         "welcome page",
-        filterAvailableSettingsSearchItems({ ...availability, hasPrimaryEnvironment }),
+        filterAvailableSettingsSearchItems({
+          ...availability,
+          hasMacProviderSettingsEnvironment: false,
+          hasPrimaryEnvironment,
+        }),
       ).map((item) => item.id);
     // Hosted web reaches remote computers but has no primary one to set up.
     expect(ids(false)).not.toContain("welcome-page");

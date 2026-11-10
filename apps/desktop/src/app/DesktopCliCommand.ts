@@ -482,7 +482,9 @@ export const make = Effect.gen(function* () {
       // A t3 that is not ours in these folders, even off PATH, means the user has one already. On
       // Windows the app never writes there, so any t3 there is someone else's.
       for (const directory of userCandidates(environment.homeDirectory)) {
-        for (const name of windows ? [commandName, commandName.replace(/\.cmd$/i, ".exe")] : [commandName]) {
+        for (const name of windows
+          ? [commandName, commandName.replace(/\.cmd$/i, ".exe")]
+          : [commandName]) {
           const other = path.join(directory, name);
           const present =
             (yield* exists(other)) || Option.isSome(yield* fs.readLink(other).pipe(Effect.option));

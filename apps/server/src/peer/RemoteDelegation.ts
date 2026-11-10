@@ -606,7 +606,7 @@ const make = Effect.gen(function* () {
   ) {
     if (remote.environmentId === hereId) {
       const records = yield* threads
-        .getThreadRecords(remote.threadId, ["runs", "messages", "turnItems"], {
+        .getThreadRecords(remote.threadId, ["runs", "messages", "turnItems", "providerTurns"], {
           messageRoles: ["assistant"],
           turnItemTypes: ["assistant_message", "error"],
           ...(runId === null
