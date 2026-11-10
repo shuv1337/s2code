@@ -136,7 +136,8 @@ it.effect(
             hasToken: true,
             harnessName: "shared-catalog",
           },
-          sessionNotice: expect.stringContaining("new provider sessions"),
+          sessionNotice:
+            "Added or re-enabled servers reach new sessions only; other changes apply immediately.",
         });
         expect(harness.stored.has(secretKey)).toBe(false);
         expect((yield* settings.getSettings).mcpServers[id]?.bearerToken).toBe(token);

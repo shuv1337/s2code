@@ -44,7 +44,7 @@ export const SharedMcpServerSummary = Schema.Struct({
 export type SharedMcpServerSummary = typeof SharedMcpServerSummary.Type;
 
 export const SHARED_MCP_SESSION_NOTICE =
-  "Changes apply to new provider sessions; existing sessions keep their MCP set.";
+  "Added or re-enabled servers reach new sessions only; other changes apply immediately.";
 export const SharedMcpServerListResult = Schema.Struct({
   servers: Schema.Array(SharedMcpServerSummary),
   sessionNotice: Schema.String,
