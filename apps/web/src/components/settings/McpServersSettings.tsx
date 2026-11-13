@@ -1,13 +1,16 @@
 import { useAtomValue } from "@effect/atom-react";
+import { mcpServerAudience } from "@t3tools/client-runtime/mcp-server-audience";
 import {
   sharedMcpServerHarnessName,
   type McpServerConfig,
   type McpServerId,
+  type ProjectId,
 } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import { useProjects } from "../../state/entities";
 import type { EnvironmentPresentation } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -68,6 +71,9 @@ function EnvironmentMcpServers({
   const canManage = useAtomValue(serverEnvironment.testMcpServer.permissionAtom(environmentId));
   const readOnly = !canManage || projectScoped;
   const servers = useEnvironmentSettings(environmentId, (settings) => settings.mcpServers);
+  const projects = useProjects();
+  const projectTitle = (id: ProjectId) =>
+    projects.find((project) => project.environmentId === environmentId && project.id === id)?.title;
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const testMcpServer = useAtomCommand(serverEnvironment.testMcpServer, { reportFailure: false });
   const [dialog, setDialog] = useState<
@@ -130,6 +136,7 @@ function EnvironmentMcpServers({
             const name = config.label ?? id;
             const test = tests[id];
             const currentTest = test?.key === JSON.stringify({ id, url: config.url }) ? test : null;
+            const audience = mcpServerAudience(config, projectTitle);
             return (
               <SettingsRow
                 key={id}
@@ -140,6 +147,7 @@ function EnvironmentMcpServers({
                       Agents see <code className="font-mono">{sharedMcpServerHarnessName(id)}</code>{" "}
                       · {mcpServerHost(config.url)}
                     </span>
+                    {audience ? <span className="wrap-anywhere">{audience}</span> : null}
                     {currentTest ? <McpServerTestStatus test={currentTest} /> : null}
                   </span>
                 }

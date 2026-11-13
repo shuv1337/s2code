@@ -578,6 +578,37 @@ describe("serverSettings helpers", () => {
     });
   });
 
+  it("keeps an MCP server's binding when a whole-entry patch omits it, and clears it explicitly", () => {
+    const url = "https://mcp.example.com/mcp";
+    const unbound = decodeServerSettings({ mcpServers: { executor: { url } } });
+    expect(unbound.mcpServers).toEqual({ executor: { url, bearerToken: "", enabled: true } });
+
+    const projectIds = [ProjectId.make("project-a")];
+    const bound = applyServerSettingsPatch(
+      unbound,
+      decodeServerSettingsPatch({
+        mcpServers: { executor: { url, projectIds, excludeSubagents: true } },
+      }),
+    );
+    const toggled = applyServerSettingsPatch(
+      bound,
+      decodeServerSettingsPatch({ mcpServers: { executor: { url, enabled: false } } }),
+    );
+    expect(toggled.mcpServers).toEqual({
+      executor: { url, bearerToken: "", enabled: false, projectIds, excludeSubagents: true },
+    });
+
+    const cleared = applyServerSettingsPatch(
+      toggled,
+      decodeServerSettingsPatch({
+        mcpServers: { executor: { url, projectIds: [], excludeSubagents: false } },
+      }),
+    );
+    expect(cleared.mcpServers).toEqual({
+      executor: { url, bearerToken: "", enabled: true, projectIds: [], excludeSubagents: false },
+    });
+  });
+
   // regression: #18334 a newer client must still see this server drop a key it does not know
   it("drops an override key this server does not know from a patch and keeps one it stored", () => {
     const projectId = ProjectId.make("project-a");

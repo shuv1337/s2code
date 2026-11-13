@@ -214,11 +214,19 @@ origins cannot manage these settings.
 
 Secret refs are one-use and host-local: request a token in a thread on the
 destination host before forwarding it. Outside a thread, including forwarded
-calls, pass the ref's destination `projectId`. Changing the URL clears the saved
-token unless a new ref is supplied.
+calls, pass the ref's destination `projectId`.
+
+A non-empty `projectIds` limits a server to threads in those projects, and
+`excludeSubagents` hides it from subagent threads. Both apply to the server list
+each provider session gets and, per request, to the `/mcp/servers/<id>` proxy.
+On a server with a saved token, changing `url`, `projectIds`, or
+`excludeSubagents` needs a new `bearerTokenSecretRef` or `clearBearerToken` in
+the same call (`secret_required`), so a caller cannot move a token it never
+held to a new address or audience. `label` and `enabled` change freely.
 
 Added or re-enabled servers reach new sessions only. Disabling, removing, or
-changing a server's URL or token applies immediately to existing proxy requests.
+changing a server's URL, token, or binding applies immediately to existing proxy
+requests.
 
 ### `orchestrator_capabilities`
 

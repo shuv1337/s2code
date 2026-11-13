@@ -1,4 +1,4 @@
-import { McpServerId, type McpServerConfig } from "@t3tools/contracts";
+import { McpServerId, ProjectId, type McpServerConfig } from "@t3tools/contracts";
 import * as Result from "effect/Result";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,6 +17,8 @@ const saved: McpServerConfig = {
   url: "https://executor.example.com/mcp",
   bearerToken: REDACTED,
   enabled: false,
+  projectIds: [ProjectId.make("project-a")],
+  excludeSubagents: true,
 };
 const edit: McpServerTarget = { mode: "edit", id, config: saved };
 
@@ -57,7 +59,7 @@ describe("mcpServerFromDraft", () => {
     }
   });
 
-  it("keeps the id, enabled state, and saved token of an edited server", () => {
+  it("keeps the id, enabled state, binding, and saved token of an edited server", () => {
     const draft = draftFromMcpServer(id, saved);
     expect(draft.token).toEqual({ kind: "saved" });
     expect(mcpServerFromDraft({ ...draft, id: "ignored" }, new Set([id]), edit)).toEqual(

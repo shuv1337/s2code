@@ -102,6 +102,8 @@ export function parseMcpServerDraft(
     url: draft.url.trim(),
     bearerToken: mcpServerTokenToSave(tokenEdit(draft, saved)),
     enabled: draft.enabled,
+    ...(saved?.projectIds === undefined ? {} : { projectIds: saved.projectIds }),
+    ...(saved?.excludeSubagents === undefined ? {} : { excludeSubagents: saved.excludeSubagents }),
   });
   if (Option.isNone(config))
     return { ok: false, error: "Enter a URL starting with http:// or https://." };

@@ -37,6 +37,13 @@ to manage providers. Full-access agents can also manage shared servers through t
 - Agents connect through the environment, which adds the saved token. Turning a
   server off, removing it, or taking a thread out of Full access stops access
   immediately, even for running sessions.
+- A server can be limited to certain projects, to top-level threads (not
+  subagents), or both. Settings shows the limit under the server; agents set
+  it with `t3_mcp_server_set` (`projectIds`, `excludeSubagents`). Threads
+  outside the limit don't get the server, and changing the limit applies to
+  running sessions on their next call.
+- An agent can't change the URL or limit of a server that has a token without
+  supplying the token again, so it can't send a saved token somewhere new.
 - Once a server is added here, Codex through ACP asks before T3 Code's own
   tools outside Full access, because it doesn't say which server a call is for.
 - If the server is unreachable, takes more than 5 seconds to connect or list

@@ -43,6 +43,10 @@
       "types": "./src/mcpServerToken.ts",
       "default": "./src/mcpServerToken.ts"
     },
+    "./mcp-server-audience": {
+      "types": "./src/mcpServerAudience.ts",
+      "default": "./src/mcpServerAudience.ts"
+    },
     "./device/stream": {
       "types": "./src/device/stream.ts",
       "default": "./src/device/stream.ts"

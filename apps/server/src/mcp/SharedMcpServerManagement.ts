@@ -26,6 +26,7 @@ export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcp
       "url_required",
       "token_conflict",
       "project_required",
+      "secret_required",
       "secret_unavailable",
       "settings_failed",
     ]),
@@ -44,6 +45,8 @@ export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcp
         return "Use bearerTokenSecretRef or clearBearerToken, not both.";
       case "project_required":
         return "Pass the destination secret ref's projectId outside a thread. Refs are host-local.";
+      case "secret_required":
+        return "This server has a saved token. Changing its url, projectIds, or excludeSubagents needs a new bearerTokenSecretRef, or clearBearerToken: true, in the same call.";
       case "secret_unavailable":
         return "The secret ref is unavailable, expired, already used, or belongs to another host or project.";
       case "settings_failed":
@@ -75,9 +78,20 @@ const summary = (id: McpServerId, server: McpServerConfig): SharedMcpServerSumma
   ...(server.label === undefined ? {} : { label: server.label }),
   url: server.url,
   enabled: server.enabled,
+  ...(server.projectIds === undefined ? {} : { projectIds: server.projectIds }),
+  ...(server.excludeSubagents === undefined ? {} : { excludeSubagents: server.excludeSubagents }),
   hasToken: server.bearerToken.length > 0,
   harnessName: sharedMcpServerHarnessName(id),
 });
+
+const sameProjects = (
+  left: ReadonlyArray<ProjectId> | undefined,
+  right: ReadonlyArray<ProjectId> | undefined,
+) => {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return leftSet.size === rightSet.size && [...leftSet].every((id) => rightSet.has(id));
+};
 
 const decodeSetInput = Schema.decodeUnknownEffect(SharedMcpServerSetInput, {
   onExcessProperty: "error",
@@ -111,6 +125,19 @@ const make = Effect.gen(function* () {
     const url = validated.url ?? saved?.url;
     if (url === undefined)
       return yield* new SharedMcpServerManagementError({ reason: "url_required" });
+    const projectIds = validated.projectIds ?? saved?.projectIds;
+    const excludeSubagents = validated.excludeSubagents ?? saved?.excludeSubagents;
+    // Repointing or rebinding a tokened server hands its token to a new audience, so the caller re-supplies it.
+    if (
+      saved !== undefined &&
+      saved.bearerToken.length > 0 &&
+      validated.bearerTokenSecretRef === undefined &&
+      validated.clearBearerToken !== true &&
+      (url !== saved.url ||
+        !sameProjects(projectIds, saved.projectIds) ||
+        (excludeSubagents ?? false) !== (saved.excludeSubagents ?? false))
+    )
+      return yield* new SharedMcpServerManagementError({ reason: "secret_required" });
     const projectId = validated.projectId ?? callerProjectId;
     if (validated.bearerTokenSecretRef !== undefined && projectId === undefined)
       return yield* new SharedMcpServerManagementError({ reason: "project_required" });
@@ -136,6 +163,8 @@ const make = Effect.gen(function* () {
             url,
             enabled: validated.enabled ?? saved?.enabled ?? true,
             bearerToken,
+            ...(projectIds === undefined ? {} : { projectIds }),
+            ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
           },
         },
       })

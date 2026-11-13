@@ -1,5 +1,5 @@
 import { MCP_TOKEN_REDACTED } from "@t3tools/client-runtime/mcp-server-token";
-import type { McpServerConfig } from "@t3tools/contracts";
+import { ProjectId, type McpServerConfig } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mcpServerDraft, mcpServerHost, parseMcpServerDraft } from "./mcp-servers";
@@ -10,6 +10,8 @@ const saved: Record<string, McpServerConfig> = {
     url: "https://executor.example.com/mcp",
     bearerToken: MCP_TOKEN_REDACTED,
     enabled: true,
+    projectIds: [ProjectId.make("project-a")],
+    excludeSubagents: true,
   },
 };
 
@@ -34,7 +36,7 @@ describe("parseMcpServerDraft", () => {
     });
   });
 
-  it("keeps a saved token by sending the redaction marker back", () => {
+  it("keeps a saved token by sending the redaction marker back, and keeps the binding", () => {
     const draft = { ...mcpServerDraft("executor", saved.executor), label: "  Tools  " };
     expect(parseMcpServerDraft(draft, saved, false)).toEqual({
       ok: true,
@@ -45,6 +47,8 @@ describe("parseMcpServerDraft", () => {
           url: "https://executor.example.com/mcp",
           bearerToken: MCP_TOKEN_REDACTED,
           enabled: true,
+          projectIds: ["project-a"],
+          excludeSubagents: true,
         },
       },
     });

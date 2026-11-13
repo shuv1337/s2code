@@ -47,6 +47,9 @@ const threadId = ThreadId.make("thread:shared-mcp");
 const secretRef = SecretRef.make("secret-ref:0123456789abcdef0123456789abcdef");
 const secretKey = "secret-request-0123456789abcdef0123456789abcdef";
 const token = "private-fixture-token";
+const freshSecretRef = SecretRef.make("secret-ref:fedcba9876543210fedcba9876543210");
+const freshSecretKey = "secret-request-fedcba9876543210fedcba9876543210";
+const freshToken = "fresh-fixture-token";
 const url = "https://mcp.example.com/api";
 const scope: McpInvocationContext.McpInvocationScope = {
   environmentId,
@@ -72,13 +75,11 @@ const call = <N extends keyof typeof tools>(name: N, input: Tool.Parameters<(typ
 const fixture = Effect.gen(function* () {
   const caller = yield* Ref.make<OrchestrationV2ThreadShell>(liveThreadShell(threadId));
   const checked = yield* Deferred.make<void>();
+  const storedSecret = (value: string) =>
+    new TextEncoder().encode(JSON.stringify({ projectId: "project:mcp-test", value, savedAt: 0 }));
   const stored = new Map<string, Uint8Array>([
-    [
-      secretKey,
-      new TextEncoder().encode(
-        JSON.stringify({ projectId: "project:mcp-test", value: token, savedAt: 0 }),
-      ),
-    ],
+    [secretKey, storedSecret(token)],
+    [freshSecretKey, storedSecret(freshToken)],
   ]);
   const tested: McpServerTestInput[] = [];
   const dependencies = Layer.mergeAll(
@@ -210,7 +211,7 @@ it("rejects invalid ids and URLs and never decodes raw token arguments", () => {
 });
 
 it.effect(
-  "rejects conflicting or wrong-project refs without spending them, and does not send an old token to a new URL",
+  "rejects conflicting or wrong-project refs without spending them, and repoints or rebinds a tokened server only with its secret",
   () =>
     Effect.gen(function* () {
       const harness = yield* fixture;
@@ -233,9 +234,69 @@ it.effect(
         ).toMatchObject({ code: "invalid_request" });
         expect(harness.stored.has(secretKey)).toBe(true);
         yield* call("t3_mcp_server_set", { id, url, bearerTokenSecretRef: secretRef });
-        yield* call("t3_mcp_server_set", { id, url: "https://other.example.com/mcp" });
         const settings = yield* Settings.ServerSettingsService;
-        expect((yield* settings.getSettings).mcpServers[id]?.bearerToken).toBe("");
+        const saved = () => settings.getSettings.pipe(Effect.map((value) => value.mcpServers[id]));
+        const projectA = ProjectId.make("project:mcp-test");
+        const projectB = ProjectId.make("project:elsewhere");
+
+        for (const change of [
+          { url: "https://other.example.com/mcp" },
+          { projectIds: [projectB] },
+          { excludeSubagents: true },
+        ]) {
+          expect(yield* call("t3_mcp_server_set", { id, ...change })).toMatchObject({
+            code: "invalid_request",
+            message: new Management.SharedMcpServerManagementError({ reason: "secret_required" })
+              .message,
+          });
+        }
+        expect(yield* saved()).toEqual({ url, enabled: true, bearerToken: token });
+
+        // Unchanged values, label, and enabled need no secret.
+        yield* call("t3_mcp_server_set", { id, url, label: "Catalog", enabled: false });
+        expect(yield* saved()).toEqual({
+          url,
+          label: "Catalog",
+          enabled: false,
+          bearerToken: token,
+        });
+
+        expect(
+          yield* call("t3_mcp_server_set", {
+            id,
+            projectIds: [projectA],
+            excludeSubagents: true,
+            bearerTokenSecretRef: freshSecretRef,
+          }),
+        ).toMatchObject({ server: { projectIds: [projectA], excludeSubagents: true } });
+        expect(harness.stored.has(freshSecretKey)).toBe(false);
+        expect(yield* saved()).toMatchObject({
+          projectIds: [projectA],
+          excludeSubagents: true,
+          bearerToken: freshToken,
+        });
+        expect(yield* call("t3_mcp_server_list", {})).toMatchObject({
+          servers: [{ id, projectIds: [projectA], excludeSubagents: true, hasToken: true }],
+        });
+        yield* call("t3_mcp_server_set", { id, projectIds: [projectA], enabled: true });
+
+        yield* call("t3_mcp_server_set", {
+          id,
+          url: "https://other.example.com/mcp",
+          projectIds: [],
+          clearBearerToken: true,
+        });
+        expect(yield* saved()).toEqual({
+          url: "https://other.example.com/mcp",
+          label: "Catalog",
+          enabled: true,
+          bearerToken: "",
+          projectIds: [],
+          excludeSubagents: true,
+        });
+        // Without a token, a server rebinds as before.
+        yield* call("t3_mcp_server_set", { id, excludeSubagents: false });
+        expect(yield* saved()).toMatchObject({ excludeSubagents: false });
       }).pipe(Effect.provide(harness.layer));
     }),
 );

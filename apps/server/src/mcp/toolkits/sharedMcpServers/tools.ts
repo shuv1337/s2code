@@ -36,7 +36,7 @@ export const SharedMcpServersToolkit = Toolkit.make(
   Tool.make("t3_mcp_server_set", {
     ...shared,
     description:
-      "Add/update a shared MCP server; omitted fields keep. Token only via request_secret ref from the target host.",
+      "Add/update a shared MCP server; omitted fields keep. Token only via request_secret ref from the target host. Non-empty projectIds limits it to those projects; excludeSubagents hides it from subagents. On a tokened server, changing url/projectIds/excludeSubagents needs a new ref or clearBearerToken.",
     parameters: SharedMcpServerSetInput,
     success: SharedMcpServerSetResult,
   })

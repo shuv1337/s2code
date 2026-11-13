@@ -23,6 +23,8 @@ export const SharedMcpServerSetInput = Schema.Struct({
   ),
   label: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   enabled: Schema.optionalKey(Schema.Boolean),
+  projectIds: McpServerConfig.fields.projectIds,
+  excludeSubagents: McpServerConfig.fields.excludeSubagents,
   bearerTokenSecretRef: Schema.optionalKey(SecretRef),
   clearBearerToken: Schema.optionalKey(Schema.Boolean),
   projectId: Schema.optionalKey(ProjectId),
@@ -34,6 +36,8 @@ export const SharedMcpServerSummary = Schema.Struct({
   label: McpServerConfig.fields.label,
   url: Schema.String,
   enabled: Schema.Boolean,
+  projectIds: McpServerConfig.fields.projectIds,
+  excludeSubagents: McpServerConfig.fields.excludeSubagents,
   hasToken: Schema.Boolean,
   harnessName: Schema.String,
 });

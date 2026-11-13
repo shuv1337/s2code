@@ -4,9 +4,11 @@ import {
   AuthProvidersManageScope,
   type EnvironmentId,
   type McpServerConfig,
+  type ProjectId,
   type ServerSettingsPatch,
   sharedMcpServerHarnessName,
 } from "@t3tools/contracts";
+import { mcpServerAudience } from "@t3tools/client-runtime/mcp-server-audience";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -22,6 +24,7 @@ import { ListActionRow } from "../../components/ui/ListActionRow";
 import { Notice } from "../../components/ui/Notice";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
+import { useProjects } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -82,6 +85,9 @@ export function SettingsMcpServersRouteScreen({
   const write = useWriteMcpServers(environmentId);
   const [toggling, setToggling] = useState<{ id: string; enabled: boolean } | null>(null);
   const entries = sortedMcpServers(servers);
+  const projects = useProjects();
+  const projectTitle = (id: ProjectId) =>
+    projects.find((project) => project.environmentId === environmentId && project.id === id)?.title;
 
   const setEnabled = async (id: string, config: McpServerConfig, enabled: boolean) => {
     if (toggling !== null) return;
@@ -113,6 +119,7 @@ export function SettingsMcpServersRouteScreen({
               ) : (
                 entries.map(({ id, config }, index) => {
                   const name = config.label ?? id;
+                  const audience = mcpServerAudience(config, projectTitle);
                   return (
                     <View
                       key={id}
@@ -144,6 +151,15 @@ export function SettingsMcpServersRouteScreen({
                           {config.label ? `${id} · ` : ""}
                           {mcpServerHost(config.url)}
                         </Text>
+                        {audience ? (
+                          <Text
+                            textRole="footnote"
+                            className="text-foreground-muted"
+                            numberOfLines={2}
+                          >
+                            {audience}
+                          </Text>
+                        ) : null}
                       </Pressable>
                       <ThemedSwitch
                         accessibilityLabel={`${name} enabled`}

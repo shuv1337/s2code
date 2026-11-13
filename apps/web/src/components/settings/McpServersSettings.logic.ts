@@ -120,13 +120,18 @@ export function mcpServerFromDraft(
     });
   }
   const label = draft.label.trim();
+  const saved = target.mode === "edit" ? target.config : undefined;
   return Result.succeed({
     id: id.success,
     config: {
       ...(label ? { label } : {}),
       url: url.success,
       bearerToken: mcpServerTokenToSave(tokenEdit(draft, target)),
-      enabled: target.mode === "edit" ? target.config.enabled : true,
+      enabled: saved?.enabled ?? true,
+      ...(saved?.projectIds === undefined ? {} : { projectIds: saved.projectIds }),
+      ...(saved?.excludeSubagents === undefined
+        ? {}
+        : { excludeSubagents: saved.excludeSubagents }),
     },
   });
 }
