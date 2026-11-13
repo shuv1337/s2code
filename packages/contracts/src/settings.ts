@@ -929,6 +929,9 @@ export const McpServerConfig = Schema.Struct({
   url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/./i)),
   bearerToken: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("")), secretSetting),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** When non-empty, only threads in these projects get the server. */
+  projectIds: Schema.optionalKey(Schema.Array(ProjectId)),
+  excludeSubagents: Schema.optionalKey(Schema.Boolean),
 });
 export type McpServerConfig = typeof McpServerConfig.Type;
 export const TextGeneratorKind = Schema.Literals(["openaiCompatible", "anthropic"]);

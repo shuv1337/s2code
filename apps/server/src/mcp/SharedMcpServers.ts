@@ -1,8 +1,11 @@
-import type {
-  McpServerConfig,
-  McpServerTestInput,
-  McpServerTestResult,
-  ServerSettings,
+import {
+  isDelegatedAppThread,
+  type McpServerConfig,
+  type McpServerTestInput,
+  type McpServerTestResult,
+  type OrchestrationV2ThreadShell,
+  type ProjectId,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -27,14 +30,40 @@ import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 
 const ROUTE_PREFIX = "/mcp/servers";
 
-/** The servers new provider sessions get, in a stable order. */
+export interface SharedMcpServerAudience {
+  readonly projectId: ProjectId;
+  readonly subagent: boolean;
+}
+
+/** Cross-project and linked-environment delegates have no subagent lineage, only `delegatedFrom`. */
+export const sharedMcpServerAudience = (
+  thread: Pick<OrchestrationV2ThreadShell, "projectId" | "lineage" | "delegatedFrom">,
+  subagentCredential = false,
+): SharedMcpServerAudience => ({
+  projectId: thread.projectId,
+  subagent: subagentCredential || isDelegatedAppThread(thread),
+});
+
+export const sharedMcpServerAdmits = (
+  server: Pick<McpServerConfig, "projectIds" | "excludeSubagents">,
+  thread: SharedMcpServerAudience,
+): boolean => {
+  const projectIds = server.projectIds ?? [];
+  if (projectIds.length > 0 && !projectIds.includes(thread.projectId)) return false;
+  return server.excludeSubagents !== true || !thread.subagent;
+};
+
+/** The servers a thread's new provider sessions get, in a stable order; a thread that can't be read gets none. */
 export const enabledSharedMcpServerNames = (
   settings: Pick<ServerSettings, "mcpServers">,
+  thread: SharedMcpServerAudience | undefined,
 ): ReadonlyArray<string> =>
-  Object.entries(settings.mcpServers)
-    .filter(([, server]) => server.enabled)
-    .map(([name]) => name)
-    .toSorted();
+  thread === undefined
+    ? []
+    : Object.entries(settings.mcpServers)
+        .filter(([, server]) => server.enabled && sharedMcpServerAdmits(server, thread))
+        .map(([name]) => name)
+        .toSorted();
 
 const NO_STORE = { "cache-control": "no-store, no-transform" } as const;
 const FORWARDED_REQUEST_HEADERS = [
@@ -107,26 +136,39 @@ const unavailable = (body: string, status: number, message: string) => {
       );
 };
 
-/** What a supervised thread gets instead of the upstream response, or undefined to forward it. */
-const supervisedAnswer = (body: string, label: string) => {
+const emptyListing = (body: string) => {
   const method = Option.getOrUndefined(decodeJsonRpcMethod(body))?.method;
-  if (method !== undefined) {
-    if (method === "initialize") return undefined;
-    const listing = SUPERVISED_LISTINGS[method];
-    const request = decodeJsonRpcRequest(body);
-    if (listing !== undefined && Option.isSome(request)) {
-      return HttpServerResponse.jsonUnsafe(
+  const listing = method === undefined ? undefined : SUPERVISED_LISTINGS[method];
+  const request = decodeJsonRpcRequest(body);
+  return listing !== undefined && Option.isSome(request)
+    ? HttpServerResponse.jsonUnsafe(
         { jsonrpc: "2.0", id: request.value.id, result: { [listing]: [] } },
         { headers: NO_STORE },
-      );
-    }
-  }
-  return unavailable(
-    body,
-    403,
-    `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
+      )
+    : undefined;
+};
+
+/** What a supervised thread gets instead of the upstream response, or undefined to forward it. */
+const supervisedAnswer = (body: string, label: string) => {
+  if (Option.getOrUndefined(decodeJsonRpcMethod(body))?.method === "initialize") return undefined;
+  return (
+    emptyListing(body) ??
+    unavailable(
+      body,
+      403,
+      `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
+    )
   );
 };
+
+/** A thread outside a server's binding never reaches it, not even to initialize. */
+const unboundAnswer = (body: string, label: string) =>
+  emptyListing(body) ??
+  unavailable(
+    body,
+    403,
+    `${label} is not available in this thread. Settings → MCP servers limits it to certain projects or to top-level threads.`,
+  );
 
 const invalidCredential = HttpServerResponse.jsonUnsafe(
   {
@@ -186,12 +228,27 @@ const proxy = Effect.gen(function* () {
   if (server === undefined || !server.enabled) {
     return unavailable(body, 404, `MCP server "${name}" is turned off or removed in Settings.`);
   }
-  // Read per request: narrowing a running thread's mode takes effect on its next call.
+  // Read per request: narrowing a running thread's mode or a server's binding takes effect on its next call.
   const thread = yield* ProjectionStore.ProjectionStoreV2.pipe(
     Effect.flatMap((projections) => projections.getThreadShell(caller.thread.threadId)),
     Effect.orElseSucceed(() => null),
   );
-  if (thread?.runtimeMode !== "full-access") {
+  if (thread === null) {
+    return (
+      emptyListing(body) ??
+      unavailable(
+        body,
+        503,
+        `${displayName(name, server)} is unavailable because T3 Code could not read this thread.`,
+      )
+    );
+  }
+  if (
+    !sharedMcpServerAdmits(server, sharedMcpServerAudience(thread, caller.thread.subagent === true))
+  ) {
+    return unboundAnswer(body, displayName(name, server));
+  }
+  if (thread.runtimeMode !== "full-access") {
     const answer = supervisedAnswer(body, displayName(name, server));
     if (answer !== undefined) return answer;
   }

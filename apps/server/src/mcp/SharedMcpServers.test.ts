@@ -7,9 +7,11 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   McpServerId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
   type McpServerConfig,
+  type OrchestrationV2ThreadShell,
   type RuntimeMode,
   type ServerSettings,
 } from "@t3tools/contracts";
@@ -151,11 +153,16 @@ const fixture = Effect.gen(function* () {
   });
   /** The calling thread's current mode, or null for a thread that can't be read. */
   const runtimeMode = yield* Ref.make<RuntimeMode | null>("full-access");
+  const threadPlacement = yield* Ref.make<
+    Partial<Pick<OrchestrationV2ThreadShell, "projectId" | "lineage" | "delegatedFrom">>
+  >({});
   const projectionsLayer = Layer.mock(ProjectionStore.ProjectionStoreV2)({
     getThreadShell: (threadId) =>
-      Ref.get(runtimeMode).pipe(
-        Effect.map((mode) =>
-          mode === null ? null : liveThreadShell(threadId, { runtimeMode: mode }),
+      Effect.all([Ref.get(runtimeMode), Ref.get(threadPlacement)]).pipe(
+        Effect.map(([mode, placement]) =>
+          mode === null
+            ? null
+            : { ...liveThreadShell(threadId, { runtimeMode: mode }), ...placement },
         ),
       ),
   });
@@ -202,6 +209,11 @@ const fixture = Effect.gen(function* () {
       offline: server("http://127.0.0.1:1/mcp", { label: "Offline" }),
       paused: server(`${origin}/upstream/mcp`, { enabled: false }),
       hang: server(`${origin}/upstream/hang`, { label: "Hang" }),
+      bound: server(`${origin}/upstream/mcp`, {
+        label: "Bound",
+        projectIds: [ProjectId.make("project:mcp-test")],
+        excludeSubagents: true,
+      }),
     } as ServerSettings["mcpServers"],
   }));
   const httpClient = Context.get(services, HttpClient.HttpClient);
@@ -223,6 +235,7 @@ const fixture = Effect.gen(function* () {
     bearerTokenReads: () => bearerTokenReads,
     hung,
     runtimeMode,
+    threadPlacement,
     call,
     shared: Context.get(services, SharedMcpServers.SharedMcpServers),
   };
@@ -339,9 +352,15 @@ it.effect.each(
       expect(received).toEqual([]);
       expect(bearerTokenReads()).toBe(0);
       expect(response.status).toBe(
-        method === "POST" && rpcMethod !== "notifications/initialized" ? 200 : 403,
+        method === "POST" && rpcMethod !== "notifications/initialized"
+          ? 200
+          : mode === null
+            ? 503
+            : 403,
       );
-      expect(yield* response.text).toContain("only works in threads with Full access");
+      expect(yield* response.text).toContain(
+        mode === null ? "could not read this thread" : "only works in threads with Full access",
+      );
     }
   }),
 );
@@ -364,7 +383,7 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
       },
     };
 
-    for (const mode of ["approval-required", "auto-accept-edits", "auto", null] as const) {
+    for (const mode of ["approval-required", "auto-accept-edits", "auto"] as const) {
       yield* Ref.set(runtimeMode, mode);
       expect(
         yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} }),
@@ -391,14 +410,71 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
       expect(batch.status).toBe(403);
     }
 
+    // A thread that can't be read reaches nothing, not even an unbound server's initialize.
     yield* Ref.set(runtimeMode, null);
-    expect(yield* send(execute)).toEqual(refused);
+    expect(yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} })).toMatchObject({
+      error: { message: "Executor is unavailable because T3 Code could not read this thread." },
+    });
+    expect(yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [] },
+    });
     expect(received.map((request) => JSON.parse(request.body).method)).toEqual(
-      Array(4).fill("initialize"),
+      Array(3).fill("initialize"),
     );
 
     yield* Ref.set(runtimeMode, "full-access");
     expect(yield* send(execute)).toEqual(FAILED_CALL);
+  }),
+);
+
+it.effect("serves a bound server only to top-level threads of its projects, never upstream", () =>
+  Effect.gen(function* () {
+    const { call, received, threadPlacement } = yield* fixture;
+    const send = (method: string) =>
+      call("/mcp/servers/bound", {
+        body: { jsonrpc: "2.0", id: 1, method, params: {} },
+        headers: asAgent,
+      }).pipe(Effect.flatMap((response) => response.json));
+    const refused = {
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: -32000,
+        message:
+          "Bound is not available in this thread. Settings → MCP servers limits it to certain projects or to top-level threads.",
+      },
+    };
+
+    expect(yield* send("tools/call")).toEqual(FAILED_CALL);
+    expect(received).toHaveLength(1);
+
+    const threadId = invocation.thread.threadId;
+    for (const placement of [
+      { projectId: ProjectId.make("project:elsewhere") },
+      {
+        lineage: {
+          rootThreadId: threadId,
+          parentThreadId: threadId,
+          relationshipToParent: "subagent" as const,
+        },
+      },
+      {
+        delegatedFrom: {
+          environmentId: EnvironmentId.make("environment:elsewhere"),
+          threadId,
+          title: "Elsewhere",
+        },
+      },
+    ]) {
+      yield* Ref.set(threadPlacement, placement);
+      expect(yield* send("initialize")).toEqual(refused);
+      expect(yield* send("tools/call")).toEqual(refused);
+      expect(yield* send("tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+      yield* Ref.set(threadPlacement, {});
+    }
+    expect(received).toHaveLength(1);
   }),
 );
 

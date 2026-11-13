@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  McpServerId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -575,6 +576,52 @@ describe("serverSettings helpers", () => {
     expect(patched.projectSettingsOverrides[projectId]).toEqual({
       newWorktreesStartFromOrigin: false,
       providerInstances: { [instanceId]: { enabled: false } },
+    });
+  });
+
+  it("keeps an MCP server's binding when a whole-entry patch omits it, and clears it explicitly", () => {
+    const url = "https://mcp.example.com/mcp";
+    const unbound = decodeServerSettings({ mcpServers: { executor: { url } } });
+    expect(unbound.mcpServers).toEqual({ executor: { url, bearerToken: "", enabled: true } });
+
+    const projectIds = [ProjectId.make("project-a")];
+    const bound = applyServerSettingsPatch(
+      unbound,
+      decodeServerSettingsPatch({
+        mcpServers: { executor: { url, projectIds, excludeSubagents: true } },
+      }),
+    );
+    const toggled = applyServerSettingsPatch(
+      bound,
+      decodeServerSettingsPatch({ mcpServers: { executor: { url, enabled: false } } }),
+    );
+    expect(toggled.mcpServers).toEqual({
+      executor: { url, bearerToken: "", enabled: false, projectIds, excludeSubagents: true },
+    });
+    // A JavaScript client can send an own `undefined`, which the patch schema's types rule out.
+    const unsetBinding = { url, bearerToken: "", enabled: false, projectIds: undefined } as Omit<
+      ServerSettings["mcpServers"][McpServerId],
+      "projectIds"
+    >;
+    const explicitUndefined = applyServerSettingsPatch(toggled, {
+      mcpServers: {
+        [McpServerId.make("executor")]: unsetBinding,
+        [McpServerId.make("fresh")]: unsetBinding,
+      },
+    });
+    expect(explicitUndefined.mcpServers).toStrictEqual({
+      ...toggled.mcpServers,
+      fresh: { url, bearerToken: "", enabled: false },
+    });
+
+    const cleared = applyServerSettingsPatch(
+      toggled,
+      decodeServerSettingsPatch({
+        mcpServers: { executor: { url, projectIds: [], excludeSubagents: false } },
+      }),
+    );
+    expect(cleared.mcpServers).toEqual({
+      executor: { url, bearerToken: "", enabled: true, projectIds: [], excludeSubagents: false },
     });
   });
 

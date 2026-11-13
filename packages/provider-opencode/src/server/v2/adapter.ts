@@ -16,6 +16,7 @@ import {
 import { Mcp } from "@opencode/schema/mcp";
 import {
   isOrchestrationV2WorkActive,
+  sharedMcpServerHarnessName,
   type ChatAttachment,
   type OrchestrationV2AppThread,
   type OrchestrationV2ConversationMessage,
@@ -401,22 +402,32 @@ const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
         { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
       ];
 
-// Shared tools get the mode's default rather than T3's allow; grants follow, so session approvals still apply.
+/**
+ * Threads share one daemon, so deny every thread's shared registrations, then allow only this thread's.
+ * Shared tools get the mode's default rather than T3's allow; grants follow, so session approvals still apply.
+ */
 const sharedMcpRules = (
   policy: RulesPolicy,
-  shared: ReadonlyArray<SharedMcpRegistration>,
+  shared: ReadonlyArray<SharedMcpRegistration> | null,
 ): ReadonlyArray<Rule> =>
-  shared.flatMap(({ server, name }) => [
-    rule(`${server}_*`, "deny"),
-    rule(`${name}_*`, policy.runtimeMode === "full-access" ? "allow" : "ask"),
-  ]);
+  shared === null
+    ? []
+    : [
+        rule(`${sharedMcpServerHarnessName("")}*`, "deny"),
+        ...shared.map(({ name }) =>
+          rule(`${name}_*`, policy.runtimeMode === "full-access" ? "allow" : "ask"),
+        ),
+      ];
+
+const isSharedMcpAllow = (entry: Rule) =>
+  entry.action.startsWith(sharedMcpServerHarnessName("")) && entry.effect !== "deny";
 
 const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
   mcpServerName: string | null,
-  shared: ReadonlyArray<SharedMcpRegistration> = [],
+  shared: ReadonlyArray<SharedMcpRegistration> | null = null,
 ): ReadonlyArray<Rule> => [
   ...(policy.runtimeMode === "full-access"
     ? [rule("*", "allow")]
@@ -1456,13 +1467,36 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       yield* emit({ type: "app_thread.created", driver, appThread });
       yield* emitProviderThread(child);
       yield* emitSubagent(call);
-      // Reused child sessions may retain old mode rules; refresh policy as soon as the call identifies them.
-      if (info === undefined) {
-        yield* writeRules(child, rootOf(call.state).policy).pipe(
-          Effect.timeout(REQUEST_REPLY_TIMEOUT),
-          Effect.ignore({ log: true }),
-        );
+      // Reused children may retain old mode rules and new ones inherit the parent's; a match writes nothing.
+      yield* writeRules(child, rootOf(call.state).policy).pipe(
+        Effect.timeout(REQUEST_REPLY_TIMEOUT),
+        Effect.ignore({ log: true }),
+      );
+    });
+
+    // OpenCode copies a parent's rules onto its new child, shared-MCP allows included; strip them before it runs.
+    const withoutInheritedSharedMcp = Effect.fnUntraced(function* (
+      info: EventOf<"session.created">["data"],
+    ) {
+      const parent = info.parentID ?? "";
+      const inherited =
+        info.permissions ?? threads.get(parent)?.rules ?? announced.get(parent)?.permissions;
+      if (inherited === undefined || !inherited.some(isSharedMcpAllow)) {
+        return { ...info, permissions: inherited };
       }
+      const permissions = inherited.filter((entry) => !isSharedMcpAllow(entry));
+      return yield* client.session
+        .update({ sessionID: Session.ID.make(info.sessionID), permissions })
+        .pipe(
+          Effect.timeout(REQUEST_REPLY_TIMEOUT),
+          Effect.as({ ...info, permissions }),
+          Effect.catchCause((cause) =>
+            Effect.logWarning(
+              "Could not strip shared MCP rules from an OpenCode subagent.",
+              cause,
+            ).pipe(Effect.as({ ...info, permissions: inherited })),
+          ),
+        );
     });
 
     const settleCall: (
@@ -2380,12 +2414,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         const strayCaller = strays.get(event.data.parentID);
         if (strayCaller !== undefined) {
           strays.set(event.data.sessionID, strayCaller);
+          yield* withoutInheritedSharedMcp(event.data);
           return;
         }
         const owner = ownerOf(event.data.parentID);
         if (owner !== undefined) {
           childOwners.set(event.data.sessionID, owner);
-          announced.set(event.data.sessionID, event.data);
+          announced.set(event.data.sessionID, yield* withoutInheritedSharedMcp(event.data));
           holderOf(event.data.parentID)?.wakes.at(-1)?.children.add(event.data.sessionID);
         }
         return;
@@ -2874,6 +2909,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       thread: Pick<ThreadState, "directory" | "agent" | "grants">,
       policy: RulesPolicy,
       appThreadId: ThreadId | null,
+      nativeSubagent = false,
     ) {
       const plan = policy.interactionMode === "plan";
       const paths =
@@ -2885,12 +2921,18 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         paths,
         policy.runtimeMode === "full-access" ? [] : thread.grants,
         appThreadId === null ? null : yield* mcpServerNameFor(appThreadId),
-        appThreadId === null ? [] : yield* sharedMcpServersFor(appThreadId),
+        appThreadId === null
+          ? null
+          : // Native subagents share the root thread's credential, so bindings cannot tell them apart.
+            nativeSubagent
+            ? []
+            : yield* sharedMcpServersFor(appThreadId),
       );
     });
 
     const writeRules = Effect.fnUntraced(function* (state: ThreadState, policy: RulesPolicy) {
-      const rules = yield* rulesFor(state, policy, rootOf(state).providerThread.appThreadId);
+      const root = rootOf(state);
+      const rules = yield* rulesFor(state, policy, root.providerThread.appThreadId, state !== root);
       if (!sameRules(state.rules, rules)) {
         yield* client.session.update({
           sessionID: Session.ID.make(state.sessionId),

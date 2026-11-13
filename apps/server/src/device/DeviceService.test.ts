@@ -304,6 +304,7 @@ const fixture = Effect.fn("fixture")(function* (
       ServerSettings.ServerSettingsService.of({
         updateProviderInstance: () => Effect.die("Unexpected provider mutation"),
         modifyProviderInstance: () => Effect.die("Unexpected provider mutation"),
+        modifySettings: () => Effect.die("Unexpected settings mutation"),
         withSettingsSnapshot: (use) => Effect.flatMap(Ref.get(settings), use),
         start: Effect.void,
         ready: Effect.void,

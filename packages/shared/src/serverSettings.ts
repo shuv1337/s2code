@@ -247,6 +247,31 @@ function mergeSettingsEntries<Value>(
   return Object.fromEntries(next);
 }
 
+// Clients that predate a binding field drop it on whole-entry replacement, which would widen who reaches
+// the server; an omitted key keeps the saved binding, and `[]` or `false` clears it.
+function mergeMcpServersPatch(
+  current: ServerSettings["mcpServers"],
+  patch: NonNullable<ServerSettingsPatch["mcpServers"]>,
+): ServerSettings["mcpServers"] {
+  const next = new Map(Object.entries(current));
+  for (const [id, config] of Object.entries(patch)) {
+    if (config === null) {
+      next.delete(id);
+      continue;
+    }
+    const saved = Object.hasOwn(current, id) ? current[id as keyof typeof current] : undefined;
+    const { projectIds: patchedProjectIds, excludeSubagents: patchedExclude, ...rest } = config;
+    const projectIds = patchedProjectIds ?? saved?.projectIds;
+    const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
+    next.set(id, {
+      ...rest,
+      ...(projectIds === undefined ? {} : { projectIds }),
+      ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
+    });
+  }
+  return Object.fromEntries(next) as ServerSettings["mcpServers"];
+}
+
 // Secret persistence keys tokens by trimmed, lowercased host, so merge on the same key.
 const byHost = (tokens: unknown) =>
   Object.fromEntries(
@@ -625,7 +650,7 @@ export function applyServerSettingsPatch(
       ? { secretProviders: mergeSettingsEntries(current.secretProviders, secretProvidersPatch) }
       : {}),
     ...(mcpServersPatch !== undefined
-      ? { mcpServers: mergeSettingsEntries(current.mcpServers, mcpServersPatch) }
+      ? { mcpServers: mergeMcpServersPatch(current.mcpServers, mcpServersPatch) }
       : {}),
     ...(usagePriceOverridesPatch !== undefined
       ? {

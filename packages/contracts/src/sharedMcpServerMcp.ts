@@ -23,19 +23,24 @@ export const SharedMcpServerSetInput = Schema.Struct({
   ),
   label: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   enabled: Schema.optionalKey(Schema.Boolean),
+  projectIds: McpServerConfig.fields.projectIds,
+  excludeSubagents: McpServerConfig.fields.excludeSubagents,
   bearerTokenSecretRef: Schema.optionalKey(SecretRef),
   clearBearerToken: Schema.optionalKey(Schema.Boolean),
   projectId: Schema.optionalKey(ProjectId),
 });
 export type SharedMcpServerSetInput = typeof SharedMcpServerSetInput.Type;
 
+/** `url`, `hasToken`, and `harnessName` are omitted for a server whose binding excludes the caller. */
 export const SharedMcpServerSummary = Schema.Struct({
   id: McpServerId,
   label: McpServerConfig.fields.label,
-  url: Schema.String,
+  url: Schema.optionalKey(Schema.String),
   enabled: Schema.Boolean,
-  hasToken: Schema.Boolean,
-  harnessName: Schema.String,
+  projectIds: McpServerConfig.fields.projectIds,
+  excludeSubagents: McpServerConfig.fields.excludeSubagents,
+  hasToken: Schema.optionalKey(Schema.Boolean),
+  harnessName: Schema.optionalKey(Schema.String),
 });
 export type SharedMcpServerSummary = typeof SharedMcpServerSummary.Type;
 

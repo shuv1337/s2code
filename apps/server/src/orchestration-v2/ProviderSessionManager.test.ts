@@ -2089,16 +2089,38 @@ it.effect(
 );
 
 it.effect.each([
-  { relationshipToParent: null, subagent: false },
-  { relationshipToParent: "subagent", subagent: true },
+  {
+    relationshipToParent: null,
+    delegated: false,
+    unreadable: false,
+    subagent: false,
+    shared: ["mine", "open"],
+  },
+  {
+    relationshipToParent: "subagent",
+    delegated: false,
+    unreadable: false,
+    subagent: true,
+    shared: ["open"],
+  },
+  {
+    relationshipToParent: null,
+    delegated: true,
+    unreadable: false,
+    subagent: false,
+    shared: ["open"],
+  },
+  // A thread that can't be read gets no shared servers, not even unbound ones.
+  { relationshipToParent: null, delegated: false, unreadable: true, subagent: false, shared: [] },
 ] as const)(
-  "ProviderSessionManagerV2 marks MCP credentials of delegated children ($relationshipToParent)",
-  ({ relationshipToParent, subagent }) =>
+  "ProviderSessionManagerV2 marks MCP credentials of delegated children and binds shared servers ($relationshipToParent, delegated $delegated, unreadable $unreadable)",
+  ({ relationshipToParent, delegated, unreadable, subagent, shared }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
         ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
       >([]);
+      const projectId = ProjectId.make("project-provider-session-manager-mcp-lineage");
       const effect = Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -2110,22 +2132,32 @@ it.effect.each([
           providerInstanceId: modelSelection.instanceId,
           threadId,
         });
-        const created = yield* makeThreadCreatedEvent({ idAllocator, threadId, now });
+        const created = yield* makeThreadCreatedEvent({ idAllocator, threadId, now, projectId });
         const parentThreadId = ThreadId.make("thread-provider-session-manager-mcp-parent");
-        yield* eventSink.write({
-          events: [
-            {
-              ...created,
-              payload: {
-                ...created.payload,
-                lineage:
-                  relationshipToParent === null
-                    ? created.payload.lineage
-                    : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
+        if (!unreadable)
+          yield* eventSink.write({
+            events: [
+              {
+                ...created,
+                payload: {
+                  ...created.payload,
+                  lineage:
+                    relationshipToParent === null
+                      ? created.payload.lineage
+                      : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
+                  ...(delegated
+                    ? {
+                        delegatedFrom: {
+                          environmentId: EnvironmentId.make("environment-elsewhere"),
+                          threadId: parentThreadId,
+                          title: "Parent",
+                        },
+                      }
+                    : {}),
+                },
               },
-            },
-          ],
-        });
+            ],
+          });
         yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
 
         const token = (yield* Ref.get(mcpConfigs))[0]?.authorizationHeader.replace(
@@ -2134,10 +2166,37 @@ it.effect.each([
         );
         assert.isDefined(token);
         assert.equal((yield* registry.resolve(token!))?.thread.subagent, subagent);
-        yield* manager.close(providerSessionId);
+        assert.deepEqual(
+          ((yield* Ref.get(mcpConfigs))[0]?.sharedMcpServers ?? []).map((server) => server.name),
+          shared.map((name) => `shared-${name}`),
+        );
+        if (!unreadable) yield* manager.close(providerSessionId);
       });
 
-      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
+      const url = "https://mcp.test/mcp";
+      yield* effect.pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1_000,
+            mcpConfigs,
+            serverSettingsLayer: ServerSettings.layerTest({
+              mcpServers: {
+                [McpServerId.make("open")]: { url },
+                [McpServerId.make("mine")]: {
+                  url,
+                  projectIds: [projectId],
+                  excludeSubagents: true,
+                },
+                [McpServerId.make("elsewhere")]: {
+                  url,
+                  projectIds: [ProjectId.make("project-elsewhere")],
+                },
+              },
+            }),
+          }),
+        ),
+      );
     }),
 );
 
@@ -2618,6 +2677,12 @@ it.effect(
               url: "https://docs.test/mcp",
               bearerToken: "",
               enabled: true,
+            },
+            [McpServerId.make("bound")]: {
+              url: "https://bound.test/mcp",
+              bearerToken: "",
+              enabled: true,
+              projectIds: [ProjectId.make("project-elsewhere")],
             },
           },
         });
