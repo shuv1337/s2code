@@ -352,9 +352,15 @@ it.effect.each(
       expect(received).toEqual([]);
       expect(bearerTokenReads()).toBe(0);
       expect(response.status).toBe(
-        method === "POST" && rpcMethod !== "notifications/initialized" ? 200 : 403,
+        method === "POST" && rpcMethod !== "notifications/initialized"
+          ? 200
+          : mode === null
+            ? 503
+            : 403,
       );
-      expect(yield* response.text).toContain("only works in threads with Full access");
+      expect(yield* response.text).toContain(
+        mode === null ? "could not read this thread" : "only works in threads with Full access",
+      );
     }
   }),
 );
@@ -377,7 +383,7 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
       },
     };
 
-    for (const mode of ["approval-required", "auto-accept-edits", "auto", null] as const) {
+    for (const mode of ["approval-required", "auto-accept-edits", "auto"] as const) {
       yield* Ref.set(runtimeMode, mode);
       expect(
         yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} }),
@@ -404,10 +410,18 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
       expect(batch.status).toBe(403);
     }
 
+    // A thread that can't be read reaches nothing, not even an unbound server's initialize.
     yield* Ref.set(runtimeMode, null);
-    expect(yield* send(execute)).toEqual(refused);
+    expect(yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} })).toMatchObject({
+      error: { message: "Executor is unavailable because T3 Code could not read this thread." },
+    });
+    expect(yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [] },
+    });
     expect(received.map((request) => JSON.parse(request.body).method)).toEqual(
-      Array(4).fill("initialize"),
+      Array(3).fill("initialize"),
     );
 
     yield* Ref.set(runtimeMode, "full-access");
@@ -417,7 +431,7 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
 
 it.effect("serves a bound server only to top-level threads of its projects, never upstream", () =>
   Effect.gen(function* () {
-    const { call, received, runtimeMode, threadPlacement } = yield* fixture;
+    const { call, received, threadPlacement } = yield* fixture;
     const send = (method: string) =>
       call("/mcp/servers/bound", {
         body: { jsonrpc: "2.0", id: 1, method, params: {} },
@@ -453,10 +467,8 @@ it.effect("serves a bound server only to top-level threads of its projects, neve
           title: "Elsewhere",
         },
       },
-      undefined,
     ]) {
-      if (placement === undefined) yield* Ref.set(runtimeMode, null);
-      else yield* Ref.set(threadPlacement, placement);
+      yield* Ref.set(threadPlacement, placement);
       expect(yield* send("initialize")).toEqual(refused);
       expect(yield* send("tools/call")).toEqual(refused);
       expect(yield* send("tools/list")).toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [] } });

@@ -221,7 +221,9 @@ A non-empty `projectIds` limits a server to threads in those projects, and
 subagent lineage or `delegatedFrom`). Forks keep `delegatedFrom` but take `fork`
 lineage, so a fork of a same-host subagent is top-level. Both apply to the server
 list each provider session gets, per request to the `/mcp/servers/<id>` proxy,
-and to these tools: a thread caller outside a server's binding gets
+and to these tools. Each re-reads the thread record, never the credential's
+`subagent` flag alone, and a thread that cannot be read gets no shared servers
+and is refused by the proxy and these tools. A thread caller outside a server's binding gets
 `not_bound_to_caller` from set, remove, and test, and list omits that server's
 `url`, `hasToken`, and `harnessName`. Callers outside any thread, including
 forwarded calls from linked hosts, are not bound. Creating a new id is always
@@ -234,9 +236,11 @@ lock.
 The binding selects which T3 threads hold and can call a server. It is not a
 boundary against a full-access agent that can launch, message, or schedule a
 top-level thread in the bound project. Provider-native subagents (Claude's
-`Agent`, Codex's `spawn_agent`, Cursor's) share their parent's MCP session and
-credential, so `excludeSubagents` cannot see them; OpenCode's native subagent
-sessions get a blanket `shared-*` deny and no shared allows.
+`Agent`, Codex's `spawn_agent`, Cursor's, OpenCode 1.x's) share their parent's
+MCP session and credential, so `excludeSubagents` cannot see them. OpenCode 2's
+native subagent sessions get a blanket `shared-*` deny and no shared allows;
+OpenCode copies the parent's rules onto a new child, so the adapter strips the
+inherited shared allows when `session.created` announces it.
 
 Added or re-enabled servers reach new sessions only. Disabling, removing, or
 changing a server's URL, token, or binding applies immediately to existing proxy

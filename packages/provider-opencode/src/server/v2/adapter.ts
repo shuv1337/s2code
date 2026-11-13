@@ -419,6 +419,9 @@ const sharedMcpRules = (
         ),
       ];
 
+const isSharedMcpAllow = (entry: Rule) =>
+  entry.action.startsWith(sharedMcpServerHarnessName("")) && entry.effect !== "deny";
+
 const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
@@ -1464,13 +1467,36 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       yield* emit({ type: "app_thread.created", driver, appThread });
       yield* emitProviderThread(child);
       yield* emitSubagent(call);
-      // Reused child sessions may retain old mode rules; refresh policy as soon as the call identifies them.
-      if (info === undefined) {
-        yield* writeRules(child, rootOf(call.state).policy).pipe(
-          Effect.timeout(REQUEST_REPLY_TIMEOUT),
-          Effect.ignore({ log: true }),
-        );
+      // Reused children may retain old mode rules and new ones inherit the parent's; a match writes nothing.
+      yield* writeRules(child, rootOf(call.state).policy).pipe(
+        Effect.timeout(REQUEST_REPLY_TIMEOUT),
+        Effect.ignore({ log: true }),
+      );
+    });
+
+    // OpenCode copies a parent's rules onto its new child, shared-MCP allows included; strip them before it runs.
+    const withoutInheritedSharedMcp = Effect.fnUntraced(function* (
+      info: EventOf<"session.created">["data"],
+    ) {
+      const parent = info.parentID ?? "";
+      const inherited =
+        info.permissions ?? threads.get(parent)?.rules ?? announced.get(parent)?.permissions;
+      if (inherited === undefined || !inherited.some(isSharedMcpAllow)) {
+        return { ...info, permissions: inherited };
       }
+      const permissions = inherited.filter((entry) => !isSharedMcpAllow(entry));
+      return yield* client.session
+        .update({ sessionID: Session.ID.make(info.sessionID), permissions })
+        .pipe(
+          Effect.timeout(REQUEST_REPLY_TIMEOUT),
+          Effect.as({ ...info, permissions }),
+          Effect.catchCause((cause) =>
+            Effect.logWarning(
+              "Could not strip shared MCP rules from an OpenCode subagent.",
+              cause,
+            ).pipe(Effect.as({ ...info, permissions: inherited })),
+          ),
+        );
     });
 
     const settleCall: (
@@ -2388,12 +2414,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         const strayCaller = strays.get(event.data.parentID);
         if (strayCaller !== undefined) {
           strays.set(event.data.sessionID, strayCaller);
+          yield* withoutInheritedSharedMcp(event.data);
           return;
         }
         const owner = ownerOf(event.data.parentID);
         if (owner !== undefined) {
           childOwners.set(event.data.sessionID, owner);
-          announced.set(event.data.sessionID, event.data);
+          announced.set(event.data.sessionID, yield* withoutInheritedSharedMcp(event.data));
           holderOf(event.data.parentID)?.wakes.at(-1)?.children.add(event.data.sessionID);
         }
         return;

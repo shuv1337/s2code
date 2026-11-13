@@ -985,24 +985,15 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
             oauth: false,
           },
         });
+      const rootRules = [
+        t3Rules[0],
+        sharedDeny,
+        { action: `${docs}_*`, resource: "*", effect: "allow" },
+        ...mcpRules,
+      ];
+      const tool = { sessionID: SESSION, assistantMessageID: "msg_assistant", id: "call-child" };
       const { runtime, thread } = yield* resumed([
-        out("session.update", {
-          sessionID: SESSION,
-          permissions: [
-            t3Rules[0],
-            sharedDeny,
-            { action: `${docs}_*`, resource: "*", effect: "allow" },
-            ...mcpRules,
-          ],
-        }),
-        reply("session.update", null),
-        add(t3, "http://127.0.0.1:3773/mcp"),
-        reply("mcp.add", null),
-        add(docs, "http://127.0.0.1:3773/mcp/servers/docs"),
-        reply("mcp.add", null),
-        ...backgroundLaunch(CHILD),
-        event("session.execution.succeeded", { sessionID: SESSION }),
-        out("session.update", { sessionID: CHILD, permissions: t3Rules }),
+        out("session.update", { sessionID: SESSION, permissions: rootRules }),
         reply("session.update", null),
         add(t3, "http://127.0.0.1:3773/mcp"),
         reply("mcp.add", null),
@@ -1010,23 +1001,39 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         reply("mcp.add", null),
         out("session.prompt", { sessionID: SESSION, text: "<any>" }),
         promptAccepted,
+        event("session.execution.started", { sessionID: SESSION }),
+        event("session.tool.input.started", { ...tool, name: "subagent" }),
+        event("session.tool.called", {
+          ...tool,
+          name: "subagent",
+          input: { description: "Sleep", prompt: "sleep" },
+          executed: false,
+        }),
+        // OpenCode copies the parent's rules, shared allows included, onto the new child.
+        event("session.created", { ...childCreated(CHILD), permissions: rootRules }),
+        out("session.update", { sessionID: CHILD, permissions: t3Rules }),
+        reply("session.update", null),
+        event("session.tool.progress", {
+          ...tool,
+          metadata: { sessionID: CHILD, status: "running" },
+        }),
+        event("session.execution.started", { sessionID: CHILD }),
+        event("session.execution.succeeded", { sessionID: CHILD }),
+        event("session.tool.success", {
+          ...tool,
+          content: [{ type: "text", text: "CHILD_OK" }],
+          metadata: { sessionID: CHILD, status: "completed", truncated: false },
+          executed: false,
+        }),
         event("session.execution.succeeded", { sessionID: SESSION }),
         out("mcp.remove", { server: t3, "location[directory]": WORK }),
         out("mcp.remove", { server: docs, "location[directory]": WORK }),
         reply("mcp.remove", null),
         reply("mcp.remove", null),
       ]);
-      for (const runOrdinal of [1, 2]) {
-        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
-        yield* runtime.startTurn({
-          ...withLineage(thread),
-          runId: RunId.make(`run:opencode2-adapter:${runOrdinal}`),
-          runOrdinal,
-          providerTurnOrdinal: runOrdinal,
-          attemptId: RunAttemptId.make(`attempt:opencode2-adapter:${runOrdinal}`),
-        });
-        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
-      }
+      const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn(withLineage(thread));
+      assert.equal((yield* Fiber.join(terminal))?.status, "completed");
     }).pipe(Effect.scoped),
   );
 
@@ -1145,8 +1152,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         ...tool,
         metadata: { sessionID: CHILD, status: "running" },
       }),
-      out("session.update", { sessionID: CHILD, permissions: "<any>" }),
-      reply("session.update", null),
       returnedRunning(tool.id),
     ];
   };
@@ -1268,8 +1273,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           ...again,
           metadata: { sessionID: CHILD, status: "running" },
         }),
-        out("session.update", { sessionID: CHILD, permissions: "<any>" }),
-        reply("session.update", null),
         // The child fails while the joined call is still the foreground one.
         event("session.execution.failed", {
           sessionID: CHILD,
@@ -1913,8 +1916,6 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         [
           ...backgroundLaunch(CHILD),
           event("session.execution.succeeded", { sessionID: SESSION }),
-          out("session.update", { sessionID: CHILD, permissions: t3Rules }),
-          reply("session.update", null),
           out("session.prompt", { sessionID: SESSION, text: "<any>" }),
           reply("session.prompt", {
             status: 502,

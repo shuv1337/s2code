@@ -46,8 +46,9 @@ to manage providers. Full-access agents can also manage shared servers through t
 - "Subagents" means threads T3 Code delegated, including tasks handed over from
   another project or a linked environment and their forks. A fork of a subagent
   in its own project is a top-level thread. A provider's own
-  built-in subagents (Claude's, Codex's, Cursor's) run inside their parent's
-  session and use whatever it can use; OpenCode's are kept off shared servers.
+  built-in subagents (Claude's, Codex's, Cursor's, and OpenCode 1.x's) run
+  inside their parent's session and use whatever it can use; OpenCode 2's are
+  kept off shared servers.
 - The limit decides which threads get the server. It doesn't stop a Full access
   agent elsewhere from starting or messaging a top-level thread in the allowed
   project and asking it to use the server. Keep agents you don't trust out of

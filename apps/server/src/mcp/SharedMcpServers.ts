@@ -44,26 +44,26 @@ export const sharedMcpServerAudience = (
   subagent: subagentCredential || isDelegatedAppThread(thread),
 });
 
-/** Whether a server's binding admits a thread; a thread that can't be read only reaches unbound servers. */
 export const sharedMcpServerAdmits = (
   server: Pick<McpServerConfig, "projectIds" | "excludeSubagents">,
-  thread: SharedMcpServerAudience | undefined,
+  thread: SharedMcpServerAudience,
 ): boolean => {
   const projectIds = server.projectIds ?? [];
-  if (projectIds.length > 0 && (thread === undefined || !projectIds.includes(thread.projectId)))
-    return false;
-  return server.excludeSubagents !== true || (thread !== undefined && !thread.subagent);
+  if (projectIds.length > 0 && !projectIds.includes(thread.projectId)) return false;
+  return server.excludeSubagents !== true || !thread.subagent;
 };
 
-/** The servers a thread's new provider sessions get, in a stable order. */
+/** The servers a thread's new provider sessions get, in a stable order; a thread that can't be read gets none. */
 export const enabledSharedMcpServerNames = (
   settings: Pick<ServerSettings, "mcpServers">,
   thread: SharedMcpServerAudience | undefined,
 ): ReadonlyArray<string> =>
-  Object.entries(settings.mcpServers)
-    .filter(([, server]) => server.enabled && sharedMcpServerAdmits(server, thread))
-    .map(([name]) => name)
-    .toSorted();
+  thread === undefined
+    ? []
+    : Object.entries(settings.mcpServers)
+        .filter(([, server]) => server.enabled && sharedMcpServerAdmits(server, thread))
+        .map(([name]) => name)
+        .toSorted();
 
 const NO_STORE = { "cache-control": "no-store, no-transform" } as const;
 const FORWARDED_REQUEST_HEADERS = [
@@ -233,12 +233,22 @@ const proxy = Effect.gen(function* () {
     Effect.flatMap((projections) => projections.getThreadShell(caller.thread.threadId)),
     Effect.orElseSucceed(() => null),
   );
-  const audience =
-    thread === null ? undefined : sharedMcpServerAudience(thread, caller.thread.subagent === true);
-  if (!sharedMcpServerAdmits(server, audience)) {
+  if (thread === null) {
+    return (
+      emptyListing(body) ??
+      unavailable(
+        body,
+        503,
+        `${displayName(name, server)} is unavailable because T3 Code could not read this thread.`,
+      )
+    );
+  }
+  if (
+    !sharedMcpServerAdmits(server, sharedMcpServerAudience(thread, caller.thread.subagent === true))
+  ) {
     return unboundAnswer(body, displayName(name, server));
   }
-  if (thread?.runtimeMode !== "full-access") {
+  if (thread.runtimeMode !== "full-access") {
     const answer = supervisedAnswer(body, displayName(name, server));
     if (answer !== undefined) return answer;
   }

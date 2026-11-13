@@ -2089,12 +2089,32 @@ it.effect(
 );
 
 it.effect.each([
-  { relationshipToParent: null, delegated: false, subagent: false, shared: ["mine", "open"] },
-  { relationshipToParent: "subagent", delegated: false, subagent: true, shared: ["open"] },
-  { relationshipToParent: null, delegated: true, subagent: false, shared: ["open"] },
+  {
+    relationshipToParent: null,
+    delegated: false,
+    unreadable: false,
+    subagent: false,
+    shared: ["mine", "open"],
+  },
+  {
+    relationshipToParent: "subagent",
+    delegated: false,
+    unreadable: false,
+    subagent: true,
+    shared: ["open"],
+  },
+  {
+    relationshipToParent: null,
+    delegated: true,
+    unreadable: false,
+    subagent: false,
+    shared: ["open"],
+  },
+  // A thread that can't be read gets no shared servers, not even unbound ones.
+  { relationshipToParent: null, delegated: false, unreadable: true, subagent: false, shared: [] },
 ] as const)(
-  "ProviderSessionManagerV2 marks MCP credentials of delegated children and binds shared servers ($relationshipToParent, delegated $delegated)",
-  ({ relationshipToParent, delegated, subagent, shared }) =>
+  "ProviderSessionManagerV2 marks MCP credentials of delegated children and binds shared servers ($relationshipToParent, delegated $delegated, unreadable $unreadable)",
+  ({ relationshipToParent, delegated, unreadable, subagent, shared }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
@@ -2114,29 +2134,30 @@ it.effect.each([
         });
         const created = yield* makeThreadCreatedEvent({ idAllocator, threadId, now, projectId });
         const parentThreadId = ThreadId.make("thread-provider-session-manager-mcp-parent");
-        yield* eventSink.write({
-          events: [
-            {
-              ...created,
-              payload: {
-                ...created.payload,
-                lineage:
-                  relationshipToParent === null
-                    ? created.payload.lineage
-                    : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
-                ...(delegated
-                  ? {
-                      delegatedFrom: {
-                        environmentId: EnvironmentId.make("environment-elsewhere"),
-                        threadId: parentThreadId,
-                        title: "Parent",
-                      },
-                    }
-                  : {}),
+        if (!unreadable)
+          yield* eventSink.write({
+            events: [
+              {
+                ...created,
+                payload: {
+                  ...created.payload,
+                  lineage:
+                    relationshipToParent === null
+                      ? created.payload.lineage
+                      : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
+                  ...(delegated
+                    ? {
+                        delegatedFrom: {
+                          environmentId: EnvironmentId.make("environment-elsewhere"),
+                          threadId: parentThreadId,
+                          title: "Parent",
+                        },
+                      }
+                    : {}),
+                },
               },
-            },
-          ],
-        });
+            ],
+          });
         yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
 
         const token = (yield* Ref.get(mcpConfigs))[0]?.authorizationHeader.replace(
@@ -2146,10 +2167,10 @@ it.effect.each([
         assert.isDefined(token);
         assert.equal((yield* registry.resolve(token!))?.thread.subagent, subagent);
         assert.deepEqual(
-          (yield* Ref.get(mcpConfigs))[0]?.sharedMcpServers?.map((server) => server.name),
+          ((yield* Ref.get(mcpConfigs))[0]?.sharedMcpServers ?? []).map((server) => server.name),
           shared.map((name) => `shared-${name}`),
         );
-        yield* manager.close(providerSessionId);
+        if (!unreadable) yield* manager.close(providerSessionId);
       });
 
       const url = "https://mcp.test/mcp";
