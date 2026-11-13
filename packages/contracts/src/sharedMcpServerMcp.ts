@@ -31,15 +31,16 @@ export const SharedMcpServerSetInput = Schema.Struct({
 });
 export type SharedMcpServerSetInput = typeof SharedMcpServerSetInput.Type;
 
+/** `url`, `hasToken`, and `harnessName` are omitted for a server whose binding excludes the caller. */
 export const SharedMcpServerSummary = Schema.Struct({
   id: McpServerId,
   label: McpServerConfig.fields.label,
-  url: Schema.String,
+  url: Schema.optionalKey(Schema.String),
   enabled: Schema.Boolean,
   projectIds: McpServerConfig.fields.projectIds,
   excludeSubagents: McpServerConfig.fields.excludeSubagents,
-  hasToken: Schema.Boolean,
-  harnessName: Schema.String,
+  hasToken: Schema.optionalKey(Schema.Boolean),
+  harnessName: Schema.optionalKey(Schema.String),
 });
 export type SharedMcpServerSummary = typeof SharedMcpServerSummary.Type;
 

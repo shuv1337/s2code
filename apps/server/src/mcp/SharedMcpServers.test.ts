@@ -154,7 +154,7 @@ const fixture = Effect.gen(function* () {
   /** The calling thread's current mode, or null for a thread that can't be read. */
   const runtimeMode = yield* Ref.make<RuntimeMode | null>("full-access");
   const threadPlacement = yield* Ref.make<
-    Partial<Pick<OrchestrationV2ThreadShell, "projectId" | "lineage">>
+    Partial<Pick<OrchestrationV2ThreadShell, "projectId" | "lineage" | "delegatedFrom">>
   >({});
   const projectionsLayer = Layer.mock(ProjectionStore.ProjectionStoreV2)({
     getThreadShell: (threadId) =>
@@ -444,6 +444,13 @@ it.effect("serves a bound server only to top-level threads of its projects, neve
           rootThreadId: threadId,
           parentThreadId: threadId,
           relationshipToParent: "subagent" as const,
+        },
+      },
+      {
+        delegatedFrom: {
+          environmentId: EnvironmentId.make("environment:elsewhere"),
+          threadId,
+          title: "Elsewhere",
         },
       },
       undefined,

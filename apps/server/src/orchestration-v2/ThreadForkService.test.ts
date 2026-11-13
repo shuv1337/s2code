@@ -134,7 +134,7 @@ const planFork = (
     });
   }).pipe(Effect.provide(ThreadForkService.layer));
 
-it.effect("resets a fork's pin, snooze, settle and delegation state but keeps its origin", () =>
+it.effect("resets a fork's pin, snooze and settle state but keeps its origin and delegation", () =>
   Effect.gen(function* () {
     const linkOrigin = { sessionId: "mcp-session:fork-source", label: "Linked laptop" };
     const sourceThread: OrchestrationV2AppThread = {
@@ -166,7 +166,7 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
     assert.isNull(result.targetThread.pinOrderKey);
     assert.isNull(result.targetThread.activeOrderKey);
     assert.isNull(result.targetThread.autoSettleDisabledAt);
-    assert.isUndefined(result.targetThread.delegatedFrom);
+    assert.deepEqual(result.targetThread.delegatedFrom, sourceThread.delegatedFrom);
     assert.equal(result.targetThread.historyOrigin, "v1_import");
     assert.deepEqual(result.targetThread.linkOrigin, linkOrigin);
     assert.deepEqual(result.targetThread.tags, ["private"]);

@@ -487,14 +487,14 @@ export const layerWithOptions = (
                 >(["orchestration", "worktree", "pull-requests"]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
-                const audience = yield* projectionStore.getThread(threadId).pipe(
-                  Effect.map((thread): SharedMcpServers.SharedMcpServerAudience => ({
-                    projectId: thread.projectId,
-                    subagent: thread.lineage.relationshipToParent === "subagent",
-                  })),
-                  Effect.orElseSucceed(() => undefined),
-                );
-                const subagent = audience?.subagent ?? false;
+                const thread = yield* projectionStore
+                  .getThread(threadId)
+                  .pipe(Effect.orElseSucceed(() => undefined));
+                const audience =
+                  thread === undefined
+                    ? undefined
+                    : SharedMcpServers.sharedMcpServerAudience(thread);
+                const subagent = thread?.lineage.relationshipToParent === "subagent";
                 const sharedMcpServers = Option.isNone(serverSettings)
                   ? []
                   : yield* serverSettings.value.getSettings.pipe(

@@ -1,9 +1,11 @@
-import type {
-  McpServerConfig,
-  McpServerTestInput,
-  McpServerTestResult,
-  ProjectId,
-  ServerSettings,
+import {
+  isDelegatedAppThread,
+  type McpServerConfig,
+  type McpServerTestInput,
+  type McpServerTestResult,
+  type OrchestrationV2ThreadShell,
+  type ProjectId,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -33,8 +35,17 @@ export interface SharedMcpServerAudience {
   readonly subagent: boolean;
 }
 
+/** Cross-project and linked-environment delegates have no subagent lineage, only `delegatedFrom`. */
+export const sharedMcpServerAudience = (
+  thread: Pick<OrchestrationV2ThreadShell, "projectId" | "lineage" | "delegatedFrom">,
+  subagentCredential = false,
+): SharedMcpServerAudience => ({
+  projectId: thread.projectId,
+  subagent: subagentCredential || isDelegatedAppThread(thread),
+});
+
 /** Whether a server's binding admits a thread; a thread that can't be read only reaches unbound servers. */
-const sharedMcpServerAdmits = (
+export const sharedMcpServerAdmits = (
   server: Pick<McpServerConfig, "projectIds" | "excludeSubagents">,
   thread: SharedMcpServerAudience | undefined,
 ): boolean => {
@@ -223,13 +234,7 @@ const proxy = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
   const audience =
-    thread === null
-      ? undefined
-      : {
-          projectId: thread.projectId,
-          subagent:
-            caller.thread.subagent === true || thread.lineage.relationshipToParent === "subagent",
-        };
+    thread === null ? undefined : sharedMcpServerAudience(thread, caller.thread.subagent === true);
   if (!sharedMcpServerAdmits(server, audience)) {
     return unboundAnswer(body, displayName(name, server));
   }

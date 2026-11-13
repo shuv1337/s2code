@@ -308,6 +308,7 @@ function makeMutableServerSettingsService(
           return next;
         }),
       modifyProviderInstance: () => Effect.die("Unexpected provider mutation"),
+      modifySettings: () => Effect.die("Unexpected settings mutation"),
       withSettingsSnapshot: (use) => Ref.get(settingsRef).pipe(Effect.flatMap(use)),
       get streamChanges() {
         return Stream.fromPubSub(changes);

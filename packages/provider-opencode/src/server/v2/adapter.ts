@@ -16,6 +16,7 @@ import {
 import { Mcp } from "@opencode/schema/mcp";
 import {
   isOrchestrationV2WorkActive,
+  sharedMcpServerHarnessName,
   type ChatAttachment,
   type OrchestrationV2AppThread,
   type OrchestrationV2ConversationMessage,
@@ -401,22 +402,29 @@ const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
         { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
       ];
 
-// Shared tools get the mode's default rather than T3's allow; grants follow, so session approvals still apply.
+/**
+ * Threads share one daemon, so deny every thread's shared registrations, then allow only this thread's.
+ * Shared tools get the mode's default rather than T3's allow; grants follow, so session approvals still apply.
+ */
 const sharedMcpRules = (
   policy: RulesPolicy,
-  shared: ReadonlyArray<SharedMcpRegistration>,
+  shared: ReadonlyArray<SharedMcpRegistration> | null,
 ): ReadonlyArray<Rule> =>
-  shared.flatMap(({ server, name }) => [
-    rule(`${server}_*`, "deny"),
-    rule(`${name}_*`, policy.runtimeMode === "full-access" ? "allow" : "ask"),
-  ]);
+  shared === null
+    ? []
+    : [
+        rule(`${sharedMcpServerHarnessName("")}*`, "deny"),
+        ...shared.map(({ name }) =>
+          rule(`${name}_*`, policy.runtimeMode === "full-access" ? "allow" : "ask"),
+        ),
+      ];
 
 const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
   mcpServerName: string | null,
-  shared: ReadonlyArray<SharedMcpRegistration> = [],
+  shared: ReadonlyArray<SharedMcpRegistration> | null = null,
 ): ReadonlyArray<Rule> => [
   ...(policy.runtimeMode === "full-access"
     ? [rule("*", "allow")]
@@ -2874,6 +2882,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       thread: Pick<ThreadState, "directory" | "agent" | "grants">,
       policy: RulesPolicy,
       appThreadId: ThreadId | null,
+      nativeSubagent = false,
     ) {
       const plan = policy.interactionMode === "plan";
       const paths =
@@ -2885,12 +2894,18 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         paths,
         policy.runtimeMode === "full-access" ? [] : thread.grants,
         appThreadId === null ? null : yield* mcpServerNameFor(appThreadId),
-        appThreadId === null ? [] : yield* sharedMcpServersFor(appThreadId),
+        appThreadId === null
+          ? null
+          : // Native subagents share the root thread's credential, so bindings cannot tell them apart.
+            nativeSubagent
+            ? []
+            : yield* sharedMcpServersFor(appThreadId),
       );
     });
 
     const writeRules = Effect.fnUntraced(function* (state: ThreadState, policy: RulesPolicy) {
-      const rules = yield* rulesFor(state, policy, rootOf(state).providerThread.appThreadId);
+      const root = rootOf(state);
+      const rules = yield* rulesFor(state, policy, root.providerThread.appThreadId, state !== root);
       if (!sameRules(state.rules, rules)) {
         yield* client.session.update({
           sessionID: Session.ID.make(state.sessionId),

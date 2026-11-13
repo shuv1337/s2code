@@ -260,12 +260,13 @@ function mergeMcpServersPatch(
       continue;
     }
     const saved = Object.hasOwn(current, id) ? current[id as keyof typeof current] : undefined;
+    const { projectIds: patchedProjectIds, excludeSubagents: patchedExclude, ...rest } = config;
+    const projectIds = patchedProjectIds ?? saved?.projectIds;
+    const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
     next.set(id, {
-      ...(saved?.projectIds === undefined ? {} : { projectIds: saved.projectIds }),
-      ...(saved?.excludeSubagents === undefined
-        ? {}
-        : { excludeSubagents: saved.excludeSubagents }),
-      ...config,
+      ...rest,
+      ...(projectIds === undefined ? {} : { projectIds }),
+      ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
     });
   }
   return Object.fromEntries(next) as ServerSettings["mcpServers"];

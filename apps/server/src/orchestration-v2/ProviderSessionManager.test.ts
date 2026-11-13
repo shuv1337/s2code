@@ -2089,11 +2089,12 @@ it.effect(
 );
 
 it.effect.each([
-  { relationshipToParent: null, subagent: false, shared: ["mine", "open"] },
-  { relationshipToParent: "subagent", subagent: true, shared: ["open"] },
+  { relationshipToParent: null, delegated: false, subagent: false, shared: ["mine", "open"] },
+  { relationshipToParent: "subagent", delegated: false, subagent: true, shared: ["open"] },
+  { relationshipToParent: null, delegated: true, subagent: false, shared: ["open"] },
 ] as const)(
-  "ProviderSessionManagerV2 marks MCP credentials of delegated children and binds shared servers ($relationshipToParent)",
-  ({ relationshipToParent, subagent, shared }) =>
+  "ProviderSessionManagerV2 marks MCP credentials of delegated children and binds shared servers ($relationshipToParent, delegated $delegated)",
+  ({ relationshipToParent, delegated, subagent, shared }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
@@ -2123,6 +2124,15 @@ it.effect.each([
                   relationshipToParent === null
                     ? created.payload.lineage
                     : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
+                ...(delegated
+                  ? {
+                      delegatedFrom: {
+                        environmentId: EnvironmentId.make("environment-elsewhere"),
+                        threadId: parentThreadId,
+                        title: "Parent",
+                      },
+                    }
+                  : {}),
               },
             },
           ],

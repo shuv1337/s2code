@@ -217,12 +217,26 @@ destination host before forwarding it. Outside a thread, including forwarded
 calls, pass the ref's destination `projectId`.
 
 A non-empty `projectIds` limits a server to threads in those projects, and
-`excludeSubagents` hides it from subagent threads. Both apply to the server list
-each provider session gets and, per request, to the `/mcp/servers/<id>` proxy.
-On a server with a saved token, changing `url`, `projectIds`, or
+`excludeSubagents` hides it from delegated threads (`isDelegatedAppThread`:
+subagent lineage or `delegatedFrom`). Forks keep `delegatedFrom` but take `fork`
+lineage, so a fork of a same-host subagent is top-level. Both apply to the server
+list each provider session gets, per request to the `/mcp/servers/<id>` proxy,
+and to these tools: a thread caller outside a server's binding gets
+`not_bound_to_caller` from set, remove, and test, and list omits that server's
+`url`, `hasToken`, and `harnessName`. Callers outside any thread, including
+forwarded calls from linked hosts, are not bound. Creating a new id is always
+allowed. On a server with a saved token, changing `url`, `projectIds`, or
 `excludeSubagents` needs a new `bearerTokenSecretRef` or `clearBearerToken` in
 the same call (`secret_required`), so a caller cannot move a token it never
-held to a new address or audience. `label` and `enabled` change freely.
+held to a new address or audience. These checks repeat under the settings write
+lock.
+
+The binding selects which T3 threads hold and can call a server. It is not a
+boundary against a full-access agent that can launch, message, or schedule a
+top-level thread in the bound project. Provider-native subagents (Claude's
+`Agent`, Codex's `spawn_agent`, Cursor's) share their parent's MCP session and
+credential, so `excludeSubagents` cannot see them; OpenCode's native subagent
+sessions get a blanket `shared-*` deny and no shared allows.
 
 Added or re-enabled servers reach new sessions only. Disabling, removing, or
 changing a server's URL, token, or binding applies immediately to existing proxy

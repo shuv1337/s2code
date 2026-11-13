@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  McpServerId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -596,6 +597,21 @@ describe("serverSettings helpers", () => {
     );
     expect(toggled.mcpServers).toEqual({
       executor: { url, bearerToken: "", enabled: false, projectIds, excludeSubagents: true },
+    });
+    // A JavaScript client can send an own `undefined`, which the patch schema's types rule out.
+    const unsetBinding = { url, bearerToken: "", enabled: false, projectIds: undefined } as Omit<
+      ServerSettings["mcpServers"][McpServerId],
+      "projectIds"
+    >;
+    const explicitUndefined = applyServerSettingsPatch(toggled, {
+      mcpServers: {
+        [McpServerId.make("executor")]: unsetBinding,
+        [McpServerId.make("fresh")]: unsetBinding,
+      },
+    });
+    expect(explicitUndefined.mcpServers).toStrictEqual({
+      ...toggled.mcpServers,
+      fresh: { url, bearerToken: "", enabled: false },
     });
 
     const cleared = applyServerSettingsPatch(

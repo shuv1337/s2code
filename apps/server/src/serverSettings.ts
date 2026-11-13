@@ -295,6 +295,11 @@ export class ServerSettingsService extends Context.Service<
       update: (current: ProviderInstanceConfig | undefined) => ProviderInstanceConfig | undefined,
     ) => Effect.Effect<boolean, ServerSettingsError>;
 
+    /** Applies the patch `build(current)` returns under the write lock; a failed `build` writes nothing. */
+    readonly modifySettings: <E, R>(
+      build: (current: ServerSettings) => Effect.Effect<ServerSettingsPatch, E, R>,
+    ) => Effect.Effect<ServerSettings, E | ServerSettingsError, R>;
+
     readonly withSettingsSnapshot: <A, E, R>(
       use: (settings: ServerSettings) => Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | ServerSettingsError, R>;
@@ -373,6 +378,16 @@ const makeTest = Effect.fn("serverSettings.makeTest")(function* (
             yield* normalizeServerSettings(applyProviderInstanceMutation(current, mutation)),
           );
           return true;
+        }),
+      ),
+    modifySettings: (build) =>
+      writeSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(currentSettingsRef);
+          const patch = yield* build(resolveTextGenerationProvider(current));
+          const next = yield* normalizeServerSettings(applyServerSettingsPatch(current, patch));
+          yield* Ref.set(currentSettingsRef, next);
+          return resolveTextGenerationProvider(next);
         }),
       ),
     withSettingsSnapshot: (use) =>
@@ -1358,6 +1373,16 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const modifySettings: ServerSettingsService["Service"]["modifySettings"] = (build) =>
+    writeSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* readForUpdate;
+        const patch = yield* build(yield* getMaterializedSettings);
+        yield* ensureSecretProviderWritesAllowed(patch, settingsPath);
+        return yield* persistUpdate(current, applyServerSettingsPatch(current, patch), patch);
+      }),
+    );
+
   const withSettingsSnapshot: ServerSettingsService["Service"]["withSettingsSnapshot"] = (use) =>
     writeSemaphore.withPermits(1)(getMaterializedSettings.pipe(Effect.flatMap(use)));
 
@@ -1482,6 +1507,7 @@ const make = Effect.gen(function* () {
         }),
       ),
     modifyProviderInstance,
+    modifySettings,
     withSettingsSnapshot,
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));
