@@ -924,6 +924,7 @@ function listItemFromShell(
     model: shell.modelSelection.model,
     runtimeMode: shell.runtimeMode,
     interactionMode: shell.interactionMode,
+    autoSettle: shell.autoSettleDisabledAt == null ? null : false,
     linkedPullRequest: shell.linkedPullRequest ?? null,
     ...threadPullRequests(shell.pullRequests),
     ...threadSettlement(shell),
@@ -961,6 +962,7 @@ function threadDetail(
     model: projection.thread.modelSelection.model,
     runtimeMode: projection.thread.runtimeMode,
     interactionMode: projection.thread.interactionMode,
+    autoSettle: projection.thread.autoSettleDisabledAt == null ? null : false,
     linkedPullRequest: projection.thread.linkedPullRequest ?? null,
     ...threadPullRequests(projection.thread.pullRequests, firstPage),
     titleRegeneration:

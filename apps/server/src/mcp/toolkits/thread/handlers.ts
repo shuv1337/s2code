@@ -8,7 +8,7 @@ import {
   type OrchestrationV2Command,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import { modelSelectionCommandType } from "@t3tools/shared/model";
+import * as ThreadMetadataMcpService from "../../ThreadMetadataMcpService.ts";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -198,7 +198,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
     ),
   ),
   t3_thread_configure: McpToolAccess.either(
-    (input) => input.modelSelection === undefined,
+    (input) => input.modelSelection === undefined && input.autoSettle === undefined,
     McpToolAccess.reads((input) =>
       Effect.gen(function* () {
         const {
@@ -209,21 +209,15 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
           modelSelection: thread.modelSelection,
           runtimeMode: thread.runtimeMode,
           interactionMode: thread.interactionMode,
+          autoSettle: thread.autoSettleDisabledAt == null ? null : false,
         };
       }),
     ),
     writesThread((input) =>
       Effect.gen(function* () {
-        const modelSelection = yield* required(input.modelSelection, "modelSelection");
-        const {
-          threads,
-          projection: { thread },
-        } = yield* readThread(input.threadId);
-        const type = modelSelectionCommandType(thread.providerInstanceId, modelSelection);
-        const result = yield* threads
-          .dispatch({ type, threadId: thread.id, commandId: yield* newCommandId(), modelSelection })
-          .pipe(Effect.mapError(dispatchFailure));
-        return { sequence: result.sequence };
+        const { projection } = yield* readThread(input.threadId);
+        const service = yield* ThreadMetadataMcpService.ThreadMetadataMcpService;
+        return yield* service.configure({ ...input, threadId: projection.thread.id });
       }),
     ),
   ),

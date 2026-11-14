@@ -65,6 +65,11 @@ describe("resolveT3McpSummaryAction", () => {
       "thread-transfers",
     );
     expect(resolveT3McpSummaryAction("t3_thread_configure", {})).toBe("thread-configuration");
+    for (const autoSettle of [false, null]) {
+      expect(resolveT3McpSummaryAction("t3_thread_configure", { autoSettle })).toBe(
+        "thread-configure",
+      );
+    }
     expect(resolveT3McpSummaryAction("schedule_task", { scheduledTaskId: "task-1" })).toBe(
       "schedule-update",
     );

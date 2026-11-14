@@ -28,6 +28,7 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as ThreadMetadataMcpService from "../../ThreadMetadataMcpService.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
@@ -150,17 +151,20 @@ const threadConfiguration = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  autoSettle: Schema.NullOr(Schema.Literal(false)),
 });
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Read a thread's provider, model, and modes, or set its provider, model, and options with `modelSelection`. Omit `threadId` for this thread. Permission modes stay. Values from `orchestrator_capabilities`.",
+    "Read settings or set `modelSelection`/`autoSettle` (false: off; null: follow global). Omit `threadId` for this thread. Permission modes stay. Models from `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
     modelSelection: Schema.optional(ModelSelection),
+    autoSettle: Schema.optional(Schema.NullOr(Schema.Literal(false))),
   }),
   success: Schema.Union([threadConfiguration, OrchestrationV2DispatchCommandResult]),
+  dependencies: [...commandTool.dependencies, ThreadMetadataMcpService.ThreadMetadataMcpService],
 }).annotate(Tool.Destructive, true);
 
 const ThreadTransferTool = Tool.make("t3_thread_transfer", {

@@ -479,8 +479,10 @@ export function resolveT3McpToolDefinition(
 const ACTION_SUMMARIES: Readonly<
   Record<string, (input: SummaryInput) => T3McpToolSummaryAction | undefined>
 > = {
-  t3_thread_configure: ({ modelSelection }) =>
-    modelSelection === undefined ? "thread-configuration" : "thread-configure",
+  t3_thread_configure: ({ modelSelection, autoSettle }) =>
+    modelSelection === undefined && autoSettle === undefined
+      ? "thread-configuration"
+      : "thread-configure",
   schedule_task: ({ scheduledTaskId }) =>
     scheduledTaskId === undefined ? "schedule-create" : "schedule-update",
 };
