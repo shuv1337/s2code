@@ -423,7 +423,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   if (options.attachedPid !== undefined) {
     const pid = options.attachedPid;
     yield* options.onStarted?.(pid) ?? Effect.void;
-    yield* options.onReady?.() ?? Effect.void;
+    yield* options.onReady?.(pid) ?? Effect.void;
     yield* Effect.sync(() => DesktopLocalServerAttach.isProcessAlive(pid)).pipe(
       Effect.repeat({ while: (alive) => alive, schedule: Schedule.spaced("2 seconds") }),
     );

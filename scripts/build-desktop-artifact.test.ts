@@ -20,7 +20,6 @@ import * as Sink from "effect/Sink";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { fromYaml } from "@t3tools/shared/schemaYaml";
 
 import cursorPackageJson from "../packages/provider-cursor/package.json" with { type: "json" };
 

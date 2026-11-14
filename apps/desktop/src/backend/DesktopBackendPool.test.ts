@@ -121,7 +121,7 @@ function layerPool(
     readonly showErrorBox?: (title: string, content: string) => Effect.Effect<void>;
     readonly quit?: Effect.Effect<void>;
   } = {},
-): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+): Layer.Layer<DesktopBackendPool.DesktopBackendPool | DesktopAppSettings.DesktopAppSettings> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(

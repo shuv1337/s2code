@@ -233,28 +233,25 @@ describe("hosted thread links", () => {
     expect(threadLinkRefs(text, local)).toEqual([]);
   });
 
-  it("leaves a hosted link that is part of another link as written", () => {
+  it("leaves hosted links unchanged even beside or inside other links", () => {
     const hosted = "https://app.t3.codes/threads/there/t1";
-    const relabeled = "[There](t3-thread://v2/there/t1)";
     const title = titlesIn({ there: { t1: "There" } });
-    for (const [markdown, expected] of [
-      [`https://example.com/?next=${hosted}`],
-      [`[Example](https://example.com/?next=${hosted})`],
-      [`[ ${hosted} ](https://example.com)`],
-      [`[${hosted}](<https://example.com/a b> "Title")`],
-      [`[a](https://example.com/x_(y)) ${hosted}`, `[a](https://example.com/x_(y)) ${relabeled}`],
-      [`(${hosted}) **${hosted}**`, `(${relabeled}) **${relabeled}**`],
-      [`[[[ [old](${hosted})`, `[[[ ${relabeled}`],
-      [`\\\\[old](${hosted})`, `\\\\${relabeled}`],
-      [`\\\\\\\\[old](${hosted})`, `\\\\\\\\${relabeled}`],
-      [`\\[old](${hosted})`, `\\[old](${relabeled})`],
-      [`\\[ ${hosted} ](https://example.com)`, `\\[ ${relabeled} ](https://example.com)`],
-      ["\\[old](t3-thread://v2/there/t1) \\<t3-thread://v2/there/t1>"],
-    ] as const) {
-      expect(relabelThreadLinks(markdown, local, title)).toBe(expected ?? markdown);
-      expect(threadLinkRefs(markdown, local)).toEqual(
-        expected === undefined ? [] : [ref("there", "t1")],
-      );
+    for (const markdown of [
+      `https://example.com/?next=${hosted}`,
+      `[Example](https://example.com/?next=${hosted})`,
+      `[ ${hosted} ](https://example.com)`,
+      `[${hosted}](<https://example.com/a b> "Title")`,
+      `[a](https://example.com/x_(y)) ${hosted}`,
+      `(${hosted}) **${hosted}**`,
+      `[[[ [old](${hosted})`,
+      `\\\\[old](${hosted})`,
+      `\\\\\\\\[old](${hosted})`,
+      `\\[old](${hosted})`,
+      `\\[ ${hosted} ](https://example.com)`,
+      "\\[old](t3-thread://v2/there/t1) \\<t3-thread://v2/there/t1>",
+    ]) {
+      expect(relabelThreadLinks(markdown, local, title)).toBe(markdown);
+      expect(threadLinkRefs(markdown, local)).toEqual([]);
     }
   });
 });

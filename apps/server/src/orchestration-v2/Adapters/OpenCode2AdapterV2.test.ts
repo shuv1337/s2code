@@ -1541,7 +1541,9 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         reply("mcp.remove", null),
       ]);
       const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
-      yield* runtime.startTurn(withLineage(thread));
+      const started = yield* runtime.startTurn(withLineage(thread)).pipe(Effect.forkScoped);
+      yield* TestClock.adjust("250 millis");
+      yield* Fiber.join(started);
       assert.equal((yield* Fiber.join(terminal))?.status, "completed");
     }).pipe(Effect.scoped),
   );
@@ -5052,7 +5054,11 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           runtimePolicy: policy(runtimeMode),
         });
         const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
-        yield* runtime.startTurn(turnInput(thread, bigPickle, runtimeMode));
+        const started = yield* runtime
+          .startTurn(turnInput(thread, bigPickle, runtimeMode))
+          .pipe(Effect.forkScoped);
+        yield* TestClock.adjust("250 millis");
+        yield* Fiber.join(started);
         assert.equal((yield* Fiber.join(terminal))?.status, "completed");
         yield* runtime.unloadThread!({ providerThread: thread });
       }).pipe(Effect.scoped),

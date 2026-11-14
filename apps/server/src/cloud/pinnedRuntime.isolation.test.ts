@@ -112,7 +112,7 @@ function install(
                 status:
                   (failure === "checksums" && request.url.endsWith("SHA256SUMS")) ||
                   (failure === "download" && !request.url.endsWith("SHA256SUMS"))
-                    ? 503
+                    ? 404
                     : 200,
               },
             ),
