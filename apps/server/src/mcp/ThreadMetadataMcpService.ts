@@ -211,7 +211,7 @@ const make = Effect.gen(function* () {
     if (input.autoSettle !== undefined && thread.archivedAt !== null) {
       return yield* failure(
         "invalid_request",
-        "Cannot configure auto-settle on an archived thread.",
+        "Cannot configure auto-settle on an archived thread. Unarchive it first.",
       );
     }
     let result: { readonly sequence: number } | undefined;

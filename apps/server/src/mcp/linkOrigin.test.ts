@@ -413,6 +413,14 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))(
           });
           assert.deepEqual((yield* threads.getThreadProjection(threadId)).thread, before);
           assert.equal(failureCode(rejected), "invalid_request");
+          const content = rejected.content[0];
+          assert.equal(content?.type, "text");
+          if (content?.type === "text") {
+            assert.include(
+              content.text,
+              "Cannot configure auto-settle on an archived thread. Unarchive it first.",
+            );
+          }
         }
       }),
     );

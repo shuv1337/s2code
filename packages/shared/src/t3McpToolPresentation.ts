@@ -468,7 +468,12 @@ export function resolveT3McpToolDefinition(
 ): T3McpToolDefinition | null {
   const name = toolName == null ? null : resolveT3McpToolName(toolName);
   if (name === null || !Object.hasOwn(T3_MCP_TOOLS, name)) return null;
-  const action = asSummaryInput(input)?.action;
+  const fields = asSummaryInput(input);
+  if (name === "t3_thread_configure" && fields?.autoSettle !== undefined) {
+    const object = fields.modelSelection === undefined ? "thread auto-settle" : "thread settings";
+    return tool(["Use", "Using", "Used", object], "thread-configure");
+  }
+  const action = fields?.action;
   const actionTool = typeof action === "string" ? ACTION_TOOLS[name]?.(action) : undefined;
   return actionTool !== undefined && Object.hasOwn(T3_MCP_TOOLS, actionTool)
     ? T3_MCP_TOOLS[actionTool]!
