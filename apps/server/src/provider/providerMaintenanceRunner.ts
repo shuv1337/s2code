@@ -399,7 +399,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           (refreshedProvider) =>
             enrichProviderSnapshotWithVersionAdvisory(
               // After an update, an external server's advisory names the installed binary.
-              phase === "post-update"
+              // `version` stays the running server's when `installedVersion` names the binary.
+              phase === "post-update" && refreshedProvider.installedVersion === undefined
                 ? {
                     ...refreshedProvider,
                     version:

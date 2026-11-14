@@ -1904,6 +1904,7 @@ describe("OrchestratorMcpService provider resolution", () => {
                   ? parentProjection(commands.length > 0 ? [task] : [])
                   : childProjection,
               ),
+            resolveThreadStartInstance: (input) => Effect.succeed(input.modelSelection),
             dispatch: (command) =>
               Effect.sync(() => {
                 commands.push(command);

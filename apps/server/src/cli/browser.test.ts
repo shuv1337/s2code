@@ -17,7 +17,8 @@ import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import { browserCommand, browserSetupHomeForUser } from "./browser.ts";
 
 const USERNS_RESTRICTION = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
-const BROWSER_ROOT = "/home/me/.t3/tools/chrome-headless-shell";
+const HOME = "/home/me/.s2code-v2";
+const BROWSER_ROOT = `${HOME}/tools/chrome-headless-shell`;
 const BROWSER = `${BROWSER_ROOT}/linux64/154/chrome-headless-shell`;
 
 const notFound = (method: string, path: string) =>
@@ -86,7 +87,7 @@ const runSetupAsRoot = (input: { readonly profile: string | undefined }) => {
     yield* Command.runWith(browserCommand, { version: packageJson.version })([
       "setup",
       "--base-dir",
-      "/home/me/.t3",
+      HOME,
     ]);
     return {
       output: (yield* TestConsole.logLines).join("\n"),

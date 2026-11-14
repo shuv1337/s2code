@@ -212,6 +212,7 @@ it.effect("does not send a token to whatever took over a dead server's port", ()
       // Above Linux's PID ceiling, as in pair.test.ts: no process can hold it.
       state: { ...state, pid: 4_194_305 },
     });
+    yield* fs.writeFileString(NodePath.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
     let requests = 0;
     const fetch: typeof globalThis.fetch = async () => {
       requests++;

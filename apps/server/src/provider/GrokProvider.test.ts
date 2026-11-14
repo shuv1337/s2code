@@ -658,6 +658,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("readGrokAccount"
             label: kind === "weekly" ? "Weekly" : "Monthly",
             usedPercent: 0,
             resetsAt: "2026-10-28T02:30:16.863Z",
+            windowDurationMins: 7 * 24 * 60,
           },
         ]);
       }

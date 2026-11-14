@@ -695,7 +695,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
       const binDir = path.join(baseDir, "bin");
       yield* fs.makeDirectory(binDir);
-      yield* fs.symlink(path.join(versionsDir, "1.1.0", "t3"), path.join(binDir, "t3"));
+      yield* fs.symlink(path.join(versionsDir, "1.1.0", "t3"), path.join(binDir, launcherName));
       const ownDir = path.join(versionsDir, "1.0.0");
       if (recorded) {
         yield* fs.writeFileString(
@@ -727,9 +727,12 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
 
   it.effect.each([
     { name: "a launcher inside the versions directory", via: "bin" as const },
-    { name: "a PATH directory linked to its version directory", via: "linked dir" as const },
     {
-      name: "a PATH directory in the versions directory linked to its version directory",
+      name: "a recorded launcher in a directory linked to its version directory",
+      via: "linked dir" as const,
+    },
+    {
+      name: "a recorded launcher in the versions directory linked to its version directory",
       via: "linked versions dir" as const,
     },
   ])("keeps a runtime $name names", ({ via }) =>
@@ -737,21 +740,22 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
-      let pathDirs = "/usr/bin:/bin";
+      const launcherDir =
+        via === "bin"
+          ? path.join(versionsDir, "bin")
+          : path.join(via === "linked dir" ? baseDir : versionsDir, "current");
       if (via === "bin") {
         // The installer accepts any bin directory, including one under the versions directory.
-        const binDir = path.join(versionsDir, "bin");
-        yield* fs.makeDirectory(binDir);
-        yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(binDir, "t3"));
-        yield* fs.writeFileString(
-          path.join(baseDir, "runtime", "launchers"),
-          `${path.join(binDir, "t3")}\n`,
-        );
+        yield* fs.makeDirectory(launcherDir);
+        yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(launcherDir, "t3"));
       } else {
-        const linkedDir = path.join(via === "linked dir" ? baseDir : versionsDir, "current");
-        yield* fs.symlink(path.join(versionsDir, "1.0.0"), linkedDir);
-        pathDirs = `${linkedDir}:${pathDirs}`;
+        // PATH lookups find only fork command names; `t3 update` records the entry it ran through.
+        yield* fs.symlink(path.join(versionsDir, "1.0.0"), launcherDir);
       }
+      yield* fs.writeFileString(
+        path.join(baseDir, "runtime", "launchers"),
+        `${path.join(launcherDir, "t3")}\n`,
+      );
 
       const removed = yield* prunePinnedRuntimes({ baseDir, keep: ["2.0.0"] }).pipe(
         Effect.provideService(
@@ -759,7 +763,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
           lsofRunner("p1\nftxt\nn/sbin/launchd\n"),
         ),
         Effect.provideService(HostProcess.Platform, "darwin"),
-        Effect.provideService(HostProcess.Environment, { PATH: pathDirs }),
+        Effect.provideService(HostProcess.Environment, { PATH: "/usr/bin:/bin" }),
       );
       assert.deepEqual(removed, ["1.1.0"]);
     }),

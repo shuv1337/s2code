@@ -754,6 +754,7 @@ const makeLaptop = (
       Layer.provide(
         Layer.mock(GitWorkflow.GitWorkflowService)({
           hasCommit: () => Effect.succeed(false),
+          currentBranch: () => Effect.succeed(null),
           createWorktree: (input) =>
             Effect.sync(() => {
               worktrees.push(input);

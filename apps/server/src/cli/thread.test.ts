@@ -158,6 +158,7 @@ it.effect("does not sign in to whatever took over a dead server's port", () =>
       // Above Linux's PID ceiling, as in pair.test.ts: no process can hold it.
       state: { ...state, pid: 4_194_305 },
     });
+    yield* fs.writeFileString(path.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
     using session = vi
       .spyOn(McpBridge, "mcpToolSession")
       .mockReturnValue(Effect.die("no session should open"));

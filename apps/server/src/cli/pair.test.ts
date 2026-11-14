@@ -254,7 +254,7 @@ describe("t3 pair", () => {
               );
             });
 
-            const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-ts-held-"));
+            const baseDir = makeOwnedTempDirectory("t3-pair-ts-held-");
             yield* persistServerRuntimeState({
               path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
               state: yield* makePersistedServerRuntimeState({
@@ -598,7 +598,7 @@ describe("t3 pair", () => {
   // localhost, 127.0.0.1 and ::1, so a specific bind needs an explanation.
   it.effect("names the bind address when Tailscale refuses it as a Serve target", () =>
     Effect.gen(function* () {
-      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-remote-"));
+      const baseDir = makeOwnedTempDirectory("t3-pair-remote-");
       yield* persistServerRuntimeState({
         path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
         state: yield* makePersistedServerRuntimeState({

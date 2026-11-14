@@ -1483,8 +1483,12 @@ export interface LauncherOptions {
 }
 
 export async function main(options: LauncherOptions = {}): Promise<void> {
+  // The product environment trims values, and a home's name may end in a space.
+  const unitHome = [process.env.S2CODE_HOME, process.env.SHUV2CODE_HOME].find((home) =>
+    home?.trim(),
+  );
   applyProductEnvironment(process.env);
-  const baseDir = options.baseDir ?? process.env.T3CODE_HOME?.trim();
+  const baseDir = options.baseDir ?? unitHome;
   if (baseDir === undefined || baseDir.trim() === "") {
     await pauseForServiceReinstall(
       "This service unit does not provide S2CODE_HOME. Inherited T3CODE_HOME is not fork ownership proof.",

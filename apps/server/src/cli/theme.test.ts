@@ -13,7 +13,10 @@ import * as Layer from "effect/Layer";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { cli } from "../binCli.ts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
@@ -97,8 +100,13 @@ describe("t3 theme", () => {
   it.effect("sets the theme of a dev server running in the default home", () =>
     Effect.gen(function* () {
       const home = makeBaseDir();
-      const devStateDir = NodePath.join(home, ".t3", "dev");
+      const productHome = NodePath.join(
+        home,
+        resolveChannelIdentity(packageJson.version).homeDirectory,
+      );
+      const devStateDir = NodePath.join(productHome, "dev");
       NodeFS.mkdirSync(devStateDir, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(productHome, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
       NodeFS.writeFileSync(
         NodePath.join(devStateDir, "server-runtime.json"),
         `${JSON.stringify({
@@ -118,7 +126,7 @@ describe("t3 theme", () => {
       );
 
       assert.equal(
-        NodeFS.existsSync(NodePath.join(home, ".t3", "userdata", "settings.json")),
+        NodeFS.existsSync(NodePath.join(productHome, "userdata", "settings.json")),
         false,
       );
       if (result._tag === "Success") {
