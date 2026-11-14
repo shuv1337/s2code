@@ -49,6 +49,20 @@ describe("resolveT3McpToolDefinition", () => {
     expect(resolveT3McpToolDefinition("t3_thread_transfer", { action: "fork" })?.displayName).toBe(
       resolveT3McpToolDefinition("t3_thread_fork")?.displayName,
     );
+    const modelSelection = { instanceId: "codex", model: "gpt-5.4" };
+    expect(resolveT3McpToolDefinition("t3_thread_configure", { modelSelection })?.labels[3]).toBe(
+      "thread model settings",
+    );
+    for (const autoSettle of [false, null]) {
+      for (const [input, object] of [
+        [{ autoSettle }, "thread auto-settle"],
+        [{ autoSettle, modelSelection }, "thread settings"],
+      ] as const) {
+        const definition = resolveT3McpToolDefinition("t3_thread_configure", input);
+        expect(definition?.labels).toEqual(["Use", "Using", "Used", object]);
+        expect(definition?.displayName).toBe(`Use ${object}`);
+      }
+    }
     expect(resolveT3McpToolDefinition("preview_act", { action: "unknown" })?.labels[2]).toBe(
       "Used",
     );

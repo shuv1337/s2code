@@ -7,6 +7,31 @@ function completed(input: unknown, output?: unknown): T3ToolSummaryCall {
 }
 
 describe("summarizeT3ToolCalls", () => {
+  it("labels the thread settings each configure call changes", () => {
+    const modelSelection = { instanceId: "codex", model: "gpt-5.4" };
+    for (const [input, object] of [
+      [{ modelSelection }, "thread model"],
+      [{ autoSettle: false }, "thread auto-settle"],
+      [{ autoSettle: null }, "thread auto-settle"],
+      [{ modelSelection, autoSettle: false }, "thread settings"],
+      [{ modelSelection, autoSettle: null }, "thread settings"],
+    ] as const) {
+      expect(summarizeT3ToolCalls("thread-configure", [completed(input)])).toEqual({
+        label: `Set ${object} 1 time`,
+        failedCount: 0,
+      });
+      expect(
+        summarizeT3ToolCalls("thread-configure", [completed(input, { isError: true })]).label,
+      ).toBe(`Tried to set ${object} 1 time`);
+    }
+    expect(
+      summarizeT3ToolCalls("thread-configure", [
+        completed({ modelSelection }),
+        completed({ autoSettle: false }),
+      ]).label,
+    ).toBe("Set thread settings 2 times");
+  });
+
   it("labels completed and failed provider usage reads", () => {
     expect(summarizeT3ToolCalls("usage-limits", [completed({})])).toEqual({
       label: "Read provider usage limits 1 time",

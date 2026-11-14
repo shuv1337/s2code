@@ -235,9 +235,17 @@ export function summarizeT3ToolCalls(
     case "thread-configuration":
       label = phrase("Checked", "check", `thread configuration ${times}`);
       break;
-    case "thread-configure":
-      label = phrase("Set", "set", `thread model ${times}`);
+    case "thread-configure": {
+      const setsModel = selected.some((call) => call.input?.modelSelection !== undefined);
+      const setsAutoSettle = selected.some((call) => call.input?.autoSettle !== undefined);
+      const object = setsAutoSettle
+        ? setsModel
+          ? "thread settings"
+          : "thread auto-settle"
+        : "thread model";
+      label = phrase("Set", "set", `${object} ${times}`);
       break;
+    }
     case "thread-fork":
       label = phrase("Requested", "request", quantity(selected.length, "thread fork"));
       break;
