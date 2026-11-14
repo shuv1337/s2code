@@ -1,19 +1,81 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Config from "effect/Config";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as TestConsole from "effect/testing/TestConsole";
+import { Command } from "effect/cli";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NetService from "@t3tools/shared/Net";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import * as Console from "effect/Console";
-import * as BootService from "../cloud/bootService.ts";
+import { afterEach, vi } from "vite-plus/test";
 
+import packageJson from "../../package.json" with { type: "json" };
+import * as BootService from "../cloud/bootService.ts";
 import {
   findOwnedLauncher,
   findRecordedLaunchers,
   runUninstall,
   spawnWindowsRemoval,
+  uninstallCommand,
 } from "./uninstall.ts";
+
+afterEach(() => vi.restoreAllMocks());
+
+it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall command", (it) => {
+  it.effect("names another home's service it leaves installed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-uninstall-cli-test-" });
+      const uninstalls: Array<true> = [];
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        Layer.succeed(
+          BootService.BootService,
+          BootService.BootService.of({
+            status: Effect.succeed({
+              supported: true,
+              installed: true,
+              current: true,
+              installedBaseDir: "/home/me/.s2code-v2",
+              unitPath: `/home/me/.config/systemd/user/${resolveChannelIdentity(packageJson.version).serviceName}.service`,
+              logPath: "/home/me/.s2code-v2/userdata/logs/boot-service.log",
+            }),
+            withStopped: (operation) => operation,
+            restart: Effect.die("unexpected restart"),
+            install: () => Effect.die("unexpected install"),
+            uninstall: Effect.sync(() => {
+              uninstalls.push(true);
+              return true;
+            }),
+          }),
+        ),
+      );
+
+      const output = yield* Command.runWith(uninstallCommand, { version: packageJson.version })([
+        "--base-dir",
+        baseDir,
+        "--yes",
+      ]).pipe(
+        Effect.andThen(TestConsole.logLines),
+        Effect.map((lines) => lines.join("\n")),
+        Effect.provideService(HostProcess.Environment, {}),
+        Effect.provideService(HostProcess.IsExecutable, false),
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            Layer.fresh(TestConsole.layer),
+          ),
+        ),
+      );
+      assert.deepStrictEqual(uninstalls, []);
+      assert.include(output, "--base-dir '/home/me/.s2code-v2'");
+    }),
+  );
+});
 
 it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
   it.effect("claims only a launcher that points into this home's runtime tree", () =>
@@ -114,7 +176,7 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
         ),
         [cmd],
       );
-    }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
+    }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
   it.effect(
     "removes the legacy service and both launcher spellings while keeping foreign aliases",

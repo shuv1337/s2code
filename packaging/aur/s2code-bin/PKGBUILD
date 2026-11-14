@@ -75,6 +75,9 @@ package() {
 
   install -Dm755 /dev/stdin "$pkgdir/usr/bin/s2code" <<'EOF'
 #!/bin/sh
+# AppRun computes APPDIR but doesn't export it. The server's AppImage env scrub needs it
+# to keep /opt/s2code-bin/usr/lib etc. out of terminal and agent shells.
+export APPDIR=/opt/s2code-bin
 exec /opt/s2code-bin/AppRun "$@"
 EOF
   ln -s s2code "$pkgdir/usr/bin/shuv2code"

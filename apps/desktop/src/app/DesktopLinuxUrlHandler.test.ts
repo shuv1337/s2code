@@ -27,7 +27,10 @@ interface RecordedRegistration {
   readonly files: Array<{ readonly path: string; readonly content: string }>;
   readonly commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>;
   readonly copies: Array<{ readonly source: string; readonly destination: string }>;
+  readonly icons: Array<{ readonly path: string; readonly bytes: ReadonlyArray<number> }>;
 }
+
+const ICON_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
 const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {}) =>
   DesktopEnvironment.DesktopEnvironment.of({
@@ -70,7 +73,7 @@ const layerHandler = (
     readonly writeError?: PlatformError.PlatformError;
     readonly existingEntry?: string;
     readonly iconSource?: string;
-    readonly iconCopyError?: PlatformError.PlatformError;
+    readonly iconWriteError?: PlatformError.PlatformError;
   } = {},
 ) =>
   DesktopLinuxUrlHandler.layer.pipe(
@@ -93,10 +96,25 @@ const layerHandler = (
         }),
         FileSystem.layerNoop({
           copyFile: (source, destination) =>
-            input.iconCopyError
-              ? Effect.fail(input.iconCopyError)
+            Effect.sync(() => {
+              recorded.copies.push({ source, destination });
+            }),
+          readFile: (path) =>
+            path === input.iconSource
+              ? Effect.succeed(ICON_BYTES)
+              : Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "readFile",
+                    pathOrDescriptor: path,
+                  }),
+                ),
+          writeFile: (path, bytes) =>
+            input.iconWriteError
+              ? Effect.fail(input.iconWriteError)
               : Effect.sync(() => {
-                  recorded.copies.push({ source, destination });
+                  recorded.icons.push({ path, bytes: [...bytes] });
                 }),
           readFileString: () => Effect.succeed(input.existingEntry ?? ""),
           makeDirectory: (path) =>
@@ -163,6 +181,7 @@ const emptyRecording = (): RecordedRegistration => ({
   files: [],
   commands: [],
   copies: [],
+  icons: [],
 });
 
 describe("DesktopLinuxUrlHandler", () => {
@@ -184,6 +203,35 @@ describe("DesktopLinuxUrlHandler", () => {
     assert.notInclude(entry, "StartupWMClass=");
     assert.include(entry, "MimeType=x-scheme-handler/t3code;");
     assert.include(entry, "Icon=/home/al ice/icons/T3\\\\x.png");
+  });
+
+  it.each([
+    { from: "T3-Code-0.1.8-x86_64.AppImage", to: "T3-Code-x86_64.AppImage", restored: true },
+    {
+      from: "T3-Code-0.1.9-nightly.20261110.4449-arm64.AppImage",
+      to: "T3-Code-Nightly-arm64.AppImage",
+      restored: true,
+    },
+    { from: "T3-Code-0.1.8-x86_64.AppImage", to: "T3-Code-0.1.9-x86_64.AppImage", restored: false },
+    { from: "t3code.AppImage", to: "T3-Code-x86_64.AppImage", restored: false },
+    { from: "T3-Code-x86_64.AppImage", to: "T3-Code-x86_64.AppImage", restored: false },
+    { from: "../T3-Code-0.1.8-x86_64.AppImage", to: "T3-Code-x86_64.AppImage", restored: false },
+  ])("finds the launch path an update from $from to $to removed", ({ from, to, restored }) => {
+    for (const dir of ["/home/alice/Applications", '/home/al ice/My "100%" $Apps\\x']) {
+      const previous = dir + "/" + from;
+      const previousEntry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        displayName: "T3 Code (Beta)",
+        execTarget: previous,
+        scheme: "t3code",
+      });
+      assert.equal(
+        DesktopLinuxUrlHandler.replacedVersionedAppImagePath({
+          previousEntry,
+          appImagePath: dir + "/" + to,
+        }),
+        restored ? previous : null,
+      );
+    }
   });
 
   it.effect(
@@ -307,22 +355,21 @@ describe("DesktopLinuxUrlHandler", () => {
         }),
       });
       assert.deepEqual(recorded.files, []);
-      assert.deepEqual(recorded.copies, [
-        { source: "/tmp/.mount_T3/resources/icon.png", destination: iconPath },
-      ]);
+      assert.deepEqual(recorded.copies, [], "icon must not be copied out of the app bundle");
+      assert.deepEqual(recorded.icons, [{ path: iconPath, bytes: [...ICON_BYTES] }]);
       assert.equal(recorded.commands.at(-1)?.command, "xdg-mime");
     });
   });
 
-  it.effect("still registers the handler when copying its icon fails", () => {
+  it.effect("still registers the handler when installing its icon fails", () => {
     const recorded = emptyRecording();
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
         iconSource: "/tmp/.mount_T3/resources/icon.png",
-        iconCopyError: PlatformError.systemError({
+        iconWriteError: PlatformError.systemError({
           _tag: "PermissionDenied",
           module: "FileSystem",
-          method: "copyFile",
+          method: "writeFile",
           description: "read-only icon directory",
         }),
       });
@@ -658,7 +705,7 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
 
       assert.isTrue(yield* fileSystem.exists(path.join(fixture.appsDir, "com.t3tools.T3Code.png")));
       assert.equal(iconCacheRuns(run), 1);
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("retries a failed icon cache refresh on the next launch", () =>
@@ -681,7 +728,7 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
       yield* registerWithRealFileSystem(recovering);
       yield* registerWithRealFileSystem(recovering);
       assert.equal(iconCacheRuns(recovering), 1);
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("still registers the handler when the theme icon install fails", () =>
@@ -705,6 +752,6 @@ it.layer(NodeServices.layer)("DesktopLinuxUrlHandler theme icons", (it) => {
         missingTool.commands.map(({ command }) => command),
         ["gtk-update-icon-cache", "update-desktop-database", "xdg-mime"],
       );
-    }).pipe(Effect.scoped),
+    }),
   );
 });

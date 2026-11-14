@@ -2,8 +2,20 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). It provides the Node version
-pinned in `package.json` (Node 26), so no separate Node install is needed. From the repository root:
+T3 Code uses [Vite+](https://viteplus.dev/guide/). Install its global `vp` command:
+
+```sh
+curl -fsSL https://vite.plus | bash
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://vite.plus/ps1 | iex
+```
+
+`vp` provides the Node version pinned in `package.json` (Node 26), so no separate Node install is
+needed. From the repository root:
 
 ```sh
 vp i
@@ -45,6 +57,12 @@ The full desktop/CLI release pipeline is unchanged: stable `v*.*.*` tags
 (excluding prereleases), scheduled nightly due checks and manual releases still
 use the full platform matrix, signing, checksums, npm publication and update
 feeds. CI Full does not publish a release.
+
+## Forge mirror (optional)
+
+This fork's source of truth is GitHub ([shuv1337/s2code](https://github.com/shuv1337/s2code)), and it
+has no forge mirror. Upstream's `source.tanstack.com` mirror tracks `pingdotgg/t3code`, not this fork.
+If `origin` is not GitHub, use that forge's CLI for pull requests, issues and CI.
 
 ## Choosing a dev process
 
@@ -127,7 +145,7 @@ Leave `VITE_HTTP_URL` and `VITE_WS_URL` unset. Vite proxies the backend through 
 origin so the same build works over localhost and remote connections.
 
 Shared runs enable bundled dev to avoid a network round trip for each import level.
-`T3CODE_BUNDLED_DEV=0` opts out when debugging bundler differences. Two reload traps matter
+`T3CODE_BUNDLED_DEV=0` opts out when debugging bundler differences. These traps matter
 when changing this setup:
 
 - The web entry must dynamically import the app so React refresh initializes before application
@@ -137,6 +155,9 @@ when changing this setup:
 - The app and its routes are lazy chunks, built on first request. A plugin pre-bundles the
   startup chain when the server starts. Renaming or moving a startup route or the app entry
   silently drops it from that list.
+- Bundled dev and `--built` hand Rolldown its own watcher, which skips Vite's default
+  `node_modules` ignore. Those files are pnpm-store hardlinks, so another worktree's install or
+  removal rebuilds every long-running server and leaks memory. Keep `node_modules` excluded.
 
 The workarounds live in the [web entry](../../apps/web/src/bootstrap.ts),
 [Tailwind plugin](../../apps/web/vite/tailwind.ts), and

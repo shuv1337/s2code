@@ -545,7 +545,7 @@ it.effect("completion during strict steer delivery fails durably without follow-
         const s = yield* h.setup;
         const first = yield* s.start;
         yield* s.orchestrator.dispatch(s.command("steer", "steer", first.runId));
-        const delivery = yield* s.worker.runOnce.pipe(Effect.forkScoped);
+        const delivery = yield* s.worker.runOnce().pipe(Effect.forkScoped);
         yield* Deferred.await(h.entered);
         yield* s.complete;
         yield* Deferred.succeed(h.release, undefined);

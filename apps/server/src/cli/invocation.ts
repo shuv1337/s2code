@@ -18,6 +18,9 @@ import {
 } from "@t3tools/shared/productIdentity";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { resolveLauncherPath } from "../cloud/pinnedRuntime.ts";
+
+const PINNED_RUNTIME_ENTRY = /^(.*)\/runtime\/versions\/[^/]+\/t3$/;
 
 export type CliRunner = "npx" | "pnpm dlx" | "bunx";
 
@@ -101,6 +104,29 @@ const resolveOwnedServerInstallation = Effect.gen(function* () {
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const entry = yield* fs.realPath(yield* resolveEntryPath);
+  const runtime = PINNED_RUNTIME_ENTRY.exec(entry);
+  if (runtime) {
+    const launcher = yield* resolveLauncherPath;
+    if (launcher === undefined) return null;
+    // Fails for a runtime started directly, as SSH launches do, or through a copy.
+    const readLink = (file: string) =>
+      Effect.map(fs.readLink(file), (link) => path.resolve(path.dirname(file), link));
+    const legacyLauncher = path.join(
+      path.dirname(launcher),
+      resolveLegacyChannelIdentity(packageJson.version).executableName,
+    );
+    let target = yield* readLink(launcher);
+    // The installer's canonical command forwards through the legacy command beside it.
+    if (target === legacyLauncher) target = yield* readLink(legacyLauncher);
+    // Keep the home as the link spells it; `t3 update` only repoints links into that spelling.
+    const linked = PINNED_RUNTIME_ENTRY.exec(target);
+    if (!linked || (yield* fs.realPath(linked[1] || "/")) !== (runtime[1] || "/")) return null;
+    return {
+      kind: "t3-launcher",
+      launcher,
+      baseDir: linked[1] || "/",
+    } satisfies ServerInstallation;
+  }
   const match = NPM_GLOBAL_LAUNCHER[platform === "win32" ? "win32" : "posix"].exec(
     entry.replaceAll("\\", "/"),
   );
@@ -260,7 +286,7 @@ export const resolveUninstallGuidance = Effect.gen(function* () {
   const installation = yield* resolveOwnedServerInstallation;
   if (installation?.kind === "npm-global")
     return `Remove this fork's npm package with \`npm uninstall --global --prefix ${shellWord(installation.prefix)} ${installation.packageName}\`. Your upstream installation is separate.`;
-  if (installation !== null)
+  if (installation !== null && installation.kind !== "t3-launcher")
     return "This is a temporary fork package-runner launch, not a global install. Stop the process; there is no global package to uninstall.";
   return (yield* HostProcess.IsExecutable)
     ? "This standalone fork binary has no other managed installation to remove. Remove only the fork binary you installed if you no longer need it."
@@ -305,7 +331,7 @@ const powershellWord = (value: string) =>
     .replaceAll("$", "`$")
     .replace(/["\u201C\u201D\u201E]/g, "$&$&")}"`;
 
-const hostShellWord = (platform: NodeJS.Platform, value: string) =>
+export const hostShellWord = (platform: NodeJS.Platform, value: string) =>
   platform === "win32" ? powershellWord(value) : shellWord(value);
 
 /**

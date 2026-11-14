@@ -29,8 +29,10 @@ permissions:
 # Hosted/relay, marketing and AUR deployment are intentionally not invoked.
 # Their accounts and fork-owned destinations are separate prerequisites (#276/#268).
 jobs:
+  # The PAUSE_NIGHTLY repository variable skips scheduled runs only; every later
+  # job needs this one, so a skip here skips the whole run.
   due:
-    if: github.repository == 'shuv1337/s2code' && !inputs.promote_version
+    if: github.repository == 'shuv1337/s2code' && !inputs.promote_version && (github.event_name != 'schedule' || vars.PAUSE_NIGHTLY != 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -39,12 +41,12 @@ jobs:
       due: ${{ steps.due.outputs.due }}
       allowed_ref: ${{ steps.due.outputs.allowed_ref }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - id: due
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const { assertReleaseSource, shouldReleaseNightly, isAllowedForkPublishRef } = require('./.github/scripts/check-nightly-release.cjs');
@@ -82,11 +84,11 @@ jobs:
       matrix_win_x64: ${{ steps.split_matrix.outputs.matrix_win_x64 }}
       due: ${{ needs.due.outputs.due }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - uses: voidzero-dev/setup-vp@v1
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
         with:
           node-version-file: package.json
           run-install: true
@@ -125,7 +127,7 @@ jobs:
         run: |
           node --test .github/scripts/macos-arm64-runner-retry.test.cjs
           vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts scripts/build-npm-launcher.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan
           path: release-plan.json
@@ -137,10 +139,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ needs.preflight.outputs.ref }}
-      - uses: voidzero-dev/setup-vp@v1
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
         env:
           pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
         with:
@@ -148,7 +150,7 @@ jobs:
           run-install: true
       # Share only the verification results, not the large registry metadata cache.
       - name: Upload dependency verification
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-dependency-verification
           path: ${{ runner.temp }}/pnpm-metadata/lockfile-verified.jsonl
@@ -160,7 +162,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION"
       - run: vp run build:desktop
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: js-bundle
           path: |
@@ -277,7 +279,7 @@ jobs:
     outputs:
       fallback: ${{ steps.watch.outputs.fallback }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ needs.preflight.outputs.ref }}
       - id: watch
@@ -337,7 +339,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ needs.preflight.outputs.ref }}
       - name: Require one macOS arm64 build that acquired a runner
@@ -387,10 +389,10 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo docker image prune -af || true
           df -h /
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ needs.preflight.outputs.ref }}
-      - uses: voidzero-dev/setup-vp@v1
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
         with:
           node-version-file: package.json
           run-install: true
@@ -399,15 +401,15 @@ jobs:
           npm install --global npm@11.21.0
           printf 'registry=https://registry.npmjs.org/\n' > "$RUNNER_TEMP/fork-npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/fork-npmrc" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-plan
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: desktop-*
           merge-multiple: true
           path: prepared/release-assets
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: cli-*
           merge-multiple: true
@@ -512,10 +514,10 @@ jobs:
       NPM_TOKEN: ""
       NODE_AUTH_TOKEN: ""
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ github.sha }}
-      - uses: voidzero-dev/setup-vp@v1
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
         with:
           node-version-file: package.json
           run-install: true

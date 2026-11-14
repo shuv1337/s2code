@@ -26,7 +26,7 @@ below install T3 Code, not this fork.
 
 S2Code is an "agent harness control surface". It enables control of the agents on your machine from web, mobile, and desktop clients.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, and fx. If they're set up on your computer, S2Code can control them.
+Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, Kiro, Pi, Muse Code, fx, and any [ACP](./docs/user/providers-acp.md) agent. If they're set up on your computer, S2Code can control them.
 
 ## "Wait, what are you selling me?"
 
@@ -159,6 +159,8 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 - [Run T3 Code as a background service](./docs/user/background-service.md)
+
+[All docs](./docs/README.md) has the full list.
 
 Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
 

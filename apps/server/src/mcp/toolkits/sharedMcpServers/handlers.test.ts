@@ -64,7 +64,10 @@ const scope: McpInvocationContext.McpInvocationScope = {
   issuedAt: 0,
 };
 const tools = SharedMcpServersToolkit.tools;
-const call = <N extends keyof typeof tools>(name: N, input: Tool.Parameters<(typeof tools)[N]>) =>
+const call = <N extends keyof typeof tools>(
+  name: N,
+  input: Tool.Parameters<(typeof tools)[N]> & Schema.Json,
+) =>
   SharedMcpServersToolkit.pipe(
     Effect.flatMap((toolkit) => toolkit.handle(name, input)),
     Stream.unwrap,

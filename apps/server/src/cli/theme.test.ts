@@ -7,12 +7,16 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import { assert, describe, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { cli } from "../binCli.ts";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
@@ -90,6 +94,45 @@ describe("t3 theme", () => {
       const settings = readSettings(baseDir);
       assert.equal(Object.hasOwn(settings, "defaultTheme"), false);
       assert.equal(settings.enableProviderUpdateChecks, false);
+    }),
+  );
+
+  it.effect("sets the theme of a dev server running in the default home", () =>
+    Effect.gen(function* () {
+      const home = makeBaseDir();
+      const productHome = NodePath.join(
+        home,
+        resolveChannelIdentity(packageJson.version).homeDirectory,
+      );
+      const devStateDir = NodePath.join(productHome, "dev");
+      NodeFS.mkdirSync(devStateDir, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(productHome, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
+      NodeFS.writeFileSync(
+        NodePath.join(devStateDir, "server-runtime.json"),
+        `${JSON.stringify({
+          version: 1,
+          pid: process.pid,
+          port: 4888,
+          origin: "http://127.0.0.1:4888",
+          devUrl: "http://127.0.0.1:5999",
+          startedAt: "1970-01-01T00:00:00.000Z",
+        })}\n`,
+      );
+
+      const result = yield* runCli(["theme", "set", "ocean"]).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, home),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+        Effect.result,
+      );
+
+      assert.equal(
+        NodeFS.existsSync(NodePath.join(productHome, "userdata", "settings.json")),
+        false,
+      );
+      if (result._tag === "Success") {
+        const devSettings = NodePath.join(devStateDir, "settings.json");
+        assert.equal(JSON.parse(NodeFS.readFileSync(devSettings, "utf8")).defaultTheme, "ocean");
+      }
     }),
   );
 
