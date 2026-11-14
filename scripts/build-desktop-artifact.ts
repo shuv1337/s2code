@@ -1085,8 +1085,10 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
   ];
 }
 
-// The Windows release has 76 runtime files plus 22 prepared server cache entries and their manifest.
-export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 99;
+// The Windows release has 76 runtime files plus one prepared server cache entry per bundled
+// server module the packaged engine compiles, and their manifest. The bundle now splits the
+// @opencode/client service-probe chunk into its own module, so that is 23 entries and 100 files.
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 100;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {

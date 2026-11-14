@@ -1682,7 +1682,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
         const cacheDir = path.join(fixture.packagedAppDir, "resources", "server-compile-cache");
         yield* fs.makeDirectory(cacheDir, { recursive: true });
-        for (let index = result.fileCount; index < 99; index++) {
+        for (let index = result.fileCount; index < WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT; index++) {
           yield* fs.writeFileString(path.join(cacheDir, String(index)), "prepared bytecode");
         }
         const validate = validateWindowsPackagedPayload({
@@ -1691,12 +1691,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           targetArch: "x64",
           appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
         });
-        assert.equal((yield* validate).fileCount, 99);
+        assert.equal((yield* validate).fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT);
         yield* fs.writeFileString(path.join(cacheDir, "unexpected"), "extra file");
         const error = yield* validate.pipe(Effect.flip);
         assert.instanceOf(error, WindowsPackagedPayloadValidationError);
         assert.equal(error.reason, "file-limit-exceeded");
-        assert.equal(error.fileCount, 100);
+        assert.equal(error.fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT + 1);
       }),
     ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
