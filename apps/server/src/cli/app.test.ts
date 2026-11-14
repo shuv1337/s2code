@@ -18,6 +18,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
 import { describe, expect, vi, beforeEach } from "vite-plus/test";
 const testVersion = vi.hoisted(() => ({ value: "1.2.3" }));
@@ -196,6 +197,15 @@ describe("t3 server command safety", () => {
         }
       }),
     ),
+  );
+
+  it.effect("does not offer auto-bootstrap in serve help, since serve never bootstraps", () =>
+    Effect.gen(function* () {
+      yield* runCli(["serve", "--help"]);
+      const help = (yield* TestConsole.logLines).join("\n");
+      expect(help).toContain("--no-browser");
+      expect(help).not.toContain("--auto-bootstrap-project-from-cwd");
+    }).pipe(Effect.provide(Layer.fresh(TestConsole.layer))),
   );
 
   it.effect("refuses manual startup over a live server before creating directories", () =>

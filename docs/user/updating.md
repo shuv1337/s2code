@@ -84,7 +84,7 @@ The offered action depends on how the server runs:
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Update server**          | Keep the client open while it installs and reconnects. Supported background services update remotely. For a desktop-hosted server, this also closes and relaunches the desktop app on the host. |
 | **Update the desktop app** | Update the desktop app on the machine running the server, then reopen it if needed.                                                                                                             |
-| **Copy update command**    | Run the command on the named host to update the detected global npm install, then restart the server with your usual options.                                                                   |
+| **Copy update command**    | Run the command on the named host to update the detected global npm install or installed fork command, then restart the server with your usual options.                                         |
 | **Copy relaunch command**  | Stop the command-line server on its host and relaunch with the copied fork command, keeping your usual subcommand and options. This does not update an installed command.                       |
 
 On the host, run:
@@ -98,6 +98,10 @@ asks before restarting the background service; if you decline, run
 `s2code-nightly service restart` when you are ready. For a server you started by hand,
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
+
+If you decline the restart for a background service installed by an older
+release, the service can stay down after a crash or reboot until you run
+`s2code-nightly service restart`.
 
 If you run a published fork package with `npx` rather than an installed command, there is
 nothing to update on the host: stop the server and relaunch it as

@@ -101,13 +101,18 @@ export function manualServerUpdateCommand(
   installation?: ServerInstallation,
   packageName: ForkNpmPackage = "shuv2code",
 ): string {
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   if (installation?.kind === "npm-global") {
-    const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
+    const prefix = quote(installation.prefix);
     const install = `npm install --global --prefix ${prefix} shuv2code@${targetVersion}`;
     // @s2code/cli is retired and installs the same `s2code` command, so it must go first.
     return installation.packageName === "@s2code/cli"
       ? `npm uninstall --global --prefix ${prefix} @s2code/cli && ${install}`
       : install;
+  }
+  if (installation?.kind === "t3-launcher") {
+    // An inherited T3CODE_HOME would otherwise send the update to a home the launcher is not in.
+    return `${quote(installation.launcher)} update --base-dir ${quote(installation.baseDir)} ${targetVersion}`;
   }
   const runner =
     installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";

@@ -169,7 +169,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
         expect(yield* fs.exists(upgradedLink)).toBe(false);
         expect((yield* upgraded.install).installedPath).toBe(upgradedLink);
       }
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("never replaces or removes a t3 it did not create", () =>
@@ -211,7 +211,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       expect((yield* Effect.flip(command.install)).message).toContain("Could not set up");
       yield* command.uninstall;
       expect(yield* fs.readFileString(launcher)).toBe("npm's t3\n");
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("keeps another channel's shared aliases when installing and removing nightly", () =>
@@ -306,7 +306,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       );
       expect(yield* fs.exists(path.join(home, ".local", "bin", "s2code"))).toBe(false);
       expect(yield* fs.readFileString(path.join(home, "bin", "t3.staging"))).toBe("mine");
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("refuses to install behind another t3 that runs first", () =>
@@ -356,7 +356,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
         installedPath: path.join(home, ".local", "bin", "s2code"),
       });
       expect(installed.shadowedBy).toBeUndefined();
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
@@ -390,7 +390,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
           onPath: true,
           installedPath: path.join(home, ".local", "bin", "s2code"),
         });
-      }).pipe(Effect.scoped),
+      }),
   );
 
   it.effect("does not treat its own launcher as another t3 when its folder is first on PATH", () =>
@@ -419,7 +419,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       expect(yield* command.state).toEqual(removed);
       expect(yield* fs.exists(installed.installedPath!)).toBe(false);
       expect(yield* fs.exists(launcher)).toBe(true);
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("leaves the Windows PATH alone when it cannot be read", () =>
@@ -458,7 +458,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const reader = yield* commandIn({ home, platform: "win32" }, inherited.spawner);
       yield* reader.install;
       expect(inherited.registry).toMatchObject({ path: `${userPath};${launcherDir}`, writes: 1 });
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("removes only owned Windows command aliases", () =>
@@ -510,6 +510,6 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       yield* (yield* commandIn({ home: besideHome, platform: "win32" }, beside.spawner))
         .installOnFirstLaunch;
       expect(beside.registry).toMatchObject({ path: "C:\\Tools", writes: 0 });
-    }).pipe(Effect.scoped),
+    }),
   );
 });

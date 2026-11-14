@@ -93,7 +93,7 @@ describe("AcpMcpOverAcpBridge", () => {
       expect(requests.at(-1)?.url).toBe("http://127.0.0.1:1/mcp/servers/executor");
       expect(requests.at(-1)?.headers.get("authorization")).toBe("Bearer bridge-test");
       expect(requests.at(-1)?.headers.get("mcp-session-id")).toBeNull();
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("aborts an in-flight HTTP request when the ACP call is interrupted", () =>
@@ -116,7 +116,7 @@ describe("AcpMcpOverAcpBridge", () => {
       const signal = yield* Effect.promise(() => started.promise);
       yield* Fiber.interrupt(request);
       expect(signal.aborted).toBe(true);
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("answers a call while a long call on the same connection is pending", () =>
@@ -157,7 +157,7 @@ describe("AcpMcpOverAcpBridge", () => {
 
       waitResponse.resolve(reply(2, { content: [] }));
       expect(yield* Fiber.join(wait)).toEqual({ content: [] });
-    }).pipe(Effect.scoped),
+    }),
   );
 
   it.effect("rejects unknown servers, connections, and oversized messages", () =>

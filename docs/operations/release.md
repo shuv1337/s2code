@@ -163,6 +163,10 @@ Publication accepts only the default branch. The scheduled due/source check
 runs without a protected environment, so days with nothing to release skip the
 builds and publication without requesting approval.
 
+To pause scheduled nightlies, run `gh variable set PAUSE_NIGHTLY -b true -R shuv1337/s2code`.
+Manual runs and promotion are unaffected. Resume with
+`gh variable delete PAUSE_NIGHTLY -R shuv1337/s2code`.
+
 Publication runs in this order, and npm never holds the GitHub release back:
 
 1. Artifacts are uploaded to a **draft** release and checked against their GitHub

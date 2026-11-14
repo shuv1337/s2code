@@ -16,6 +16,7 @@ import {
   isVersionExecutable,
   launcherOwnsVersionsDir,
   pinnedRuntimeVersionsDir,
+  resolveLauncherPath,
 } from "../cloud/pinnedRuntime.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
@@ -25,7 +26,7 @@ import {
   resolveLegacyChannelIdentity,
 } from "@t3tools/shared/channelIdentity";
 import packageJson from "../../package.json" with { type: "json" };
-import { findWindowsShim, readLauncherTarget, resolveLauncherPath } from "./update.ts";
+import { findWindowsShim, readLauncherTarget } from "./update.ts";
 import { windowsForwarderShim } from "./windowsForwarderShim.ts";
 
 export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
@@ -39,6 +40,7 @@ export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
 
 export interface UninstallPlan {
   readonly service: boolean;
+  readonly otherHomeService: string | undefined;
   readonly versionsDir: string;
   readonly launchers: ReadonlyArray<string>;
   readonly runtimeDir: string | undefined;
@@ -175,9 +177,11 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
   const path = yield* Path.Path;
   const service = yield* BootService.BootService;
   const status = yield* service.status;
+  const installedBaseDir =
+    status.supported && status.installed ? status.installedBaseDir : undefined;
   const servesThisHome =
-    status.installedBaseDir !== undefined &&
-    path.resolve(status.installedBaseDir) === path.resolve(input.baseDir);
+    installedBaseDir !== undefined &&
+    path.resolve(installedBaseDir) === path.resolve(input.baseDir);
   const identities = [
     resolveChannelIdentity(packageJson.version),
     resolveLegacyChannelIdentity(packageJson.version),
@@ -212,7 +216,8 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
   }
   const serviceEnv = yield* CliService.readServiceEnv(input.baseDir);
   const plan: UninstallPlan = {
-    service: status.supported && status.installed && servesThisHome && ownsUnit,
+    service: servesThisHome && ownsUnit,
+    otherHomeService: servesThisHome || !ownsUnit ? undefined : installedBaseDir,
     versionsDir,
     launchers: [...new Set([...launchers, ...(yield* findRecordedLaunchers(versionsDir))])],
     runtimeDir: (yield* fs.exists(runtimeDir).pipe(Effect.orElseSucceed(() => false)))
@@ -250,6 +255,13 @@ export const uninstallCommand = Command.make("uninstall", {
   ),
 );
 
+const logOtherHomeService = (plan: UninstallPlan) =>
+  plan.otherHomeService === undefined
+    ? Effect.void
+    : Console.log(
+        `The s2code service serves ${plan.otherHomeService}, so it was not removed. Pass \`${BootService.formatBootServiceBaseDirOption(plan.otherHomeService)}\` to remove it.`,
+      );
+
 export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   readonly baseDir: string;
   readonly assumeYes: boolean;
@@ -268,6 +280,7 @@ export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   ) {
     yield* Console.log(`Nothing to remove: s2code is not installed for ${input.baseDir}.`);
     yield* Console.log(`  ${yield* resolveUninstallGuidance}`);
+    yield* logOtherHomeService(plan);
     return;
   }
 
@@ -368,4 +381,5 @@ export const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     (yield* resolveServerInstallation)?.kind === "npm-global"
   )
     yield* Console.log(yield* resolveUninstallGuidance);
+  yield* logOtherHomeService(plan);
 });
