@@ -4,3 +4,4 @@ self-hosted-runner:
     # The retained mobile-dev-client jobs are gated to the upstream repository.
     - blacksmith-32vcpu-ubuntu-2404
     - blacksmith-12vcpu-macos-26
+    - blacksmith-12vcpu-macos-27
