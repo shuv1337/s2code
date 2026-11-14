@@ -1,6 +1,7 @@
 import {
   CommandId,
   OrchestratorMcpFailure,
+  type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   type ThreadMetadataMcpAction,
@@ -8,6 +9,7 @@ import {
   type ThreadMetadataMcpUpdateResult,
   ThreadId,
 } from "@t3tools/contracts";
+import { modelSelectionCommandType } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
@@ -16,11 +18,16 @@ import * as Layer from "effect/Layer";
 
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
-import { threadNotFound } from "./threadAccess.ts";
+import { dispatchFailure, threadNotFound } from "./threadAccess.ts";
 
 export class ThreadMetadataMcpService extends Context.Service<
   ThreadMetadataMcpService,
   {
+    readonly configure: (input: {
+      readonly threadId: ThreadId;
+      readonly modelSelection?: ModelSelection | undefined;
+      readonly autoSettle?: boolean | null | undefined;
+    }) => Effect.Effect<{ readonly sequence: number }, OrchestratorMcpFailure>;
     readonly update: (
       scope: McpInvocationScope,
       input: ThreadMetadataMcpUpdateInput,
@@ -192,7 +199,43 @@ const make = Effect.gen(function* () {
     });
   });
 
-  return ThreadMetadataMcpService.of({ update });
+  const configure = Effect.fn("ThreadMetadataMcpService.configure")(function* (
+    input: Parameters<ThreadMetadataMcpService["Service"]["configure"]>[0],
+  ) {
+    let result: { readonly sequence: number } | undefined;
+    if (input.modelSelection !== undefined) {
+      const thread = yield* threadManagement
+        .getThreadShell(input.threadId)
+        .pipe(Effect.mapError(dispatchFailure));
+      if (thread === null || thread.deletedAt !== null) {
+        return yield* threadNotFound(threadManagement, input.threadId, "Thread was not found.");
+      }
+      result = yield* threadManagement
+        .dispatch({
+          type: modelSelectionCommandType(thread.providerInstanceId, input.modelSelection),
+          threadId: input.threadId,
+          commandId: CommandId.make(yield* random.uuidV4()),
+          modelSelection: input.modelSelection,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
+    }
+    if (input.autoSettle !== undefined) {
+      result = yield* threadManagement
+        .dispatch({
+          type: "thread.auto-settle.set",
+          threadId: input.threadId,
+          commandId: CommandId.make(yield* random.uuidV4()),
+          enabled: input.autoSettle !== false,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
+    }
+    if (result === undefined) {
+      return yield* failure("invalid_request", "Pass modelSelection or autoSettle to configure.");
+    }
+    return { sequence: result.sequence };
+  });
+
+  return ThreadMetadataMcpService.of({ update, configure });
 });
 
 export const layer: Layer.Layer<
