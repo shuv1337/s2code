@@ -151,17 +151,17 @@ const threadConfiguration = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
-  autoSettle: Schema.NullOr(Schema.Boolean),
+  autoSettle: Schema.NullOr(Schema.Literal(false)),
 });
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Read a thread's provider, model, modes, and auto-settle, or set `modelSelection` and/or `autoSettle`. `autoSettle`: false disables it; true or null follows global settings (read back as null). Omit `threadId` for this thread. Permission modes stay. Values from `orchestrator_capabilities`.",
+    "Read settings or set `modelSelection`/`autoSettle` (false: off; null: follow global). Omit `threadId` for this thread. Permission modes stay. Models from `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),
     modelSelection: Schema.optional(ModelSelection),
-    autoSettle: Schema.optional(Schema.NullOr(Schema.Boolean)),
+    autoSettle: Schema.optional(Schema.NullOr(Schema.Literal(false))),
   }),
   success: Schema.Union([threadConfiguration, OrchestrationV2DispatchCommandResult]),
   dependencies: [...commandTool.dependencies, ThreadMetadataMcpService.ThreadMetadataMcpService],

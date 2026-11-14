@@ -492,7 +492,8 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   pullRequests: Schema.optional(Schema.Array(OrchestratorMcpThreadPullRequest)),
   pullRequestCount: Schema.optional(NonNegativeInt),
   openPullRequestCount: Schema.optional(NonNegativeInt),
-  autoSettle: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** Older linked peers omit this field. */
+  autoSettle: Schema.optional(Schema.NullOr(Schema.Literal(false))),
   settled: Schema.Boolean,
   settledAt: Schema.NullOr(IsoDateTime),
   snoozed: Schema.Boolean,
@@ -578,7 +579,8 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   itemCount: NonNegativeInt,
   pendingRequestCount: NonNegativeInt,
   archived: Schema.Boolean,
-  autoSettle: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** Older linked peers omit this field. */
+  autoSettle: Schema.optional(Schema.NullOr(Schema.Literal(false))),
   settled: Schema.Boolean,
   settledAt: Schema.NullOr(IsoDateTime),
   snoozed: Schema.Boolean,

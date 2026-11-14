@@ -56,6 +56,7 @@ import * as PeerLinks from "../peer/PeerLinks.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const projectId = ProjectId.make("project:link-origin");
+const autoSettleProjectId = ProjectId.make("project:auto-settle-other");
 const adapter = {
   instanceId,
   driver: ProviderDriverKind.make("codex"),
@@ -137,7 +138,7 @@ const layerTools = Layer.mergeAll(
     Layer.mock(ProjectService.ProjectService)({
       getById: (id) =>
         Effect.succeed(
-          id === projectId
+          id === projectId || id === autoSettleProjectId
             ? Option.some({
                 id,
                 title: "t3code",
@@ -289,103 +290,136 @@ const usersOwnThread = Effect.gen(function* () {
   return threadId;
 });
 
-it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts", (it) => {
-  it.effect("configures persisted auto-settle across projects through MCP", () =>
-    Effect.gen(function* () {
-      const callerThreadId = yield* launch(claudeCode, "Auto-settle caller");
-      const targetProjectId = ProjectId.make("project:auto-settle-other");
-      const threadId = yield* launch(claudeCode, "Auto-settle target", {
-        projectId: targetProjectId,
-      });
-      const scope: McpInvocationContext.McpInvocationScope = {
-        ...claudeCode,
-        client: undefined,
-        thread: {
+it.layer(Layer.provideMerge(layerTools, layerOrchestration))(
+  "thread auto-settle configuration",
+  (it) => {
+    it.effect("configures persisted auto-settle across projects through MCP", () =>
+      Effect.gen(function* () {
+        const callerThreadId = yield* launch(claudeCode, "Auto-settle caller");
+        const targetProjectId = autoSettleProjectId;
+        const threadId = yield* launch(claudeCode, "Auto-settle target", {
+          projectId: targetProjectId,
+        });
+        const scope: McpInvocationContext.McpInvocationScope = {
+          ...claudeCode,
+          client: undefined,
+          thread: {
+            threadId: callerThreadId,
+            providerInstanceId: instanceId,
+            providerSessionId: "session:auto-settle-caller",
+          },
+        };
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        yield* threads.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("dispatch:auto-settle-caller"),
           threadId: callerThreadId,
-          providerInstanceId: instanceId,
-          providerSessionId: "session:auto-settle-caller",
-        },
-      };
-      const threads = yield* ThreadManagement.ThreadManagementService;
-      yield* threads.dispatch({
-        type: "message.dispatch",
-        commandId: CommandId.make("dispatch:auto-settle-caller"),
-        threadId: callerThreadId,
-        messageId: MessageId.make("message:auto-settle-caller"),
-        text: "Manage auto-settle in another project",
-        attachments: [],
-        dispatchMode: { type: "defer_start" },
-        createdBy: "agent",
-        creationSource: "mcp",
-      });
-      const configure = (autoSettle: boolean | null) =>
-        call(scope, "t3_thread_configure", { threadId, autoSettle });
-      for (const autoSettle of [false, true, false, null]) {
-        const configured = yield* configure(autoSettle);
-        assert.equal(configured.isError, false, JSON.stringify(configured.content));
-        const stored = (yield* threads.getThreadProjection(threadId)).thread;
-        assert.equal(stored.autoSettleDisabledAt == null, autoSettle !== false);
-        const expected = autoSettle === false ? false : null;
-        const read = yield* call(scope, "t3_thread_read", { threadId });
-        assert.equal(read.isError, false, JSON.stringify(read.content));
-        assert.equal(
-          (read.structuredContent as { thread: { autoSettle: boolean | null } }).thread.autoSettle,
-          expected,
+          messageId: MessageId.make("message:auto-settle-caller"),
+          text: "Manage auto-settle in another project",
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+        const configure = (autoSettle: false | null) =>
+          call(scope, "t3_thread_configure", { threadId, autoSettle });
+        for (const autoSettle of [false, null, false, null] as const) {
+          const configured = yield* configure(autoSettle);
+          assert.equal(configured.isError, false, JSON.stringify(configured.content));
+          const stored = (yield* threads.getThreadProjection(threadId)).thread;
+          assert.equal(stored.autoSettleDisabledAt == null, autoSettle !== false);
+          const expected = autoSettle === false ? false : null;
+          const read = yield* call(scope, "t3_thread_read", { threadId });
+          assert.equal(read.isError, false, JSON.stringify(read.content));
+          assert.equal(
+            (read.structuredContent as { thread: { autoSettle: boolean | null } }).thread
+              .autoSettle,
+            expected,
+          );
+          const configuration = yield* call(scope, "t3_thread_configure", { threadId });
+          assert.equal(
+            (configuration.structuredContent as { autoSettle: boolean | null }).autoSettle,
+            expected,
+          );
+          const listed = yield* call(scope, "t3_thread_list", { projectId: targetProjectId });
+          assert.equal(listed.isError, false, JSON.stringify(listed.content));
+          assert.equal(
+            (
+              listed.structuredContent as {
+                threads: Array<{ threadId: string; autoSettle: boolean | null }>;
+              }
+            ).threads.find((thread) => thread.threadId === threadId)?.autoSettle,
+            expected,
+          );
+        }
+        const combined = yield* call(scope, "t3_thread_configure", {
+          threadId,
+          modelSelection: { instanceId, model: "gpt-5.4" },
+          autoSettle: false,
+        });
+        assert.equal(combined.isError, false, JSON.stringify(combined.content));
+        const combinedThread = (yield* threads.getThreadProjection(threadId)).thread;
+        assert.equal(combinedThread.modelSelection.model, "gpt-5.4");
+        assert.ok(combinedThread.autoSettleDisabledAt);
+        const modelOnly = yield* call(scope, "t3_thread_configure", {
+          threadId,
+          modelSelection: { instanceId, model: "gpt-5" },
+        });
+        assert.equal(modelOnly.isError, false, JSON.stringify(modelOnly.content));
+        const unchanged = (yield* threads.getThreadProjection(threadId)).thread;
+        assert.equal(unchanged.modelSelection.model, "gpt-5");
+        assert.ok(unchanged.autoSettleDisabledAt);
+        assert.equal((yield* configure(null)).isError, false);
+        const invalid = yield* call(scope, "t3_thread_configure", {
+          threadId,
+          autoSettle: true,
+        }).pipe(Effect.flip);
+        assert.instanceOf(invalid, McpSchema.InvalidParams);
+        const ownThread = yield* call(scope, "t3_thread_configure", { autoSettle: false });
+        assert.equal(ownThread.isError, false, JSON.stringify(ownThread.content));
+        assert.ok((yield* threads.getThreadProjection(callerThreadId)).thread.autoSettleDisabledAt);
+        const missing = yield* call(scope, "t3_thread_configure", {
+          threadId: "thread:missing-auto-settle",
+          autoSettle: false,
+        });
+        assert.equal(failureCode(missing), "thread_not_found");
+        const denied = yield* call(
+          { ...claudeCode, client: { ...claudeCode.client!, access: "read-only" } },
+          "t3_thread_configure",
+          { threadId, autoSettle: false },
         );
-        const configuration = yield* call(scope, "t3_thread_configure", { threadId });
+        assert.equal(failureCode(denied), "capability_denied");
         assert.equal(
-          (configuration.structuredContent as { autoSettle: boolean | null }).autoSettle,
-          expected,
+          (yield* threads.getThreadProjection(threadId)).thread.autoSettleDisabledAt,
+          null,
         );
-        const listed = yield* call(scope, "t3_thread_list", { projectId: targetProjectId });
-        assert.equal(listed.isError, false, JSON.stringify(listed.content));
-        assert.equal(
-          (
-            listed.structuredContent as {
-              threads: Array<{ threadId: string; autoSettle: boolean | null }>;
-            }
-          ).threads.find((thread) => thread.threadId === threadId)?.autoSettle,
-          expected,
-        );
-      }
-      const combined = yield* call(scope, "t3_thread_configure", {
-        threadId,
-        modelSelection: { instanceId, model: "gpt-5.4" },
-        autoSettle: false,
-      });
-      assert.equal(combined.isError, false, JSON.stringify(combined.content));
-      const combinedThread = (yield* threads.getThreadProjection(threadId)).thread;
-      assert.equal(combinedThread.modelSelection.model, "gpt-5.4");
-      assert.ok(combinedThread.autoSettleDisabledAt);
-      const modelOnly = yield* call(scope, "t3_thread_configure", {
-        threadId,
-        modelSelection: { instanceId, model: "gpt-5" },
-      });
-      assert.equal(modelOnly.isError, false, JSON.stringify(modelOnly.content));
-      const unchanged = (yield* threads.getThreadProjection(threadId)).thread;
-      assert.equal(unchanged.modelSelection.model, "gpt-5");
-      assert.ok(unchanged.autoSettleDisabledAt);
-      assert.equal((yield* configure(null)).isError, false);
-      const ownThread = yield* call(scope, "t3_thread_configure", { autoSettle: false });
-      assert.equal(ownThread.isError, false, JSON.stringify(ownThread.content));
-      assert.ok((yield* threads.getThreadProjection(callerThreadId)).thread.autoSettleDisabledAt);
-      const missing = yield* call(scope, "t3_thread_configure", {
-        threadId: "thread:missing-auto-settle",
-        autoSettle: false,
-      });
-      assert.equal(failureCode(missing), "thread_not_found");
-      const denied = yield* call(
-        { ...claudeCode, client: { ...claudeCode.client!, access: "read-only" } },
-        "t3_thread_configure",
-        { threadId, autoSettle: false },
-      );
-      assert.equal(failureCode(denied), "capability_denied");
-      assert.equal(
-        (yield* threads.getThreadProjection(threadId)).thread.autoSettleDisabledAt,
-        null,
-      );
-    }),
-  );
+      }),
+    );
+    it.effect("rejects auto-settle on archived threads before changing their model", () =>
+      Effect.gen(function* () {
+        const threadId = yield* launch(claudeCode, "Archived auto-settle target");
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        yield* threads.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.make("archive:auto-settle-target"),
+          threadId,
+        });
+        const before = (yield* threads.getThreadProjection(threadId)).thread;
+        for (const autoSettle of [false, null] as const) {
+          const rejected = yield* call(claudeCode, "t3_thread_configure", {
+            threadId,
+            modelSelection: { instanceId, model: "gpt-5.4" },
+            autoSettle,
+          });
+          assert.deepEqual((yield* threads.getThreadProjection(threadId)).thread, before);
+          assert.equal(failureCode(rejected), "invalid_request");
+        }
+      }),
+    );
+  },
+);
+
+it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts", (it) => {
   it.effect("is stamped, and so is the work it derives", () =>
     Effect.gen(function* () {
       const projections = yield* ProjectionStore.ProjectionStoreV2;

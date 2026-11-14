@@ -26,7 +26,7 @@ export class ThreadMetadataMcpService extends Context.Service<
     readonly configure: (input: {
       readonly threadId: ThreadId;
       readonly modelSelection?: ModelSelection | undefined;
-      readonly autoSettle?: boolean | null | undefined;
+      readonly autoSettle?: false | null | undefined;
     }) => Effect.Effect<{ readonly sequence: number }, OrchestratorMcpFailure>;
     readonly update: (
       scope: McpInvocationScope,
@@ -202,14 +202,20 @@ const make = Effect.gen(function* () {
   const configure = Effect.fn("ThreadMetadataMcpService.configure")(function* (
     input: Parameters<ThreadMetadataMcpService["Service"]["configure"]>[0],
   ) {
+    const thread = yield* threadManagement
+      .getThreadShell(input.threadId)
+      .pipe(Effect.mapError(dispatchFailure));
+    if (thread === null || thread.deletedAt !== null) {
+      return yield* threadNotFound(threadManagement, input.threadId, "Thread was not found.");
+    }
+    if (input.autoSettle !== undefined && thread.archivedAt !== null) {
+      return yield* failure(
+        "invalid_request",
+        "Cannot configure auto-settle on an archived thread.",
+      );
+    }
     let result: { readonly sequence: number } | undefined;
     if (input.modelSelection !== undefined) {
-      const thread = yield* threadManagement
-        .getThreadShell(input.threadId)
-        .pipe(Effect.mapError(dispatchFailure));
-      if (thread === null || thread.deletedAt !== null) {
-        return yield* threadNotFound(threadManagement, input.threadId, "Thread was not found.");
-      }
       result = yield* threadManagement
         .dispatch({
           type: modelSelectionCommandType(thread.providerInstanceId, input.modelSelection),
