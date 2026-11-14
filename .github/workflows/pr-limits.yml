@@ -27,7 +27,7 @@ permissions:
 jobs:
   open-limit:
     name: Open PR limit
-    if: github.event_name == 'pull_request_target'
+    if: github.repository == 'pingdotgg/t3code' && github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     steps:
       # pull_request_target has a write token. Load the script from the default
@@ -50,7 +50,7 @@ jobs:
 
   sweep:
     name: Conflict and close windows
-    if: github.event_name != 'pull_request_target'
+    if: github.repository == 'pingdotgg/t3code' && github.event_name != 'pull_request_target'
     runs-on: ubuntu-24.04
     concurrency:
       group: pr-limits-sweep

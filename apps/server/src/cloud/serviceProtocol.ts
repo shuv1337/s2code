@@ -46,7 +46,7 @@ export const disabledServiceTask = (taskXml: string): string =>
     ? taskXml
     : taskXml.replace("  </Settings>", "    <Enabled>false</Enabled>\n  </Settings>");
 
-export function serviceUnitEnvironmentValueOf(
+function serviceUnitEnvironmentValueOf(
   contents: string,
   name: "T3CODE_HOME" | "T3CODE_INSTALL_BIN_DIR",
 ): string | undefined {
