@@ -248,13 +248,8 @@
                   (mode) => mode === customTheme.appearance || customTheme.variants?.[mode],
                 )
               : null);
-          const isKnownTheme =
-            storedTheme === "light" ||
-            storedTheme === "dark" ||
-            storedTheme === "system" ||
-            themeModes !== null;
-          const theme = isKnownTheme && storedTheme ? storedTheme : "ocean";
-          const isThemed = isKnownTheme && themeModes !== null;
+          const theme = storedTheme ?? "ocean";
+          const isThemed = themeModes !== null;
           const baseAppearance = customTheme
             ? customTheme.appearance
             : storedTheme === null
@@ -363,14 +358,7 @@
           } else {
             delete document.documentElement.dataset.themeId;
           }
-          // A resolved half is a selection even when the base theme is gone
-          // (deleting the base leaves the mix pointing at a real theme).
-          const hasSelection = halfThemeId !== null || isKnownTheme;
-          if (hasSelection) {
-            document.documentElement.dataset.themeSelected = "true";
-          } else {
-            delete document.documentElement.dataset.themeSelected;
-          }
+          document.documentElement.dataset.themeSelected = "true";
           document.documentElement.classList.toggle("dark", isDark);
           const chromeColor = customColors
             ? isThemeColor(customColors.chrome)
@@ -382,11 +370,9 @@
                 ? DARK_BACKGROUND
                 : LIGHT_BACKGROUND;
           document.documentElement.style.backgroundColor = chromeColor;
-          if (hasSelection) {
-            const splashColors = customSplash ?? builtInSplash ?? fallbackSplash;
-            for (const [name, value] of Object.entries(splashColors)) {
-              document.documentElement.style.setProperty(`--boot-${name}`, value);
-            }
+          const splashColors = customSplash ?? builtInSplash ?? fallbackSplash;
+          for (const [name, value] of Object.entries(splashColors)) {
+            document.documentElement.style.setProperty(`--boot-${name}`, value);
           }
           setThemeColor(chromeColor);
         } catch {

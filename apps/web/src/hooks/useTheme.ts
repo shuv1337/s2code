@@ -34,11 +34,18 @@ type ThemeSnapshot = {
   followSystem: boolean;
   appearanceMode: ThemePreferenceMode;
   themeHalves: ThemeHalves | null;
+  themeOverrides: { theme: boolean; appearance: boolean; halves: boolean };
 };
 
 type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
 
 const STORAGE_KEY = "t3code:theme";
+const THEME_PREFERENCE_KEYS = {
+  theme: STORAGE_KEY,
+  appearance: THEME_APPEARANCE_MODE_STORAGE_KEY,
+  followSystem: THEME_FOLLOW_SYSTEM_STORAGE_KEY,
+  halves: THEME_HALVES_STORAGE_KEY,
+} as const;
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   theme: "ocean",
@@ -47,6 +54,7 @@ const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   followSystem: false,
   appearanceMode: "dark",
   themeHalves: null,
+  themeOverrides: { theme: false, appearance: false, halves: false },
 };
 
 export function readThemeHalves(): ThemeHalves | null {
@@ -127,7 +135,7 @@ let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
 let snapshotStale = true;
 let lastDesktopTheme: "light" | "dark" | "system" | null = null;
-let lastAppliedTheme: Omit<ThemeSnapshot, "resolvedTheme"> | null = null;
+let lastAppliedTheme: Omit<ThemeSnapshot, "resolvedTheme" | "themeOverrides"> | null = null;
 let themeStorageReadFailure: ThemeStorageError | null = null;
 
 function emitChange() {
@@ -173,7 +181,7 @@ export function readAppearanceModePreference(theme: Theme): ThemePreferenceMode 
   } catch {
     return "dark";
   }
-  return getThemePreferenceMode(theme) ?? "dark";
+  return getThemePreferenceMode(theme) ?? "light";
 }
 
 function writeAppearanceModePreference(appearanceMode: ThemePreferenceMode): void {
@@ -405,6 +413,7 @@ function getSnapshot(): ThemeSnapshot {
   // Cache localStorage reads until signalled; useTheme calls this every render.
   if (!snapshotStale && lastSnapshot) return lastSnapshot;
   snapshotStale = false;
+  const themeOverrides = readThemeOverrides();
   const theme = getStored();
   const appearanceMode = readAppearanceModePreference(theme);
   const followSystem = appearanceMode === "system";
@@ -425,12 +434,23 @@ function getSnapshot(): ThemeSnapshot {
     lastSnapshot.systemDark === systemDark &&
     lastSnapshot.followSystem === followSystem &&
     lastSnapshot.appearanceMode === appearanceMode &&
+    lastSnapshot.themeOverrides.theme === themeOverrides.theme &&
+    lastSnapshot.themeOverrides.appearance === themeOverrides.appearance &&
+    lastSnapshot.themeOverrides.halves === themeOverrides.halves &&
     themeHalvesSignature(lastSnapshot.themeHalves) === themeHalvesSignature(themeHalves)
   ) {
     return lastSnapshot;
   }
 
-  lastSnapshot = { theme, resolvedTheme, systemDark, followSystem, appearanceMode, themeHalves };
+  lastSnapshot = {
+    theme,
+    resolvedTheme,
+    systemDark,
+    followSystem,
+    appearanceMode,
+    themeHalves,
+    themeOverrides,
+  };
   return lastSnapshot;
 }
 
@@ -637,6 +657,56 @@ function clearThemeHalves(): boolean {
   return true;
 }
 
+function readThemeOverrides() {
+  const hasPreference = (key: string) => {
+    try {
+      return typeof window !== "undefined" && window.localStorage.getItem(key) !== null;
+    } catch {
+      return false;
+    }
+  };
+  return {
+    theme: hasPreference(THEME_PREFERENCE_KEYS.theme),
+    appearance:
+      hasPreference(THEME_PREFERENCE_KEYS.appearance) ||
+      hasPreference(THEME_PREFERENCE_KEYS.followSystem),
+    halves: hasPreference(THEME_PREFERENCE_KEYS.halves),
+  };
+}
+
+export function resetThemePreferences(): boolean {
+  if (typeof window === "undefined") return false;
+  if (!Object.values(readThemeOverrides()).some(Boolean)) return true;
+  const cleared: Array<readonly [string, string]> = [];
+  let storageKey: string = STORAGE_KEY;
+  try {
+    for (const key of Object.values(THEME_PREFERENCE_KEYS)) {
+      storageKey = key;
+      const value = window.localStorage.getItem(key);
+      if (value !== null) {
+        window.localStorage.removeItem(key);
+        cleared.push([key, value]);
+      }
+    }
+  } catch (cause) {
+    for (const [key, value] of cleared) {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {}
+    }
+    const error = new ThemeStorageError({ operation: "write", storageKey, cause });
+    console.error(error.message, {
+      operation: error.operation,
+      storageKey,
+      ...safeErrorLogAttributes(error),
+    });
+    return false;
+  }
+  themeStorageReadFailure = null;
+  refreshTheme();
+  return true;
+}
+
 export function refreshTheme({ preservePreview = false } = {}): void {
   if (typeof window === "undefined") return;
   lastAppliedTheme = null;
@@ -670,5 +740,6 @@ export function useTheme() {
     appearanceMode: snapshot.appearanceMode,
     resolvedTheme,
     themeHalves: snapshot.themeHalves,
+    themeOverrides: snapshot.themeOverrides,
   } as const;
 }

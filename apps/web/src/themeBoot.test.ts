@@ -150,6 +150,16 @@ describe("index.html boot script", () => {
       prefersDark: false,
     },
     {
+      name: "legacy System with follow-system off on a dark OS",
+      storage: { [THEME_STORAGE_KEY]: "system", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "false" },
+      prefersDark: true,
+    },
+    {
+      name: "legacy System with follow-system off on a light OS",
+      storage: { [THEME_STORAGE_KEY]: "system", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "false" },
+      prefersDark: false,
+    },
+    {
       name: "explicit Light on a dark OS",
       storage: { [THEME_STORAGE_KEY]: "light" },
       prefersDark: true,
