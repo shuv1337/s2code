@@ -317,6 +317,11 @@ permissions:
 # pnpm keeps optional deps inside the virtual store, so hoist it to the root.
 publicHoistPattern:
   - "@cursor/sdk-*"
+  # `vp fmt` resolves the formatter from the project root, and the oxfmt CLI it
+  # finds there imports `vite-plus` for the config. pnpm keeps oxfmt under the
+  # virtual store, so without this link resolution walked up past the checkout
+  # to an unrelated ancestor node_modules and failed.
+  - "oxfmt"
 
 minimumReleaseAgeExclude:
   - "@legendapp/list@3.7.2"
