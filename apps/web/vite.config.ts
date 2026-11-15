@@ -132,6 +132,8 @@ const browserTestProject = {
   },
   test: {
     name: "browser",
+    // Chromium shares CI memory with Vite; CPU-count workers exhaust renderer headroom late in the suite.
+    maxWorkers: 1,
     include: ["src/**/*.browser.test.{ts,tsx}"],
     hookTimeout: 15_000,
     testTimeout: 15_000,
