@@ -21,6 +21,7 @@ import {
   flattenThemeColor,
   getMobileThemeVariables,
   resolveMobileThemeIds,
+  resolveMobileThemeMode,
   themeColorWithAlpha,
   themeColorToNativeColor,
 } from "./mobileTheme";
@@ -225,6 +226,17 @@ describe("mobile themes", () => {
   });
 
   it("migrates one theme choice to both appearances and preserves independent choices", () => {
+    expect(resolveMobileThemeIds({})).toEqual({ light: "ocean", dark: "ocean" });
+    expect(resolveMobileThemeMode({})).toBe("dark");
+    expect(resolveMobileThemeMode({ themeId: "grove" })).toBe("system");
+    for (const themeMode of ["light", "dark", "system"] as const) {
+      expect(resolveMobileThemeMode({ themeMode })).toBe(themeMode);
+      expect(resolveMobileThemeMode({ themeId: "t3-code", themeMode })).toBe(themeMode);
+    }
+    expect(resolveMobileThemeIds({ themeId: "t3-code" })).toEqual({
+      light: "t3-code",
+      dark: "t3-code",
+    });
     expect(resolveMobileThemeIds({ themeId: "grove" })).toEqual({
       light: "grove",
       dark: "grove",
@@ -233,7 +245,7 @@ describe("mobile themes", () => {
       resolveMobileThemeIds({ themeId: "grove", lightThemeId: "iris", darkThemeId: "ocean" }),
     ).toEqual({ light: "iris", dark: "ocean" });
     expect(resolveMobileThemeIds({ themeId: "grove", lightThemeId: "missing" })).toEqual({
-      light: DEFAULT_MOBILE_THEME_ID,
+      light: "ocean",
       dark: "grove",
     });
   });

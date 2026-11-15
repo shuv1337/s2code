@@ -31,7 +31,7 @@ import type { MobileThemeVariables } from "../../../lib/mobileTheme";
 import {
   createMobileThemePairPatch,
   createMobileThemeSelectionPatch,
-  normalizeMobileThemeMode,
+  resolveMobileThemeMode,
   resolveMobileThemeIds,
   type MobileThemeAppearance,
   type MobileThemeId,
@@ -120,7 +120,7 @@ function resolveThemeVariablesByAppearance(
 
 /** The appearance whose theme is on screen, read from the native scheme. */
 export function resolveThemeAppearance(stored: Preferences | null): MobileThemeAppearance {
-  const themeMode = normalizeMobileThemeMode(stored?.themeMode);
+  const themeMode = resolveMobileThemeMode(stored ?? {});
   if (themeMode !== "system") return themeMode;
   return Appearance.getColorScheme() === "dark" ? "dark" : "light";
 }
@@ -128,7 +128,7 @@ export function resolveThemeAppearance(stored: Preferences | null): MobileThemeA
 function runtimeStateFor(stored: Preferences | null): MobileThemeRuntimeState {
   return {
     baseFontSize: resolveAppearancePreferences(stored).baseFontSize,
-    themeMode: normalizeMobileThemeMode(stored?.themeMode),
+    themeMode: resolveMobileThemeMode(stored ?? {}),
     themeAppearance: resolveThemeAppearance(stored),
   };
 }
@@ -201,7 +201,7 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
     manufacturer,
     process.env.EXPO_PUBLIC_T3_FLOATING_TABS === "1",
   );
-  const themeMode = normalizeMobileThemeMode(storedPreferences?.themeMode);
+  const themeMode = resolveMobileThemeMode(storedPreferences ?? {});
   const themeAppearance = themeMode === "system" ? systemColorScheme : themeMode;
   const resolvedThemeIds = resolveMobileThemeIds(storedPreferences ?? {});
   const themeIds = useMemo<MobileThemeIds>(

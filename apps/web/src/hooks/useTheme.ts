@@ -41,11 +41,11 @@ type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
-  theme: "system",
-  resolvedTheme: "light",
+  theme: "ocean",
+  resolvedTheme: "dark",
   systemDark: false,
-  followSystem: true,
-  appearanceMode: "system",
+  followSystem: false,
+  appearanceMode: "dark",
   themeHalves: null,
 };
 
@@ -160,15 +160,20 @@ function isThemePreferenceMode(value: string | null): value is ThemePreferenceMo
 }
 
 export function readAppearanceModePreference(theme: Theme): ThemePreferenceMode {
-  if (typeof window !== "undefined") {
-    try {
-      const raw = window.localStorage.getItem(THEME_APPEARANCE_MODE_STORAGE_KEY);
-      if (isThemePreferenceMode(raw)) return raw;
-    } catch {}
-  }
+  if (typeof window === "undefined") return DEFAULT_THEME_SNAPSHOT.appearanceMode;
+  try {
+    const raw = window.localStorage.getItem(THEME_APPEARANCE_MODE_STORAGE_KEY);
+    if (isThemePreferenceMode(raw)) return raw;
+  } catch {}
 
   if (readStoredFollowSystem(theme)) return "system";
-  return getThemePreferenceMode(theme) ?? "light";
+  try {
+    const storedTheme = window.localStorage.getItem(STORAGE_KEY);
+    if (storedTheme === null || !isKnownThemePreference(storedTheme)) return "dark";
+  } catch {
+    return "dark";
+  }
+  return getThemePreferenceMode(theme) ?? "dark";
 }
 
 function writeAppearanceModePreference(appearanceMode: ThemePreferenceMode): void {

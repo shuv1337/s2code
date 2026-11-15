@@ -7,7 +7,6 @@ import {
   getDefaultThemeColors,
   getThemeColorsForMode,
   invalidateCustomThemes,
-  isKnownThemePreference,
   publishedThemeDefinitions,
   resolveThemeAppearance,
   T3_CHAT_THEME,
@@ -19,6 +18,8 @@ import {
   THEME_FOLLOW_SYSTEM_STORAGE_KEY,
   toCanonicalThemeColor,
 } from "./themePalette";
+
+import { readAppearanceModePreference, readThemePreference } from "./hooks/useTheme";
 
 const THEME_STORAGE_KEY = "t3code:theme";
 const DEFAULT_DARK_CHROME = getDefaultThemeColors("dark").chrome;
@@ -101,32 +102,20 @@ function runBootScript(options: {
   };
 }
 
-function runtimeResolvedAppearance(
-  storage: Record<string, string>,
-  prefersDark: boolean,
-): "light" | "dark" {
+function runtimeTheme(storage: Record<string, string>, prefersDark: boolean) {
   vi.stubGlobal("window", {
     localStorage: { getItem: (key: string) => storage[key] ?? null },
     matchMedia: () => ({ matches: prefersDark }),
   });
   invalidateCustomThemes();
   try {
-    const raw = storage[THEME_STORAGE_KEY] ?? null;
-    const theme = raw !== null && isKnownThemePreference(raw) ? raw : "system";
-    const followRaw = storage[THEME_FOLLOW_SYSTEM_STORAGE_KEY] ?? null;
-    const appearanceRaw = storage[THEME_APPEARANCE_MODE_STORAGE_KEY] ?? null;
-    const appearanceMode =
-      appearanceRaw === "light" || appearanceRaw === "dark" || appearanceRaw === "system"
-        ? appearanceRaw
-        : followRaw === "true"
-          ? "system"
-          : followRaw === "false"
-            ? null
-            : theme === "system"
-              ? "system"
-              : null;
+    const theme = readThemePreference();
+    const appearanceMode = readAppearanceModePreference(theme);
     const followSystem = appearanceMode === "system";
-    return resolveThemeAppearance(theme, prefersDark, followSystem, appearanceMode ?? undefined);
+    return {
+      theme,
+      appearance: resolveThemeAppearance(theme, prefersDark, followSystem, appearanceMode),
+    };
   } finally {
     vi.unstubAllGlobals();
     invalidateCustomThemes();
@@ -154,6 +143,32 @@ describe("index.html boot script", () => {
     prefersDark: boolean;
   }> = [
     { name: "no stored preference on a dark OS", storage: {}, prefersDark: true },
+    { name: "no stored preference on a light OS", storage: {}, prefersDark: false },
+    {
+      name: "explicit System on a light OS",
+      storage: { [THEME_STORAGE_KEY]: "system" },
+      prefersDark: false,
+    },
+    {
+      name: "explicit Light on a dark OS",
+      storage: { [THEME_STORAGE_KEY]: "light" },
+      prefersDark: true,
+    },
+    {
+      name: "explicit Ocean retains its inferred light mode",
+      storage: { [THEME_STORAGE_KEY]: "ocean" },
+      prefersDark: true,
+    },
+    {
+      name: "implicit palette with explicit Light",
+      storage: { [THEME_APPEARANCE_MODE_STORAGE_KEY]: "light" },
+      prefersDark: true,
+    },
+    {
+      name: "implicit palette with explicit System",
+      storage: { [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system" },
+      prefersDark: false,
+    },
     {
       name: "T3 Chat follows a dark OS",
       storage: { [THEME_STORAGE_KEY]: "t3-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
@@ -225,7 +240,7 @@ describe("index.html boot script", () => {
       prefersDark: true,
     },
     {
-      name: "a removed custom theme falls back to system",
+      name: "a removed custom theme falls back to Ocean dark",
       storage: { [THEME_STORAGE_KEY]: "gone-theme" },
       prefersDark: true,
     },
@@ -253,7 +268,21 @@ describe("index.html boot script", () => {
 
   it.each(parityCases)("matches the runtime appearance: $name", ({ storage, prefersDark }) => {
     const boot = runBootScript({ storage, prefersDark });
-    expect(boot.isDark).toBe(runtimeResolvedAppearance(storage, prefersDark) === "dark");
+    const runtime = runtimeTheme(storage, prefersDark);
+    expect(boot.isDark).toBe(runtime.appearance === "dark");
+    if (boot.themeId !== undefined) {
+      expect(runtime.theme === "t3-chat-dark" ? "t3-chat" : runtime.theme).toBe(boot.themeId);
+    }
+  });
+
+  it.each([false, true])("defaults to Ocean dark regardless of OS dark=%s", (prefersDark) => {
+    const boot = runBootScript({ prefersDark });
+    expect(boot.themeId).toBe("ocean");
+    expect(boot.isDark).toBe(true);
+    expect(boot.bootVariables["--boot-background"]).toBe(
+      getThemeColorsForMode(OCEAN_THEME, "dark")!.canvas,
+    );
+    expect(runtimeTheme({}, prefersDark)).toEqual({ theme: "ocean", appearance: "dark" });
   });
 
   it("accepts exponent-form OKLCH before the runtime mounts", () => {
@@ -397,12 +426,12 @@ describe("index.html boot script", () => {
     expect(boot.metaContent).toBe(DEFAULT_DARK_CHROME);
   });
 
-  it("follows the OS appearance when storage is unavailable", () => {
-    const light = runBootScript({ storageThrows: true, prefersDark: false });
-    expect(light.isDark).toBe(false);
-    expect(light.themeId).toBeUndefined();
-
-    const dark = runBootScript({ storageThrows: true, prefersDark: true });
-    expect(dark.isDark).toBe(true);
+  it("uses Ocean dark when storage is unavailable", () => {
+    for (const prefersDark of [false, true]) {
+      const boot = runBootScript({ storageThrows: true, prefersDark });
+      expect(boot.isDark).toBe(true);
+      expect(boot.themeId).toBe("ocean");
+      expect(boot.backgroundColor).toBe(getThemeColorsForMode(OCEAN_THEME, "dark")!.chrome);
+    }
   });
 });
