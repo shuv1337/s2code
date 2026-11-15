@@ -23,6 +23,7 @@ it.live("keeps migration warnings out of JSON thread output", () =>
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-json-" });
     const stateDir = `${root}/userdata`;
     yield* fs.makeDirectory(stateDir);
+    yield* fs.writeFileString(`${root}/.product-identity`, "s2code\n");
     yield* Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations();
@@ -105,7 +106,7 @@ it.live("keeps migration warnings out of JSON thread output", () =>
           "--base-dir",
           root,
         ],
-        { env: { T3CODE_HOME: root } },
+        { env: { S2CODE_HOME: root, SHUV2CODE_HOME: root, T3CODE_HOME: undefined } },
       ),
     );
     const { stdout, stderr, exitCode } = yield* Effect.all(

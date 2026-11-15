@@ -500,8 +500,11 @@ export const layer: Layer.Layer<
           cause: `Run ${runId} is missing its execution projection state.`,
         });
       }
+      // A quota failover carries continuation history, but starts a new turn on the new account.
       const manualResume =
-        run.manualContinuationOfRunId !== undefined && attempt.reason !== "steering_restart";
+        run.manualContinuationOfRunId !== undefined &&
+        run.movedOffSpentInstanceId === undefined &&
+        attempt.reason !== "steering_restart";
       const resumeSource = manualResume
         ? unsentManualContinuationSource(run, projection)
         : undefined;
