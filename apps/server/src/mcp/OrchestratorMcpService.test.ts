@@ -1588,6 +1588,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         Layer.mock(SecretRequests.SecretRequests)({}),
         Layer.mock(RemoteDelegation.RemoteDelegation)({
           record: () => Effect.succeed({ taskId }),
+          runStatus: () => Effect.succeed(null),
         }),
         Layer.mock(ThreadLaunchService.ThreadLaunchService)({
           launch: () =>
@@ -4483,7 +4484,10 @@ describe("OrchestratorMcpService provider resolution", () => {
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome({ title: "Other", workspaceRoot: "/other" } as never),
         }),
-        Layer.mock(RemoteDelegation.RemoteDelegation)({ record: () => Effect.succeed({ taskId }) }),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({
+          record: () => Effect.succeed({ taskId }),
+          runStatus: () => Effect.succeed(null),
+        }),
         providerRegistryLayer([]),
         adapterRegistryLayer([]),
         ServerSettings.layerTest(),

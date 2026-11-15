@@ -545,7 +545,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       assert.equal(yield* fs.readFileString(oldExe), "");
       assert.equal(
         formatUpdatedLauncherCommand(Option.getOrThrow(repointed), "/fork home"),
-        `\'${launcher}\' serve --base-dir \'/fork home\'`,
+        `'${launcher}' serve --base-dir '/fork home'`,
       );
     }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
   );
