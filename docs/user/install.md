@@ -85,9 +85,10 @@ Run `s2code-nightly help` or `s2code-nightly --help` for the full reference. To 
 a new working directory, use an explicit path such as `s2code-nightly ./my-project`. A bare
 directory name is accepted only if it already exists.
 
-If the command or its `start` subcommand reports an already running server, connect to that server
-instead. Stop it before starting a replacement, or use a different `--base-dir`
-for an independent server.
+If the command or its `start` subcommand reports an already running server, run the
+`s2code-nightly pair` command it names and open the pairing URL to connect to that
+server. Stop it before starting a replacement, or use a different `--base-dir` for an
+independent server.
 
 Do not use `npx t3` to try this fork: it downloads upstream. `npx shuv2code` runs the
 newest nightly, because nightly is the only train this fork publishes. Install it with

@@ -366,7 +366,8 @@ export const resolveHostCliCommand = Effect.fnUntraced(function* (
   // PowerShell runs a quoted path only through the call operator.
   const call = platform === "win32" && invocation.pathCommand ? "& " : "";
   return {
-    command: [`${call}${invocation.command}`, ...args.map(quote)].join(" "),
+    // An empty subcommand names the root command.
+    command: [`${call}${invocation.command}`.trimEnd(), ...args.map(quote)].join(" "),
     launcher: invocation.launcher,
   };
 });
