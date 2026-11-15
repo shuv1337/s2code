@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -147,6 +148,7 @@ it.effect.each([
               appVersion: "0.1.3",
               stateDir: "/task/state",
               logDir: "/task/logs",
+              displayName: "S2Code (Nightly)",
               path: { join: (...parts: string[]) => parts.join("/") },
             } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]),
             Layer.succeed(ElectronApp.ElectronApp, {
@@ -208,6 +210,99 @@ it.effect.each([
         yield* Effect.promise(() => closed.promise);
         expect(closeCount).toBe(1);
       }
+    }),
+  ).pipe(Effect.provide(DesktopState.layer)),
+);
+
+it.effect("sends recovery actions to the fork and names its updater", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const checked = yield* Deferred.make<void>();
+      const opened = yield* Queue.unbounded<string>();
+      const loaded: string[] = [];
+      const recoveryWindowHandlers = new Map<string, (url: string) => void>();
+      const recovery = {
+        isDestroyed: () => false,
+        loadURL: (url: string) => {
+          loaded.push(url);
+          return Promise.resolve();
+        },
+        once: () => {},
+        webContents: {
+          setWindowOpenHandler: () => {},
+          on: (event: string, listener: (event: unknown, url: string) => void) => {
+            recoveryWindowHandlers.set(event, (url) => listener({ preventDefault: () => {} }, url));
+          },
+        },
+      } as unknown as Electron.BrowserWindow;
+      const state = yield* DesktopState.DesktopState;
+      yield* listen.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            FileSystem.layerNoop({
+              readFileString: () => Effect.succeed("0.1.3-nightly.1"),
+              writeFileString: () => Effect.void,
+            }),
+            Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+              appVersion: "0.1.3-nightly.2",
+              stateDir: "/task/state",
+              logDir: "/task/logs",
+              displayName: "S2Code (Nightly)",
+              path: { join: (...parts: string[]) => parts.join("/") },
+            } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]),
+            Layer.succeed(ElectronApp.ElectronApp, {
+              on: () => Effect.void,
+            } as unknown as ElectronApp.ElectronApp["Service"]),
+            Layer.succeed(ElectronShell.ElectronShell, {
+              openExternal: (url: unknown) =>
+                Queue.offer(opened, String(url)).pipe(Effect.as(true)),
+            } as unknown as ElectronShell.ElectronShell["Service"]),
+            Layer.succeed(ElectronTheme.ElectronTheme, {
+              shouldUseDarkColors: Effect.succeed(false),
+            } as ElectronTheme.ElectronTheme["Service"]),
+            Layer.succeed(ElectronWindow.ElectronWindow, {
+              main: Effect.succeedNone,
+              create: () => Effect.succeed(recovery),
+            } as unknown as ElectronWindow.ElectronWindow["Service"]),
+            Layer.succeed(DesktopUpdates.DesktopUpdates, {
+              subscribe: Effect.succeed({
+                latest: {
+                  ...createInitialDesktopUpdateState(
+                    "0.1.3-nightly.2",
+                    { hostArch: "arm64", appArch: "arm64", runningUnderArm64Translation: false },
+                    "nightly",
+                  ),
+                  status: "disabled",
+                },
+                changes: Stream.empty,
+              }),
+              check: () => Deferred.succeed(checked, undefined).pipe(Effect.asVoid),
+            } as unknown as DesktopUpdates.DesktopUpdates["Service"]),
+          ),
+        ),
+      );
+      yield* SubscriptionRef.set(state.primaryBackendStartup, {
+        _tag: "Failing",
+        reason: "Server failed before readiness",
+        managedPolicy: false,
+        output: "Failure details",
+      });
+      yield* Deferred.await(checked);
+
+      const navigate = recoveryWindowHandlers.get("will-navigate");
+      expect(navigate).toBeDefined();
+      navigate!("https://startup-recovery.invalid/releases");
+      expect(yield* Queue.take(opened)).toBe("https://github.com/shuv1337/s2code/releases");
+      navigate!("https://startup-recovery.invalid/reinstall");
+      expect(yield* Queue.take(opened)).toBe(
+        "https://github.com/shuv1337/s2code/releases/tag/v0.1.3-nightly.1",
+      );
+
+      const html = decodeURIComponent(loaded[0]!);
+      expect(html).toContain("S2Code (Nightly) could not start");
+      expect(html).toContain("s2code-nightly update");
+      expect(html).not.toContain("T3 Code");
+      expect(html).not.toContain("pingdotgg");
     }),
   ).pipe(Effect.provide(DesktopState.layer)),
 );
