@@ -30,7 +30,7 @@ it("reports the installed service version and host paths", () => {
   assert.equal(
     formatServiceStatus(status, "0.0.29"),
     [
-      "T3 Code service",
+      "s2code service",
       "  Status: installed · s2code@0.0.29",
       "  Unit: /home/me/.config/systemd/user/t3code.service",
       "  Logs: /home/me/.t3/userdata/logs/boot-service.log",
@@ -375,6 +375,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
       args: [],
     },
     { label: "a newer service", status: newerServiceStatus, hint: "update", args: ["999.0.0"] },
+    {
+      label: "duplicate services",
+      status: { ...status, problems: ["duplicate-service"] as const },
+      hint: "service uninstall",
+      args: [],
+    },
     {
       label: "a stopped service",
       status: { ...status, problems: ["service-stopped"] as const },

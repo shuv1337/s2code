@@ -205,18 +205,24 @@ function formatProtection(
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
-  commands: { readonly install: string; readonly restart: string; readonly update: string } = {
+  commands: {
+    readonly install: string;
+    readonly restart: string;
+    readonly update: string;
+    readonly uninstall?: string;
+  } = {
     install: forkCliCommand("service install", cliVersion),
     restart: forkCliCommand("service restart", cliVersion),
+    uninstall: forkCliCommand("service uninstall", cliVersion),
     update: forkCliCommand(`update ${status.installedVersion ?? cliVersion}`, cliVersion),
   },
   protection?: ServiceProtection.ServiceProtectionState,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, Windows with Task Scheduler";
+    return `${forkCliCommand("service", cliVersion)}\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, Windows with Task Scheduler`;
   }
   if (!status.installed) {
-    return `T3 Code service\n  Status: not installed\n  Next: Run \`${commands.install}\`.`;
+    return `${forkCliCommand("service", cliVersion)}\n  Status: not installed\n  Next: Run \`${commands.install}\`.`;
   }
   if (status.otherBaseDir !== undefined) {
     return [
@@ -242,7 +248,7 @@ export function formatServiceStatus(
     compareExactServiceVersions(status.installedVersion, cliVersion) > 0
   ) {
     return [
-      "T3 Code service",
+      forkCliCommand("service", cliVersion),
       `  Status: installed · s2code@${installedVersion} (newer than this s2code@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
@@ -252,7 +258,7 @@ export function formatServiceStatus(
     ].join("\n");
   }
   return [
-    "T3 Code service",
+    forkCliCommand("service", cliVersion),
     `  Status: ${status.current ? `installed · s2code@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
@@ -405,6 +411,7 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
               )
             : undefined;
         const commands = {
+          uninstall: yield* resolveHostCliHint("service uninstall", flags.baseDir),
           install: yield* resolveHostCliHint("service install", flags.baseDir),
           restart: yield* resolveHostCliHint("service restart", flags.baseDir),
           update: yield* resolveHostCliHint("update", flags.baseDir, [
