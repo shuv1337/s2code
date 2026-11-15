@@ -30,6 +30,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import {
   ensurePinnedRuntimeInstalled,
+  findPosixLauncher,
   launcherOwnsVersionsDir,
   pinnedRuntimeCommand,
   isUnpublishedRelease,
@@ -39,6 +40,8 @@ import {
   prunePinnedRuntimes,
   recordPinnedRuntimeLauncher,
   resolveLauncherPath,
+  readPosixLauncherTarget,
+  writePosixLauncher,
 } from "../cloud/pinnedRuntime.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
@@ -57,6 +60,7 @@ export const formatUpdatedLauncherCommand = (launcher: string, baseDir: string) 
 
 export class CliUpdateError extends Schema.TaggedError<CliUpdateError>()("CliUpdateError", {
   reason: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
     return this.reason;
@@ -130,7 +134,7 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
               ),
           ),
         )
-      : fs.readLink(file)
+      : fs.readLink(file).pipe(Effect.catch(() => readPosixLauncherTarget(file)))
     ).pipe(
       Effect.map((target) =>
         target === undefined ? undefined : path.resolve(path.dirname(file), target),
@@ -222,7 +226,11 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   const launcher =
     platform === "win32"
       ? yield* findWindowsShim(input.launchedAs, input.currentVersion)
-      : input.launchedAs;
+      : yield* findPosixLauncher({
+          launchedAs: input.launchedAs,
+          versionsDir,
+          version: input.currentVersion,
+        });
   if (launcher === undefined) return Option.none<string>();
   const current = yield* readLauncherTarget(launcher, input.currentVersion);
   if (current === undefined || !ownsTarget(current.target)) return Option.none<string>();
@@ -266,9 +274,11 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     const replacement =
       platform === "win32"
         ? fs.writeFileString(alias, `@echo off\r\n"${input.targetEntryPath}" %*`)
-        : fs
-            .symlink(input.targetEntryPath, `${alias}.${process.pid}.tmp`)
-            .pipe(Effect.andThen(fs.rename(`${alias}.${process.pid}.tmp`, alias)));
+        : writePosixLauncher({
+            launcher: alias,
+            executable: input.targetEntryPath,
+            exclusive: false,
+          });
     yield* replacement.pipe(
       Effect.mapError(
         () => new CliUpdateError({ reason: `Could not update the s2code launcher at ${alias}.` }),

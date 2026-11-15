@@ -16,6 +16,7 @@ vi.mock("../../package.json", async (importOriginal) => {
   return { default: { ...actual.default, version: "1.2.3" } };
 });
 
+import { posixLauncherScript } from "../cloud/pinnedRuntime.ts";
 import {
   formatCliCommand,
   resolveHostCliCommand,
@@ -439,7 +440,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
             logPath: "fork.log",
           },
           "1.2.3",
-          () => command,
+          { install: command, restart: command, update: command },
         ),
       ).toContain(command);
       yield* fs.remove(globalBin);
@@ -534,14 +535,14 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
       }),
   );
 
-  it.effect("names the launcher symlink that started a downloaded runtime", () =>
+  it.effect("names the launcher that started a downloaded runtime", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
       // The install script's launcher names ~/.t3, which here links to a home elsewhere.
       const executable = path.join(root, "data/t3/runtime/versions/1.0.0/t3");
-      const launcher = path.join(root, "bin/t3");
+      const launcher = path.join(root, "bin/s2code");
       const copy = path.join(root, "bin/t3-copy");
       yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
       yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
@@ -553,18 +554,19 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
       yield* fs.makeDirectory(path.join(root, "shadow-dir/t3"), { recursive: true });
       yield* fs.makeDirectory(path.join(root, "shadow-file"));
       yield* fs.writeFileString(path.join(root, "shadow-file/t3"), "");
-      const resolve = (invokedAs: string) =>
+      const resolve = (invokedAs: string, PATH = "shadow-dir:shadow-file:bin") =>
         resolveServerInstallation.pipe(
           Effect.provideService(HostProcess.ExecutablePath, executable),
           Effect.provideService(HostProcess.IsExecutable, true),
           Effect.provideService(HostProcess.InvokedAs, invokedAs),
           Effect.provideService(HostProcess.WorkingDirectory, root),
-          Effect.provideService(HostProcess.Environment, { PATH: "shadow-dir:shadow-file:bin" }),
+          Effect.provideService(HostProcess.Environment, { PATH }),
+          Effect.provideService(HostProcess.HomeDirectory, root),
           Effect.provideService(HostProcess.Platform, "linux"),
         );
       const baseDir = path.join(root, ".t3");
 
-      expect(yield* resolve("t3")).toEqual({ kind: "t3-launcher", launcher, baseDir });
+      expect(yield* resolve("s2code")).toEqual({ kind: "t3-launcher", launcher, baseDir });
       expect(yield* resolve(launcher)).toEqual({ kind: "t3-launcher", launcher, baseDir });
       expect(yield* resolve(executable)).toBeNull();
       expect(yield* resolve(copy)).toBeNull();
@@ -572,6 +574,7 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
       // The installer links s2code to the legacy shuv2code command, which links to the runtime.
       const legacy = path.join(root, "bin/shuv2code");
       const canonical = path.join(root, "bin/s2code");
+      yield* fs.remove(canonical);
       yield* fs.symlink(path.join(root, ".t3/runtime/versions/1.0.0/t3"), legacy);
       yield* fs.symlink(legacy, canonical);
       expect(yield* resolve("s2code")).toEqual({
@@ -580,6 +583,18 @@ it.layer(NodeServices.layer)("manual server installation ownership", (it) => {
         baseDir,
       });
       expect(yield* resolve(legacy)).toEqual({ kind: "t3-launcher", launcher: legacy, baseDir });
+      // The script launcher execs the runtime by absolute path, so argv0 names the runtime.
+      yield* fs.remove(launcher);
+      yield* fs.writeFileString(
+        launcher,
+        posixLauncherScript(path.join(root, ".t3/runtime/versions/1.0.0/t3")),
+        { mode: 0o755 },
+      );
+      expect(yield* resolve(executable, path.join(root, "bin"))).toEqual({
+        kind: "t3-launcher",
+        launcher,
+        baseDir,
+      });
     }),
   );
 
@@ -657,7 +672,8 @@ it.layer(NodeServices.layer)("fork recovery instructions", (it) => {
           expect(
             formatBootServiceProblem("service-stopped", {
               version: "1.2.3-nightly.20261014.1",
-              command: () => install,
+              install,
+              restart: install,
             }),
           ).toContain("systemctl --user status s2code-v2-nightly.service");
         }).pipe(

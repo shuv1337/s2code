@@ -12,10 +12,12 @@ import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import * as BootService from "../cloud/bootService.ts";
 import {
+  findPosixLauncher,
   generatedWindowsShimTarget,
   isVersionExecutable,
   launcherOwnsVersionsDir,
   pinnedRuntimeVersionsDir,
+  readPosixLauncherTarget,
   resolveLauncherPath,
 } from "../cloud/pinnedRuntime.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
@@ -80,6 +82,7 @@ export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(functi
       : undefined;
   }
   if (
+    !isVersionExecutable(path, input.versionsDir, input.launchedAs) &&
     ![
       resolveChannelIdentity(input.version ?? packageJson.version).executableName,
       resolveLegacyChannelIdentity(input.version ?? packageJson.version).executableName,
@@ -87,13 +90,14 @@ export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(functi
     ].includes(path.basename(input.launchedAs))
   )
     return undefined;
-  const target = (yield* readLauncherTarget(input.launchedAs, input.version))?.target;
-  return target !== undefined && launcherOwnsVersionsDir(path, input.versionsDir, target)
-    ? input.launchedAs
-    : undefined;
+  return yield* findPosixLauncher({
+    launchedAs: input.launchedAs,
+    versionsDir: input.versionsDir,
+    version: input.version,
+  });
 });
 
-/** Whether `launcher` is a link or unedited `t3.cmd` into this home's runtime/versions. */
+/** Whether `launcher` is a link, unedited `t3` script, or unedited `t3.cmd` into this home's runtime/versions. */
 const ownsLauncher = Effect.fn("cli.uninstall.owns_launcher")(function* (
   launcher: string,
   versionsDir: string,
@@ -120,6 +124,7 @@ const ownsLauncher = Effect.fn("cli.uninstall.owns_launcher")(function* (
             Effect.orElseSucceed(() => undefined),
           ),
           yield* fs.realPath(launcher).pipe(Effect.orElseSucceed(() => undefined)),
+          yield* readPosixLauncherTarget(launcher),
         ];
   return targets.some(
     (target) =>

@@ -103,7 +103,9 @@ const archiveChecksums = Effect.fn("archiveChecksums")(function* (input: {
   const checksums: Record<string, { archive: string; sha256: string }> = {};
   for (const { key, archive } of present) {
     const bytes = yield* fs.readFile(path.join(input.archivesDir, archive));
-    const digest = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", bytes));
+    const digest = yield* Effect.promise(() =>
+      crypto.subtle.digest("SHA-256", new Uint8Array(bytes)),
+    );
     checksums[key] = { archive, sha256: Buffer.from(digest).toString("hex") };
   }
   return checksums;

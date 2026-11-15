@@ -33,6 +33,7 @@ export class DesktopApplicationMenu extends Context.Service<
 >()("@t3tools/desktop/window/DesktopApplicationMenu") {}
 
 type DesktopApplicationMenuRuntimeServices =
+  | DesktopEnvironment.DesktopEnvironment
   | DesktopUpdates.DesktopUpdates
   | DesktopWindow.DesktopWindow
   | ElectronDialog.ElectronDialog;
@@ -64,7 +65,11 @@ const runMainContentsCommand = Effect.fn("desktop.menu.runMainContentsCommand")(
   yield* desktopWindow.runMainContentsCommand(command);
 });
 
+const describeUpdate = (displayName: string, version: string | null) =>
+  version === null ? `A new version of ${displayName}` : `${displayName} ${version}`;
+
 const checkForUpdatesFromMenu = Effect.gen(function* () {
+  const { displayName } = yield* DesktopEnvironment.DesktopEnvironment;
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
   const result = yield* updates.check("menu");
@@ -74,9 +79,38 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
     yield* electronDialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
-      message: `S2Code ${updateState.currentVersion} is currently the newest version available.`,
+      message: `${displayName} ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
+  } else if (updateState.status === "available") {
+    const { response } = yield* electronDialog.showMessageBox({
+      type: "info",
+      title: "Update available",
+      message: `${describeUpdate(displayName, updateState.availableVersion)} is available.`,
+      detail: `You're running ${displayName} ${updateState.currentVersion}.`,
+      buttons: ["Download", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) yield* updates.download;
+  } else if (updateState.status === "downloading") {
+    yield* electronDialog.showMessageBox({
+      type: "info",
+      title: "Update downloading",
+      message: `${describeUpdate(displayName, updateState.availableVersion)} is already downloading.`,
+      buttons: ["OK"],
+    });
+  } else if (updateState.status === "downloaded") {
+    const { response } = yield* electronDialog.showMessageBox({
+      type: "info",
+      title: "Update ready",
+      message: `${describeUpdate(displayName, updateState.downloadedVersion ?? updateState.availableVersion)} is ready to install.`,
+      detail: `${displayName} will restart to install it. Any running tasks will be interrupted.`,
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) yield* updates.install;
   } else if (updateState.status === "error") {
     yield* electronDialog.showMessageBox({
       type: "warning",

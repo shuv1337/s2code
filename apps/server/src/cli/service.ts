@@ -20,11 +20,12 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
-import { forkCliCommand, resolveCliCommand, formatCliHomeFlag } from "./invocation.ts";
+import { forkCliCommand, resolveCliCommand } from "./invocation.ts";
 import {
   isSameInstallationChannel,
   SEPARATE_CHANNEL_INSTALL_MESSAGE,
 } from "@t3tools/shared/channelIdentity";
+import { resolveHostCliHint } from "./invocation.ts";
 
 export const layer = (config: ServerConfig.ServerConfig["Service"]) =>
   BootService.layer({
@@ -204,14 +205,24 @@ function formatProtection(
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
-  command = (subcommand: string) => forkCliCommand(subcommand, cliVersion),
+  commands: {
+    readonly install: string;
+    readonly restart: string;
+    readonly update: string;
+    readonly uninstall?: string;
+  } = {
+    install: forkCliCommand("service install", cliVersion),
+    restart: forkCliCommand("service restart", cliVersion),
+    uninstall: forkCliCommand("service uninstall", cliVersion),
+    update: forkCliCommand(`update ${status.installedVersion ?? cliVersion}`, cliVersion),
+  },
   protection?: ServiceProtection.ServiceProtectionState,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, Windows with Task Scheduler";
+    return `${forkCliCommand("service", cliVersion)}\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd, Windows with Task Scheduler`;
   }
   if (!status.installed) {
-    return `s2code service\n  Status: not installed\n  Next: Run \`${command("service install")}\`.`;
+    return `${forkCliCommand("service", cliVersion)}\n  Status: not installed\n  Next: Run \`${commands.install}\`.`;
   }
   if (status.otherBaseDir !== undefined) {
     return [
@@ -229,7 +240,7 @@ export function formatServiceStatus(
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
     (problem) =>
-      `  [${problem}] ${BootService.formatBootServiceProblem(problem, { version: cliVersion, command })}`,
+      `  [${problem}] ${BootService.formatBootServiceProblem(problem, { ...commands, version: cliVersion })}`,
   );
   if (
     !status.current &&
@@ -237,17 +248,17 @@ export function formatServiceStatus(
     compareExactServiceVersions(status.installedVersion, cliVersion) > 0
   ) {
     return [
-      "T3 Code service",
+      forkCliCommand("service", cliVersion),
       `  Status: installed · s2code@${installedVersion} (newer than this s2code@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...formatProtection(protection),
       ...problems,
-      `  Next: Run \`${command(`update ${installedVersion}`)}\` to match it, or pass \`--allow-downgrade\` to \`${command("service install")}\` explicitly.`,
+      `  Next: Run \`${commands.update}\` to match it, or pass \`--allow-downgrade\` to \`${commands.install}\` explicitly.`,
     ].join("\n");
   }
   return [
-    "T3 Code service",
+    forkCliCommand("service", cliVersion),
     `  Status: ${status.current ? `installed · s2code@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
@@ -255,7 +266,7 @@ export function formatServiceStatus(
     ...problems,
     ...(status.current || status.problems?.includes("duplicate-service")
       ? []
-      : [`  Next: Run \`${command("service install")}\` to repair it.`]),
+      : [`  Next: Run \`${commands.install}\` to repair it.`]),
   ].join("\n");
 }
 
@@ -296,7 +307,8 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
         }
         yield* Console.log(formatServiceChange(result));
         if (!result.previouslyInstalled) {
-          yield* Console.log("Run `t3 up` to choose how your other devices reach it.");
+          const upCommand = yield* resolveHostCliHint("up", flags.baseDir);
+          yield* Console.log(`Run \`${upCommand}\` to choose how your other devices reach it.`);
         }
       }),
     ),
@@ -387,7 +399,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
   Command.withDescription("Show whether the T3 Code background service is installed."),
   Command.withHandler((flags) =>
-    runServiceCommand(flags, (config) =>
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
         const path = yield* Path.Path;
@@ -398,15 +410,15 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
                 Effect.provide(ProcessRunner.layer),
               )
             : undefined;
-        const prefix = (yield* resolveCliCommand("")).trimEnd();
-        yield* Console.log(
-          formatServiceStatus(
-            status,
-            packageJson.version,
-            (subcommand) => `${prefix} ${subcommand} ${formatCliHomeFlag(config.baseDir)}`,
-            protection,
-          ),
-        );
+        const commands = {
+          uninstall: yield* resolveHostCliHint("service uninstall", flags.baseDir),
+          install: yield* resolveHostCliHint("service install", flags.baseDir),
+          restart: yield* resolveHostCliHint("service restart", flags.baseDir),
+          update: yield* resolveHostCliHint("update", flags.baseDir, [
+            status.installedVersion ?? packageJson.version,
+          ]),
+        };
+        yield* Console.log(formatServiceStatus(status, packageJson.version, commands, protection));
       }),
     ),
   ),
