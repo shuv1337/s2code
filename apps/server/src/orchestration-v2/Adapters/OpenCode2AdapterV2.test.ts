@@ -568,7 +568,11 @@ const layerConfiguredServerMcp = McpSessionRegistry.layer.pipe(
       layerMcpEnvironment,
       ServerSettings.layerTest(),
       Layer.mock(ThreadManagementService.ThreadManagementService)({
-        getThreadRecords: () => Effect.succeed(threadMcpProjection),
+        getThreadRecords: (requestedThreadId) =>
+          Effect.sync(() => {
+            assert.equal(requestedThreadId, threadId);
+            return threadMcpProjection;
+          }),
       } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
       Layer.mock(ProviderRegistry.ProviderRegistry)({
         getProviders: Effect.succeed([]),
@@ -1858,6 +1862,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           assert.equal(added[0]?.config.url, issued.config.endpoint);
           assert.equal(added[0]?.config.headers.Authorization, issued.config.authorizationHeader);
           assert.equal(added[1]?.config.url, `${issued.config.endpoint}/servers/docs`);
+          assert.equal(added[1]?.config.headers.Authorization, issued.config.authorizationHeader);
 
           const capabilities = yield* mcpToolSession({
             endpoint: added[0]!.config.url,

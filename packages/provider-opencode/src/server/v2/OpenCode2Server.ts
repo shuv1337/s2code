@@ -9,6 +9,7 @@ import * as P from "effect/Predicate";
 import * as Redacted from "effect/Redacted";
 import * as HttpClientError from "effect/http/HttpClientError";
 
+import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
@@ -21,16 +22,12 @@ export interface OpenCode2Connection extends OpenCode2Client.OpenCode2Api {
   readonly url: string;
   readonly version: string;
   readonly external: boolean;
-  /** T3 issues a loopback MCP endpoint, so a server on another machine cannot reach it. */
+  /** Assumes daemons at local addresses share T3's network namespace. */
   readonly mcpReachable: boolean;
   /** Only owned processes have an authoritative lifetime signal. */
   readonly processExit?: Effect.Effect<void>;
 }
 
-/**
- * The endpoint T3 issues is loopback, so only a server answering at this host's own addresses can
- * reach it. Another machine gets no registration, and its threads are not told the tools exist.
- */
 export const reachesLocalMcpEndpoint = (
   serverUrl: string,
   hostAddresses: ReadonlySet<string>,
@@ -38,9 +35,7 @@ export const reachesLocalMcpEndpoint = (
   const url = URL.parse(serverUrl.trim());
   if (url === null) return false;
   const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
-  return (
-    host === "localhost" || host === "::1" || host.startsWith("127.") || hostAddresses.has(host)
-  );
+  return isLocalLoopbackHost(host) || hostAddresses.has(host);
 };
 
 export class OpenCode2Server extends Context.Service<

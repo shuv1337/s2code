@@ -300,6 +300,8 @@ describe("OpenCode2Server MCP reachability", () => {
     for (const serverUrl of [
       "http://100.126.224.78:4096",
       "http://opencode.example.test:4096",
+      "http://127.opencode.example.test:4096",
+      "http://127.0.0.1.example.test:4096",
       "http://[fd7a:115c:a1e0::1]:4096",
       "not a url",
     ]) {
