@@ -21,6 +21,11 @@ import {
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import {
+  DEFAULT_HOME_DIRECTORY,
+  PRODUCT_HOME_MARKER,
+  PRODUCT_ID,
+} from "@t3tools/shared/productIdentity";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -230,9 +235,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       assert(child.pid !== undefined);
       for (const source of ["flag", "T3CODE_HOME", "default"] as const) {
         const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-preflight-pair-" });
-        const baseDir = source === "default" ? path.join(home, ".t3") : home;
+        const baseDir = source === "default" ? path.join(home, DEFAULT_HOME_DIRECTORY) : home;
         const stateDir = path.join(baseDir, "userdata");
         yield* fs.makeDirectory(stateDir, { recursive: true });
+        // This fork claims a nonempty home only after its product marker is there.
+        yield* fs.writeFileString(path.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
         yield* fs.writeFileString(
           path.join(stateDir, "server-runtime.json"),
           yield* encodeUnknownJson({

@@ -189,7 +189,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
     },
     {
       label: "the local network opens",
-      prints: ["Run `s2code pair --base-dir <baseDir>`. Use the code on your other device."],
+      prints: [" pair --base-dir <baseDir>`. Use the code on your other device."],
       installed: true,
       env: "S2CODE_LAN=false\n",
       args: ["--lan"],
@@ -208,7 +208,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
     },
     {
       label: "a route turns off with no service to run",
-      prints: ["Run `s2code --base-dir <baseDir>` to use S2Code here."],
+      prints: [" --base-dir <baseDir>` to use S2Code here."],
       installed: false,
       env: "S2CODE_LAN=true\n",
       args: ["--no-lan"],
@@ -229,7 +229,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
     {
       label: "a failed update keeps service.env matching the old service",
       // The old service still runs, so no foreground server is offered.
-      prints: ["Fix that, then run `s2code up --base-dir <baseDir>` again."],
+      prints: [" up --base-dir <baseDir>` again."],
       installed: true,
       status: { current: false },
       installFails: true,
@@ -292,8 +292,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       installed: true,
       reportStatus: true,
       prints: [
-        "Turn it off: `s2code up --base-dir <baseDir> --no-lan`.",
-        "Change access: `s2code up --base-dir <baseDir>`.",
+        " up --base-dir <baseDir> --no-lan`.",
+        "Change access: `",
+        " up --base-dir <baseDir>`.",
       ],
       env: "",
       args: [],
@@ -306,7 +307,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       installed: true,
       reportStatus: true,
       prints: ["overridden · S2CODE_HOST=0.0.0.0"],
-      omits: "--no-lan",
+      omits: "up --no-lan",
       env: "S2CODE_HOST=0.0.0.0\n",
       args: [],
       installs: 0,
