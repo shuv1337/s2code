@@ -149,7 +149,12 @@ const make = Effect.gen(function* () {
         ),
       );
     if (shell === null || shell.deletedAt !== null) {
-      return yield* threadNotFound(threadManagement, threadId, `Thread ${threadId} was not found.`);
+      return yield* threadNotFound(
+        threadManagement,
+        scope,
+        threadId,
+        `Thread ${threadId} was not found.`,
+      );
     }
     const requestKey =
       input.clientRequestId === undefined ? yield* random.uuidV4() : input.clientRequestId;
@@ -206,7 +211,7 @@ const make = Effect.gen(function* () {
       .getThreadShell(input.threadId)
       .pipe(Effect.mapError(dispatchFailure));
     if (thread === null || thread.deletedAt !== null) {
-      return yield* threadNotFound(threadManagement, input.threadId, "Thread was not found.");
+      return yield* failure("thread_not_found", "Thread was not found.");
     }
     if (input.autoSettle !== undefined && thread.archivedAt !== null) {
       return yield* failure(

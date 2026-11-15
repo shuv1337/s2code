@@ -31,6 +31,7 @@
     "@types/pngjs": "6.0.5",
     "@types/semver": "7.8.0",
     "esbuild": "0.28.2",
+    "jszip": "3.10.1",
     "postject": "1.0.0-alpha.6",
     "typescript-legacy": "npm:typescript@~6.0.3",
     "vite-plus": "catalog:"

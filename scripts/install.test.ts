@@ -121,6 +121,9 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer term
     },
   );
 });
+/** The launcher install.sh, `t3 install`, and `t3 update` write; exec by absolute path. */
+const launcherScript = (executable: string) =>
+  `#!/bin/sh\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`;
 
 const nightlies = Array.from({ length: 100 }, (_, index) => ({
   tag_name: `v1.2.4-nightly.20261020.${200 - index}`,
@@ -146,10 +149,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
       await NodeFSP.writeFile(NodePath.join(target, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
         mode: 0o755,
       });
-      const { status, stdout, stderr } = NodeChildProcess.spawnSync(
-        "sh",
-        [NodePath.resolve(import.meta.dirname, "install.sh")],
-        {
+      const install = () =>
+        NodeChildProcess.spawnSync("sh", [NodePath.resolve(import.meta.dirname, "install.sh")], {
           cwd: root,
           env: {
             ...process.env,
@@ -160,11 +161,16 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
             S2CODE_RELEASE_BASE_URL: "http://127.0.0.1:1",
           },
           encoding: "utf8",
-        },
-      );
+        });
+      // The second run replaces the launcher the first wrote, newlines in its path and all.
+      const first = install();
+      expect(first.status, first.stdout + first.stderr).toBe(0);
+      const { status, stdout, stderr } = install();
       expect(status, stdout + stderr).toBe(0);
       expect(stderr).toContain(`Installed s2code ${version}`);
-      expect(await NodeFSP.realpath(launcher)).toBe(NodePath.join(target, "t3"));
+      expect(await NodeFSP.readFile(launcher, "utf8")).toBe(
+        launcherScript(NodePath.join(target, "t3")),
+      );
       expect(
         NodeChildProcess.execFileSync(launcher, ["--version"], {
           cwd: NodeOS.tmpdir(),
@@ -428,7 +434,9 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
         });
         expect(upgrade.code, upgrade.output).toBe(0);
         expect(await NodeFSP.readlink(link)).toBe(NodePath.join(binDir, "shuv2code"));
-        expect(await NodeFSP.realpath(link)).toBe(NodePath.join(home, "runtime/versions/1.2.3/t3"));
+        expect(await NodeFSP.readFile(link, "utf8")).toBe(
+          launcherScript(NodePath.join(home, "runtime/versions/1.2.3/t3")),
+        );
         expect(upgrade.output).toContain(`Add ${binDir} to your PATH`);
 
         // Containers and CI often have no SHELL; `set -u` must not stop the installer there.
@@ -608,6 +616,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
             "rm",
             "mv",
             "ln",
+            "chmod",
             "sed",
             "tr",
             "head",

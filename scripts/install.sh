@@ -314,18 +314,42 @@ fi
 for child in userdata dev runtime; do
   case "$(canonical_dir "$t3_home/$child")/" in "$t3_home/"*) ;; *) fail "Refusing foreign $child path." ;; esac
 done
+nl='
+'
+launcher_head="#!/bin/sh${nl}exec '"
+launcher_tail="' \"\$@\"${nl}"
+# The x keeps a trailing newline in the path through command substitution.
+launcher_script() {
+  quoted="$(printf '%sx' "$1" | sed "s/'/'\\\\''/g")"
+  printf '%s%s%s' "$launcher_head" "${quoted%x}" "$launcher_tail"
+}
+# The executable an unedited launcher script at $1 runs; a user's own wrapper prints nothing.
+script_t3() {
+  [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c < "$1")" -le 4096 ] || return 0
+  contents="$(cat "$1"; printf x)"
+  contents="${contents%x}"
+  case "$contents" in "$launcher_head"*"$launcher_tail") ;; *) return 0 ;; esac
+  quoted="${contents#"$launcher_head"}"
+  unquoted="$(printf '%sx' "${quoted%"$launcher_tail"}" | sed "s/'\\\\''/'/g")"
+  unquoted="${unquoted%x}"
+  [ -n "$unquoted" ] && [ "$(launcher_script "$unquoted"; printf x)" = "${contents}x" ] && printf '%s' "$unquoted"
+  return 0
+}
+launcher_target() {
+  if [ -L "$1" ]; then readlink "$1"; else script_t3 "$1"; fi
+}
 # A new alias must not replace another installation or an unrelated command.
 bin_dir="$(canonical_dir "$bin_dir")"
 legacy_command_name="shuv2code${command_name#s2code}"
 for command in "$command_name" "$legacy_command_name"; do
   installed_command="$bin_dir/$command"
   if [ -e "$installed_command" ] || [ -L "$installed_command" ]; then
-    [ -L "$installed_command" ] || fail "Refusing to replace an existing command: $installed_command"
-    link_target="$(readlink "$installed_command")"
+    link_target="$(launcher_target "$installed_command")"
+    [ -n "$link_target" ] || fail "Refusing to replace an existing command: $installed_command"
     case "$link_target" in /*) ;; *) link_target="$bin_dir/$link_target" ;; esac
     if [ "$command" = "$command_name" ] && [ "$link_target" = "$bin_dir/$legacy_command_name" ]; then
-      [ -L "$link_target" ] || fail "Refusing a canonical command without an owned legacy launcher: $installed_command"
-      link_target="$(readlink "$link_target")"
+      link_target="$(launcher_target "$link_target")"
+      [ -n "$link_target" ] || fail "Refusing a canonical command without an owned legacy launcher: $installed_command"
       case "$link_target" in /*) ;; *) link_target="$bin_dir/$link_target" ;; esac
     fi
     case "$(canonical_dir "$(dirname "$link_target")")/$(basename "$link_target")" in
@@ -439,8 +463,13 @@ fi
 
 step "Setting up the s2code command..."
 mkdir -p "$bin_dir"
-# Installed old updaters only repoint their legacy command.
-ln -sfn "${target_dir}/t3" "${bin_dir}/$legacy_command_name"
+# Exec the runtime by absolute path so SDK helpers resolve beside it.
+launcher_tmp="$(mktemp "${bin_dir}/.s2code.XXXXXX")"
+trap 'rm -f "$launcher_tmp"' EXIT
+launcher_script "${target_dir}/t3" > "$launcher_tmp"
+chmod 755 "$launcher_tmp"
+mv -f "$launcher_tmp" "${bin_dir}/$legacy_command_name"
+trap - EXIT
 ln -sfn "${bin_dir}/$legacy_command_name" "${bin_dir}/$command_name"
 # Pruning keeps what this launcher points at; a background service cannot see bin_dir otherwise.
 launcher="$(CDPATH='' cd -P -- "$bin_dir" && pwd)/$command_name"

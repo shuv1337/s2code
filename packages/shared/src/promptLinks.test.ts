@@ -165,4 +165,18 @@ describe("link round trips", () => {
       "s2code://threads/env-1/thread-1?prompt=hi",
     );
   });
+
+  it("maps links in browsers without URL.canParse, such as Safari before 17", () => {
+    const canParse = URL.canParse;
+    Reflect.deleteProperty(URL, "canParse");
+    try {
+      expect(
+        promptLinkAppPath("https://app.fork.test/new?prompt=hi", "https://app.fork.test"),
+      ).toBe("/new?prompt=hi");
+      expect(promptLinkAppPath("https://app.t3.codes/")).toBeNull();
+      expect(promptLinkAppPath("not a url")).toBeNull();
+    } finally {
+      URL.canParse = canParse;
+    }
+  });
 });

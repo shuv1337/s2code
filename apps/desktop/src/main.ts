@@ -1,10 +1,10 @@
 import * as MacPermissions from "./permissions/MacPermissions.ts";
 import { applyProductEnvironment } from "@t3tools/shared/productIdentity";
 applyProductEnvironment(process.env);
+import { handleStdioError } from "./app/stdioErrors.ts";
+
 for (const stream of [process.stdout, process.stderr]) {
-  stream.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code !== "EPIPE") throw err;
-  });
+  stream.on("error", handleStdioError);
 }
 
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";

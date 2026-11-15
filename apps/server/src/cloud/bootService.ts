@@ -710,19 +710,21 @@ const BootServiceProblem = Schema.Literals([
 ]);
 type BootServiceProblem = typeof BootServiceProblem.Type;
 
-/** These codes and recovery steps are documented in docs/user/background-service.md. */
 export function formatBootServiceProblem(
   problem: BootServiceProblem,
-  input: {
-    version?: string;
-    command?: (subcommand: string) => string;
-  } = {},
+  commands: {
+    readonly install: string;
+    readonly restart: string;
+    readonly uninstall?: string;
+    readonly version?: string;
+  } = {
+    install: forkCliCommand("service install"),
+    restart: forkCliCommand("service restart"),
+  },
 ): string {
-  const version = input.version ?? packageJson.version;
-  const command = input.command ?? ((subcommand) => forkCliCommand(subcommand, version));
   switch (problem) {
     case "duplicate-service":
-      return `Both old and new service names serve this home. Run \`${command("service uninstall")}\` to remove both, then \`${command("service install")}\` to install one service. Your data is kept.`;
+      return `Both old and new service names serve this home. Run \`${commands.uninstall ?? forkCliCommand("service uninstall", commands.version)}\` to remove both, then \`${commands.install}\` to install one service. Your data is kept.`;
     case "user-manager-unavailable":
       return "Cannot reach the systemd user manager. Run `systemctl --user status` in a login session for the service user. Install your distribution's systemd user-session support if it is missing; do not run T3 with sudo.";
     case "linger-unavailable":
@@ -730,11 +732,11 @@ export function formatBootServiceProblem(
     case "linger-disabled":
       return 'Lingering is disabled. T3 Code will stop when your last login session ends and will not start at boot. Run `sudo loginctl enable-linger "$(id -un)"` on this machine, then retry the service command as your normal user.';
     case "service-disabled":
-      return `The service is not enabled to start automatically. Run \`${command("service install")}\` to repair it.`;
+      return `The service is not enabled to start automatically. Run \`${commands.install}\` to repair it.`;
     case "service-stopped":
-      return `The service is not running. Check the service log (on Linux, also \`systemctl --user status ${serviceIdentity(version).unitFile}\`), then run \`${command("service install")}\`.`;
+      return `The service is not running. Check the service log (on Linux, also \`systemctl --user status ${serviceIdentity(commands.version).unitFile}\`), then run \`${commands.install}\`.`;
     case "restart-pending":
-      return `A newer version is installed but the service is still running the previous one. Run \`${command("service restart")}\` to switch.`;
+      return `A newer version is installed but the service is still running the previous one. Run \`${commands.restart}\` to switch.`;
   }
 }
 
