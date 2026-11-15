@@ -37,11 +37,23 @@ export type MobileThemeVariables = Readonly<Record<MobileThemeVariable, string>>
 function normalizeMobileThemeId(value: unknown): MobileThemeId {
   return typeof value === "string" && (MOBILE_THEME_IDS as readonly string[]).includes(value)
     ? (value as MobileThemeId)
-    : DEFAULT_MOBILE_THEME_ID;
+    : "ocean";
 }
 
-export function normalizeMobileThemeMode(value: unknown): MobileThemeMode {
-  return value === "light" || value === "dark" || value === "system" ? value : "system";
+export function resolveMobileThemeMode(preferences: {
+  readonly themeMode?: unknown;
+  readonly themeId?: unknown;
+  readonly lightThemeId?: unknown;
+  readonly darkThemeId?: unknown;
+}): MobileThemeMode {
+  const value = preferences.themeMode;
+  if (value === "light" || value === "dark" || value === "system") return value;
+  const hasThemeChoice = [
+    preferences.themeId,
+    preferences.lightThemeId,
+    preferences.darkThemeId,
+  ].some((id) => typeof id === "string" && (MOBILE_THEME_IDS as readonly string[]).includes(id));
+  return hasThemeChoice ? "system" : "dark";
 }
 
 export function resolveMobileThemeIds(preferences: {

@@ -219,7 +219,7 @@
         };
 
         try {
-          const storedTheme = window.localStorage.getItem("t3code:theme");
+          let storedTheme = window.localStorage.getItem("t3code:theme");
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const LEGACY_THEME_IDS = {
             "t3-chat-dark": "t3-chat",
@@ -228,9 +228,16 @@
             "t3-ember": "ember",
             "t3-iris": "iris",
           };
+          if (
+            storedTheme !== null &&
+            !RESERVED_THEME_IDS.includes(storedTheme) &&
+            !findCustomTheme(storedTheme)
+          ) {
+            storedTheme = null;
+          }
           const isLegacyT3ChatDark = storedTheme === "t3-chat-dark";
           const themeId =
-            storedTheme === null ? "" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
+            storedTheme === null ? "ocean" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
           const legacyMode = isLegacyT3ChatDark ? "dark" : null;
           const builtInModes = BUILT_IN_THEME_MODES[themeId] ?? null;
           const customTheme = builtInModes ? null : findCustomTheme(themeId);
@@ -241,14 +248,13 @@
                   (mode) => mode === customTheme.appearance || customTheme.variants?.[mode],
                 )
               : null);
-          const isKnownTheme =
-            storedTheme === "light" ||
-            storedTheme === "dark" ||
-            storedTheme === "system" ||
-            themeModes !== null;
-          const theme = isKnownTheme && storedTheme ? storedTheme : "system";
-          const isThemed = isKnownTheme && themeModes !== null;
-          const baseAppearance = customTheme ? customTheme.appearance : "light";
+          const theme = storedTheme ?? "ocean";
+          const isThemed = themeModes !== null;
+          const baseAppearance = customTheme
+            ? customTheme.appearance
+            : storedTheme === null
+              ? "dark"
+              : "light";
           const systemMode = prefersDark ? "dark" : "light";
           const storedAppearanceMode = window.localStorage.getItem(
             THEME_APPEARANCE_MODE_STORAGE_KEY,
@@ -352,14 +358,7 @@
           } else {
             delete document.documentElement.dataset.themeId;
           }
-          // A resolved half is a selection even when the base theme is gone
-          // (deleting the base leaves the mix pointing at a real theme).
-          const hasSelection = halfThemeId !== null || (isKnownTheme && storedTheme !== null);
-          if (hasSelection) {
-            document.documentElement.dataset.themeSelected = "true";
-          } else {
-            delete document.documentElement.dataset.themeSelected;
-          }
+          document.documentElement.dataset.themeSelected = "true";
           document.documentElement.classList.toggle("dark", isDark);
           const chromeColor = customColors
             ? isThemeColor(customColors.chrome)
@@ -371,24 +370,21 @@
                 ? DARK_BACKGROUND
                 : LIGHT_BACKGROUND;
           document.documentElement.style.backgroundColor = chromeColor;
-          if (hasSelection) {
-            const splashColors = customSplash ?? builtInSplash ?? fallbackSplash;
-            for (const [name, value] of Object.entries(splashColors)) {
-              document.documentElement.style.setProperty(`--boot-${name}`, value);
-            }
+          const splashColors = customSplash ?? builtInSplash ?? fallbackSplash;
+          for (const [name, value] of Object.entries(splashColors)) {
+            document.documentElement.style.setProperty(`--boot-${name}`, value);
           }
           setThemeColor(chromeColor);
         } catch {
-          let prefersDark = true;
-          try {
-            prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          } catch {}
-          delete document.documentElement.dataset.themeId;
-          delete document.documentElement.dataset.themeSelected;
-          document.documentElement.classList.toggle("dark", prefersDark);
-          const fallbackColor = prefersDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
-          document.documentElement.style.backgroundColor = fallbackColor;
-          setThemeColor(fallbackColor);
+          const splash = BUILT_IN_THEME_PALETTES.ocean.dark;
+          document.documentElement.dataset.themeId = "ocean";
+          document.documentElement.dataset.themeSelected = "true";
+          document.documentElement.classList.add("dark");
+          document.documentElement.style.backgroundColor = splash.chrome;
+          for (const [name, value] of Object.entries(splash)) {
+            document.documentElement.style.setProperty(`--boot-${name}`, value);
+          }
+          setThemeColor(splash.chrome);
         }
       })();
     </script>

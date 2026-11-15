@@ -120,7 +120,7 @@ export function AppearanceSettingsPanel() {
       : "Only built-in themes show artwork."
     : environmentStageVariant
       ? "Choose how Dev and Nightly environments are identified."
-      : "Show Dev or Nightly artwork in the sidebar header.";
+      : "Show Dev or Nightly artwork on the send button.";
   const glassOpacityRatio =
     (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY);
   const glassOpacitySliderStyle = {
