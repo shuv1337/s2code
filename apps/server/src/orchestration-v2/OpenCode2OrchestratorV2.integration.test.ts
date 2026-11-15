@@ -65,9 +65,11 @@ const mcpRules = (name: string) => [
   { action: "t3-code-*", resource: "*", effect: "deny" },
   { action: `t3-code-thread_${name}_*`, resource: "*", effect: "allow" },
 ];
+/** Threads share one daemon, so each denies every shared registration before its own T3 servers. */
+const sharedMcpRules = [{ action: "shared-*", resource: "*", effect: "deny" }];
 const FULL_ACCESS = [{ action: "*", resource: "*", effect: "allow" }];
 
-const t3Rules = (name: string) => [...FULL_ACCESS, ...mcpRules(name)];
+const t3Rules = (name: string) => [...FULL_ACCESS, ...sharedMcpRules, ...mcpRules(name)];
 
 const BUILD_PATHS = [
   {
@@ -113,12 +115,14 @@ const autoEditRules = (name: string) => [
   { action: "shell", resource: "*", effect: "ask" },
   { action: "edit", resource: "*", effect: "allow" },
   { action: "external_directory", resource: "*", effect: "ask" },
+  ...sharedMcpRules,
   ...BUILD_PATHS,
   ...mcpRules(name),
 ];
 
 const planRules = (name: string) => [
   { action: "*", resource: "*", effect: "allow" },
+  ...sharedMcpRules,
   { action: "edit", resource: "*", effect: "deny" },
   ...PLAN_PATHS,
   ...mcpRules(name),
