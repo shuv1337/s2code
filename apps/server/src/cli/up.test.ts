@@ -307,7 +307,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       installed: true,
       reportStatus: true,
       prints: ["overridden · S2CODE_HOST=0.0.0.0"],
-      omits: "up --no-lan",
+      omits: "--no-lan",
       env: "S2CODE_HOST=0.0.0.0\n",
       args: [],
       installs: 0,
