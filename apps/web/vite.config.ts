@@ -132,8 +132,9 @@ const browserTestProject = {
   },
   test: {
     name: "browser",
-    // Chromium shares CI memory with Vite; CPU-count workers exhaust renderer headroom late in the suite.
-    maxWorkers: 1,
+    // Leave CI headroom for Vite and the Chromium renderer heaps.
+    maxWorkers: 2,
+    sequence: { groupOrder: 1 },
     include: ["src/**/*.browser.test.{ts,tsx}"],
     hookTimeout: 15_000,
     testTimeout: 15_000,
@@ -146,6 +147,9 @@ const browserTestProject = {
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
       commands: {
+        collectBrowserGarbage: async ({ page }) => {
+          await page.requestGC();
+        },
         // Playwright's mouse outlives each test, so whatever mounts under its last
         // position starts hovered. test/browserSetup.ts parks it off the page before each test.
         resetPointer: async ({ page }) => {
