@@ -69,6 +69,8 @@ it.effect("rejects a planned fork whose source was deleted before it committed",
     const plannedFork = {
       commandId: CommandId.make("fork"),
       commandType: "thread.fork",
+      payloadFingerprint: "fork-payload",
+      principal: "fork-caller",
       threadId: targetId,
       acceptedAt: now,
       effects: [],
@@ -99,6 +101,8 @@ it.effect("rejects a planned fork whose source was deleted before it committed",
     });
     const rejected = yield* sink.commitCommand(plannedFork);
     assert.equal(rejected.receipt.status, "rejected");
+    assert.equal(rejected.receipt.payloadFingerprint, plannedFork.payloadFingerprint);
+    assert.equal(rejected.receipt.principal, plannedFork.principal);
     assert.isFalse(rejected.committed);
     const replayed = yield* sink.commitCommand(plannedFork);
     assert.deepEqual(replayed.receipt, rejected.receipt);
