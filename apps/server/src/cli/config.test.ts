@@ -21,6 +21,11 @@ import {
 } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import {
+  DEFAULT_HOME_DIRECTORY,
+  PRODUCT_HOME_MARKER,
+  PRODUCT_ID,
+} from "@t3tools/shared/productIdentity";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -220,6 +225,61 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         expect(String(error)).toContain(`pid ${child.pid}`);
         expect(yield* fs.exists(cwd)).toBe(false);
       }),
+  );
+
+  it.effect("names the pair command for the refused server's home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const child = yield* liveProcess;
+      assert(child.pid !== undefined);
+      for (const source of ["flag", "T3CODE_HOME", "default"] as const) {
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-preflight-pair-" });
+        const baseDir = source === "default" ? path.join(home, DEFAULT_HOME_DIRECTORY) : home;
+        const stateDir = path.join(baseDir, "userdata");
+        yield* fs.makeDirectory(stateDir, { recursive: true });
+        // This fork claims a nonempty home only after its product marker is there.
+        yield* fs.writeFileString(path.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
+        yield* fs.writeFileString(
+          path.join(stateDir, "server-runtime.json"),
+          yield* encodeUnknownJson({
+            version: 1,
+            pid: child.pid,
+            port: 3773,
+            origin: "http://127.0.0.1:3773",
+            startedAt: "2026-10-01T00:00:00.000Z",
+          }),
+        );
+        const error = yield* resolveServerConfig(
+          {
+            ...minimalWebFlags(baseDir),
+            baseDir: source === "flag" ? Option.some(baseDir) : Option.none(),
+            cwd: Option.some(path.join(home, "project")),
+          },
+          Option.none(),
+          { rejectRunningServer: true },
+        ).pipe(
+          Effect.provide(
+            Layer.merge(
+              NetService.layer,
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({
+                  env: source === "T3CODE_HOME" ? { T3CODE_HOME: baseDir } : {},
+                }),
+              ),
+            ),
+          ),
+          Effect.provideService(HostProcess.HomeDirectory, home),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.flip,
+        );
+        // A temp dir with spaces or backslashes is single-quoted for the shell.
+        const homePattern = baseDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        expect(String(error)).toMatch(
+          new RegExp(`pair --base-dir (${homePattern}|'${homePattern}')`),
+        );
+      }
+    }),
   );
 
   it.effect("enables a trimmed reusable auth token only for web dev mode", () =>
