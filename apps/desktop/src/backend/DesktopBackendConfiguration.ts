@@ -865,6 +865,11 @@ export const make = Effect.gen(function* () {
       Effect.provideService(Path.Path, environment.path),
       Effect.provideService(HttpClient.HttpClient, httpClient),
       Effect.provideService(Mac.Mac, mac),
+      Effect.retry({
+        while: (error) => error._tag === "LocalServiceUpdating",
+        schedule: Schedule.spaced("500 millis"),
+        times: 240,
+      }),
     );
     const attachment = yield* discover.pipe(
       Effect.catchTags({
@@ -880,6 +885,7 @@ export const make = Effect.gen(function* () {
             entryArgs: config.args.slice(0, config.args.indexOf(config.entryPath) + 1),
             env: { ...config.env, SHUV2CODE_HOME: environment.baseDir },
             appVersion: environment.appVersion,
+            serverVersion: mismatch.serverVersion,
           }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
           // The restarted service publishes its attachment record shortly after `update` exits.
           return yield* discover.pipe(

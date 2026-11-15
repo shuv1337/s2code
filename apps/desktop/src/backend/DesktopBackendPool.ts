@@ -173,8 +173,13 @@ export const layer = Layer.effect(
         const { reason, fatal } = failure;
         if (failure.localServerAttach) {
           yield* logBackendPoolWarning("cannot attach to the existing local server", { reason });
-          yield* electronDialog.showErrorBox("Can't connect to the running server", reason);
-          yield* electronApp.quit;
+          // Startup recovery must stay alive so an older desktop can update without touching the service.
+          yield* SubscriptionRef.set(primaryBackendStartup, {
+            _tag: "Failing",
+            reason,
+            output: "",
+            managedPolicy: false,
+          });
           return false;
         }
         if (!fatal) {

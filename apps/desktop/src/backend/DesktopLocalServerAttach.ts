@@ -1,6 +1,7 @@
 import { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
 import { currentDesktopBootstrapToken } from "@t3tools/shared/desktopBootstrapToken";
+import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import {
   LOCAL_SERVER_ATTACHMENT_FILE,
   LocalServerAttachment,
@@ -26,6 +27,11 @@ const decodeRuntime = Schema.decodeUnknownEffect(
   ),
 );
 const decodeAttachment = Schema.decodeUnknownEffect(Schema.fromJsonString(LocalServerAttachment));
+const decodeServiceState = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({ update: Schema.optional(Schema.Struct({ status: Schema.String })) }),
+  ),
+);
 
 export class LocalServerAttachmentError extends Schema.TaggedError<LocalServerAttachmentError>()(
   "LocalServerAttachmentError",
@@ -46,6 +52,15 @@ export class LocalServiceVersionMismatch extends Schema.TaggedError<LocalService
   }
 }
 
+export class LocalServiceUpdating extends Schema.TaggedError<LocalServiceUpdating>()(
+  "LocalServiceUpdating",
+  {},
+) {
+  override get message() {
+    return "The background service is still updating. Retry after its update finishes.";
+  }
+}
+
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -58,6 +73,7 @@ export function isProcessAlive(pid: number): boolean {
 
 /** A live but incompatible/unreachable server must never trigger a competing DB owner. */
 export const discover = Effect.fn("desktop.localServerAttach.discover")(function* (input: {
+  readonly baseDir: string;
   readonly stateDir: string;
   readonly appVersion: string;
 }) {
@@ -88,6 +104,13 @@ export const discover = Effect.fn("desktop.localServerAttach.discover")(function
             "A server is already running but does not support automatic desktop attachment. Update or stop it first.",
         });
       }
+    }
+    // The launcher releases the ownership lock while backing up the database between server versions.
+    const serviceState = yield* fs
+      .readFileString(path.join(input.baseDir, "runtime", "service-state.json"))
+      .pipe(Effect.flatMap(decodeServiceState), Effect.option);
+    if (Option.isSome(serviceState) && serviceState.value.update?.status === "pending") {
+      return yield* new LocalServiceUpdating();
     }
   });
   if (!(yield* fs.exists(file))) {
@@ -155,19 +178,23 @@ export const discover = Effect.fn("desktop.localServerAttach.discover")(function
   return record;
 });
 
-/**
- * Runs the desktop's bundled CLI `update` pinned to the desktop's own version. It
- * downloads that release's runtime, repoints the service, and restarts it. The CLI
- * refuses to move a newer service backwards, so a desktop older than its service
- * reports that instead of downgrading the database owner.
- */
+/** Pin older services to the desktop; a newer database owner requires a desktop update. */
 export const updateServiceToAppVersion = Effect.fn("desktop.localServerAttach.updateService")(
   function* (input: {
     readonly executablePath: string;
     readonly entryArgs: ReadonlyArray<string>;
     readonly env: Record<string, string | undefined>;
     readonly appVersion: string;
+    readonly serverVersion: string;
   }) {
+    if (
+      parseSemver(input.serverVersion) !== null &&
+      compareSemverVersions(input.serverVersion, input.appVersion) > 0
+    ) {
+      return yield* new LocalServerAttachmentError({
+        reason: `The background service runs ${input.serverVersion}, newer than this desktop (${input.appVersion}). Update the desktop app to reconnect. The service has not been downgraded.`,
+      });
+    }
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const failed = (detail: string) =>
       new LocalServerAttachmentError({

@@ -55,45 +55,50 @@ const layer = Layer.mergeAll(
 );
 
 describe("local desktop attachment", () => {
-  it.effect("preserves the downgrade refusal instead of showing only its final stack frame", () =>
-    Effect.gen(function* () {
-      const reason =
-        "t3@0.1.0-nightly.20261026.62 is older than the installed 0.1.3-nightly.20261027.66.";
-      const error = yield* Effect.flip(
-        updateServiceToAppVersion({
-          executablePath: "electron",
-          entryArgs: ["bin.mjs"],
-          env: {},
-          appVersion: "0.1.0-nightly.20261026.62",
-        }).pipe(
-          Effect.provideService(
-            ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make(() =>
-              Effect.succeed(
-                ChildProcessSpawner.makeHandle({
-                  pid: ChildProcessSpawner.ProcessId(123),
-                  stdout: Stream.empty,
-                  stderr: Stream.make(
-                    new TextEncoder().encode(
-                      `Checking for updates...\nERROR (#1): CliUpdateError: ${reason}\n    at cli.update.run (Nightly)\n    at cli.update.run (definition) (Nightly)\n`,
+  it.effect.each([false, true])(
+    "refuses a downgrade before spawning when the newer service version is known: %s",
+    (newerService) =>
+      Effect.gen(function* () {
+        const reason =
+          "t3@0.1.0-nightly.20261026.62 is older than the installed 0.1.3-nightly.20261027.66.";
+        const error = yield* Effect.flip(
+          updateServiceToAppVersion({
+            executablePath: "electron",
+            entryArgs: ["bin.mjs"],
+            env: {},
+            appVersion: "0.1.0-nightly.20261026.62",
+            serverVersion: newerService ? "0.1.3-nightly.20261027.66" : "0.0.1",
+          }).pipe(
+            Effect.provideService(
+              ChildProcessSpawner.ChildProcessSpawner,
+              ChildProcessSpawner.make(() =>
+                newerService
+                  ? Effect.die("must not downgrade a newer service")
+                  : Effect.succeed(
+                      ChildProcessSpawner.makeHandle({
+                        pid: ChildProcessSpawner.ProcessId(123),
+                        stdout: Stream.empty,
+                        stderr: Stream.make(
+                          new TextEncoder().encode(
+                            `Checking for updates...\nERROR (#1): CliUpdateError: ${reason}\n    at cli.update.run (Nightly)\n    at cli.update.run (definition) (Nightly)\n`,
+                          ),
+                        ),
+                        all: Stream.empty,
+                        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+                        isRunning: Effect.succeed(false),
+                        kill: () => Effect.void,
+                        stdin: Sink.drain,
+                        getInputFd: () => Sink.drain,
+                        getOutputFd: () => Stream.empty,
+                        unref: Effect.succeed(Effect.void),
+                      }),
                     ),
-                  ),
-                  all: Stream.empty,
-                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
-                  isRunning: Effect.succeed(false),
-                  kill: () => Effect.void,
-                  stdin: Sink.drain,
-                  getInputFd: () => Sink.drain,
-                  getOutputFd: () => Stream.empty,
-                  unref: Effect.succeed(Effect.void),
-                }),
               ),
             ),
           ),
-        ),
-      );
-      assert.include(error.message, reason);
-    }),
+        );
+        assert.include(error.message, newerService ? "Update the desktop app" : reason);
+      }),
   );
 
   it.effect.each([
@@ -107,12 +112,19 @@ describe("local desktop attachment", () => {
     "legacy-service",
     "unavailable",
     "auth-rejected",
+    "service-updating",
   ] as const)("%s", (scenario) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const stateDir = yield* fs.makeTempDirectoryScoped();
-      if (scenario === "legacy") {
+      if (scenario === "service-updating") {
+        yield* fs.makeDirectory(path.join(stateDir, "runtime"));
+        yield* fs.writeFileString(
+          path.join(stateDir, "runtime", "service-state.json"),
+          JSON.stringify({ update: { status: "pending" } }),
+        );
+      } else if (scenario === "legacy") {
         yield* fs.writeFileString(
           path.join(stateDir, "server-runtime.json"),
           JSON.stringify({ pid: process.pid }),
@@ -148,7 +160,7 @@ describe("local desktop attachment", () => {
           JSON.stringify({ pid: process.pid }),
         );
       }
-      const result = discover({ stateDir, appVersion: "1.2.3" }).pipe(
+      const result = discover({ baseDir: stateDir, stateDir, appVersion: "1.2.3" }).pipe(
         Effect.provideService(
           HttpClient.HttpClient,
           scenario === "unavailable" || scenario === "auth-rejected"
@@ -167,7 +179,9 @@ describe("local desktop attachment", () => {
             : http,
         ),
       );
-      if (scenario === "service-version" || scenario === "legacy-service") {
+      if (scenario === "service-updating") {
+        assert.equal((yield* Effect.flip(result))._tag, "LocalServiceUpdating");
+      } else if (scenario === "service-version" || scenario === "legacy-service") {
         assert.equal((yield* Effect.flip(result))._tag, "LocalServiceVersionMismatch");
       } else if (
         scenario === "version" ||

@@ -100,11 +100,15 @@ describe("DesktopHomeOwner.awaitHomeOwnershipRelease", () => {
   it.effect("waits for a shutting-down owner to release the lock, then gives up", () =>
     withTempHome((userdata) =>
       Effect.gen(function* () {
-        assert.isTrue(yield* DesktopHomeOwner.awaitHomeOwnershipRelease());
+        assert.isTrue(
+          yield* DesktopHomeOwner.awaitHomeOwnershipRelease({ allowServiceAttachment: false }),
+        );
 
         const lock = new NodeSqlite.DatabaseSync(`${userdata}/server-owner.sqlite`);
         lock.exec("BEGIN EXCLUSIVE;");
-        const released = yield* Effect.forkChild(DesktopHomeOwner.awaitHomeOwnershipRelease());
+        const released = yield* Effect.forkChild(
+          DesktopHomeOwner.awaitHomeOwnershipRelease({ allowServiceAttachment: false }),
+        );
         yield* TestClock.adjust("5 seconds");
         lock.close();
         yield* TestClock.adjust("1 second");
@@ -112,7 +116,21 @@ describe("DesktopHomeOwner.awaitHomeOwnershipRelease", () => {
 
         const held = new NodeSqlite.DatabaseSync(`${userdata}/server-owner.sqlite`);
         held.exec("BEGIN EXCLUSIVE;");
-        const owned = yield* Effect.forkChild(DesktopHomeOwner.awaitHomeOwnershipRelease());
+        yield* (yield* FileSystem.FileSystem).writeFileString(
+          `${userdata}/server-runtime.json`,
+          JSON.stringify({
+            pid: process.pid,
+            port: 3773,
+            serviceManaged: true,
+            serverVersion: "1.2.3",
+          }),
+        );
+        assert.isTrue(
+          yield* DesktopHomeOwner.awaitHomeOwnershipRelease({ allowServiceAttachment: true }),
+        );
+        const owned = yield* Effect.forkChild(
+          DesktopHomeOwner.awaitHomeOwnershipRelease({ allowServiceAttachment: false }),
+        );
         yield* TestClock.adjust("1 minute");
         assert.isFalse(yield* Fiber.join(owned));
         held.close();

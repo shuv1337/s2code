@@ -14,6 +14,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
@@ -121,7 +122,11 @@ function layerPool(
     readonly showErrorBox?: (title: string, content: string) => Effect.Effect<void>;
     readonly quit?: Effect.Effect<void>;
   } = {},
-): Layer.Layer<DesktopBackendPool.DesktopBackendPool | DesktopAppSettings.DesktopAppSettings> {
+): Layer.Layer<
+  | DesktopBackendPool.DesktopBackendPool
+  | DesktopAppSettings.DesktopAppSettings
+  | DesktopState.DesktopState
+> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -488,58 +493,67 @@ describe("DesktopBackendPool", () => {
     }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows")))),
   );
 
-  it.effect("reports a blocked local server attach immediately without touching WSL settings", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const dialogs: string[] = [];
-        let quits = 0;
-        const labelRef = yield* Ref.make("Local environment");
-        const reason = "Cannot attach to the existing local server. Refusing to downgrade.";
-        const context = yield* Layer.build(
-          layerPool(labelRef, {
-            config: {
-              executablePath: "/electron",
-              args: ["/server/bin.mjs"],
-              entryPath: "/server/bin.mjs",
-              cwd: "/server",
-              env: {},
-              bootstrap: {
-                mode: "desktop",
-                noBrowser: true,
-                port: 3773,
-                t3Home: "/tmp/t3",
-                host: "127.0.0.1",
-                desktopBootstrapToken: "token",
-                tailscaleServeEnabled: false,
-                tailscaleServePort: 443,
+  it.effect(
+    "keeps update recovery available for a blocked local server attach without touching WSL settings",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const dialogs: string[] = [];
+          let quits = 0;
+          const labelRef = yield* Ref.make("Local environment");
+          const reason = "Cannot attach to the existing local server. Refusing to downgrade.";
+          const context = yield* Layer.build(
+            layerPool(labelRef, {
+              config: {
+                executablePath: "/electron",
+                args: ["/server/bin.mjs"],
+                entryPath: "/server/bin.mjs",
+                cwd: "/server",
+                env: {},
+                bootstrap: {
+                  mode: "desktop",
+                  noBrowser: true,
+                  port: 3773,
+                  t3Home: "/tmp/t3",
+                  host: "127.0.0.1",
+                  desktopBootstrapToken: "token",
+                  tailscaleServeEnabled: false,
+                  tailscaleServePort: 443,
+                },
+                bootstrapDelivery: "fd3",
+                extendEnv: true,
+                httpBaseUrl: new URL("http://127.0.0.1:3773"),
+                captureOutput: true,
+                preflightFailure: Option.some({
+                  reason,
+                  fatal: true,
+                  retryLimit: 1,
+                  localServerAttach: true,
+                }),
               },
-              bootstrapDelivery: "fd3",
-              extendEnv: true,
-              httpBaseUrl: new URL("http://127.0.0.1:3773"),
-              captureOutput: true,
-              preflightFailure: Option.some({
-                reason,
-                fatal: true,
-                retryLimit: 1,
-                localServerAttach: true,
+              showErrorBox: (title) => Effect.sync(() => void dialogs.push(title)),
+              quit: Effect.sync(() => {
+                quits += 1;
               }),
-            },
-            showErrorBox: (title) => Effect.sync(() => void dialogs.push(title)),
-            quit: Effect.sync(() => {
-              quits += 1;
             }),
-          }),
-        );
-        const pool = Context.get(context, DesktopBackendPool.DesktopBackendPool);
-        const settings = Context.get(context, DesktopAppSettings.DesktopAppSettings);
-        const before = yield* settings.get;
+          );
+          const pool = Context.get(context, DesktopBackendPool.DesktopBackendPool);
+          const settings = Context.get(context, DesktopAppSettings.DesktopAppSettings);
+          const before = yield* settings.get;
 
-        yield* (yield* pool.primary).start;
+          yield* (yield* pool.primary).start;
 
-        assert.deepEqual(dialogs, ["Can't connect to the running server"]);
-        assert.equal(quits, 1);
-        assert.deepEqual(yield* settings.get, before);
-      }),
-    ),
+          assert.deepEqual(dialogs, []);
+          assert.equal(quits, 0);
+          const state = Context.get(context, DesktopState.DesktopState);
+          assert.deepEqual(yield* SubscriptionRef.get(state.primaryBackendStartup), {
+            _tag: "Failing",
+            reason,
+            output: "",
+            managedPolicy: false,
+          });
+          assert.deepEqual(yield* settings.get, before);
+        }),
+      ),
   );
 });
