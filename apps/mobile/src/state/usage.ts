@@ -94,6 +94,7 @@ const usageEnvironmentsAtom = Atom.make((get): readonly EnvironmentUsageStatus[]
     canReadDiagnostics: false,
     error: null,
     summary: null,
+    needsCursorKeychainAccess: false,
   })),
 ).pipe(Atom.withLabel("mobile-usage:environments"));
 

@@ -1,4 +1,7 @@
 import * as VoiceSession from "./voice/VoiceSession.ts";
+import * as VoiceAuditLog from "./voice/VoiceAuditLog.ts";
+import * as VoiceProvider from "./voice/VoiceProvider.ts";
+import * as VoiceTools from "./voice/VoiceTools.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { WebSocket } from "@effect/platform-node/NodeWS";
@@ -921,6 +924,9 @@ it.live.each([
     Effect.gen(function* () {
       const services = Layer.mergeAll(
         layerUnusedConfigRpcServices,
+        Layer.mock(VoiceAuditLog.VoiceAuditLog)({}),
+        Layer.mock(VoiceProvider.VoiceProvider)({}),
+        Layer.mock(VoiceTools.VoiceTools)({}),
         Layer.mock(ServerBrowser.ServerBrowser)({
           profileReporter: Effect.succeed(() => Effect.void),
         }),
