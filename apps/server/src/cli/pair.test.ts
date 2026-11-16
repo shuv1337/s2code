@@ -664,7 +664,7 @@ describe("t3 pair", () => {
   // from a normal user, and the CLI must say how to fix it.
   it.effect("explains the operator fix when Tailscale denies the Serve config", () =>
     Effect.gen(function* () {
-      const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-remote-"));
+      const baseDir = makeOwnedTempDirectory("t3-pair-remote-");
       yield* persistServerRuntimeState({
         path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
         state: yield* makePersistedServerRuntimeState({
