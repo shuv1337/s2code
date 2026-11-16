@@ -225,6 +225,7 @@ describe("searchSettings", () => {
     for (const [title, id] of [
       ["Automatic worktree cleanup", "storage-worktrees"],
       ["Delete settled worktrees", "storage-worktrees"],
+      ["Sidebar density", "sidebar-density"],
       ["Delete old browser artifacts", "storage-artifacts"],
       ["Delete old rotated logs", "storage-artifacts"],
       ["Custom search URL", "browser-search-engine"],

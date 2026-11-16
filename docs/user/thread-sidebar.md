@@ -160,6 +160,15 @@ Pinned threads stay above the folders, and Snoozed and Settled stay below them. 
 can drag a thread onto the composer to mention it, but not within the sidebar, and the Working
 section is off. Each device keeps its own choice.
 
+### Choose sidebar row height
+
+On web and desktop, **Settings → General → Sidebar density** controls how much each pinned,
+inbox, and Working thread row shows. **Standard** keeps the full three-line card. **Compact**
+puts the title and status first, then the project and branch on a second line. **Single-line**
+shows the project icon, title, and status in one row. Hover a row for its branch, machine,
+model, and pull requests, or right-click it for the same actions. Snoozed and Settled rows and
+the boring sidebar keep their own row height. Each device keeps its own choice.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

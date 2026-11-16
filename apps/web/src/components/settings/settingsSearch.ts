@@ -456,6 +456,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["sort projects sidebar manual created recent"],
   },
   {
+    id: "sidebar-density",
+    title: msg("Sidebar density"),
+    to: "/settings/general",
+    searchTerms: ["row height compact single line threads pinned inbox working cards"],
+  },
+  {
     id: "snooze-options",
     title: "Snooze options",
     to: "/settings/threads",
