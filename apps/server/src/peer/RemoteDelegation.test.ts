@@ -14,9 +14,11 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderThreadId,
+  ProviderTurnId,
   type Project,
   type RepositoryIdentity,
   RunId,
+  RunAttemptId,
   type ServerProvider,
   ThreadId,
   TurnItemId,
@@ -1053,6 +1055,7 @@ const finishLocalChild = Effect.fn("test.finishLocalChild")(function* (
   a: Effect.Success<ReturnType<typeof makeLaptop>>,
   threadId: ThreadId,
   text: string,
+  activeAttemptId?: RunAttemptId,
 ) {
   const child = yield* a.orchestrator.getThreadProjection(threadId);
   const run = child.runs[0]!;
@@ -1079,7 +1082,12 @@ const finishLocalChild = Effect.fn("test.finishLocalChild")(function* (
         threadId,
         runId: run.id,
         occurredAt: now,
-        payload: { ...run, status: "completed", completedAt: now },
+        payload: {
+          ...run,
+          ...(activeAttemptId === undefined ? {} : { activeAttemptId }),
+          status: "completed",
+          completedAt: now,
+        },
       },
     ],
   });
@@ -1143,10 +1151,67 @@ it.effect.each(["shared", "worktree"] as const)(
         expect(first.structuredContent).toMatchObject({
           link: `<t3-thread://v2/${laptop.environmentId}/${result.childThreadId}>`,
         });
-        yield* finishLocalChild(a, result.childThreadId, "Local work finished.");
+        const run = child.runs[0]!;
+        const earlierAttempt = child.attempts[0]!;
+        const activeAttemptId = RunAttemptId.make(`attempt:${run.id}:current`);
+        const providerThreadId = earlierAttempt.providerThreadId;
+        const rootNodeId = earlierAttempt.rootNodeId;
+        const now = yield* DateTime.now;
+        for (const [index, model] of ["gpt-5.4-mini", "gpt-5.4-nano"].entries()) {
+          const attemptId = index === 0 ? activeAttemptId : earlierAttempt.id;
+          yield* a.sink.write({
+            commandId: CommandId.make(`reported-model:${result.childThreadId}:${index}`),
+            events: [
+              {
+                id: EventId.make(`attempt-model:${result.childThreadId}:${index}`),
+                type: "run-attempt.updated",
+                threadId: result.childThreadId,
+                runId: run.id,
+                occurredAt: now,
+                payload: {
+                  id: attemptId,
+                  runId: run.id,
+                  attemptOrdinal:
+                    index === 0 ? earlierAttempt.attemptOrdinal + 1 : earlierAttempt.attemptOrdinal,
+                  rootNodeId,
+                  providerInstanceId: instanceId,
+                  providerThreadId,
+                  providerTurnId: null,
+                  reason: index === 0 ? "retry" : earlierAttempt.reason,
+                  status: "completed",
+                  startedAt: now,
+                  completedAt: now,
+                },
+              },
+              {
+                id: EventId.make(`provider-model:${result.childThreadId}:${index}`),
+                type: "provider-turn.updated",
+                threadId: result.childThreadId,
+                runId: run.id,
+                nodeId: rootNodeId,
+                occurredAt: now,
+                payload: {
+                  id: ProviderTurnId.make(`turn:${result.childThreadId}:${index}`),
+                  providerThreadId,
+                  nodeId: rootNodeId,
+                  runAttemptId: attemptId,
+                  nativeTurnRef: null,
+                  ordinal: index + 1,
+                  status: "completed",
+                  startedAt: now,
+                  completedAt: now,
+                  model,
+                },
+              },
+            ],
+          });
+        }
+        yield* finishLocalChild(a, result.childThreadId, "Local work finished.", activeAttemptId);
+        const summary =
+          "Requested model gpt-5.4; the provider reported running gpt-5.4-mini.\n\nLocal work finished.";
         expect(yield* taskResult(a, result.taskId)).toMatchObject({
           status: "completed",
-          result: "Local work finished.",
+          result: summary,
         });
         const offered = yield* SubscriptionRef.changes(offers).pipe(
           Stream.filter((seen) => seen.some((offer) => offer.threadId === parentThreadId)),
@@ -1157,7 +1222,8 @@ it.effect.each(["shared", "worktree"] as const)(
           (yield* a.call("task_status", { taskId: result.taskId })).structuredContent,
         ).toMatchObject({
           status: "completed",
-          summary: "Local work finished.",
+          summary,
+          executedModel: "gpt-5.4-mini",
           childThreadId: result.childThreadId,
         });
         const after = yield* a.orchestrator.getThreadProjection(result.childThreadId);
