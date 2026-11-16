@@ -1566,11 +1566,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   // a pixel short per row above.
   const rowIntrinsicSizeClassName =
     density === "single-line"
-      ? "[contain-intrinsic-size:auto_32px]"
+      ? "[contain-intrinsic-size:auto_--spacing(8)]"
       : density === "compact"
         ? metaLine === null
-          ? "[contain-intrinsic-size:auto_32px]"
-          : "[contain-intrinsic-size:auto_50px]"
+          ? "[contain-intrinsic-size:auto_--spacing(8)]"
+          : "[contain-intrinsic-size:auto_--spacing(12.5)]"
         : metaLineEmpty
           ? "[contain-intrinsic-size:auto_60px]"
           : "[contain-intrinsic-size:auto_78px]";
