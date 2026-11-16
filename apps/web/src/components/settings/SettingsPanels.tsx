@@ -21,6 +21,7 @@ import {
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
+  SidebarRowDensity,
   ScreenReaderAnnouncements,
   ToolCallVisibility,
 } from "@t3tools/contracts/settings";
@@ -125,6 +126,13 @@ const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string>
   manual: msg("Manual"),
 };
 const isSidebarProjectSortOrder = Schema.is(SidebarProjectSortOrder);
+
+const SIDEBAR_ROW_DENSITY_LABELS: Record<SidebarRowDensity, string> = {
+  standard: msg("Standard"),
+  compact: msg("Compact"),
+  "single-line": msg("Single-line"),
+};
+const isSidebarRowDensity = Schema.is(SidebarRowDensity);
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: msg("System default"),
@@ -390,6 +398,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
       ? ["Working section"]
       : []),
+    ...(settings.sidebarRowDensity !== DEFAULT_UNIFIED_SETTINGS.sidebarRowDensity
+      ? ["Sidebar density"]
+      : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
       ? ["Auto-settle inactive threads"]
       : []),
@@ -541,6 +552,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+      sidebarRowDensity: DEFAULT_UNIFIED_SETTINGS.sidebarRowDensity,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -757,6 +769,54 @@ export function GeneralSettingsPanel() {
                 {SidebarProjectSortOrder.literals.map((sortOrder) => (
                   <SelectItem hideIndicator key={sortOrder} value={sortOrder}>
                     {m(SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder])}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          {...setting("sidebar-density")}
+          description={
+            <T>
+              Row height for pinned, inbox, and Working threads. Compact uses two lines; Single-line
+              keeps one. Standard is unchanged.
+            </T>
+          }
+          resetAction={
+            settings.sidebarRowDensity !== DEFAULT_UNIFIED_SETTINGS.sidebarRowDensity ? (
+              <SettingResetButton
+                label="sidebar density"
+                onClick={() =>
+                  updateSettings({
+                    sidebarRowDensity: DEFAULT_UNIFIED_SETTINGS.sidebarRowDensity,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarRowDensity}
+              onValueChange={(value) => {
+                if (isSidebarRowDensity(value)) {
+                  updateSettings({ sidebarRowDensity: value });
+                }
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-full sm:w-44"
+                aria-label={gt("Sidebar density")}
+              >
+                <SelectValue>
+                  {m(SIDEBAR_ROW_DENSITY_LABELS[settings.sidebarRowDensity])}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SidebarRowDensity.literals.map((density) => (
+                  <SelectItem hideIndicator key={density} value={density}>
+                    {m(SIDEBAR_ROW_DENSITY_LABELS[density])}
                   </SelectItem>
                 ))}
               </SelectPopup>
