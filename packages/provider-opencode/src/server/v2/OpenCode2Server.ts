@@ -9,6 +9,9 @@ import * as P from "effect/Predicate";
 import * as Redacted from "effect/Redacted";
 import * as HttpClientError from "effect/http/HttpClientError";
 
+import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
 import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import * as OpenCode2Client from "./OpenCode2Client.ts";
@@ -19,9 +22,21 @@ export interface OpenCode2Connection extends OpenCode2Client.OpenCode2Api {
   readonly url: string;
   readonly version: string;
   readonly external: boolean;
+  /** Assumes daemons at local addresses share T3's network namespace. */
+  readonly mcpReachable: boolean;
   /** Only owned processes have an authoritative lifetime signal. */
   readonly processExit?: Effect.Effect<void>;
 }
+
+export const reachesLocalMcpEndpoint = (
+  serverUrl: string,
+  hostAddresses: ReadonlySet<string>,
+): boolean => {
+  const url = URL.parse(serverUrl.trim());
+  if (url === null) return false;
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  return isLocalLoopbackHost(host) || hostAddresses.has(host);
+};
 
 export class OpenCode2Server extends Context.Service<
   OpenCode2Server,
@@ -126,10 +141,11 @@ export const make = Effect.fn("OpenCode2Server.make")(function* (input: {
     url: string,
     password: Redacted.Redacted,
     external: boolean,
+    mcpReachable: boolean,
   ) {
     const api = yield* opencode.connect({ baseUrl: url, password });
     const version = yield* verifyServer(api.client, input.environment);
-    return { ...api, url, version, external } satisfies OpenCode2Connection;
+    return { ...api, url, version, external, mcpReachable } satisfies OpenCode2Connection;
   });
   let latest: OpenCode2Connection | undefined;
   const remember = (connection: OpenCode2Connection) =>
@@ -140,9 +156,15 @@ export const make = Effect.fn("OpenCode2Server.make")(function* (input: {
 
   const serverUrl = input.serverUrl.trim();
   if (serverUrl.length > 0) {
-    const connect = connectTo(serverUrl, Redacted.make(input.serverPassword), true).pipe(
-      Effect.tap(remember),
-    );
+    // Read once per instance: a configured server at one of this host's addresses reaches loopback.
+    const readAddresses = yield* HostProcess.Addresses;
+    const mcpReachable = reachesLocalMcpEndpoint(serverUrl, yield* readAddresses);
+    const connect = connectTo(
+      serverUrl,
+      Redacted.make(input.serverPassword),
+      true,
+      mcpReachable,
+    ).pipe(Effect.tap(remember));
     return OpenCode2Server.of({
       withConnection: Effect.fn("OpenCode2Server.withConnection")(function (use) {
         return Effect.suspend(() => (latest === undefined ? connect : Effect.succeed(latest))).pipe(
@@ -160,7 +182,7 @@ export const make = Effect.fn("OpenCode2Server.make")(function* (input: {
     binaryPath: input.binaryPath,
     directory: input.directory,
     environment: serverEnvironment(input.environment, password),
-    verify: (url) => connectTo(url, password, false).pipe(Effect.flatMap(remember)),
+    verify: (url) => connectTo(url, password, false, true).pipe(Effect.flatMap(remember)),
   });
   return OpenCode2Server.of({
     withConnection: Effect.fn("OpenCode2Server.withConnection")(function (use) {

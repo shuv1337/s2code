@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -118,11 +119,17 @@ describe("OpenCode2Server error details", () => {
 
   it.effect("never include the server URL", () =>
     Effect.gen(function* () {
+      // A configured server now resolves this host's addresses before dialing, so wait for the
+      // request itself rather than for the fiber to be scheduled.
+      const dialing = yield* Deferred.make<void>();
       const layerHanging = Layer.succeed(
         HttpClient.HttpClient,
-        HttpClient.make(() => Effect.never),
+        HttpClient.make(() =>
+          Deferred.succeed(dialing, undefined).pipe(Effect.andThen(Effect.never)),
+        ),
       );
       const timedOut = yield* detailFor(layerHanging).pipe(Effect.forkChild);
+      yield* Deferred.await(dialing);
       yield* TestClock.adjust("10 seconds");
       const details = [
         yield* detailFor(FetchHttpClient.layer),
@@ -271,4 +278,34 @@ describe("OpenCode2Server spawned server", () => {
       ),
     ),
   );
+});
+
+describe("OpenCode2Server MCP reachability", () => {
+  const hostAddresses = new Set(["127.0.0.1", "::1", "100.126.224.77", "192.168.1.5"]);
+
+  it("accepts a configured server that answers at this host's own addresses", () => {
+    for (const serverUrl of [
+      "http://127.0.0.1:4096",
+      "http://127.0.1.1:4096",
+      "http://localhost:4096",
+      "http://[::1]:4096",
+      "http://100.126.224.77:4096",
+      "http://192.168.1.5:4096",
+    ]) {
+      assert.isTrue(OpenCode2Server.reachesLocalMcpEndpoint(serverUrl, hostAddresses), serverUrl);
+    }
+  });
+
+  it("refuses a server this machine cannot reach over loopback", () => {
+    for (const serverUrl of [
+      "http://100.126.224.78:4096",
+      "http://opencode.example.test:4096",
+      "http://127.opencode.example.test:4096",
+      "http://127.0.0.1.example.test:4096",
+      "http://[fd7a:115c:a1e0::1]:4096",
+      "not a url",
+    ]) {
+      assert.isFalse(OpenCode2Server.reachesLocalMcpEndpoint(serverUrl, hostAddresses), serverUrl);
+    }
+  });
 });

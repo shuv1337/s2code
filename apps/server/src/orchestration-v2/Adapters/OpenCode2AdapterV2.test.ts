@@ -1,5 +1,6 @@
 import * as NodeURL from "node:url";
 import { toolOutputImages } from "@t3tools/shared/toolOutput";
+import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -11,6 +12,7 @@ import {
   EnvironmentId,
   MessageId,
   NodeId,
+  ProjectId,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -21,6 +23,7 @@ import {
   ThreadId,
   type ModelSelection,
   type OrchestrationV2AppThread,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
@@ -36,9 +39,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Exit from "effect/Exit";
 import { TestClock } from "effect/testing";
+import { HttpRouter } from "effect/http";
 
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -53,6 +58,23 @@ import {
   sharedMcpServerName,
   t3McpServerName,
 } from "@t3tools/provider-opencode/testing";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import * as PeerForwarding from "../../peer/PeerForwarding.ts";
+import * as PeerLinkRequests from "../../peer/PeerLinkRequests.ts";
+import * as PeerLinks from "../../peer/PeerLinks.ts";
+import * as RemoteDelegation from "../../peer/RemoteDelegation.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
+import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
+import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
+import * as SecretRequests from "../../secrets/SecretRequests.ts";
+import * as McpHttpServer from "../../mcp/McpHttpServer.ts";
+import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import { mcpToolSession } from "../../mcp/AcpMcpStdioBridge.ts";
+import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
+import * as ThreadLaunchService from "../ThreadLaunchService.ts";
+import * as ThreadManagementService from "../ThreadManagementService.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { openCode2ReplayRuntime } from "./OpenCode2AdapterV2.testkit.ts";
 import {
@@ -162,6 +184,7 @@ const noOpenRequests: ReadonlyArray<ProviderReplayEntry> = [
 
 const withInstructions = (
   entries: ReadonlyArray<ProviderReplayEntry>,
+  value = "<any>",
 ): ReadonlyArray<ProviderReplayEntry> => {
   const first = entries.findIndex(
     (entry) =>
@@ -195,7 +218,7 @@ const withInstructions = (
         out("session.instructions.entry.put", {
           sessionID: SESSION,
           key: "t3-code",
-          value: "<any>",
+          value,
         }),
         reply("session.instructions.entry.put", null),
         ...entries.slice(at),
@@ -336,6 +359,7 @@ const resumed = (
     readonly pendingBackgroundTasks?: OrchestrationV2ProviderThread["pendingBackgroundTasks"];
     readonly goal?: OrchestrationV2ProviderThread["goal"];
     readonly external?: boolean;
+    readonly mcpReachable?: boolean;
     readonly supervised?: boolean;
     readonly processExit?: Effect.Effect<void>;
     readonly beforeResponse?: (path: string) => Effect.Effect<void>;
@@ -345,6 +369,8 @@ const resumed = (
     readonly resolveExtractedTextPath?: (path: string) => Effect.Effect<string | undefined>;
     readonly fileSystem?: FileSystem.FileSystem;
     readonly onPrompt?: (input: unknown) => void;
+    readonly onMcpAdd?: (input: unknown) => void;
+    readonly instructions?: string;
   },
 ) =>
   Effect.gen(function* () {
@@ -365,24 +391,29 @@ const resumed = (
                   ? [out("job.list", { kind: "shell" }), reply("job.list", { data: [] })]
                   : emptyShellInventory),
               ])),
-        ...withInstructions([
-          ...(options?.supervised === true
-            ? [
-                out("agent.list", "<any>"),
-                reply("agent.list", agentList),
-                out("session.update", { sessionID: SESSION, permissions: supervisedRules }),
-                reply("session.update", null),
-              ]
-            : []),
-          ...entries,
-        ]),
+        ...withInstructions(
+          [
+            ...(options?.supervised === true
+              ? [
+                  out("agent.list", "<any>"),
+                  reply("agent.list", agentList),
+                  out("session.update", { sessionID: SESSION, permissions: supervisedRules }),
+                  reply("session.update", null),
+                ]
+              : []),
+            ...entries,
+          ],
+          ...(options?.instructions === undefined ? [] : [options.instructions]),
+        ),
       ],
       {
         ...(options?.version === undefined ? {} : { version: options.version }),
         ...(options?.borrowers === undefined ? {} : { borrowers: options.borrowers }),
         ...(options?.fileSystem === undefined ? {} : { fileSystem: options.fileSystem }),
         ...(options?.onPrompt === undefined ? {} : { onPrompt: options.onPrompt }),
+        ...(options?.onMcpAdd === undefined ? {} : { onMcpAdd: options.onMcpAdd }),
         ...(options?.external === undefined ? {} : { external: options.external }),
+        ...(options?.mcpReachable === undefined ? {} : { mcpReachable: options.mcpReachable }),
         ...(options?.processExit === undefined ? {} : { processExit: options.processExit }),
         ...(options?.beforeResponse === undefined
           ? {}
@@ -483,6 +514,94 @@ const nativeGoal = (status: "active" | "paused" | "complete") => ({
   updatedAt: 1,
   reason: "Checked proof.txt",
 });
+
+const mcpEnvironmentId = EnvironmentId.make("environment:opencode2-adapter");
+const openCode2ProjectId = ProjectId.make("project:opencode2-adapter");
+// The identity this test proves: `orchestrator_capabilities` names the OpenCode thread it serves.
+const capabilitiesResult = Schema.Struct({
+  structuredContent: Schema.Struct({ parentThreadId: Schema.NullOr(Schema.String) }),
+});
+const decodeCapabilities = Schema.decodeUnknownEffect(capabilitiesResult);
+const mcpRegistration = Schema.Struct({
+  server: Schema.String,
+  config: Schema.Struct({
+    url: Schema.String,
+    headers: Schema.Struct({ Authorization: Schema.String }),
+  }),
+});
+const decodeMcpRegistration = Schema.decodeUnknownSync(mcpRegistration);
+
+/** The thread row `orchestrator_capabilities` reads to name its caller. */
+const threadMcpProjection = {
+  thread: {
+    id: threadId,
+    projectId: openCode2ProjectId,
+    title: TITLE,
+    createdBy: "user",
+    creationSource: "web",
+    modelSelection: bigPickle,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+    archivedAt: null,
+    deletedAt: null,
+    providerInstanceId: instanceId,
+    createdAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+    updatedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+  },
+  runs: [],
+} as unknown as OrchestrationV2ThreadProjection;
+
+const layerMcpEnvironment = Layer.succeed(
+  ServerEnvironment.ServerEnvironment,
+  ServerEnvironment.ServerEnvironment.of({
+    getEnvironmentId: Effect.succeed(mcpEnvironmentId),
+    getDescriptor: Effect.die("unused"),
+  }),
+);
+
+const layerConfiguredServerMcp = McpSessionRegistry.layer.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      layerMcpEnvironment,
+      ServerSettings.layerTest(),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({
+        getThreadRecords: (requestedThreadId) =>
+          Effect.sync(() => {
+            assert.equal(requestedThreadId, threadId);
+            return threadMcpProjection;
+          }),
+      } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({
+        getProviders: Effect.succeed([]),
+      } satisfies Partial<ProviderRegistry.ProviderRegistry["Service"]>),
+      Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+        list: () => Effect.succeed([]),
+      } satisfies Partial<ProviderAdapterRegistry.ProviderAdapterRegistryV2["Service"]>),
+      Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+        list: () => Effect.succeed({ tasks: [] }),
+      } satisfies Partial<ScheduledTaskService.ScheduledTaskService["Service"]>),
+      Layer.mock(ProjectService.ProjectService)({}),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+      Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+      Layer.mock(PeerForwarding.PeerForwarding)({}),
+      Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
+      Layer.mock(PeerLinks.PeerLinks)({}),
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+      Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+      NodeServices.layer,
+      NodeCrypto.layer,
+    ),
+  ),
+  Layer.provideMerge(NodeHttpServer.layerTest),
+);
+
+const layerOrchestratorMcpToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
+  Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+);
 
 it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
   it.effect("switches the session's model and variant before a turn that changed them", () =>
@@ -1661,6 +1780,137 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       yield* Fiber.join(started);
       assert.equal((yield* Fiber.join(terminal))?.status, "completed");
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "registers T3 MCP on a configured server on this machine, and its credential reports the OpenCode thread",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* McpSessionRegistry.McpSessionRegistry;
+          const issued = yield* registry.issue({ threadId, providerInstanceId: instanceId });
+          yield* HttpRouter.serve(McpHttpServer.layerMcpTransport(layerOrchestratorMcpToolkit), {
+            disableListenLog: true,
+            disableLogger: true,
+          }).pipe(Layer.build);
+          const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+          yield* mcpSessions.set({
+            ...issued.config,
+            sharedMcpServers: [
+              { name: "shared-docs", endpoint: `${issued.config.endpoint}/servers/docs` },
+            ],
+          });
+          yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
+
+          const registrations: Array<unknown> = [];
+          const registration = (server: string) =>
+            out("mcp.add", {
+              server,
+              "location[directory]": WORK,
+              config: {
+                type: "remote",
+                url: "<any>",
+                headers: { Authorization: "<any>" },
+                oauth: false,
+              },
+            });
+          const t3 = "t3-code-thread_opencode2-adapter";
+          const docs = "shared-docs_thread_opencode2-adapter";
+          const { runtime, thread } = yield* resumed(
+            [
+              out("session.update", {
+                sessionID: SESSION,
+                permissions: [
+                  t3Rules[0],
+                  sharedDeny,
+                  { action: `${docs}_*`, resource: "*", effect: "allow" },
+                  ...mcpRules,
+                ],
+              }),
+              reply("session.update", null),
+              registration(t3),
+              reply("mcp.add", null),
+              registration(docs),
+              reply("mcp.add", null),
+              out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+              promptAccepted,
+              event("session.execution.succeeded", { sessionID: SESSION }),
+              out("mcp.remove", { server: t3, "location[directory]": WORK }),
+              out("mcp.remove", { server: docs, "location[directory]": WORK }),
+              reply("mcp.remove", null),
+              reply("mcp.remove", null),
+            ],
+            {
+              // 2.2.6 loads a freshly added server's tools without the older debounce.
+              version: "2.2.6",
+              external: true,
+              mcpReachable: true,
+              onMcpAdd: (input) => registrations.push(input),
+            },
+          );
+          const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+          const started = yield* runtime.startTurn(withLineage(thread)).pipe(Effect.forkScoped);
+          yield* Fiber.join(started);
+          assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+
+          const added = registrations.map((input) => decodeMcpRegistration(input));
+          assert.deepEqual(
+            added.map((entry) => entry.server),
+            [t3, docs],
+          );
+          // The issued thread credential reaches the configured server, not a placeholder.
+          assert.equal(added[0]?.config.url, issued.config.endpoint);
+          assert.equal(added[0]?.config.headers.Authorization, issued.config.authorizationHeader);
+          assert.equal(added[1]?.config.url, `${issued.config.endpoint}/servers/docs`);
+          assert.equal(added[1]?.config.headers.Authorization, issued.config.authorizationHeader);
+
+          const capabilities = yield* mcpToolSession({
+            endpoint: added[0]!.config.url,
+            authorization: added[0]!.config.headers.Authorization,
+            clientName: "opencode2-thread",
+          }).pipe(
+            Effect.flatMap((session) => session.call("orchestrator_capabilities", {})),
+            Effect.flatMap(decodeCapabilities),
+            Effect.scoped,
+          );
+          assert.equal(capabilities.structuredContent.parentThreadId, threadId);
+        }),
+      ).pipe(Effect.provide(layerConfiguredServerMcp)),
+  );
+
+  it.effect("leaves a configured server on another machine without T3 MCP tools", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        yield* mcpSessions.set({
+          environmentId: EnvironmentId.make("environment:opencode2-adapter"),
+          threadId,
+          providerSessionId: "mcp:opencode2-adapter",
+          providerInstanceId: instanceId,
+          endpoint: "http://127.0.0.1:3773/mcp",
+          authorizationHeader: "Bearer thread-credential",
+          browserToolsAvailable: false,
+        });
+        yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
+        const { runtime, thread } = yield* resumed(
+          [
+            out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+            promptAccepted,
+            event("session.execution.succeeded", { sessionID: SESSION }),
+          ],
+          {
+            external: true,
+            mcpReachable: false,
+            // No registration, so the instructions must not promise T3's tools.
+            instructions: buildRuntimeInstructions({ harness: "OpenCode", model: bigPickle.model }),
+          },
+        );
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        const started = yield* runtime.startTurn(withLineage(thread)).pipe(Effect.forkScoped);
+        yield* Fiber.join(started);
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+      }),
+    ),
   );
 
   it.effect(

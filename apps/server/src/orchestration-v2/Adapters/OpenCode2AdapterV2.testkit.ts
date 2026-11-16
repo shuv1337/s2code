@@ -153,6 +153,7 @@ const replayHttpClient = (
   replayGate: ProviderReplayGate | undefined,
   onPrompt: ((input: unknown) => void) | undefined,
   beforeResponse: ((path: string) => Effect.Effect<void>) | undefined,
+  onMcpAdd: ((input: unknown) => void) | undefined,
 ) =>
   HttpClient.make((request, url) =>
     Effect.tryPromise({
@@ -175,6 +176,7 @@ const replayHttpClient = (
         if (operation.type !== "event.subscribe") await controller.untilInboundDelivered();
         if (operation.type === "session.prompt") onPrompt?.(operation.input);
         await controller.expectOutbound(operation);
+        if (operation.type === "mcp.add") onMcpAdd?.(operation.input);
         if (operation.type === "event.subscribe") {
           controller.exited = false;
           const encoder = new TextEncoder();
@@ -221,9 +223,11 @@ export const replayServer = (
   transcript: ProviderReplayTranscript,
   options?: {
     readonly external?: boolean;
+    readonly mcpReachable?: boolean;
     readonly processExit?: Effect.Effect<void>;
     readonly beforeResponse?: (path: string) => Effect.Effect<void>;
     readonly onPrompt?: (input: unknown) => void;
+    readonly onMcpAdd?: (input: unknown) => void;
     readonly replayGate?: ProviderReplayGate;
     readonly borrowers?: { current: number };
   },
@@ -244,6 +248,7 @@ export const replayServer = (
           options?.replayGate,
           options?.onPrompt,
           options?.beforeResponse,
+          options?.onMcpAdd,
         ),
       ),
     );
@@ -252,6 +257,7 @@ export const replayServer = (
       url: BASE_URL,
       version: transcript.version,
       external: options?.external ?? false,
+      mcpReachable: options?.mcpReachable ?? options?.external !== true,
       ...(options?.external ? {} : { processExit: options?.processExit ?? Effect.never }),
     };
     const borrowers = options?.borrowers;
@@ -277,9 +283,11 @@ const makeReplayAdapter = (
   transcript: ProviderReplayTranscript,
   options?: {
     readonly external?: boolean;
+    readonly mcpReachable?: boolean;
     readonly processExit?: Effect.Effect<void>;
     readonly beforeResponse?: (path: string) => Effect.Effect<void>;
     readonly onPrompt?: (input: unknown) => void;
+    readonly onMcpAdd?: (input: unknown) => void;
     readonly replayGate?: ProviderReplayGate;
     readonly borrowers?: { current: number };
   },
@@ -332,10 +340,12 @@ export const openCode2ReplayRuntime = (
   entries: ReadonlyArray<ProviderReplayEntry>,
   options?: {
     readonly external?: boolean;
+    readonly mcpReachable?: boolean;
     readonly processExit?: Effect.Effect<void>;
     readonly beforeResponse?: (path: string) => Effect.Effect<void>;
     readonly version?: string;
     readonly onPrompt?: (input: unknown) => void;
+    readonly onMcpAdd?: (input: unknown) => void;
     readonly borrowers?: { current: number };
     readonly replayGate?: ProviderReplayGate;
     readonly attachmentsDir?: string;

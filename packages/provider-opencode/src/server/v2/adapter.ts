@@ -4314,9 +4314,9 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     ) {
       const mcpSession = yield* mcpSessions.read(turnInput.threadId);
       const directory = turnInput.runtimePolicy.cwd ?? host.paths.cwd;
-      // An external server may not reach T3's MCP endpoints, as with 1.x.
+      // A configured server on another machine cannot reach T3's loopback endpoint (as in 1.x).
       const wanted: ReadonlyArray<McpRegistration> =
-        mcpSession === undefined || connection.external
+        mcpSession === undefined || !connection.mcpReachable
           ? []
           : [
               {
