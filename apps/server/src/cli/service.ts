@@ -190,14 +190,19 @@ export function formatServiceChange(
 /** The command that launched this CLI, so a no-op names the install that found nothing to change. */
 const runningCliCommand = Effect.map(resolveCliCommand(""), (command) => command.trimEnd());
 
+const MEMORY_CONTROLLER_DISABLED =
+  "the kernel's memory cgroup controller is disabled. Add `cgroup_enable=memory` to the kernel command line and reboot.";
+
 function formatProtection(
   protection: ServiceProtection.ServiceProtectionState | undefined,
 ): ReadonlyArray<string> {
   if (protection === undefined) return [];
   return [
-    protection.unprotected === undefined
-      ? `  Memory protection: on${protection.setByProtect ? " (s2code service protect)" : ""}`
-      : `  Memory protection: off, ${protection.unprotected} grants none. Run \`s2code service protect\`.`,
+    !protection.memoryControllerAvailable
+      ? `  Memory protection: unavailable, ${MEMORY_CONTROLLER_DISABLED}`
+      : protection.unprotected === undefined
+        ? `  Memory protection: on${protection.setByProtect ? " (s2code service protect)" : ""}`
+        : `  Memory protection: off, ${protection.unprotected} grants none. Run \`s2code service protect\`.`,
     ...(protection.oomScoreAdj === undefined ? [] : [`  OOM score: ${protection.oomScoreAdj}`]),
   ];
 }
@@ -521,10 +526,16 @@ const serviceProtectCommand = Command.make("protect", {
               ...formatDropIns([plan.managerDefaults, ...plan.user]),
             ].join("\n"),
           );
+          const memoryController = yield* ServiceProtection.memoryControllerAvailable;
+          if (!memoryController) {
+            yield* Console.log(`Only the OOM scores can apply: ${MEMORY_CONTROLLER_DISABLED}`);
+          }
           if (!(yield* confirm(flags.yes, "Apply these settings?"))) return;
           yield* ServiceProtection.applyProtection(plan);
           yield* Console.log(
-            "Protected S2Code. Memory protection applies now; the server takes its OOM score after `s2code service restart`. Undo with `s2code service protect --undo`.",
+            memoryController
+              ? "Protected S2Code. Memory protection applies now; the server takes its OOM score after `s2code service restart`. Undo with `s2code service protect --undo`."
+              : "Protected S2Code's OOM score; the server takes it after `s2code service restart`. Memory protection applies once the kernel's memory controller is enabled. Undo with `s2code service protect --undo`.",
           );
         }).pipe(Effect.provide(ProcessRunner.layer)),
       );

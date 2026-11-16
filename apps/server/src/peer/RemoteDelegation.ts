@@ -1,6 +1,7 @@
 import {
   CommandId,
   type EnvironmentId,
+  latestProviderTurnForAttempt,
   type ModelSelection,
   type OrchestratorMcpThreadWaitResult,
   NodeId,
@@ -622,6 +623,7 @@ const make = Effect.gen(function* () {
     result: string,
     stoppedThere: "ran-out" | "stopped" | undefined,
     stopCount?: number,
+    executedModel?: string,
   ) {
     const attempt = yield* random.uuidV4();
     yield* threads
@@ -634,6 +636,7 @@ const make = Effect.gen(function* () {
         result,
         ...(stoppedThere === undefined ? {} : { stoppedThere }),
         ...(stopCount === undefined ? {} : { stopCount }),
+        ...(executedModel === undefined ? {} : { executedModel }),
       })
       .pipe(
         Effect.catch((error) =>
@@ -782,7 +785,14 @@ const make = Effect.gen(function* () {
         })
         .pipe(Effect.mapError(localFailure));
       const run = ThreadManagement.latestRun(records);
-      return run === undefined ? undefined : subagentResultForRun(records, run).text;
+      const executedModel =
+        run === undefined
+          ? undefined
+          : latestProviderTurnForAttempt(records.providerTurns, run.activeAttemptId)?.model;
+      return {
+        text: run === undefined ? undefined : subagentResultForRun(records, run).text,
+        executedModel,
+      };
     }
     let reply: OrchestratorMcpThreadTimelineItem | undefined;
     let error: OrchestratorMcpThreadTimelineItem | undefined;
@@ -812,7 +822,8 @@ const make = Effect.gen(function* () {
       afterPosition = read.nextPosition;
     }
     reply = error ?? reply;
-    if (reply === undefined) return undefined;
+    const executedModel = run?.executedModel ?? undefined;
+    if (reply === undefined) return { text: undefined, executedModel };
     let text = reply.text ?? "";
     let textOffset = reply.textTruncated ? (reply.nextTextOffset ?? null) : null;
     while (textOffset !== null) {
@@ -827,7 +838,10 @@ const make = Effect.gen(function* () {
       text += part.text ?? "";
       textOffset = part.textTruncated ? (part.nextTextOffset ?? null) : null;
     }
-    return run === undefined ? text : withExecutedModelNote(text, run.model, run.executedModel);
+    return {
+      text: run === undefined ? text : withExecutedModelNote(text, run.model, run.executedModel),
+      executedModel,
+    };
   });
 
   /**
@@ -983,8 +997,8 @@ const make = Effect.gen(function* () {
       yield* complete(
         parentThreadId,
         taskId,
-        reply === undefined ? "failed" : "completed",
-        reply ?? "The delegated thread has no run to follow.",
+        reply.text === undefined ? "failed" : "completed",
+        reply.text ?? "The delegated thread has no run to follow.",
         "ran-out",
       );
       return yield* settled(parentThreadId, taskId);
@@ -1020,8 +1034,10 @@ const make = Effect.gen(function* () {
       parentThreadId,
       taskId,
       terminalStatus(resultRun.status),
-      result ?? noReply,
+      result.text ?? noReply,
       "ran-out",
+      undefined,
+      result.executedModel,
     );
     return yield* settled(parentThreadId, taskId);
   });
