@@ -9,9 +9,12 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import {
   awaitCliNotarization,
   signMacArchiveContents,
+  signWindowsArchiveContents,
   macCodesignArgs,
 } from "./build-cli-archive.ts";
 
@@ -269,4 +272,63 @@ describe("macCodesignArgs", () => {
       }),
     ).toEqual(["--force", "--sign", "-", "/t3"]);
   });
+});
+
+it.layer(NodeServices.layer)("Windows staged signing", (it) => {
+  it.effect("signs every staged PE and leaves non-PE native dependencies untouched", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const content = yield* makeContent();
+      const pe = Buffer.alloc(512);
+      pe.writeUInt16LE(0x5a4d, 0);
+      pe.writeUInt32LE(128, 0x3c);
+      pe.writeUInt32LE(0x4550, 128);
+      pe.writeUInt16LE(0x20b, 152);
+      for (const name of ["t3", "monitor.exe", "addon.node", "helper"]) {
+        yield* fs.writeFile(path.join(content.contentDir, name), pe);
+      }
+      yield* fs.writeFileString(path.join(content.contentDir, "linux.node"), "ELF native fixture");
+      const stub = stubSpawner(() => ({ exitCode: 0 }));
+      yield* withStubs(
+        signWindowsArchiveContents(content.contentDir, content.executablePath),
+        stub,
+        {
+          AZURE_TRUSTED_SIGNING_ENDPOINT: "https://wus2.codesigning.azure.net/",
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "test",
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "profile",
+        },
+      ).pipe(Effect.provideService(HostProcess.Platform, "win32"));
+      assert.equal(stub.calls.length, 4);
+      for (const call of stub.calls) {
+        assert.equal(call[0], "pwsh");
+        assert.include(call.join(" "), ".azure-sign-");
+      }
+      assert.equal(
+        yield* fs.readFileString(path.join(content.contentDir, "linux.node")),
+        "ELF native fixture",
+      );
+    }).pipe(Effect.scoped),
+  );
+  it.effect("keeps unsigned archive builds unsigned", () =>
+    Effect.gen(function* () {
+      const content = yield* makeContent();
+      const stub = stubSpawner(() => ({ exitCode: 0 }));
+      for (const env of [
+        {},
+        {
+          AZURE_TRUSTED_SIGNING_ENDPOINT: "",
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "",
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "",
+        },
+      ]) {
+        yield* withStubs(
+          signWindowsArchiveContents(content.contentDir, content.executablePath),
+          stub,
+          env,
+        );
+      }
+      assert.equal(stub.calls.length, 0);
+    }).pipe(Effect.scoped),
+  );
 });

@@ -338,3 +338,53 @@ selection; install-order coexistence with upstream. With npm enabled, also captu
 a clean `npm i -g shuv2code`, its first-run download on each platform, and OIDC provenance. An
 offline test or green artifact job is not evidence that signing, npm ownership or delivery
 was configured correctly.
+
+### Encrypted signed Windows validation builds
+
+`encrypted-windows-build.yml` is a manual, nonpublishing build for testing a full
+signed installer before enabling public signed releases. It runs only in
+`shuv1337/s2code` on `main`, checks out the triggering commit exactly, and uses the
+existing protected `fork-release` environment and profile-scoped OIDC identity.
+It does not change `AZURE_SIGNING_RELEASE_ENABLED` or create a GitHub Release.
+
+Generate an age identity on the trusted receiving computer and keep the private
+identity there. Supply only its native `age1...` public recipient when dispatching
+the workflow on `main`. Never paste an age private identity into Actions inputs,
+variables, secrets, or logs. The pinned age binary validates the recipient before
+builds start.
+
+One Ubuntu job builds the same-source Linux/WSL runtime, Windows CLI, and full
+NSIS desktop installer using one `nightly.ci.<1000 + run-number>` version. Signing sessions
+are refreshed immediately before the two signing phases. The updater repository
+remains `shuv1337/s2code`, but no update feed or release is published. Intermediates
+remain on the runner: there are no plaintext artifact uploads or build caches.
+
+The only uploaded artifact is `s2code-windows-encrypted-<run-id>`, containing
+`s2code-windows.tar.gz.age`, retained for seven days. Decrypt it locally with the
+matching identity, then extract the archive. It contains the installer, CLI zip,
+verification evidence, `verify-windows.ps1`, source/version provenance, and
+`SHA256SUMS`. Verify hashes before transferring it to the test Windows machine.
+Run the included Windows verifier before installation: Linux signature checks do
+not establish Windows trust or SmartScreen reputation. A valid publisher signature
+is not a promise that SmartScreen will suppress warnings for a new download.
+
+Run the bundled verifier with the source SHA obtained independently from the
+approved GitHub Actions run and the expected publisher from the approved Azure
+profile, not values copied blindly from the downloaded report:
+
+```powershell
+.\verify-windows.ps1 -Root . -ExpectedSourceSha '<approved-run-source-sha>' -ExpectedPublisher 'CN=Latitudes Technology Consulting, O=Latitudes Technology Consulting, L=Marysville, S=Washington, C=US'
+```
+
+age encryption protects confidentiality but does not authenticate the producer;
+use the trusted workflow run as the delivery source. The verifier also checks the
+actual packaged updater configuration targets `shuv1337/s2code` and pins that
+publisher. Do not install until this Windows verification passes.
+
+For the approved native execution test, append `-RunRuntimeChecks` to that command.
+After every Authenticode/hash/publisher check succeeds, this switch runs the
+bundled desktop native-load verifier and CLI archive smoke test against the
+extracted payload, then deletes the temporary extraction. It requires Node.js 24+
+and 7-Zip. Without the switch, verification does not launch application code.
+The bundled scripts are hashed in the delivery provenance and need no dependency
+installation on the Windows test machine.
