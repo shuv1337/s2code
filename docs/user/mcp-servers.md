@@ -53,8 +53,9 @@ to manage providers. Full-access agents can also manage shared servers through t
   agent elsewhere from starting or messaging a top-level thread in the allowed
   project and asking it to use the server. Keep agents you don't trust out of
   Full access.
-- An agent can't change the URL or limit of a server that has a token without
-  supplying the token again, so it can't send a saved token somewhere new.
+- Changing the URL, allowed projects, or subagent access through a settings client
+  removes the saved token unless you supply it again. The agent tool instead
+  refuses the change unless the agent supplies a token or explicitly clears it.
 - Once a server is added here, Codex through ACP asks before T3 Code's own
   tools outside Full access, because it doesn't say which server a call is for.
 - If the server is unreachable, takes more than 5 seconds to connect or list

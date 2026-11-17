@@ -54,6 +54,7 @@ import {
   deriveLegacyProjectOverrides,
   fallbackTextGenerationModelSelection,
   isModelSelectionProviderEnabled,
+  sameMcpServerBinding,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
@@ -1084,8 +1085,8 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
-  // The token's secret is keyed by URL, so an echoed marker after a move would claim a token it no longer has.
-  const forgetMovedMcpServerTokens = (
+  // A marker may keep an existing token, not claim an orphaned slot.
+  const clearUnboundMcpServerTokenMarkers = (
     current: ServerSettings,
     next: ServerSettings,
   ): ServerSettings => {
@@ -1096,9 +1097,10 @@ const make = Effect.gen(function* () {
           ? current.mcpServers[id as McpServerId]
           : undefined;
         if (
-          previous === undefined ||
-          previous.url === server.url ||
-          server.bearerToken !== SECRET_REDACTED
+          server.bearerToken !== SECRET_REDACTED ||
+          (previous !== undefined &&
+            previous.bearerToken !== "" &&
+            sameMcpServerBinding(previous, server))
         ) {
           return [id, server];
         }
@@ -1324,7 +1326,7 @@ const make = Effect.gen(function* () {
       });
     }
     // After vetting, which can keep stored variables a policy hides from clients.
-    const updated = forgetMovedMcpServerTokens(
+    const updated = clearUnboundMcpServerTokenMarkers(
       current,
       withoutRemovedSecretProviderReferences(current, vettedProviders.settings),
     );

@@ -34,10 +34,12 @@ import {
 } from "effect/http";
 
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
+import * as SharedMcpServerManagement from "./SharedMcpServerManagement.ts";
 import * as SharedMcpServers from "./SharedMcpServers.ts";
 
 const AGENT_TOKEN = "agent-session-token";
@@ -571,6 +573,33 @@ it.effect("tests a server the way agents connect to it", () =>
       _tag: "Unreachable",
       timedOut: false,
     });
+
+    const id = McpServerId.make("denied");
+    const projectId = ProjectId.make("project:mcp-test");
+    // Management admits the caller against this snapshot; a later lookup would see a different token.
+    const authorized = {
+      ...DEFAULT_SERVER_SETTINGS,
+      mcpServers: { [id]: server(url, { projectIds: [projectId] }) },
+    };
+    const result = yield* Effect.gen(function* () {
+      const management = yield* SharedMcpServerManagement.SharedMcpServerManagement;
+      return yield* management.test(id, { projectId, subagent: false });
+    }).pipe(
+      Effect.provide(
+        SharedMcpServerManagement.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(ServerSettingsService.ServerSettingsService)({
+                getSettings: Effect.succeed(authorized),
+              }),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              Layer.succeed(SharedMcpServers.SharedMcpServers, shared),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(result).toMatchObject({ _tag: "Connected", tools: ["search", "execute"] });
   }),
 );
 
