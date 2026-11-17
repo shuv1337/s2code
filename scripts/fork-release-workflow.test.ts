@@ -58,6 +58,32 @@ const jobAccess = (job: string) => {
 };
 
 describe("fork workflow gates", () => {
+  it("keeps OIDC signing opt-in and restricted to the trusted release source", () => {
+    const readWorkflow = (name: string) =>
+      NodeFS.readFileSync(NodePath.join(import.meta.dirname, "../.github/workflows", name), "utf8");
+    expect(readWorkflow("release.yml")).toContain(
+      "vars.AZURE_SIGNING_RELEASE_ENABLED == 'true' && vars.AZURE_SIGNING_AUTH || ''",
+    );
+    const build = readWorkflow("release-desktop.yml");
+    expect(build).toContain("github.repository == 'shuv1337/s2code' &&");
+    expect(build).toContain(
+      "(!(inputs.platform == 'win' && inputs.win_signed) || (inputs.release_publication &&",
+    );
+    expect(build).toContain(
+      `contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) &&`,
+    );
+    expect(build).toContain("github.ref == 'refs/heads/main' && inputs.ref == github.sha");
+    expect(build).toContain(
+      "environment: ${{ inputs.platform == 'win' && inputs.win_signed && 'fork-release' || '' }}",
+    );
+    const smoke = readWorkflow("windows-signing-smoke.yml");
+    expect(smoke).toContain(
+      "github.repository == 'shuv1337/s2code' && github.ref == 'refs/heads/main'",
+    );
+    expect(smoke).toContain("environment: fork-release");
+    expect(smoke).not.toMatch(/contents: write|upload-artifact|gh release/);
+  });
+
   it("checks a not-due nightly without entering a protected environment", async () => {
     expect(due).not.toContain("environment:");
     expect(due).toContain("contents: read");

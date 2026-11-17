@@ -94,6 +94,21 @@ describe("fork release contract", () => {
     expect(() => releaseSigningPolicy("stable", true, fullCredentials)).toThrow("Stable");
     expect(() => releaseSigningPolicy("nightly", false, {})).toThrow("allow_unsigned");
   });
+  it("requires complete OIDC configuration without requiring a client secret", () => {
+    const oidc = {
+      ...fullCredentials,
+      AZURE_SIGNING_AUTH: "oidc",
+      AZURE_SUBSCRIPTION_ID: "subscription",
+      AZURE_CLIENT_SECRET: "",
+    };
+    expect(releaseSigningPolicy("stable", false, oidc).win).toBe(true);
+    expect(() =>
+      releaseSigningPolicy("stable", false, { ...oidc, AZURE_SUBSCRIPTION_ID: "" }),
+    ).toThrow("AZURE_SUBSCRIPTION_ID");
+    expect(() =>
+      releaseSigningPolicy("stable", false, { ...oidc, AZURE_SIGNING_AUTH: "" }),
+    ).toThrow("AZURE_CLIENT_SECRET");
+  });
   it("keeps unsigned disclosures in platform sections for nightly and preview builds", () => {
     for (const channel of ["nightly", "preview"]) {
       const version = `1.2.3-${channel}.20261014.1`;

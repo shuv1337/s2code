@@ -125,12 +125,47 @@ group). Nothing retries a hosted build that never gets a runner.
 The job pins Xcode 27.1 through `DEVELOPER_DIR` and fails on a beta, because the runner's
 default Xcode is a beta. It runs only for `schedule` or `workflow_dispatch` on `main` (an
 allowlist, so `pull_request` and every other event are refused). The macOS job never receives the
-Azure Trusted Signing secrets, empties the workspace before checkout, and deletes its signing
+Azure signing identity, empties the workspace before checkout, and deletes its signing
 keychains, keys and profiles from `RUNNER_TEMP` at the end. npm publishing stays on GitHub-hosted
 runners: `scripts/fork-release.ts` refuses any other runner.
 
 To go back to hosted runners, change `FORK_MACOS_ARM64_SELF_HOSTED_RUNNER` in
 `scripts/lib/fork-release.ts` to `"macos-26"`.
+
+## Windows signing with GitHub OIDC
+
+The `fork-release` environment holds `AZURE_SIGNING_AUTH=oidc`, `AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_TRUSTED_SIGNING_ENDPOINT`,
+`AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`, `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`,
+and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME` as **variables**, not secrets. The publisher
+is the exact validated certificate subject. No Azure client secret is required by
+these workflows. The standalone build scripts retain client-secret support for
+existing callers that do not select OIDC.
+
+Azure trusts only the GitHub OIDC subject
+`repo:shuv1337/s2code:environment:fork-release`, issuer
+`https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.
+The environment must allow **only the `main` branch**, not tags. Its dedicated
+identity needs only **Artifact Signing Certificate Profile Signer** on the exact
+certificate profile, not Contributor or subscription-wide access. Signed builds
+also require `schedule` or `workflow_dispatch` on `main` and check that the source
+SHA equals the workflow SHA. Jobs that do not sign Windows never enter this
+environment for signing. Keep branch protections and release workflow reviews intact:
+any trusted workflow allowed into that environment could use its identity.
+
+First run **Windows signing smoke (no publication)** on `main`. It signs a harmless
+locally compiled fixture, verifies its Windows trust, publisher and timestamp, then
+discards it. It has no release/repository write permission and uploads no artifact.
+Only after that passes and signed publication is approved, set the environment
+variable `AZURE_SIGNING_RELEASE_ENABLED=true`. Its default/false value preserves
+existing unsigned nightly publication; configuring the identity alone does not
+enable signed releases.
+
+Each signing phase obtains a fresh OIDC login and immediately caches a token for
+`https://codesigning.azure.net`. The CLI and desktop phases log in separately after
+long compile/wait steps. Jsign uses the cached short-lived token through an
+environment reference, never a literal token in process arguments. Tokens are not
+published as artifacts or GitHub outputs. Expired/failed authentication fails closed.
 
 ## Nightly only
 
