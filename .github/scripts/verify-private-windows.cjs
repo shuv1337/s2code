@@ -29,6 +29,17 @@ function filesUnder(root) {
     return entry.isDirectory() ? filesUnder(file) : entry.isFile() ? [file] : [];
   });
 }
+// This workflow builds only the nightly product. NSIS embeds its uninstaller
+// outside app-64.7z; plugin helper DLLs are not installed application components.
+const EXPECTED_UNINSTALLER = "Uninstall S2Code (Nightly).exe";
+function findUninstaller(root) {
+  const candidates = filesUnder(root).filter((file) =>
+    /^uninstall .*\.exe$/i.test(path.basename(file)),
+  );
+  if (candidates.length !== 1 || path.basename(candidates[0]) !== EXPECTED_UNINSTALLER)
+    throw new Error("Expected one unique S2Code nightly NSIS uninstaller.");
+  return candidates[0];
+}
 function unpack(archive, destination) {
   fs.mkdirSync(destination, { recursive: false });
   execFileSync("7z", ["x", "-y", `-o${destination}`, archive], { stdio: "pipe" });
@@ -65,7 +76,11 @@ try {
   if ($appArchive.Count -ne 1) { throw 'Missing unique x64 application payload' }
   Expand-Checked $appArchive[0].FullName (Join-Path $temp 'app')
   Expand-Checked $cli[0].FullName (Join-Path $temp 'cli')
-  $observed = @('installer/' + $installer[0].Name)
+  $installerContents = Join-Path $temp 'installer'
+  $uninstaller = @(Get-ChildItem -LiteralPath $installerContents -Recurse -File | Where-Object { $_.Name -match '^uninstall .*\.exe$' })
+  if ($uninstaller.Count -ne 1 -or $uninstaller[0].Name -cne 'Uninstall S2Code (Nightly).exe') { throw 'Expected one unique S2Code nightly NSIS uninstaller' }
+  $uninstallerRelative = $uninstaller[0].FullName.Substring($installerContents.Length + 1).Replace([char]92, [char]47)
+  $observed = @("installer/$($installer[0].Name)", "nsis-uninstaller/$uninstallerRelative")
   foreach ($area in @('app', 'cli')) {
     $base = Join-Path $temp $area
     foreach ($file in Get-ChildItem -LiteralPath $base -Recurse -File) {
@@ -90,6 +105,7 @@ try {
   $validated = 0
   foreach ($item in $report.files) {
     if ($item.area -eq 'installer') { $candidate = $installer[0].FullName }
+    elseif ($item.area -eq 'nsis-uninstaller') { $candidate = $uninstaller[0].FullName }
     elseif ($item.area -eq 'app' -or $item.area -eq 'cli') { $candidate = Join-Path (Join-Path $temp $item.area) $item.path }
     else { throw 'Invalid inventory area' }
     if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha256) { throw "Payload hash mismatch: $($item.path)" }
@@ -99,7 +115,7 @@ try {
     if (!$signature.TimeStamperCertificate) { throw "Missing trusted timestamp: $($item.path)" }
     $validated++
   }
-  if ($validated -lt 4) { throw 'Incomplete execution-component inventory' }
+  if ($validated -lt 5) { throw 'Incomplete execution-component inventory' }
   if ($RunRuntimeChecks) {
     $major = & node -p 'process.versions.node.split(".")[0]'
     if ($LASTEXITCODE -ne 0 -or [int]$major -lt 24) { throw 'Node.js 24+ is required for runtime checks' }
@@ -145,7 +161,18 @@ async function verify({ root, source, version, publisher }) {
     unpack(cli, path.join(extracted, "cli"));
     if (!fs.existsSync(path.join(extracted, "app", "resources", "app.asar")))
       throw new Error("Incomplete Electron payload.");
-    const entries = [{ area: "installer", path: path.basename(installer), file: installer }];
+    const uninstaller = findUninstaller(path.join(extracted, "installer"));
+    const entries = [
+      { area: "installer", path: path.basename(installer), file: installer },
+      {
+        area: "nsis-uninstaller",
+        path: path
+          .relative(path.join(extracted, "installer"), uninstaller)
+          .split(path.sep)
+          .join("/"),
+        file: uninstaller,
+      },
+    ];
     for (const area of ["app", "cli"]) {
       for (const file of filesUnder(path.join(extracted, area))) {
         const buffer = fs.readFileSync(file);
@@ -158,7 +185,7 @@ async function verify({ root, source, version, publisher }) {
       }
     }
     if (
-      entries.length < 4 ||
+      entries.length < 5 ||
       !entries.some((e) => e.area === "cli") ||
       !entries.some((e) => e.area === "app" && e.path.includes("server.asar.unpacked"))
     )
@@ -215,7 +242,14 @@ async function verify({ root, source, version, publisher }) {
     fs.rmSync(extracted, { recursive: true, force: true });
   }
 }
-module.exports = { peSignature, filesUnder, windowsVerifier, validateUpdateConfiguration, verify };
+module.exports = {
+  peSignature,
+  filesUnder,
+  findUninstaller,
+  windowsVerifier,
+  validateUpdateConfiguration,
+  verify,
+};
 if (require.main === module) {
   const args = process.argv.slice(2);
   const options = {};
