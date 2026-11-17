@@ -29,19 +29,8 @@ pass. A missing/expired profile or an Apple account agreement may require the
 account owner's action in Xcode first. Do not switch to a Personal Team or change
 the bundle ID: that would create a different installation and omit capabilities.
 
-`package.json` pins `pnpm@12.14.0`, so `vp env current` must report that version for
-pnpm before the first `vp i`. If it reports `Source system PATH` with `Mode system_first`,
-Vite Plus runs whatever `pnpm` is first on `PATH` (a global 9.x on shuvbot), which
-ignores the lockfile and the dependency patches, and the build fails later in
-unrelated places. Use `vp env on pnpm` once per machine to switch Vite Plus to its
-managed pnpm everywhere, or fix one shell and run `pnpm install --frozen-lockfile`
-in place of `vp i` below:
-
-```bash
-export PATH="$HOME/.local/share/vite-plus/package_manager/pnpm/12.14.0/pnpm/bin:$PATH"
-# After installing, in the worktree:
-readlink apps/mobile/node_modules/@pierre/diffs  # contains patch_hash once patched
-```
+`vp env current` must show pnpm 12.14.0 in managed mode; if it shows `system_first`,
+run `vp env on pnpm` once, or `vp i` installs with a global pnpm that skips the patches.
 
 ## Fresh checkout and native project
 
