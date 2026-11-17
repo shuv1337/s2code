@@ -8,7 +8,12 @@ import {
 } from "@t3tools/shared/databaseMigrationLog";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 // s2code fork: fork-only migrations run on their own track; see ForkMigrations.ts.
-import { divergentForkMigrations, runForkMigrations } from "./ForkMigrations.ts";
+import {
+  divergentForkMigrations,
+  forkMigrationManifest,
+  FORK_MIGRATIONS_TABLE,
+  runForkMigrations,
+} from "./ForkMigrations.ts";
 import { reconcileForkMigrationTrack } from "./reconcileForkMigrationTrack.ts";
 import { reconcileWatchPreviewMigration } from "./reconcileWatchPreviewMigration.ts";
 
@@ -108,6 +113,8 @@ import Migration0093 from "./Migrations/093_ProviderTurnAttemptIndex.ts";
 import Migration0094 from "./Migrations/094_TurnItemMessageOrdinalIndex.ts";
 import Migration0095 from "./Migrations/095_TurnItemInlineWorkOutput.ts";
 import Migration0096 from "./Migrations/096_RepairStaleTitleRegeneration.ts";
+import Migration0097 from "./Migrations/097_IssueTrackerBindings.ts";
+import Migration0098 from "./Migrations/098_ActiveShellIndexIndexes.ts";
 
 // s2code fork: fork migration 4 added this column before upstream shipped it as 71.
 const peerLinkFenceOnce = Effect.gen(function* () {
@@ -215,6 +222,8 @@ const migrationEntries = [
   [94, "TurnItemMessageOrdinalIndex", Migration0094],
   [95, "TurnItemInlineWorkOutput", Migration0095],
   [96, "RepairStaleTitleRegeneration", Migration0096],
+  [97, "IssueTrackerBindings", Migration0097],
+  [98, "ActiveShellIndexIndexes", Migration0098],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -276,7 +285,7 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
 const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
 
 // Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
-export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* () {
+const hasPendingUpstreamMigrations = Effect.fn("hasPendingUpstreamMigrations")(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tables = yield* sql`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
@@ -294,6 +303,42 @@ export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* 
 
 const run = Migrator.make({});
 
+const hasLegacyForkRows = Effect.fn("hasLegacyForkRows")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return false;
+  const names = forkMigrationManifest.map(([, name]) => name);
+  const rows = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+    SELECT migration_id, name FROM effect_sql_migrations
+    WHERE migration_id >= 61 AND ${sql.in("name", names)}
+  `;
+  return rows.some(
+    (row) => !migrationEntries.some(([id, name]) => id === row.migration_id && name === row.name),
+  );
+});
+
+const hasPendingForkMigrations = Effect.fn("hasPendingForkMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${FORK_MIGRATIONS_TABLE}
+  `;
+  if (tables.length === 0) return true;
+  const [latest] = yield* sql<{ readonly id: number | null }>`
+    SELECT MAX(migration_id) AS id FROM ${sql(FORK_MIGRATIONS_TABLE)}
+  `;
+  return (latest?.id ?? 0) < Math.max(...forkMigrationManifest.map(([id]) => id));
+});
+
+export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* () {
+  return (
+    (yield* hasPendingUpstreamMigrations()) ||
+    (yield* hasLegacyForkRows()) ||
+    (yield* hasPendingForkMigrations())
+  );
+});
+
 export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
@@ -302,16 +347,19 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
   // The desktop waits past its readiness budget until the finished line follows this one.
-  if (yield* hasPendingMigrations()) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
+  const hasPending = yield* hasPendingUpstreamMigrations();
+  if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
-  const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
+  // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
+  const previewMigrations = includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
   // s2code fork: reconcile fork-track history, then run fork migrations after upstream's;
   // a partial run (`toMigrationInclusive` names an upstream id) leaves the fork track alone.
   // Reconciles precede the V2 check because fork rows can still occupy upstream ids.
   const fullRun = toMigrationInclusive === undefined;
-  const watchPreviewMigrations = fullRun ? yield* reconcileWatchPreviewMigration() : [];
-  const reconciled = fullRun
+  const reconcileFork = fullRun && (yield* hasLegacyForkRows());
+  const watchPreviewMigrations = reconcileFork ? yield* reconcileWatchPreviewMigration() : [];
+  const reconciled = reconcileFork
     ? yield* reconcileForkMigrationTrack(migrationEntries)
     : { moved: [], backfilled: [] };
   if (reconciled.moved.length > 0) {
@@ -355,7 +403,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     }
     executedMigrations.push(...(yield* run({ loader: makeMigrationLoader(id) })));
   }
-  if (fullRun) yield* runForkMigrations();
+  if (fullRun && (yield* hasPendingForkMigrations())) yield* runForkMigrations();
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")

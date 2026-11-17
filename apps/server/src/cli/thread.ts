@@ -690,14 +690,19 @@ const finishRun = Effect.fn("cli.thread.finishRun")(function* (
 
 /** `t3_thread_launch` model fields for `thread start`, and a warning for a flag they leave unused. */
 export const launchModelFields = (flags: {
-  readonly provider: Option.Option<string>;
-  readonly model: Option.Option<string>;
+  readonly modelSelection:
+    | {
+        readonly instanceId: string;
+        readonly model: string;
+        readonly options?: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }>;
+      }
+    | undefined;
   readonly allowPoolFailover: boolean;
 }) =>
-  Option.isSome(flags.provider) && Option.isSome(flags.model)
+  flags.modelSelection !== undefined
     ? {
         fields: {
-          modelSelection: { instanceId: flags.provider.value, model: flags.model.value },
+          modelSelection: flags.modelSelection,
           ...(flags.allowPoolFailover ? { allowPoolFailover: true } : {}),
         },
         warning: undefined,
@@ -737,6 +742,45 @@ const launchWorkspaceStrategy = (input: {
         ...Option.match(input.branch, { onNone: () => ({}), onSome: (branch) => ({ branch }) }),
       }),
   });
+
+/**
+ * Options are model specific, so they need an explicit model. `true` and
+ * `false` become booleans because boolean options such as fastMode only match
+ * a boolean.
+ */
+export const launchModelSelection = Effect.fn("cli.thread.launchModelSelection")(function* (input: {
+  readonly provider: Option.Option<string>;
+  readonly model: Option.Option<string>;
+  readonly option: ReadonlyArray<string>;
+}) {
+  if (Option.isSome(input.provider) !== Option.isSome(input.model)) {
+    return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
+  }
+  if (Option.isNone(input.provider) || Option.isNone(input.model)) {
+    if (input.option.length > 0) {
+      return yield* new ThreadUsageError({ detail: "--option needs --provider and --model." });
+    }
+    return undefined;
+  }
+  const options: Array<{ readonly id: string; readonly value: string | boolean }> = [];
+  for (const entry of input.option) {
+    const separator = entry.indexOf("=");
+    const id = separator < 0 ? "" : entry.slice(0, separator).trim();
+    const value = separator < 0 ? "" : entry.slice(separator + 1).trim();
+    if (id.length === 0 || value.length === 0) {
+      return yield* new ThreadUsageError({ detail: `--option '${entry}' is not id=value.` });
+    }
+    if (options.some((option) => option.id === id)) {
+      return yield* new ThreadUsageError({ detail: `--option ${id} is given more than once.` });
+    }
+    options.push({ id, value: value === "true" ? true : value === "false" ? false : value });
+  }
+  return {
+    instanceId: input.provider.value,
+    model: input.model.value,
+    ...(options.length === 0 ? {} : { options }),
+  };
+});
 
 const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print JSON instead of text."),
@@ -814,6 +858,12 @@ const threadStartCommand = Command.make("start", {
     Flag.withDescription("Model slug. Defaults to the project's default model."),
     Flag.optional,
   ),
+  option: Flag.String("option").pipe(
+    Flag.withDescription(
+      "Model option as id=value, such as effort=high. Repeat for more. Needs --provider and --model.",
+    ),
+    Flag.atLeast(0),
+  ),
   allowPoolFailover: Flag.Boolean("allow-pool-failover").pipe(
     Flag.withDescription(
       "If --provider is out of quota or unavailable, start on its pool's freest instance instead of failing.",
@@ -838,10 +888,11 @@ const threadStartCommand = Command.make("start", {
     Effect.gen(function* () {
       const message = yield* readMessageArgument(flags.message);
       const workspaceStrategy = yield* launchWorkspaceStrategy(flags);
-      if (Option.isSome(flags.provider) !== Option.isSome(flags.model)) {
-        return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
-      }
-      const launchModel = launchModelFields(flags);
+      const modelSelection = yield* launchModelSelection(flags);
+      const launchModel = launchModelFields({
+        modelSelection,
+        allowPoolFailover: flags.allowPoolFailover,
+      });
       if (launchModel.warning !== undefined) yield* Console.error(launchModel.warning);
       const title = yield* decodeTitle(
         Option.getOrElse(flags.title, () => titleFromMessage(message)),

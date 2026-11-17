@@ -157,7 +157,7 @@ const threadConfiguration = Schema.Struct({
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Read settings or set `modelSelection`/`autoSettle` (false: off; null: follow global). Omit `threadId` for this thread. Permission modes stay. Models from `orchestrator_capabilities`.",
+    "Read settings or set `modelSelection`/`autoSettle` (false: off; null: global). Defaults to this thread. Modes stay. Models from `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     threadId: Schema.optional(ThreadId),

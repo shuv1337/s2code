@@ -101,11 +101,11 @@ export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.T
 
 /** Opt-in for a named instance, shared by every tool that can name one. */
 export const OrchestratorMcpAllowPoolFailover = Schema.Boolean.annotate({
-  description: "If the named seat can't run, fall back to another member of its pool.",
+  description: "If named seat fails, allow a pool fallback.",
 });
 
 export const OrchestratorMcpPoolSelector = Schema.optional(ProviderDriverKind).annotate({
-  description: "From capabilities `pools`; T3 picks the member.",
+  description: "From capabilities `pools`; auto-select seat.",
 });
 
 /** The member a `pool` request landed on. */
@@ -139,8 +139,7 @@ export const OrchestratorMcpTarget = Schema.Struct({
   ),
   projectId: Schema.optional(
     ProjectId.annotate({
-      description:
-        "Can name another local project. Default: yours; with `environmentId`, its project matching your repository.",
+      description: "Defaults to your project or the linked environment's matching repo.",
     }),
   ),
 });
@@ -194,7 +193,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "'shared' (default): parent checkout or other project root. 'worktree': new checkout from parent commit or other local repo's HEAD; no uncommitted edits. Worktree unsupported across environments.",
+        "'shared': parent checkout or other project root (default). 'worktree': clean checkout from parent commit or other local HEAD; local only.",
     }),
   ),
   mode: Schema.optional(
@@ -355,8 +354,7 @@ const OrchestratorMcpProjectTarget = Schema.optional(
  */
 export const OrchestratorMcpEnvironmentTarget = Schema.optional(
   EnvironmentId.annotate({
-    description:
-      "Linked environment to act in. Omit for this one. Ids are then that environment's.",
+    description: "Use linked environment and its IDs; omit for local.",
   }),
 );
 

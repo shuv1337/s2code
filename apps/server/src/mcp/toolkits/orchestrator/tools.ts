@@ -89,8 +89,7 @@ const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   .annotate(Tool.Idempotent, true);
 
 const OrchestratorUsageLimitsTool = Tool.make("orchestrator_usage_limits", {
-  description:
-    "Read usage limits for every provider account in one call, including used percentages, reset times, checked-at times, unsupported providers, and probe failures. Pass `environmentId` to read a linked environment.",
+  description: "Read all provider quotas: use, resets, freshness, and probe status.",
   parameters: OrchestratorMcpUsageLimitsInput,
   success: OrchestratorMcpUsageLimitsResult,
   failure: OrchestratorMcpFailure,

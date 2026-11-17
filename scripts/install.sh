@@ -456,6 +456,8 @@ else
     mv "$target_dir" "$previous"
   fi
   mv "$staging" "$target_dir" || fail "Could not publish the runtime; restoring the previous copy."
+  # A concurrent publish can make mv put this staging directory inside the winner's runtime.
+  rm -rf "${target_dir}/${staging##*/}"
   committed=true
   cleanup_runtime
   trap - EXIT
