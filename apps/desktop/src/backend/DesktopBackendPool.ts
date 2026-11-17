@@ -1,3 +1,4 @@
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import {
   DESKTOP_UPDATE_IN_PROGRESS_MARKER_FILE,
   DESKTOP_UPDATE_IN_PROGRESS_TTL_MS,
@@ -259,8 +260,11 @@ export const layer = Layer.effect(
         DesktopHomeOwner.readLiveHomeOwner().pipe(
           Effect.flatMap((owner) =>
             electronDialog.showErrorBox(
-              "This T3 home is unavailable",
-              DesktopHomeOwner.homeOwnedMessage(owner),
+              "This S2Code home is unavailable",
+              DesktopHomeOwner.homeOwnedMessage(
+                owner,
+                resolveChannelIdentity(environment.appVersion).executableName,
+              ),
             ),
           ),
           Effect.provideContext(homeOwnerContext),

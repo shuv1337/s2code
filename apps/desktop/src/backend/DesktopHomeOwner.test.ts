@@ -82,6 +82,10 @@ describe("DesktopHomeOwner.readLiveHomeOwner", () => {
         DesktopHomeOwner.homeOwnedMessage(owner),
         `PID ${process.pid}, port 3790, version 1.2.3`,
       );
+      assert.include(
+        DesktopHomeOwner.homeOwnedMessage(Option.none(), "s2code-nightly"),
+        "`s2code-nightly service uninstall`",
+      );
     }),
   );
 
