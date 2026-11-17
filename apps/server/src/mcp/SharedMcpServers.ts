@@ -347,8 +347,11 @@ const responseJson = (response: HttpClientResponse.HttpClientResponse) =>
 export class SharedMcpServers extends Context.Service<
   SharedMcpServers,
   {
-    /** Connects as an agent would, then lists the tools agents would get. */
+    /** Tests a settings draft, resolving a saved token only when requested. */
     readonly test: (input: McpServerTestInput) => Effect.Effect<McpServerTestResult>;
+    readonly testConnection: (
+      server: Pick<McpServerConfig, "url" | "bearerToken">,
+    ) => Effect.Effect<McpServerTestResult>;
   }
 >()("t3/mcp/SharedMcpServers") {}
 
@@ -356,24 +359,14 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const serverSettings = yield* ServerSettingsService.ServerSettingsService;
 
-  const test = Effect.fn("SharedMcpServers.test")(function* (input: McpServerTestInput) {
-    const saved = yield* serverSettings.getSettings.pipe(
-      Effect.map((settings) =>
-        Object.hasOwn(settings.mcpServers, input.id) ? settings.mcpServers[input.id] : undefined,
-      ),
-      Effect.orElseSucceed(() => undefined),
-    );
-    // A saved token only goes to the URL it was saved for.
-    const bearerToken =
-      input.bearerToken === undefined || input.bearerToken === SECRET_REDACTED
-        ? saved?.url === input.url
-          ? saved.bearerToken
-          : ""
-        : input.bearerToken.trim();
+  const testConnection = Effect.fn("SharedMcpServers.testConnection")(function* ({
+    url,
+    bearerToken,
+  }: Pick<McpServerConfig, "url" | "bearerToken">) {
     const post = (body: unknown, sessionId?: string) =>
       sendUpstream(
         httpClient,
-        HttpClientRequest.post(input.url).pipe(
+        HttpClientRequest.post(url).pipe(
           HttpClientRequest.setHeaders({
             accept: "application/json, text/event-stream",
             ...(bearerToken.length > 0 ? { authorization: `Bearer ${bearerToken}` } : {}),
@@ -424,7 +417,7 @@ const make = Effect.gen(function* () {
       if (sessionId !== undefined) {
         yield* sendUpstream(
           httpClient,
-          HttpClientRequest.delete(input.url).pipe(
+          HttpClientRequest.delete(url).pipe(
             HttpClientRequest.setHeaders({
               ...(bearerToken.length > 0 ? { authorization: `Bearer ${bearerToken}` } : {}),
               "mcp-session-id": sessionId,
@@ -452,7 +445,24 @@ const make = Effect.gen(function* () {
     return result.value.value satisfies McpServerTestResult;
   });
 
-  return SharedMcpServers.of({ test });
+  const test = Effect.fn("SharedMcpServers.test")(function* (input: McpServerTestInput) {
+    if (input.bearerToken !== undefined && input.bearerToken !== SECRET_REDACTED) {
+      return yield* testConnection({ url: input.url, bearerToken: input.bearerToken.trim() });
+    }
+    const saved = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) =>
+        Object.hasOwn(settings.mcpServers, input.id) ? settings.mcpServers[input.id] : undefined,
+      ),
+      Effect.orElseSucceed(() => undefined),
+    );
+    // A saved token only goes to the URL it was saved for.
+    return yield* testConnection({
+      url: input.url,
+      bearerToken: saved?.url === input.url ? saved.bearerToken : "",
+    });
+  });
+
+  return SharedMcpServers.of({ test, testConnection });
 });
 
 export const layer = Layer.effect(SharedMcpServers, make);

@@ -1085,8 +1085,8 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
-  // An echoed marker is permission to keep a token only at its saved URL and audience.
-  const forgetReboundMcpServerTokens = (
+  // A marker may keep an existing token, not claim an orphaned slot.
+  const clearUnboundMcpServerTokenMarkers = (
     current: ServerSettings,
     next: ServerSettings,
   ): ServerSettings => {
@@ -1097,9 +1097,10 @@ const make = Effect.gen(function* () {
           ? current.mcpServers[id as McpServerId]
           : undefined;
         if (
-          previous === undefined ||
           server.bearerToken !== SECRET_REDACTED ||
-          sameMcpServerBinding(previous, server)
+          (previous !== undefined &&
+            previous.bearerToken !== "" &&
+            sameMcpServerBinding(previous, server))
         ) {
           return [id, server];
         }
@@ -1325,7 +1326,7 @@ const make = Effect.gen(function* () {
       });
     }
     // After vetting, which can keep stored variables a policy hides from clients.
-    const updated = forgetReboundMcpServerTokens(
+    const updated = clearUnboundMcpServerTokenMarkers(
       current,
       withoutRemovedSecretProviderReferences(current, vettedProviders.settings),
     );

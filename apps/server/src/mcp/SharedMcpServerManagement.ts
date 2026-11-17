@@ -230,7 +230,7 @@ const make = Effect.gen(function* () {
     const saved = yield* reachable((yield* current).mcpServers, id, caller);
     if (saved === undefined)
       return yield* new SharedMcpServerManagementError({ reason: "not_found" });
-    return yield* servers.test({ id, url: saved.url });
+    return yield* servers.testConnection(saved);
   });
   return SharedMcpServerManagement.of({ list, set, remove, test });
 });

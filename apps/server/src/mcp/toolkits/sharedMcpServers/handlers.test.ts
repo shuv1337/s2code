@@ -9,7 +9,6 @@ import {
   SecretRef,
   SharedMcpServerSetInput,
   ThreadId,
-  type McpServerTestInput,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
@@ -84,7 +83,7 @@ const fixture = Effect.gen(function* () {
     [secretKey, storedSecret(token)],
     [freshSecretKey, storedSecret(freshToken)],
   ]);
-  const tested: McpServerTestInput[] = [];
+  let tested = false;
   const dependencies = Layer.mergeAll(
     NodeCrypto.layer,
     ThreadCommandExecutor.layer,
@@ -111,9 +110,9 @@ const fixture = Effect.gen(function* () {
     }),
     Layer.mock(SecretResolver.SecretResolver)({}),
     Layer.mock(SharedMcpServers.SharedMcpServers)({
-      test: (input) =>
+      testConnection: () =>
         Effect.sync(() => {
-          tested.push(input);
+          tested = true;
           return { _tag: "Connected" as const, serverName: "Fixture", tools: ["lookup"] };
         }),
     }),
@@ -125,7 +124,7 @@ const fixture = Effect.gen(function* () {
     Layer.provideMerge(dependencies),
     Layer.provide(NodeServices.layer),
   );
-  return { layer, caller, checked, stored, tested };
+  return { layer, caller, checked, stored, wasTested: () => tested };
 });
 
 it.effect(
@@ -176,7 +175,6 @@ it.effect(
           serverName: "Fixture",
           tools: ["lookup"],
         });
-        expect(harness.tested).toEqual([{ id, url }]);
         yield* call("t3_mcp_server_set", { id, label: null });
         expect((yield* settings.getSettings).mcpServers[id]?.label).toBeUndefined();
         yield* call("t3_mcp_server_set", { id, clearBearerToken: true });
@@ -332,7 +330,7 @@ it.effect(
             });
         }
         expect(harness.stored.has(secretKey)).toBe(true);
-        expect(harness.tested).toEqual([]);
+        expect(harness.wasTested()).toBe(false);
         const settings = yield* Settings.ServerSettingsService;
         expect((yield* settings.getSettings).mcpServers).toEqual({});
       }).pipe(Effect.provide(harness.layer));
@@ -557,7 +555,7 @@ it.effect(
           expect(JSON.stringify(listed)).not.toContain(url);
           expect(JSON.stringify(listed)).not.toContain("hasToken");
         }
-        expect(harness.tested).toEqual([]);
+        expect(harness.wasTested()).toBe(false);
         expect((yield* settings.getSettings).mcpServers).toEqual(before);
 
         yield* Ref.set(harness.caller, shell);
