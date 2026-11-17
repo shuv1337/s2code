@@ -29,6 +29,20 @@ pass. A missing/expired profile or an Apple account agreement may require the
 account owner's action in Xcode first. Do not switch to a Personal Team or change
 the bundle ID: that would create a different installation and omit capabilities.
 
+`package.json` pins `pnpm@12.14.0`, so `vp env current` must report that version for
+pnpm before the first `vp i`. If it reports `Source system PATH` with `Mode system_first`,
+Vite Plus runs whatever `pnpm` is first on `PATH` (a global 9.x on shuvbot), which
+ignores the lockfile and the dependency patches, and the build fails later in
+unrelated places. Use `vp env on pnpm` once per machine to switch Vite Plus to its
+managed pnpm everywhere, or fix one shell and run `pnpm install --frozen-lockfile`
+in place of `vp i` below:
+
+```bash
+export PATH="$HOME/.local/share/vite-plus/package_manager/pnpm/12.14.0/pnpm/bin:$PATH"
+# After installing, in the worktree:
+readlink apps/mobile/node_modules/@pierre/diffs  # contains patch_hash once patched
+```
+
 ## Fresh checkout and native project
 
 Choose a new worktree/build-directory name for each source revision. Run in Bash:
@@ -52,19 +66,6 @@ vp i
 export APP_VARIANT=preview APPLE_TEAM_ID=7H54B326YZ
 cd apps/mobile
 CI=1 EXPO_NO_GIT_STATUS=1 vp exec expo prebuild --clean --platform ios
-```
-
-`package.json` pins `pnpm@12.14.0`, so `vp env current` must report that version for
-pnpm before `vp i`. If it reports `Source system PATH` with `Mode system_first`,
-Vite Plus runs whatever `pnpm` is first on `PATH` (a global 9.x on shuvbot), which
-ignores the lockfile and the dependency patches, and the build fails later in
-unrelated places. Use `vp env on pnpm` once per machine to switch Vite Plus to its
-managed pnpm everywhere, or fix one shell:
-
-```bash
-export PATH="$HOME/.local/share/vite-plus/package_manager/pnpm/12.14.0/pnpm/bin:$PATH"
-pnpm install --frozen-lockfile
-readlink apps/mobile/node_modules/@pierre/diffs  # contains patch_hash once patched
 ```
 
 For a shell-created worktree, `vp i` performs the initial setup. If another tool
@@ -139,5 +140,5 @@ sqim upload --device --ipa "$IPA_DIR/S2CodeNightly.ipa"
 
 It prints an HTTPS install link (`https://build.sqim.dev/sqim/install/<token>`);
 treat it as valid only when the command exits 0. Signing needs a macOS desktop
-(Qua) session: over plain SSH, codesign fails with `errSecInternalComponent` or
+(Aqua) session: over plain SSH, codesign fails with `errSecInternalComponent` or
 "User interaction is not allowed".
