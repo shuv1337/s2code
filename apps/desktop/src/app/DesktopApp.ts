@@ -1,3 +1,4 @@
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -218,8 +219,11 @@ const startLocalBackend = Effect.gen(function* () {
       owner: Option.getOrNull(owner),
     });
     yield* (yield* ElectronDialog.ElectronDialog).showErrorBox(
-      "This T3 home is unavailable",
-      DesktopHomeOwner.homeOwnedMessage(owner),
+      "This S2Code home is unavailable",
+      DesktopHomeOwner.homeOwnedMessage(
+        owner,
+        resolveChannelIdentity(environment.appVersion).executableName,
+      ),
     );
     yield* (yield* ElectronApp.ElectronApp).quit;
     return false;
