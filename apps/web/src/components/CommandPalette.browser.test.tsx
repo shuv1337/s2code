@@ -270,7 +270,11 @@ describe("CommandPalette open intents", () => {
   it("numbers filtered New thread in... rows from 1 and jumps to them", async () => {
     using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
     setup({ projects: [makeProject("server"), makeProject("lima")] });
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({ open: "new-thread-in" });
     await userEvent.fill(page.getByPlaceholder("Search..."), "li");

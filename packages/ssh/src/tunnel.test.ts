@@ -1911,13 +1911,15 @@ const canBind = (port) =>
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-archive-launch-" });
       const home = `${root}/home`;
-      const stateDir = `${home}/.t3/ssh-launch/test-state`;
+      const productHome = `${home}/.s2code-v2`;
+      const stateDir = `${productHome}/ssh-launch/test-state`;
       const fakeT3 = `${root}/fake-t3.cjs`;
       yield* fs.makeDirectory(stateDir, { recursive: true });
+      yield* fs.writeFileString(`${productHome}/.product-identity`, "s2code\n");
       yield* fs.writeFileString(`${stateDir}/port`, `${yield* freeLoopbackPort}\n`);
       yield* fs.writeFileString(fakeT3, FAKE_T3);
       for (const version of versions) {
-        const runtimeDir = `${home}/.t3/runtime/versions/${version}`;
+        const runtimeDir = `${productHome}/runtime/versions/${version}`;
         yield* fs.makeDirectory(runtimeDir, { recursive: true });
         yield* fs.writeFileString(
           `${runtimeDir}/t3`,
@@ -1925,12 +1927,13 @@ const canBind = (port) =>
         );
         yield* fs.chmod(`${runtimeDir}/t3`, 0o755);
         yield* fs.writeFileString(`${runtimeDir}/.install-complete`, `${version}\n`);
+        yield* fs.writeFileString(`${runtimeDir}/.install-product`, "s2code\n");
       }
       const readManagedPid = fs
         .readFileString(`${stateDir}/pid`)
         .pipe(Effect.map((pid) => Number(pid.trim())));
       const readServerVersion = fs
-        .readFileString(`${home}/.t3/userdata/server-runtime.json`)
+        .readFileString(`${productHome}/userdata/server-runtime.json`)
         .pipe(Effect.map((raw) => (JSON.parse(raw) as { serverVersion: string }).serverVersion));
       // Launched servers outlive the script, so stop each PID it recorded.
       const launchedPids = new Set<number>();
@@ -1948,7 +1951,13 @@ const canBind = (port) =>
       const connect = (archiveVersion: string) =>
         Effect.gen(function* () {
           const launch = `${root}/launch-${archiveVersion}.sh`;
-          yield* fs.writeFileString(launch, SshTunnel.buildRemoteLaunchScript({ archiveVersion }));
+          yield* fs.writeFileString(
+            launch,
+            SshTunnel.buildRemoteLaunchScript({
+              archiveVersion,
+              releaseBaseUrl: "http://127.0.0.1:1",
+            }),
+          );
           const result = yield* runScript(home, [launch, "test-state"]);
           assert.equal(result.exitCode, 0, result.stderr);
           const pid = yield* readManagedPid;

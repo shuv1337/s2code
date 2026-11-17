@@ -1,8 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - Vitest setup runs before an Effect runtime exists.
+import * as NodeOS from "node:os";
 import { isolateGitEnv } from "@t3tools/shared/testing/gitEnv";
 
 // Drops inherited repository selectors and GIT_CONFIG_* first, then overrides autocrlf, signing and
 // init-branch settings through env so every git child gets stable fixtures.
 isolateGitEnv();
+process.env.GIT_CONFIG_GLOBAL = NodeOS.devNull;
 
 const entries: ReadonlyArray<readonly [key: string, value: string]> = [
   ["core.autocrlf", "false"],
