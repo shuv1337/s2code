@@ -13,7 +13,7 @@ describe("mcpServerTokenToSave", () => {
   it.each([
     ["keeps the saved token", edit, MCP_TOKEN_REDACTED],
     ["replaces it with typed text", { ...edit, typed: " next " }, "next"],
-    ["explicitly removes it when cleared", { ...edit, cleared: true }, null],
+    ["removes it when cleared", { ...edit, cleared: true }, ""],
     ["drops it once the URL changes", moved, ""],
     ["takes a token typed for the new URL", { ...moved, typed: "again" }, "again"],
     ["has nothing to keep for a new server", { ...edit, saved: undefined }, ""],
@@ -25,11 +25,6 @@ describe("mcpServerTokenToSave", () => {
 describe("mcpServerTestInput", () => {
   it("omits the token only when the server should use its saved one", () => {
     expect(mcpServerTestInput(id, url, edit)).toEqual({ id, url });
-    expect(mcpServerTestInput(id, url, { ...edit, cleared: true })).toEqual({
-      id,
-      url,
-      bearerToken: "",
-    });
     expect(mcpServerTestInput(id, moved.url, moved)).toEqual({
       id,
       url: moved.url,

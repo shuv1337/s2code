@@ -198,7 +198,7 @@ const make = Effect.gen(function* () {
           Effect.map(({ saved, url, projectIds, excludeSubagents }) => {
             const label =
               validated.label === undefined ? saved?.label : (validated.label ?? undefined);
-            const bearerToken = validated.clearBearerToken === true ? null : suppliedToken;
+            const bearerToken = validated.clearBearerToken === true ? "" : suppliedToken;
             return {
               mcpServers: {
                 [validated.id]: {

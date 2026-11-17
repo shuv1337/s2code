@@ -1647,38 +1647,30 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
-  it.effect(
-    "keeps a saved MCP server token when a settings update omits it or sends it blank",
-    () =>
-      Effect.gen(function* () {
-        const service = yield* ServerSettingsModule.ServerSettingsService;
-        const store = yield* ServerSecretStore.ServerSecretStore;
-        const id = McpServerId.make("executor");
-        const url = "https://executor.example.test/mcp";
-        yield* service.updateSettings({
-          mcpServers: { [id]: { url, bearerToken: "mcp-secret", enabled: true } },
-        });
+  it.effect("keeps an omitted MCP server token but clears an explicitly blank token", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const id = McpServerId.make("executor");
+      const url = "https://executor.example.test/mcp";
+      yield* service.updateSettings({
+        mcpServers: { [id]: { url, bearerToken: "mcp-secret", enabled: true } },
+      });
 
-        const withoutToken = yield* service.updateSettings(
-          yield* decodeServerSettingsPatch({ mcpServers: { [id]: { url, enabled: false } } }),
-        );
-        assert.equal(withoutToken.mcpServers[id]?.bearerToken, "mcp-secret");
-        assert.isFalse(withoutToken.mcpServers[id]?.enabled);
+      const withoutToken = yield* service.updateSettings(
+        yield* decodeServerSettingsPatch({ mcpServers: { [id]: { url, enabled: false } } }),
+      );
+      assert.equal(withoutToken.mcpServers[id]?.bearerToken, "mcp-secret");
+      assert.isFalse(withoutToken.mcpServers[id]?.enabled);
 
-        const withBlankToken = yield* service.updateSettings(
-          yield* decodeServerSettingsPatch({
-            mcpServers: { [id]: { url, label: "Renamed", bearerToken: "" } },
-          }),
-        );
-        assert.equal(withBlankToken.mcpServers[id]?.bearerToken, "mcp-secret");
-        assert.equal(withBlankToken.mcpServers[id]?.label, "Renamed");
-
-        const cleared = yield* service.updateSettings(
-          yield* decodeServerSettingsPatch({ mcpServers: { [id]: { url, bearerToken: null } } }),
-        );
-        assert.equal(cleared.mcpServers[id]?.bearerToken, "");
-        assert.isTrue(Option.isNone(yield* store.get(mcpServerSecretName(id, url))));
-      }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+      const cleared = yield* service.updateSettings(
+        yield* decodeServerSettingsPatch({
+          mcpServers: { [id]: { url, label: "Renamed", bearerToken: "" } },
+        }),
+      );
+      assert.equal(cleared.mcpServers[id]?.bearerToken, "");
+      assert.isTrue(Option.isNone(yield* store.get(mcpServerSecretName(id, url))));
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
   it.effect("never lets a saved MCP server token follow the server to a new URL", () =>
@@ -1722,6 +1714,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         bearerToken: "new-secret",
       });
       assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
+
+      const movedWithoutToken = yield* service.updateSettings(
+        yield* decodeServerSettingsPatch({
+          mcpServers: { [id]: { url: "https://elsewhere.example.test/mcp" } },
+        }),
+      );
+      assert.equal(movedWithoutToken.mcpServers[id]?.bearerToken, "");
+      assert.isTrue(Option.isNone(yield* store.get(secretName)));
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
@@ -1732,7 +1732,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       const store = yield* ServerSecretStore.ServerSecretStore;
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const savedUrl = "https://executor.example.test/mcp";
-      for (const id of ["executor", "docs", "blank"]) {
+      for (const id of ["executor", "docs"]) {
         yield* store.set(
           mcpServerSecretName(id, savedUrl),
           new TextEncoder().encode(`${id}-secret`),
@@ -1745,7 +1745,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           mcpServers: {
             executor: server("https://elsewhere.example.test/mcp"),
             docs: server(savedUrl),
-            blank: { ...server(savedUrl), bearerToken: "" },
           },
         }),
       );
@@ -1754,7 +1753,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
 
       assert.equal(loaded.mcpServers[McpServerId.make("executor")]?.bearerToken, "");
       assert.equal(loaded.mcpServers[McpServerId.make("docs")]?.bearerToken, "docs-secret");
-      assert.equal(loaded.mcpServers[McpServerId.make("blank")]?.bearerToken, "blank-secret");
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

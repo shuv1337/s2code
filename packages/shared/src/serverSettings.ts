@@ -273,10 +273,7 @@ function mergeMcpServersPatch(
     const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
     next.set(id, {
       ...rest,
-      bearerToken:
-        bearerToken === null
-          ? ""
-          : bearerToken?.trim() || (saved?.url === rest.url.trim() ? saved.bearerToken : ""),
+      bearerToken: bearerToken ?? (saved?.url === rest.url.trim() ? saved.bearerToken : ""),
       ...(projectIds === undefined ? {} : { projectIds }),
       ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
     });

@@ -1,6 +1,5 @@
 import {
-  type McpServerConfig,
-  McpServerConfigPatch,
+  McpServerConfig,
   McpServerId,
   type McpServerTestInput,
   type McpServerTestResult,
@@ -16,7 +15,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 const decodeId = Schema.decodeUnknownOption(McpServerId);
-const decodeConfig = Schema.decodeUnknownOption(McpServerConfigPatch);
+const decodeConfig = Schema.decodeUnknownOption(McpServerConfig);
 
 export interface McpServerDraft {
   readonly id: string;
@@ -93,7 +92,7 @@ export function parseMcpServerDraft(
   draft: McpServerDraft,
   existing: Readonly<Record<string, McpServerConfig>>,
   isNew: boolean,
-): Parsed<{ readonly id: McpServerId; readonly config: McpServerConfigPatch }> {
+): Parsed<{ readonly id: McpServerId; readonly config: McpServerConfig }> {
   const id = parseMcpServerId(draft.id, existing, isNew);
   if (!id.ok) return id;
   const saved = isNew ? undefined : existing[id.value];
@@ -123,7 +122,7 @@ export function mcpServerTestInput(
   return { ok: true, value: sharedTestInput(id, config.url, tokenEdit(draft, saved)) };
 }
 
-export function upsertMcpServerPatch(id: string, config: McpServerConfigPatch) {
+export function upsertMcpServerPatch(id: string, config: McpServerConfig) {
   return { mcpServers: { [id]: config } } as ServerSettingsPatch;
 }
 

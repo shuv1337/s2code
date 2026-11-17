@@ -66,7 +66,6 @@ import {
 import {
   mapSettingsSecrets,
   mapSettingsSecretValues,
-  mcpServerSecretName,
   withoutRemovedSecretProviderReferences,
   SECRET_REDACTED,
   type SettingsSecret,
@@ -838,40 +837,6 @@ const make = Effect.gen(function* () {
     },
   );
 
-  const readSettingsSecret = Effect.fn("serverSettings.readSettingsSecret")(function* (
-    secret: Pick<SettingsSecret, "secretName" | "providerInstanceId" | "environmentVariable">,
-  ) {
-    return yield* secretStore.get(secret.secretName).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ServerSettingsError({
-            settingsPath,
-            operation: "read-secret",
-            providerInstanceId: secret.providerInstanceId,
-            environmentVariable: secret.environmentVariable,
-            cause,
-          }),
-      ),
-    );
-  });
-
-  const restoreBlankMcpServerTokens = Effect.fn("serverSettings.restoreBlankMcpServerTokens")(
-    function* (settings: ServerSettings) {
-      let mcpServers: Record<McpServerId, ServerSettings["mcpServers"][McpServerId]> | undefined;
-      for (const [id, server] of Object.entries(settings.mcpServers)) {
-        if (server.bearerToken !== "") continue;
-        const value = yield* readSettingsSecret({
-          secretName: mcpServerSecretName(id, server.url),
-        });
-        if (Option.isSome(value) && value.value.byteLength > 0) {
-          mcpServers ??= { ...settings.mcpServers };
-          mcpServers[id as McpServerId] = { ...server, bearerToken: SECRET_REDACTED };
-        }
-      }
-      return mcpServers === undefined ? settings : { ...settings, mcpServers };
-    },
-  );
-
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = managed.defaults;
     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
@@ -1000,9 +965,7 @@ const make = Effect.gen(function* () {
       ? migrateLegacySourceControlSettings(folded, legacySourceControl)
       : { settings: folded, secretMoves: [] };
     const migrated = settingsFileTrusted
-      ? yield* restoreBlankMcpServerTokens(sourceControlMigration.settings).pipe(
-          Effect.flatMap(moveInlineSettingsSecrets),
-        )
+      ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings)
       : folded;
     if (
       migrated !== loaded ||
@@ -1038,7 +1001,18 @@ const make = Effect.gen(function* () {
         return secret;
       });
       for (const secret of pending.values()) {
-        const value = yield* readSettingsSecret(secret);
+        const value = yield* secretStore.get(secret.secretName).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerSettingsError({
+                settingsPath,
+                operation: "read-secret",
+                providerInstanceId: secret.providerInstanceId,
+                environmentVariable: secret.environmentVariable,
+                cause,
+              }),
+          ),
+        );
         storedSecrets.set(
           secret.secretName,
           Option.isSome(value) ? textDecoder.decode(value.value) : "",

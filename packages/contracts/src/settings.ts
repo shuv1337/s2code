@@ -968,12 +968,11 @@ export const McpServerConfig = Schema.Struct({
 });
 export type McpServerConfig = typeof McpServerConfig.Type;
 
-export const McpServerConfigPatch = Schema.Struct({
+const McpServerConfigPatch = Schema.Struct({
   ...McpServerConfig.fields,
-  /** Null clears the token; an omitted, blank, or redacted token keeps it at the same URL. */
-  bearerToken: Schema.optionalKey(Schema.NullOr(TrimmedString).pipe(secretSetting)),
+  /** Omission keeps the token at the same URL; an explicit empty string clears it. */
+  bearerToken: Schema.optionalKey(TrimmedString).pipe(secretSetting),
 });
-export type McpServerConfigPatch = typeof McpServerConfigPatch.Type;
 
 export const TextGeneratorKind = Schema.Literals(["openaiCompatible", "anthropic"]);
 export type TextGeneratorKind = typeof TextGeneratorKind.Type;
