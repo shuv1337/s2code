@@ -143,8 +143,13 @@ these workflows. The standalone build scripts retain client-secret support for
 existing callers that do not select OIDC.
 
 Azure trusts only the GitHub OIDC subject
-`repo:shuv1337/s2code:environment:fork-release`, issuer
+`repo:shuv1337@523952/s2code@1309128463:environment:fork-release`, issuer
 `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.
+This repository uses GitHub's immutable subject format. Before configuring or
+repairing federation, inspect `gh api repos/shuv1337/s2code/actions/oidc/customization/sub`:
+`use_immutable_subject` is `true`, and `sub_claim_prefix` includes the owner and
+repository IDs. Append `:environment:fork-release` to that reported prefix; do not
+assume the name-only `repo:owner/name` format. Azure requires an exact subject match.
 The environment must allow **only the `main` branch**, not tags. Its dedicated
 identity needs only **Artifact Signing Certificate Profile Signer** on the exact
 certificate profile, not Contributor or subscription-wide access. Signed builds
