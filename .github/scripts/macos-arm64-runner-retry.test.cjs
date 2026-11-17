@@ -340,7 +340,7 @@ test("the dependency verification the desktop builds download is produced first"
   assert.ok(bundle.includes("pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata"));
 });
 
-test("the self-hosted job is allowlisted, starts clean, and never holds Azure secrets on the Mac", () => {
+test("the self-hosted job is allowlisted, starts clean, and never grants Azure signing access on the Mac", () => {
   assert.ok(
     desktop.includes(
       `contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main'`,
@@ -350,18 +350,40 @@ test("the self-hosted job is allowlisted, starts clean, and never holds Azure se
   const checkout = desktop.indexOf("      - name: Checkout\n");
   const clean = desktop.indexOf("      - name: Clean workspace\n");
   assert.ok(clean !== -1 && clean < checkout);
-  // Every Azure secret passed to a step is gated to Windows, except the Windows-only steps.
-  const azure = desktop
-    .split("\n")
-    .filter((line) => /^\s+AZURE_[A-Z_]+: \$\{\{ secrets\./.test(line));
-  const gated = desktop
-    .split("\n")
-    .filter((line) =>
-      /^\s+AZURE_[A-Z_]+: \$\{\{ inputs\.platform == 'win' && secrets\./.test(line),
+  // OIDC has no stored Azure secret. Non-Windows jobs never enter the trusted
+  // environment or login, and even public configuration stays Windows-only.
+  assert.equal(/secrets\.AZURE_/.test(desktop), false);
+  assert.ok(
+    desktop.includes(
+      "environment: ${{ inputs.platform == 'win' && inputs.win_signed && 'fork-release' || '' }}",
+    ),
+  );
+  for (const key of ["AZURE_SIGNING_AUTH", "AZURE_SUBSCRIPTION_ID"]) {
+    assert.ok(
+      desktop.includes(
+        `${key}: \${{ inputs.platform == 'win' && inputs.win_signed && vars.${key} || '' }}`,
+      ),
     );
-  assert.equal(gated.length, 20);
-  // Left ungated: the Windows-only "Prepare Azure Trusted Signing" step's seven secrets.
-  assert.equal(azure.length, 7);
+  }
+  const steps = desktop.split("      - ").slice(1);
+  let azureSteps = 0;
+  let logins = 0;
+  for (const step of steps) {
+    const config = step.split("\n").filter((line) => line.includes("vars.AZURE_"));
+    if (config.length === 0 && !step.includes("uses: azure/login@")) continue;
+    azureSteps++;
+    const windowsOnly = /if: [^\n]*inputs\.platform == 'win'/.test(step);
+    for (const line of config) {
+      assert.ok(windowsOnly || line.includes("inputs.platform == 'win' && vars."), line);
+    }
+    if (step.includes("uses: azure/login@")) {
+      logins++;
+      assert.ok(windowsOnly);
+      assert.ok(step.includes("steps.signing_policy.outputs.win_signed == 'true'"));
+    }
+  }
+  assert.ok(azureSteps > 0);
+  assert.equal(logins, 2);
   // Every macOS arm64 caller passes the Mac signing secrets by name instead of inheriting all.
   const macSecrets = workflow
     .split("    secrets: &mac_arm64_secrets\n")[1]

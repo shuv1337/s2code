@@ -171,7 +171,7 @@ jobs:
       T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
       T3CODE_RELAY_URL: ${{ inputs.relay_url }}
       AZURE_SIGNING_AUTH: ${{ inputs.platform == 'win' && inputs.win_signed && vars.AZURE_SIGNING_AUTH || '' }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ inputs.platform == 'win' && inputs.win_signed && vars.AZURE_SUBSCRIPTION_ID || '' }}
       S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/s2code
     steps:
       # The launch check and the CLI archive smoke test both run the bundle.
