@@ -191,8 +191,8 @@ export function prepareForkAssets(
       ...(plan.windows ? [["win", `${prefix}-win-x64.yml`, `${prefix}.yml`]] : []),
     ]) {
       const first = Path.join(directory, primary!);
-      // An unsigned platform has no feed in the plan: electron-builder still
-      // wrote a per-arch manifest, so drop it instead of renaming.
+      // An unsigned platform has no feed in the plan. Older packaging may
+      // still produce a manifest; discard it if present instead of renaming.
       if (plan.feedAssets.includes(output!)) {
         const manifest = parseUpdateManifest(FS.readFileSync(first, "utf8"), primary!, platform!);
         FS.writeFileSync(
@@ -200,7 +200,8 @@ export function prepareForkAssets(
           serializeUpdateManifest(manifest, { platformLabel: platform! }),
         );
       }
-      if (primary !== output || !plan.feedAssets.includes(output!)) FS.unlinkSync(first);
+      if (primary !== output || !plan.feedAssets.includes(output!))
+        FS.rmSync(first, { force: true });
     }
     for (const name of plan.feedAssets) {
       const manifest = parseUpdateManifest(
