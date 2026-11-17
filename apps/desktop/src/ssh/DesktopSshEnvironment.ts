@@ -87,10 +87,12 @@ export const resolveDesktopSshCliRunner = (
   if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
     return {
       nodeScriptPath: devRemoteEntryPath,
+      version: environment.appVersion,
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  const releaseBaseUrl = env[CLI_RELEASE_BASE_URL_ENV]?.trim() || undefined;
+  const releaseBaseUrl =
+    env[CLI_RELEASE_BASE_URL_ENV]?.trim() || env.SHUV2CODE_RELEASE_BASE_URL?.trim() || undefined;
   return {
     archiveVersion: environment.appVersion,
     ...(releaseBaseUrl === undefined ? {} : { releaseBaseUrl }),

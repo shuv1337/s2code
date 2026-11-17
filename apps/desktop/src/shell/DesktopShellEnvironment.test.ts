@@ -594,28 +594,32 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
-  it.effect("hydrates PATH and missing SSH_AUTH_SOCK from the login shell on linux", () =>
-    Effect.gen(function* () {
-      const env: NodeJS.ProcessEnv = {
-        SHELL: "/bin/zsh",
-        PATH: "/usr/bin",
-      };
+  it.effect.each(["S2CODE_RELEASE_BASE_URL", "SHUV2CODE_RELEASE_BASE_URL"] as const)(
+    "hydrates PATH, missing SSH_AUTH_SOCK, and %s from the login shell on linux",
+    (mirrorKey) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+        };
 
-      yield* runShellEnvironment({
-        env,
-        platform: "linux",
-        handler: () =>
-          envOutput({
-            PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
-            SSH_AUTH_SOCK: "/tmp/secretive.sock",
-            SHUV2CODE_TELEMETRY_ENABLED: "false",
-          }),
-      });
+        yield* runShellEnvironment({
+          env,
+          platform: "linux",
+          handler: () =>
+            envOutput({
+              PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
+              SSH_AUTH_SOCK: "/tmp/secretive.sock",
+              SHUV2CODE_TELEMETRY_ENABLED: "false",
+              [mirrorKey]: "https://mirror.example.com/s2code",
+            }),
+        });
 
-      assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
-      assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
-      assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
-    }),
+        assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
+        assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
+        assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
+        assert.equal(env[mirrorKey], "https://mirror.example.com/s2code");
+      }),
   );
 
   it.effect("hydrates missing CA trust variables from the login shell", () =>

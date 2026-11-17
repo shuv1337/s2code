@@ -139,7 +139,8 @@ export const OrchestratorMcpTarget = Schema.Struct({
   ),
   projectId: Schema.optional(
     ProjectId.annotate({
-      description: "Defaults to your project or the linked environment's matching repo.",
+      description:
+        "Can name another local project. Default: yours; with `environmentId`, its project matching your repository.",
     }),
   ),
 });
@@ -193,7 +194,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "'shared': parent checkout or other project root (default). 'worktree': clean checkout from parent commit or other local HEAD; local only.",
+        "'shared' (default): parent checkout or other project root. 'worktree': new checkout from parent commit or other local repo's HEAD; no uncommitted edits. Worktree unsupported across environments.",
     }),
   ),
   mode: Schema.optional(
@@ -354,7 +355,8 @@ const OrchestratorMcpProjectTarget = Schema.optional(
  */
 export const OrchestratorMcpEnvironmentTarget = Schema.optional(
   EnvironmentId.annotate({
-    description: "Use linked environment and its IDs; omit for local.",
+    description:
+      "Linked environment to act in. Omit for this one. Ids are then that environment's.",
   }),
 );
 

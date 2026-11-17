@@ -1,4 +1,5 @@
 import { DesktopShellEnvironmentSnapshot, ShellEnvironmentPatch } from "@t3tools/contracts";
+import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 import {
   applyShellEnvironment,
   buildEnvironmentCaptureCommand,
@@ -126,6 +127,8 @@ const LOGIN_SHELL_ENV_NAMES = [
   "SHUV2CODE_TELEMETRY_ENABLED",
   "T3CODE_GITHUB_APP_CLIENT_ID",
   "T3CODE_RELEASE_BASE_URL",
+  CLI_RELEASE_BASE_URL_ENV,
+  "SHUV2CODE_RELEASE_BASE_URL",
   "__MISE_DIFF",
   "JAVA_HOME",
 ] as const;
@@ -554,6 +557,8 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "SHUV2CODE_TELEMETRY_ENABLED",
       "T3CODE_GITHUB_APP_CLIENT_ID",
       "T3CODE_RELEASE_BASE_URL",
+      CLI_RELEASE_BASE_URL_ENV,
+      "SHUV2CODE_RELEASE_BASE_URL",
     ] as const) {
       if (!config.env[name] && shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];

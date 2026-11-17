@@ -50,6 +50,7 @@ describe("filterSettingsSections", () => {
     { query: "dark mode", expected: [["Interface", ["Appearance"]]] },
     { query: "microphone", expected: [["Interface", ["Voice"]]] },
     { query: "agent credits", expected: [["Server settings", ["Source control & issues"]]] },
+    { query: "mcp", expected: [["Connections", ["Environments"]]] },
     {
       query: "server settings",
       expected: [["Server settings", ["Provider accounts", "Source control & issues"]]],

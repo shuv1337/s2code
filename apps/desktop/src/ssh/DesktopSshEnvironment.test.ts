@@ -4,7 +4,9 @@ import { assert, describe, it } from "@effect/vitest";
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
+import serverPackageJson from "../../../server/package.json" with { type: "json" };
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { resolveDesktopSshCliRunner } from "./DesktopSshEnvironment.ts";
@@ -30,17 +32,42 @@ const packagedEnvironment = DesktopEnvironment.DesktopEnvironment.pipe(
 );
 
 describe("resolveDesktopSshCliRunner", () => {
-  it.effect("downloads the remote runner from the release mirror", () =>
+  it.effect("keeps the development build's version with the remote entry point", () =>
     Effect.gen(function* () {
       const environment = yield* packagedEnvironment;
 
-      const runner = resolveDesktopSshCliRunner(environment, {
-        [CLI_RELEASE_BASE_URL_ENV]: "https://mirror.example.com/t3code",
-      });
+      assert.deepStrictEqual(
+        resolveDesktopSshCliRunner(
+          {
+            ...environment,
+            isDevelopment: true,
+            appVersion: "0.0.22-nightly.1",
+            devRemoteT3ServerEntryPath: Option.some("/test/dev/server.mjs"),
+          },
+          {},
+        ),
+        {
+          nodeScriptPath: "/test/dev/server.mjs",
+          version: "0.0.22-nightly.1",
+          nodeEngineRange: serverPackageJson.engines.node,
+        },
+      );
+    }),
+  );
 
-      assert.deepStrictEqual(runner, {
+  it.effect.each([
+    { [CLI_RELEASE_BASE_URL_ENV]: " https://mirror.example.com/s2code " },
+    { SHUV2CODE_RELEASE_BASE_URL: "https://mirror.example.com/s2code" },
+    {
+      [CLI_RELEASE_BASE_URL_ENV]: "https://mirror.example.com/s2code",
+      SHUV2CODE_RELEASE_BASE_URL: "https://legacy.example.com/s2code",
+    },
+  ])("downloads the remote runner from the release mirror (%j)", (env) =>
+    Effect.gen(function* () {
+      const environment = yield* packagedEnvironment;
+      assert.deepStrictEqual(resolveDesktopSshCliRunner(environment, env), {
         archiveVersion: "0.0.22",
-        releaseBaseUrl: "https://mirror.example.com/t3code",
+        releaseBaseUrl: "https://mirror.example.com/s2code",
       });
     }),
   );
