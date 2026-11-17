@@ -175,7 +175,7 @@ function subscriptionUsageProps(
           name,
           colors,
           detail: !fresh
-            ? "Open T3 to refresh"
+            ? "Open S2Code to refresh"
             : pool.accounts.length > 1
               ? `${pool.accounts.length} accounts · pooled`
               : "Subscription remaining",
@@ -243,7 +243,7 @@ export function subscriptionUsageTimeline(snapshot: SubscriptionUsageSnapshot, n
       ...snapshot,
       providers: snapshot.providers.map((provider) =>
         provider.windows.length > 0 && provider.expiresAt <= date
-          ? { ...provider, detail: "Open T3 to refresh", windows: [], totalWindows: 0 }
+          ? { ...provider, detail: "Open S2Code to refresh", windows: [], totalWindows: 0 }
           : provider,
       ),
     },

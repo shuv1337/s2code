@@ -55,8 +55,14 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
         error: material.error,
       };
   const providers = props.providers ?? [
-    { name: "Codex", detail: "Open T3 to connect", windows: [], expiresAt: 0, totalWindows: 0 },
-    { name: "Claude", detail: "Open T3 to connect", windows: [], expiresAt: 0, totalWindows: 0 },
+    { name: "Codex", detail: "Open S2Code to connect", windows: [], expiresAt: 0, totalWindows: 0 },
+    {
+      name: "Claude",
+      detail: "Open S2Code to connect",
+      windows: [],
+      expiresAt: 0,
+      totalWindows: 0,
+    },
   ];
 
   const pad = 14;
@@ -83,7 +89,7 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
         {
           type: "note",
           provider: provider.name,
-          text: stale ? "Open T3 to refresh" : provider.detail,
+          text: stale ? "Open S2Code to refresh" : provider.detail,
         },
       ];
     return [...provider.windows]
@@ -327,7 +333,7 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
           {shown.map(row)}
           {hidden > 0 ? (
             <Text color={colors.muted} maxLines={1} style={{ fontSize: 10 }}>
-              {`${hidden} more in T3`}
+              {`${hidden} more in S2Code`}
             </Text>
           ) : null}
         </Column>
@@ -339,7 +345,7 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
         >
           {props.checkedAt
             ? `As of ${new Date(props.checkedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}`
-            : "Tap to connect in T3"}
+            : "Tap to connect in S2Code"}
         </Text>
       </Column>
     </Button>
