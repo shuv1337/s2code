@@ -967,6 +967,14 @@ export const McpServerConfig = Schema.Struct({
   excludeSubagents: Schema.optionalKey(Schema.Boolean),
 });
 export type McpServerConfig = typeof McpServerConfig.Type;
+
+export const McpServerConfigPatch = Schema.Struct({
+  ...McpServerConfig.fields,
+  /** Null clears the token; an omitted, blank, or redacted token keeps it at the same URL. */
+  bearerToken: Schema.optionalKey(Schema.NullOr(TrimmedString).pipe(secretSetting)),
+});
+export type McpServerConfigPatch = typeof McpServerConfigPatch.Type;
+
 export const TextGeneratorKind = Schema.Literals(["openaiCompatible", "anthropic"]);
 export type TextGeneratorKind = typeof TextGeneratorKind.Type;
 
@@ -2007,7 +2015,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(SecretProviderId, Schema.NullOr(SecretProviderConfigWrite)),
   ),
   // Merge per server; null removes one.
-  mcpServers: Schema.optionalKey(Schema.Record(McpServerId, Schema.NullOr(McpServerConfig))),
+  mcpServers: Schema.optionalKey(Schema.Record(McpServerId, Schema.NullOr(McpServerConfigPatch))),
   cursorKeychainUsageEnabled: Schema.optionalKey(Schema.Boolean),
 
   usagePriceOverrides: Schema.optionalKey(

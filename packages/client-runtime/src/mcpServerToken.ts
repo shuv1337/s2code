@@ -16,10 +16,10 @@ export function mcpSavedTokenKept({ saved, url, cleared }: McpServerTokenEdit): 
   return saved !== undefined && saved.bearerToken !== "" && !cleared && url.trim() === saved.url;
 }
 
-/** Typed text replaces the token, the redaction marker keeps the saved one, and empty removes it. */
-export function mcpServerTokenToSave(edit: McpServerTokenEdit): string {
+export function mcpServerTokenToSave(edit: McpServerTokenEdit): string | null {
   const typed = edit.typed.trim();
   if (typed) return typed;
+  if (edit.cleared && edit.saved?.bearerToken) return null;
   return mcpSavedTokenKept(edit) ? MCP_TOKEN_REDACTED : "";
 }
 
@@ -30,5 +30,7 @@ export function mcpServerTestInput(
   edit: McpServerTokenEdit,
 ): McpServerTestInput {
   const bearerToken = mcpServerTokenToSave(edit);
-  return bearerToken === MCP_TOKEN_REDACTED ? { id, url } : { id, url, bearerToken };
+  return bearerToken === MCP_TOKEN_REDACTED
+    ? { id, url }
+    : { id, url, bearerToken: bearerToken ?? "" };
 }

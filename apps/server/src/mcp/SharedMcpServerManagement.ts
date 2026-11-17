@@ -15,7 +15,6 @@ import * as Schema from "effect/Schema";
 
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Settings from "../serverSettings.ts";
-import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as SharedMcpServers from "./SharedMcpServers.ts";
 
 export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcpServerManagementError>()(
@@ -199,18 +198,14 @@ const make = Effect.gen(function* () {
           Effect.map(({ saved, url, projectIds, excludeSubagents }) => {
             const label =
               validated.label === undefined ? saved?.label : (validated.label ?? undefined);
-            const bearerToken =
-              validated.clearBearerToken === true
-                ? ""
-                : (suppliedToken ??
-                  (saved !== undefined && saved.bearerToken.length > 0 ? SECRET_REDACTED : ""));
+            const bearerToken = validated.clearBearerToken === true ? null : suppliedToken;
             return {
               mcpServers: {
                 [validated.id]: {
                   ...(label === undefined ? {} : { label }),
                   url,
                   enabled: validated.enabled ?? saved?.enabled ?? true,
-                  bearerToken,
+                  ...(bearerToken === undefined ? {} : { bearerToken }),
                   ...(projectIds === undefined ? {} : { projectIds }),
                   ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
                 },

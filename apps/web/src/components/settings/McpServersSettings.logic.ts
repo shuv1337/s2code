@@ -1,6 +1,7 @@
 import {
   McpServerId,
   type McpServerConfig,
+  type McpServerConfigPatch,
   type McpServerTestInput,
   type McpServerTestResult,
 } from "@t3tools/contracts";
@@ -108,7 +109,7 @@ export function mcpServerFromDraft(
   existingIds: ReadonlySet<string>,
   target: McpServerTarget,
 ): Result.Result<
-  { readonly id: McpServerId; readonly config: McpServerConfig },
+  { readonly id: McpServerId; readonly config: McpServerConfigPatch },
   McpServerDraftIssues
 > {
   const id = validateId(draft.id, existingIds, target);
