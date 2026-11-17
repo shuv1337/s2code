@@ -204,7 +204,7 @@ function publishFixture(
     if (channel !== "preview") {
       const prefix = channel === "stable" ? "latest" : "nightly";
       feed(`${prefix}-mac.yml`, (file) => file.endsWith(".zip"));
-      if (windows) feed(`${prefix}-win-x64.yml`, (file) => file.endsWith(".exe"));
+      if (windows && signing.win) feed(`${prefix}-win-x64.yml`, (file) => file.endsWith(".exe"));
       feed(`${prefix}-linux.yml`, (file) => file.endsWith(".AppImage") && !file.includes("arm64"));
       feed(
         `${prefix}-linux-arm64.yml`,

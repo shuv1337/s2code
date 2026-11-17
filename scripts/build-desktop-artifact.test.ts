@@ -624,6 +624,25 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }),
   );
 
+  it.effect("omits automatic update feeds from unsigned Windows releases", () =>
+    Effect.gen(function* () {
+      for (const version of ["1.2.3", "1.2.3-nightly.20261117.1"]) {
+        const config = yield* createBuildConfig(
+          "win",
+          "nsis",
+          version,
+          false,
+          false,
+          undefined,
+          undefined,
+        );
+        assert.isNull(config.publish);
+      }
+      const mock = yield* createBuildConfig("win", "nsis", "1.2.3", false, true, 1234, undefined);
+      assert.isNotNull(mock.publish);
+    }),
+  );
+
   it.effect("omits update feeds for pull request preview builds", () =>
     Effect.gen(function* () {
       const preview = yield* createBuildConfig(
@@ -2419,7 +2438,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.gen(function* () {
       const signedWinConfig = (hostPlatform: string) =>
         createBuildConfig("win", "nsis", "1.2.3", true, false, undefined, undefined).pipe(
-          Effect.map((config) => config.win as Record<string, unknown>),
+          Effect.map((config) => {
+            assert.isNotNull(config.publish);
+            return config.win as Record<string, unknown>;
+          }),
           Effect.provideService(HostProcess.Platform, hostPlatform),
         );
 
