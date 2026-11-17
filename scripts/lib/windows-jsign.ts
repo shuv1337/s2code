@@ -1,6 +1,7 @@
 // Azure Trusted Signing from a non-Windows host, for electron-builder's
 // `win.signtoolOptions.sign` hook and the CLI archive. jsign reads AZURE_TENANT_ID,
 // AZURE_CLIENT_ID and AZURE_CLIENT_SECRET itself when no --storepass is given.
+// OIDC jobs read the Azure CLI signing token cached immediately after azure/login.
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Config from "effect/Config";
@@ -30,11 +31,65 @@ export class JsignFailedError extends Schema.TaggedError<JsignFailedError>()("Js
   }
 }
 
+class AzureSigningAuthenticationError extends Schema.TaggedError<AzureSigningAuthenticationError>()(
+  "AzureSigningAuthenticationError",
+  { reason: Schema.String },
+) {}
+
 /** Runs jsign, forwarding its stderr as it arrives and returning a tail of it for classification. */
-const runJsign = Effect.fn("runJsign")(function* (jsign: string, args: ReadonlyArray<string>) {
+const runJsign = Effect.fn("runJsign")(function* (
+  jsign: string,
+  args: ReadonlyArray<string>,
+  oidc: boolean,
+) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  let accessToken: string | undefined;
+  if (oidc) {
+    // The workflow refreshes OIDC login before each signing phase. Never place the
+    // token in argv, GitHub outputs, the filesystem, or exception messages.
+    const credential = yield* spawner.spawn(
+      ChildProcess.make(
+        "az",
+        [
+          "account",
+          "get-access-token",
+          "--resource",
+          "https://codesigning.azure.net",
+          "--query",
+          "accessToken",
+          "--output",
+          "tsv",
+          "--only-show-errors",
+        ],
+        { stdout: "pipe", stderr: "inherit" },
+      ),
+    );
+    const [exitCode, token] = yield* Effect.all(
+      [credential.exitCode, Stream.mkString(Stream.decodeText(credential.stdout))],
+      { concurrency: "unbounded" },
+    );
+    if (Number(exitCode) !== 0)
+      return yield* new AzureSigningAuthenticationError({
+        reason: "Azure CLI signing authentication failed.",
+      });
+    accessToken = token.trim();
+    if (!accessToken)
+      return yield* new AzureSigningAuthenticationError({
+        reason: "Azure CLI returned no signing access token.",
+      });
+  }
   const child = yield* spawner.spawn(
-    ChildProcess.make(jsign, args, { stdout: "inherit", stderr: "pipe" }),
+    ChildProcess.make(
+      jsign,
+      oidc ? ["--storepass", "env:S2CODE_SIGNING_ACCESS_TOKEN", ...args] : args,
+      {
+        stdout: "inherit",
+        stderr: "pipe",
+        ...(accessToken
+          ? { env: { S2CODE_SIGNING_ACCESS_TOKEN: accessToken }, extendEnv: true }
+          : {}),
+      },
+    ),
   );
   const decoder = new TextDecoder();
   let stderr = "";
@@ -54,7 +109,8 @@ const runJsign = Effect.fn("runJsign")(function* (jsign: string, args: ReadonlyA
 });
 
 export const signWithJsign = Effect.fn("signWithJsign")(function* (file: string) {
-  const { jsign, endpoint, account, profile } = yield* Config.all({
+  const { jsign, endpoint, account, profile, auth } = yield* Config.all({
+    auth: Config.String("AZURE_SIGNING_AUTH").pipe(Config.withDefault("client-secret")),
     jsign: Config.String("T3CODE_JSIGN").pipe(Config.withDefault("jsign")),
     endpoint: Config.String("AZURE_TRUSTED_SIGNING_ENDPOINT"),
     account: Config.String("AZURE_TRUSTED_SIGNING_ACCOUNT_NAME"),
@@ -91,7 +147,7 @@ export const signWithJsign = Effect.fn("signWithJsign")(function* (file: string)
     });
     const copy = path.join(dir, path.basename(file));
     yield* fs.copyFile(file, copy);
-    const { exitCode, stderr } = yield* runJsign(jsign, [...args, copy]);
+    const { exitCode, stderr } = yield* runJsign(jsign, [...args, copy], auth === "oidc");
     if (exitCode !== 0) {
       const transient = TRANSIENT_JSIGN_ERROR.test(stderr);
       if (transient && attempt <= JSIGN_RETRIES) {

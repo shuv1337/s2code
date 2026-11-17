@@ -1,0 +1,49 @@
+name: Windows signing smoke (no publication)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  signing:
+    if: github.repository == 'shuv1337/s2code' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    environment: fork-release
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 15
+    steps:
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Cache the signing-service token
+        shell: pwsh
+        run: |
+          az account get-access-token --resource https://codesigning.azure.net --query expiresOn --output tsv --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw 'Signing token acquisition failed.' }
+      # Sign only this harmless, locally compiled fixture. No app/release assets,
+      # public uploads, release manifests, or repository write permission.
+      - name: Compile, sign, and verify an isolated fixture
+        shell: pwsh
+        env:
+          SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          SIGNING_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          EXPECTED_PUBLISHER: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:RUNNER_TEMP 'SigningSmoke.cs'
+          $binary = Join-Path $env:RUNNER_TEMP 'SigningSmoke.exe'
+          'public class SigningSmoke { public static void Main() { System.Console.WriteLine("S2Code signing smoke"); } }' | Set-Content $source
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$binary" $source
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture compilation failed.' }
+          Install-Module TrustedSigning -Repository PSGallery -Scope CurrentUser -Force
+          Invoke-TrustedSigning -Endpoint $env:SIGNING_ENDPOINT -CodeSigningAccountName $env:SIGNING_ACCOUNT -CertificateProfileName $env:SIGNING_PROFILE -Files $binary -FileDigest SHA256 -TimestampRfc3161 'http://timestamp.acs.microsoft.com' -TimestampDigest SHA256
+          $signature = Get-AuthenticodeSignature -LiteralPath $binary
+          if ($signature.Status -ne 'Valid') { throw "Invalid signature status: $($signature.Status)" }
+          if ($signature.SignerCertificate.Subject -ne $env:EXPECTED_PUBLISHER) { throw 'Wrong signing publisher.' }
+          if (-not $signature.TimeStamperCertificate) { throw 'Missing timestamp.' }
+          "Verified Windows signature and timestamp for $env:EXPECTED_PUBLISHER. No release published." >> $env:GITHUB_STEP_SUMMARY
+          Remove-Item $source, $binary

@@ -27,12 +27,31 @@ const BAD_SECRET =
 type Reply = { readonly exitCode: number; readonly stderr?: string; readonly write?: string };
 
 /** Stands in for jsign. Records the bytes it received and applies each reply in turn. */
-function stubJsign(replies: ReadonlyArray<Reply>) {
+function stubJsign(replies: ReadonlyArray<Reply>, authReply?: { token: string; exitCode: number }) {
+  const tokenRequests: Array<ReadonlyArray<string>> = [];
+  const commands: Array<ChildProcess.Command> = [];
   const inputs: Array<{ readonly path: string; readonly content: string }> = [];
   const spawner = ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const args = ChildProcess.isStandardCommand(command) ? command.args.map(String) : [];
+      commands.push(command);
+      if (ChildProcess.isStandardCommand(command) && command.command === "az") {
+        tokenRequests.push(args);
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(authReply?.exitCode ?? 0)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.make(new TextEncoder().encode(authReply?.token ?? "fixture-token")),
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        });
+      }
       const target = args.at(-1)!;
       inputs.push({ path: target, content: yield* fs.readFileString(target) });
       const reply = replies[inputs.length - 1] ?? replies.at(-1)!;
@@ -52,18 +71,21 @@ function stubJsign(replies: ReadonlyArray<Reply>) {
       });
     }).pipe(Effect.provide(NodeServices.layer), Effect.orDie),
   );
-  return { inputs, spawner };
+  return { inputs, spawner, tokenRequests, commands };
 }
 
 const signed = (content: string): Reply => ({ exitCode: 0, write: `${content}+signature` });
 
-const runSign = Effect.fn("test.runSign")(function* (replies: ReadonlyArray<Reply>) {
+const runSign = Effect.fn("test.runSign")(function* (
+  replies: ReadonlyArray<Reply>,
+  authReply?: { token: string; exitCode: number },
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-jsign-" });
   const file = path.join(dir, "t3.exe");
   yield* fs.writeFileString(file, UNSIGNED);
-  const stub = stubJsign(replies);
+  const stub = stubJsign(replies, authReply);
   const sleeps: Array<number> = [];
   const clock = yield* Clock.Clock;
   const exit = yield* signWithJsign(file).pipe(
@@ -77,6 +99,7 @@ const runSign = Effect.fn("test.runSign")(function* (replies: ReadonlyArray<Repl
       ConfigProvider.layer(
         ConfigProvider.fromEnv({
           env: {
+            AZURE_SIGNING_AUTH: authReply ? "oidc" : "client-secret",
             AZURE_TRUSTED_SIGNING_ENDPOINT: "https://eus.codesigning.azure.net/",
             AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "acct",
             AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "profile",
@@ -93,6 +116,8 @@ const runSign = Effect.fn("test.runSign")(function* (replies: ReadonlyArray<Repl
       : undefined,
     sleeps,
     inputs: stub.inputs,
+    tokenRequests: stub.tokenRequests,
+    commands: stub.commands,
     // jsign only ever sees a disposable copy, never the file itself.
     signedInPlace: stub.inputs.some((input) => input.path === file),
     content: yield* fs.readFileString(file),
@@ -122,6 +147,40 @@ it.layer(NodeServices.layer)("signWithJsign", (it) => {
     }),
   );
 
+  it.effect("refreshes OIDC signing tokens on retries without putting the token in argv", () =>
+    Effect.gen(function* () {
+      const result = yield* runSign([{ exitCode: 1, stderr: TRANSIENT_CHAIN }, signed(UNSIGNED)], {
+        token: "fixture-token",
+        exitCode: 0,
+      });
+      assert.isTrue(result.ok);
+      assert.strictEqual(result.tokenRequests.length, 2);
+      for (const args of result.tokenRequests)
+        assert.include(args, "https://codesigning.azure.net");
+      for (const command of result.commands) {
+        if (!ChildProcess.isStandardCommand(command)) continue;
+        assert.notInclude(command.args, "fixture-token");
+        if (command.command !== "az") {
+          assert.include(command.args, "env:S2CODE_SIGNING_ACCESS_TOKEN");
+          assert.strictEqual(command.options.env?.S2CODE_SIGNING_ACCESS_TOKEN, "fixture-token");
+          assert.isTrue(command.options.extendEnv);
+        }
+      }
+    }),
+  );
+  it.effect("never calls the signer after failed or empty OIDC authentication", () =>
+    Effect.gen(function* () {
+      for (const authReply of [
+        { token: "", exitCode: 0 },
+        { token: "not-a-valid-token", exitCode: 1 },
+      ]) {
+        const result = yield* runSign([signed(UNSIGNED)], authReply);
+        assert.isFalse(result.ok);
+        assert.strictEqual(result.inputs.length, 0);
+        assert.strictEqual(result.content, UNSIGNED);
+      }
+    }),
+  );
   it.effect("fails once without retrying on errors that are not transient", () =>
     Effect.gen(function* () {
       for (const reply of [

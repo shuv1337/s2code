@@ -22,7 +22,7 @@ import {
   FORK_NPM_PACKAGES,
   forkNpmPublishingReady,
   MAC_RELEASE_CREDENTIALS,
-  WIN_RELEASE_CREDENTIALS,
+  windowsSigningCredentials,
   RELEASE_CREDENTIAL_VARIABLES,
   releaseSigningPolicy,
   forkReleasePlan,
@@ -971,7 +971,7 @@ async function main() {
       platform === "mac"
         ? MAC_RELEASE_CREDENTIALS
         : platform === "win"
-          ? WIN_RELEASE_CREDENTIALS
+          ? windowsSigningCredentials(process.env)
           : [];
     const missing = required.filter((key) => !process.env[key]?.trim());
     if (
@@ -985,7 +985,7 @@ async function main() {
           )
           .join(
             ", ",
-          )}. Signing inputs must be repository or organization secrets and variables; anything scoped to the fork-release environment is invisible here.`,
+          )}. The signing job must have the same configuration and protected environment as preflight.`,
       );
     FS.appendFileSync(
       process.env.GITHUB_OUTPUT!,

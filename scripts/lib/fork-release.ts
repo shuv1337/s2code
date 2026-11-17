@@ -100,13 +100,23 @@ export const WIN_RELEASE_CREDENTIALS = [
   "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME",
 ];
 type Environment = Readonly<Record<string, string | undefined>>;
+/** OIDC uses the Azure CLI session established in the protected release job. */
+export function windowsSigningCredentials(env: Environment): ReadonlyArray<string> {
+  return env.AZURE_SIGNING_AUTH === "oidc"
+    ? [
+        ...WIN_RELEASE_CREDENTIALS.filter((key) => key !== "AZURE_CLIENT_SECRET"),
+        "AZURE_SUBSCRIPTION_ID",
+      ]
+    : WIN_RELEASE_CREDENTIALS;
+}
+
 export function releaseSigningPolicy(channel: string, allowUnsigned: boolean, env: Environment) {
   if (!["stable", "nightly", "preview"].includes(channel))
     throw new Error("Unsupported fork release channel.");
   if (channel === "stable" && allowUnsigned)
     throw new Error("Stable releases cannot opt into unsigned publication.");
   const missingMac = MAC_RELEASE_CREDENTIALS.filter((key) => !env[key]?.trim());
-  const missingWin = WIN_RELEASE_CREDENTIALS.filter((key) => !env[key]?.trim());
+  const missingWin = windowsSigningCredentials(env).filter((key) => !env[key]?.trim());
   if ((!allowUnsigned || channel === "stable") && (missingMac.length || missingWin.length))
     throw new Error(
       `Missing fork signing configuration: ${[...missingMac, ...missingWin].join(", ")}. Only nightly/preview can explicitly allow_unsigned.`,
