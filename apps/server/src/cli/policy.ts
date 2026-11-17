@@ -47,7 +47,7 @@ export const describeRunningServer = Effect.fn("cli.policy.describeRunningServer
 ) {
   const state = yield* readPersistedServerRuntimeState(statePath);
   if (Option.isNone(state) || !isProcessAlive(state.value.pid)) {
-    return "No T3 Code server is running from this T3 home. The installed policy applies when one starts.";
+    return "No S2Code server is running from this S2Code home. The installed policy applies when one starts.";
   }
   const { pid, startedAt, managedPolicy: loaded } = state.value;
   const server = `The running server (pid ${pid}, started ${startedAt})`;
@@ -63,7 +63,7 @@ export const describeRunningServer = Effect.fn("cli.policy.describeRunningServer
     loaded === null
       ? "no policy"
       : `${loaded.organization}'s policy from ${loaded.source} (fingerprint ${loaded.fingerprint})`;
-  return `${server} loaded ${what}. Restart T3 Code to apply the installed policy.`;
+  return `${server} loaded ${what}. Restart S2Code to apply the installed policy.`;
 });
 
 const showCommand = Command.make("show", projectLocationFlags).pipe(

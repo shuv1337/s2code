@@ -97,7 +97,7 @@ export class PreviewBrowserInstallError extends Schema.TaggedError<PreviewBrowse
   { detail: Schema.String, cause: Schema.optional(Schema.Defect()) },
 ) {
   override get message(): string {
-    return `T3 could not install its headless browser: ${this.detail} Try again.`;
+    return `S2Code could not install its headless browser: ${this.detail} Try again.`;
   }
 }
 const isInstallError = Schema.is(PreviewBrowserInstallError);
@@ -110,7 +110,7 @@ export class PreviewBrowserInstallingError extends Schema.TaggedError<PreviewBro
     const progress = this.unpacking
       ? "unpacking"
       : `${megabytes(this.downloadedBytes)} of ${megabytes(this.totalBytes)} MB downloaded`;
-    return `T3 is installing its headless browser (${progress}). Try again in a minute.`;
+    return `S2Code is installing its headless browser (${progress}). Try again in a minute.`;
   }
 }
 
