@@ -1647,6 +1647,32 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
+  it.effect("keeps an omitted MCP server token but clears an explicitly blank token", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const id = McpServerId.make("executor");
+      const url = "https://executor.example.test/mcp";
+      yield* service.updateSettings({
+        mcpServers: { [id]: { url, bearerToken: "mcp-secret", enabled: true } },
+      });
+
+      const withoutToken = yield* service.updateSettings(
+        yield* decodeServerSettingsPatch({ mcpServers: { [id]: { url, enabled: false } } }),
+      );
+      assert.equal(withoutToken.mcpServers[id]?.bearerToken, "mcp-secret");
+      assert.isFalse(withoutToken.mcpServers[id]?.enabled);
+
+      const cleared = yield* service.updateSettings(
+        yield* decodeServerSettingsPatch({
+          mcpServers: { [id]: { url, label: "Renamed", bearerToken: "" } },
+        }),
+      );
+      assert.equal(cleared.mcpServers[id]?.bearerToken, "");
+      assert.isTrue(Option.isNone(yield* store.get(mcpServerSecretName(id, url))));
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
   it.effect("never lets a saved MCP server token follow the server to a new URL", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;
@@ -1688,6 +1714,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         bearerToken: "new-secret",
       });
       assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
+
+      const movedWithoutToken = yield* service.updateSettings(
+        yield* decodeServerSettingsPatch({
+          mcpServers: { [id]: { url: "https://elsewhere.example.test/mcp" } },
+        }),
+      );
+      assert.equal(movedWithoutToken.mcpServers[id]?.bearerToken, "");
+      assert.isTrue(Option.isNone(yield* store.get(secretName)));
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

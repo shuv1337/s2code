@@ -263,11 +263,17 @@ function mergeMcpServersPatch(
       continue;
     }
     const saved = Object.hasOwn(current, id) ? current[id as keyof typeof current] : undefined;
-    const { projectIds: patchedProjectIds, excludeSubagents: patchedExclude, ...rest } = config;
+    const {
+      bearerToken,
+      projectIds: patchedProjectIds,
+      excludeSubagents: patchedExclude,
+      ...rest
+    } = config;
     const projectIds = patchedProjectIds ?? saved?.projectIds;
     const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
     next.set(id, {
       ...rest,
+      bearerToken: bearerToken ?? (saved?.url === rest.url.trim() ? saved.bearerToken : ""),
       ...(projectIds === undefined ? {} : { projectIds }),
       ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
     });
