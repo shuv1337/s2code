@@ -34,7 +34,7 @@ import {
   partitionStageDependencies,
   selectCliRuntimeExternalDependencies,
 } from "./lib/cli-external-packages.ts";
-import { signWithJsign } from "./lib/windows-jsign.ts";
+import { WindowsSigningConfig, signWindowsStage } from "./lib/windows-stage-signing.ts";
 import { windowsSystemTar } from "./lib/windows-tar.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -557,14 +557,6 @@ export const awaitCliNotarization = Effect.fn("awaitCliNotarization")(function* 
   yield* requireAccepted(yield* notarytool(["wait", id], credentials.value));
 });
 
-const WindowsSigningConfig = Config.all({
-  endpoint: Config.String("AZURE_TRUSTED_SIGNING_ENDPOINT").pipe(Config.option),
-  accountName: Config.String("AZURE_TRUSTED_SIGNING_ACCOUNT_NAME").pipe(Config.option),
-  certificateProfileName: Config.String("AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME").pipe(
-    Config.option,
-  ),
-});
-
 /** Node's Windows --build-sea leaves a stale Authenticode offset pointing into rebuilt resources instead of certificates. */
 const stripStaleAuthenticodeEntry = Effect.fn("stripStaleAuthenticodeEntry")(function* (
   executablePath: string,
@@ -598,40 +590,22 @@ const stripStaleAuthenticodeEntry = Effect.fn("stripStaleAuthenticodeEntry")(fun
   );
 });
 
-const signWindowsExecutable = Effect.fn("signWindowsExecutable")(function* (
+export const signWindowsArchiveContents = Effect.fn("signWindowsArchiveContents")(function* (
+  contentDir: string,
   executablePath: string,
 ) {
   const signing = yield* WindowsSigningConfig;
-  const endpoint = Option.getOrUndefined(signing.endpoint);
-  const accountName = Option.getOrUndefined(signing.accountName);
-  const profile = Option.getOrUndefined(signing.certificateProfileName);
-  if (!endpoint || !accountName || !profile) {
+  if (
+    !Option.getOrUndefined(signing.endpoint)?.trim() ||
+    !Option.getOrUndefined(signing.accountName)?.trim() ||
+    !Option.getOrUndefined(signing.certificateProfileName)?.trim()
+  ) {
     yield* Effect.log("[cli-archive] Windows signing disabled (missing Azure Trusted Signing).");
     return;
   }
   yield* stripStaleAuthenticodeEntry(executablePath);
-  if ((yield* HostProcess.Platform) !== "win32") {
-    yield* signWithJsign(executablePath);
-    yield* Effect.log("[cli-archive] Signed t3.exe (Azure Trusted Signing via jsign).");
-    return;
-  }
-  const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  const script = [
-    "$ErrorActionPreference = 'Stop';",
-    "Invoke-TrustedSigning",
-    `-Endpoint ${quote(endpoint)}`,
-    `-CodeSigningAccountName ${quote(accountName)}`,
-    `-CertificateProfileName ${quote(profile)}`,
-    "-FileDigest 'SHA256'",
-    "-TimestampRfc3161 'http://timestamp.acs.microsoft.com'",
-    "-TimestampDigest 'SHA256'",
-    `-Files ${quote(executablePath)}`,
-  ].join(" ");
-  yield* runCommand(
-    ChildProcess.make("pwsh", ["-NoProfile", "-NonInteractive", "-Command", script]),
-    "Invoke-TrustedSigning t3.exe",
-  );
-  yield* Effect.log("[cli-archive] Signed t3.exe (Azure Trusted Signing).");
+  yield* signWindowsStage(contentDir);
+  yield* Effect.log("[cli-archive] Signed all staged Windows execution components.");
 });
 
 const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
@@ -714,7 +688,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
       notarySubmissionFile: input.notarySubmissionFile,
     });
   } else if (input.platform === "win") {
-    yield* signWindowsExecutable(executablePath);
+    yield* signWindowsArchiveContents(contentDir, executablePath);
   }
   if (input.platform !== "win") {
     yield* fs.chmod(executablePath, 0o755);

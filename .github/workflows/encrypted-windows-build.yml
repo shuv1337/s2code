@@ -1,0 +1,180 @@
+name: Encrypted signed Windows build (no publication)
+on:
+  workflow_dispatch:
+    inputs:
+      recipient:
+        description: Native age public recipient; keep its private identity on your computer
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: encrypted-windows-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'shuv1337/s2code' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: fork-release
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AGE_RECIPIENT: ${{ inputs.recipient }}
+      S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/s2code
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/.repos/
+      - name: Validate recipient and exact trusted source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AZURE_CONFIG_DIR=$RUNNER_TEMP/azure-encrypted-windows" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node -e 'require("./.github/scripts/encrypted-windows-delivery.cjs").validateRecipient(process.env.AGE_RECIPIENT)'
+          version="$(node -p 'require("./apps/server/package.json").version.split("-")[0]')-nightly.ci.$((1000 + GITHUB_RUN_NUMBER))"
+          echo "PRIVATE_BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Source shuv1337/s2code main $GITHUB_SHA. Delivery is encrypted; no release will be published." >> "$GITHUB_STEP_SUMMARY"
+      - name: Install pinned age encryption tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/age-tool"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/age.tar.gz" https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz
+          echo "cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10  $RUNNER_TEMP/age.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/age.tar.gz" -C "$RUNNER_TEMP/age-tool"
+          "$RUNNER_TEMP/age-tool/age/age" --version
+          # This also verifies the recipient's checksum before spending build/signing time.
+          printf '' | "$RUNNER_TEMP/age-tool/age/age" --encrypt --recipient "$AGE_RECIPIENT" --output "$RUNNER_TEMP/recipient-check.age"
+          rm "$RUNNER_TEMP/recipient-check.age"
+          echo "$RUNNER_TEMP/age-tool/age" >> "$GITHUB_PATH"
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.100.0"
+          targets: x86_64-pc-windows-msvc
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-xwin@0.23.1
+      - name: Install build and verification dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsecret-1-dev pkg-config clang lld llvm imagemagick p7zip-full python3-yaml osslsigncode openjdk-17-jre-headless
+          vp install --frozen-lockfile --filter=@t3tools/desktop... --filter=@t3tools/web... --filter=t3... --filter=@t3tools/scripts...
+          mkdir -p "$RUNNER_TEMP/jsign"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/jsign/jsign.jar" https://github.com/ebourg/jsign/releases/download/7.6/jsign-7.6.jar
+          echo "6cf58aa080e7ff82656f320cff8d4a3bff30408df8766806dcba3740dd839fa5  $RUNNER_TEMP/jsign/jsign.jar" | sha256sum -c -
+          printf '#!/bin/sh\nexec java -jar "%s" "$@"\n' "$RUNNER_TEMP/jsign/jsign.jar" > "$RUNNER_TEMP/jsign/jsign"
+          chmod +x "$RUNNER_TEMP/jsign/jsign"
+          echo "T3CODE_JSIGN=$RUNNER_TEMP/jsign/jsign" >> "$GITHUB_ENV"
+      - name: Build same-source Linux runtime without uploading intermediates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/update-release-package-versions.ts "$PRIVATE_BUILD_VERSION"
+          cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml
+          mkdir -p release-private/linux-resource-monitor
+          cp native/resource-monitor/target/release/t3-resource-monitor release-private/linux-resource-monitor/
+          vp run --filter @t3tools/web build
+          node apps/server/scripts/cli.ts build --verbose
+          node apps/server/scripts/cli.ts build-exe --verbose
+          node scripts/build-cli-archive.ts --platform linux --arch x64 --version "$PRIVATE_BUILD_VERSION" --resource-monitor-dir release-private/linux-resource-monitor --output-dir release-private/linux-runtime
+          node scripts/smoke-cli-archive.ts --archive release-private/linux-runtime/*.tar.gz --expect-version "$PRIVATE_BUILD_VERSION"
+      - name: Cross-build Windows resource monitor and CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo xwin build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target x86_64-pc-windows-msvc
+          mkdir -p release-private/windows-resource-monitor
+          cp native/resource-monitor/target/x86_64-pc-windows-msvc/release/t3-resource-monitor.exe release-private/windows-resource-monitor/
+          node apps/server/scripts/cli.ts build-exe --verbose --target win-x64
+      - name: Log in immediately before CLI signing
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Cache signing token and build signed CLI archive
+        shell: bash
+        env:
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true"
+          AZURE_SIGNING_AUTH: oidc
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+        run: |
+          set -euo pipefail
+          az account get-access-token --resource https://codesigning.azure.net --query expiresOn --output tsv --only-show-errors
+          node scripts/build-cli-archive.ts --platform win --arch x64 --version "$PRIVATE_BUILD_VERSION" --resource-monitor-dir release-private/windows-resource-monitor --output-dir release-private/windows-cli
+      - name: Build desktop JavaScript before acquiring a fresh signing token
+        shell: bash
+        run: vp run build:desktop
+      - name: Refresh login immediately before desktop signing
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Build signed desktop installer without publishing
+        shell: bash
+        env:
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true"
+          AZURE_SIGNING_AUTH: oidc
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+        run: |
+          set -euo pipefail
+          az account get-access-token --resource https://codesigning.azure.net --query expiresOn --output tsv --only-show-errors
+          runtime=(release-private/linux-runtime/*.tar.gz)
+          test "${#runtime[@]}" = 1
+          node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version "$PRIVATE_BUILD_VERSION" --wsl-runtime "${runtime[0]}" --signed --skip-build --output-dir release-private/windows-desktop
+      - name: Bundle offline Windows runtime checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          esbuild=scripts/node_modules/.bin/esbuild
+          banner="import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);"
+          "$esbuild" scripts/verify-windows-desktop-artifact.ts --bundle --platform=node --format=esm \
+            --target=node24 --define:import.meta.main=false --banner:js="$banner" \
+            --outfile=release-private/verify-windows-desktop-artifact.mjs
+          "$esbuild" scripts/smoke-cli-archive.ts --bundle --platform=node --format=esm \
+            --target=node24 --banner:js="$banner" --outfile=release-private/smoke-cli-archive.mjs
+      # The verifier is kept separate so it can inspect the actual NSIS payload,
+      # not a staging directory that differs from the installer being delivered.
+      - name: Verify final installer, nested execution components, and CLI
+        shell: bash
+        env:
+          EXPECTED_PUBLISHER: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+        run: node .github/scripts/verify-private-windows.cjs --root release-private --source "$GITHUB_SHA" --version "$PRIVATE_BUILD_VERSION" --publisher "$EXPECTED_PUBLISHER"
+      - name: Encrypt all deliverables to the local recipient
+        shell: bash
+        run: node .github/scripts/encrypted-windows-delivery.cjs
+      - name: Upload ciphertext only
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: s2code-windows-encrypted-${{ github.run_id }}
+          path: ${{ runner.temp }}/encrypted-windows-output/s2code-windows.tar.gz.age
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Delete local plaintext and signing session
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- release-private "$RUNNER_TEMP/encrypted-windows-plaintext" "$AZURE_CONFIG_DIR"

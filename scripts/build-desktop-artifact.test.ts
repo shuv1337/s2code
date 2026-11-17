@@ -2440,6 +2440,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         createBuildConfig("win", "nsis", "1.2.3", true, false, undefined, undefined).pipe(
           Effect.map((config) => {
             assert.isNotNull(config.publish);
+            assert.isTrue(config.forceCodeSigning);
+            assert.notInclude(JSON.stringify(config.extraResources), "windows-server");
+            assert.match(config.afterPack as string, /scripts[\\/]windows-after-pack\.ts$/);
             return config.win as Record<string, unknown>;
           }),
           Effect.provideService(HostProcess.Platform, hostPlatform),

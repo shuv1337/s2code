@@ -52,6 +52,7 @@ import { loadRepoEnv } from "./lib/public-config.ts";
 import { selectDesktopRuntimeExternalDependencies } from "./lib/desktop-external-packages.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 import { resolveTaggedSourceVersion } from "./lib/tagged-source-version.ts";
+import { signWindowsStage } from "./lib/windows-stage-signing.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -3113,7 +3114,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ...DESKTOP_EXTRA_RESOURCES,
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
-      ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
+      // Signed sidecar is copied unchanged in afterPack: the builder extra-file
+      // transformer would otherwise re-sign native bytes after ASAR sizes are recorded.
+      ...(platform === "win" && !signed ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
       ...(platform === "win" && wslRuntimeBundled ? WSL_RUNTIME_EXTRA_RESOURCES : []),
     ],
   };
@@ -3275,6 +3278,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "win") {
+    if (signed) {
+      buildConfig.forceCodeSigning = true;
+      buildConfig.afterPack = (yield* Path.Path).join(
+        yield* RepoRoot,
+        "scripts/windows-after-pack.ts",
+      );
+    }
     buildConfig.npmRebuild = false;
     buildConfig.nsis = {
       differentialPackage: true,
@@ -3412,6 +3422,7 @@ export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function
 
 export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(function* (input: {
   readonly stageRoot: string;
+  readonly signed?: boolean;
   readonly repoRoot: string;
   readonly serverDistDir: string;
   readonly arch: typeof BuildArch.Type;
@@ -3492,6 +3503,10 @@ export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(
     label: "The Windows server sidecar",
   });
 
+  // Sign native copies before ASAR records their size/integrity metadata.
+  if (input.signed) {
+    yield* signWindowsStage(serverStageDir, resolveWindowsServerAsarIgnoreGlobs(input.arch));
+  }
   yield* Effect.log("[desktop-artifact] Packing server.asar...");
   yield* fs.makeDirectory(path.dirname(input.asarPath), { recursive: true });
   yield* packWindowsServerAsar({
@@ -4372,6 +4387,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   if (options.platform === "win" && windowsServerAsarPath) {
     yield* stageWindowsServerSidecar({
       stageRoot,
+      signed: options.signed,
       repoRoot,
       serverDistDir: distDirs.serverDist,
       arch: options.arch,
