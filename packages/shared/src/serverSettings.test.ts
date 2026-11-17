@@ -602,7 +602,7 @@ describe("serverSettings helpers", () => {
     });
   });
 
-  it("keeps an MCP server's binding when a whole-entry patch omits it, and clears it explicitly", () => {
+  it("keeps an MCP server's enabled flag and binding when a patch omits them", () => {
     const url = "https://mcp.example.com/mcp";
     const unbound = decodeServerSettings({ mcpServers: { executor: { url } } });
     expect(unbound.mcpServers).toEqual({ executor: { url, bearerToken: "", enabled: true } });
@@ -640,11 +640,12 @@ describe("serverSettings helpers", () => {
     const cleared = applyServerSettingsPatch(
       toggled,
       decodeServerSettingsPatch({
-        mcpServers: { executor: { url, projectIds: [], excludeSubagents: false } },
+        mcpServers: { executor: { url, projectIds: [], excludeSubagents: false }, fresh: { url } },
       }),
     );
     expect(cleared.mcpServers).toEqual({
-      executor: { url, bearerToken: "", enabled: true, projectIds: [], excludeSubagents: false },
+      executor: { url, bearerToken: "", enabled: false, projectIds: [], excludeSubagents: false },
+      fresh: { url, bearerToken: "", enabled: true },
     });
   });
 

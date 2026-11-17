@@ -2,12 +2,12 @@ import {
   type McpServerConfig,
   type McpServerId,
   type McpServerTestResult,
-  type ProjectId,
   type ServerSettings,
   SharedMcpServerSetInput,
   type SharedMcpServerSummary,
   sharedMcpServerHarnessName,
 } from "@t3tools/contracts";
+import { sameMcpServerBinding } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -97,15 +97,6 @@ const summary = (id: McpServerId, server: McpServerConfig): SharedMcpServerSumma
   harnessName: sharedMcpServerHarnessName(id),
 });
 
-const sameProjects = (
-  left: ReadonlyArray<ProjectId> | undefined,
-  right: ReadonlyArray<ProjectId> | undefined,
-) => {
-  const leftSet = new Set(left);
-  const rightSet = new Set(right);
-  return leftSet.size === rightSet.size && [...leftSet].every((id) => rightSet.has(id));
-};
-
 const isManagementError = Schema.is(SharedMcpServerManagementError);
 
 const decodeSetInput = Schema.decodeUnknownEffect(SharedMcpServerSetInput, {
@@ -161,20 +152,21 @@ const make = Effect.gen(function* () {
       const url = validated.url ?? saved?.url;
       if (url === undefined)
         return yield* new SharedMcpServerManagementError({ reason: "url_required" });
-      const projectIds = validated.projectIds ?? saved?.projectIds;
-      const excludeSubagents = validated.excludeSubagents ?? saved?.excludeSubagents;
+      const binding = {
+        url,
+        projectIds: validated.projectIds ?? saved?.projectIds,
+        excludeSubagents: validated.excludeSubagents ?? saved?.excludeSubagents,
+      };
       // Repointing or rebinding a tokened server hands its token to a new audience, so the caller re-supplies it.
       if (
         saved !== undefined &&
         saved.bearerToken.length > 0 &&
         validated.bearerTokenSecretRef === undefined &&
         validated.clearBearerToken !== true &&
-        (url !== saved.url ||
-          !sameProjects(projectIds, saved.projectIds) ||
-          (excludeSubagents ?? false) !== (saved.excludeSubagents ?? false))
+        !sameMcpServerBinding(saved, binding)
       )
         return yield* new SharedMcpServerManagementError({ reason: "secret_required" });
-      return { saved, url, projectIds, excludeSubagents };
+      return { saved, ...binding };
     });
     // Refuse before spending a ref; the write re-checks against what it replaces.
     yield* resolve((yield* current).mcpServers);

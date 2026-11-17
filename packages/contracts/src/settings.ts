@@ -972,8 +972,9 @@ export type McpServerConfig = typeof McpServerConfig.Type;
 
 const McpServerConfigPatch = Schema.Struct({
   ...McpServerConfig.fields,
-  /** Omission keeps the token at the same URL; an explicit empty string clears it. */
+  /** Omission keeps the token at the same URL and audience; an empty string clears it. */
   bearerToken: Schema.optionalKey(TrimmedString).pipe(secretSetting),
+  enabled: Schema.optionalKey(Schema.Boolean),
 });
 
 export const TextGeneratorKind = Schema.Literals(["openaiCompatible", "anthropic"]);

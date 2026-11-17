@@ -13,6 +13,7 @@ import {
   resolveTextGenerationSelectionEnabled,
   textGeneratorForSelection,
   isProviderTextGenerationCapable,
+  type McpServerConfig,
   type ModelSelection,
   type ProjectId,
   type ProjectScopedServerSettingKey,
@@ -250,6 +251,27 @@ function mergeSettingsEntries<Value>(
   return Object.fromEntries(next);
 }
 
+type McpServerBinding = {
+  readonly url: string;
+  readonly projectIds?: McpServerConfig["projectIds"];
+  readonly excludeSubagents?: McpServerConfig["excludeSubagents"];
+};
+
+export function sameMcpServerBinding(left: McpServerBinding, right: McpServerBinding): boolean {
+  if (
+    left.url !== right.url ||
+    (left.excludeSubagents ?? false) !== (right.excludeSubagents ?? false)
+  ) {
+    return false;
+  }
+  const leftProjects = new Set(left.projectIds);
+  const rightProjects = new Set(right.projectIds);
+  return (
+    leftProjects.size === rightProjects.size &&
+    [...leftProjects].every((id) => rightProjects.has(id))
+  );
+}
+
 // Clients that predate a binding field drop it on whole-entry replacement, which would widen who reaches
 // the server; an omitted key keeps the saved binding, and `[]` or `false` clears it.
 function mergeMcpServersPatch(
@@ -271,11 +293,19 @@ function mergeMcpServersPatch(
     } = config;
     const projectIds = patchedProjectIds ?? saved?.projectIds;
     const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
-    next.set(id, {
+    const merged = {
       ...rest,
-      bearerToken: bearerToken ?? (saved?.url === rest.url.trim() ? saved.bearerToken : ""),
+      enabled: rest.enabled ?? saved?.enabled ?? true,
       ...(projectIds === undefined ? {} : { projectIds }),
       ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
+    };
+    next.set(id, {
+      ...merged,
+      bearerToken:
+        bearerToken ??
+        (saved !== undefined && sameMcpServerBinding(saved, { ...merged, url: merged.url.trim() })
+          ? saved.bearerToken
+          : ""),
     });
   }
   return Object.fromEntries(next) as ServerSettings["mcpServers"];

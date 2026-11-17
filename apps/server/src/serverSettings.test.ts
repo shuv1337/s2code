@@ -1674,18 +1674,26 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
-  it.effect("never lets a saved MCP server token follow the server to a new URL", () =>
+  const originalMcpServer = {
+    label: "Executor",
+    url: "https://executor.example.test/mcp",
+    bearerToken: "mcp-secret",
+    enabled: true,
+    projectIds: [ProjectId.make("a"), ProjectId.make("b")],
+    excludeSubagents: true,
+  };
+
+  it.effect.each([
+    { binding: "URL", changes: { url: "https://elsewhere.example.test/mcp" } },
+    { binding: "project audience", changes: { projectIds: [] } },
+    { binding: "subagent audience", changes: { excludeSubagents: false } },
+  ])("never carries a saved MCP server token to a new $binding", ({ changes }) =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;
       const store = yield* ServerSecretStore.ServerSecretStore;
       const id = McpServerId.make("executor");
-      const secretName = mcpServerSecretName(id, "https://executor.example.test/mcp");
-      const original = {
-        label: "Executor",
-        url: "https://executor.example.test/mcp",
-        bearerToken: "mcp-secret",
-        enabled: true,
-      };
+      const original = originalMcpServer;
+      const secretName = mcpServerSecretName(id, original.url);
       yield* service.updateSettings({ mcpServers: { [id]: original } });
       const echo = (changes: Partial<typeof original>) =>
         service.getSettings.pipe(
@@ -1703,22 +1711,25 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           ),
         );
 
-      const relabeled = yield* echo({ label: "Renamed" });
+      const relabeled = yield* echo({
+        label: "Renamed",
+        projectIds: [ProjectId.make("b"), ProjectId.make("a"), ProjectId.make("b")],
+      });
       assert.equal(relabeled.mcpServers[id]?.bearerToken, "mcp-secret");
 
-      const moved = yield* echo({ url: "https://elsewhere.example.test/mcp" });
+      const moved = yield* echo(changes);
+      assert.deepInclude(moved.mcpServers[id], changes);
       assert.equal(moved.mcpServers[id]?.bearerToken, "");
       assert.isTrue(Option.isNone(yield* store.get(secretName)));
 
-      const replaced = yield* echo({
-        url: "https://executor.example.test/mcp",
-        bearerToken: "new-secret",
+      const replaced = yield* service.updateSettings({
+        mcpServers: { [id]: { ...original, bearerToken: "new-secret" } },
       });
       assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
 
       const movedWithoutToken = yield* service.updateSettings(
         yield* decodeServerSettingsPatch({
-          mcpServers: { [id]: { url: "https://elsewhere.example.test/mcp" } },
+          mcpServers: { [id]: { url: original.url, ...changes } },
         }),
       );
       assert.equal(movedWithoutToken.mcpServers[id]?.bearerToken, "");
