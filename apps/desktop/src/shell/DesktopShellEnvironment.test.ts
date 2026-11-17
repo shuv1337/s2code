@@ -355,6 +355,7 @@ describe("DesktopShellEnvironment", () => {
             NODE_EXTRA_CA_CERTS: "/cached/ca.pem",
             SSL_CERT_FILE: "/cached/cert.pem",
             SSL_CERT_DIR: "/cached/certs",
+            T3CODE_TELEMETRY_ENABLED: "false",
             SSH_AUTH_SOCK: "/stale.sock",
             NODE_OPTIONS: "--bad",
           },
@@ -394,6 +395,7 @@ describe("DesktopShellEnvironment", () => {
         assert.equal(env.NODE_EXTRA_CA_CERTS, "/launcher/ca.pem");
         assert.equal(env.SSL_CERT_FILE, "");
         assert.equal(env.SSL_CERT_DIR, "/cached/certs");
+        assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
         assert.equal(env.SSH_AUTH_SOCK, "/current.sock");
         assert.isUndefined(env.NODE_OPTIONS);
         assert.equal(yield* fs.readFileString(cachePath), contents);
@@ -592,28 +594,32 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
-  it.effect("hydrates PATH and missing SSH_AUTH_SOCK from the login shell on linux", () =>
-    Effect.gen(function* () {
-      const env: NodeJS.ProcessEnv = {
-        SHELL: "/bin/zsh",
-        PATH: "/usr/bin",
-      };
+  it.effect.each(["S2CODE_RELEASE_BASE_URL", "SHUV2CODE_RELEASE_BASE_URL"] as const)(
+    "hydrates PATH, missing SSH_AUTH_SOCK, and %s from the login shell on linux",
+    (mirrorKey) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+        };
 
-      yield* runShellEnvironment({
-        env,
-        platform: "linux",
-        handler: () =>
-          envOutput({
-            PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
-            SSH_AUTH_SOCK: "/tmp/secretive.sock",
-            SHUV2CODE_TELEMETRY_ENABLED: "false",
-          }),
-      });
+        yield* runShellEnvironment({
+          env,
+          platform: "linux",
+          handler: () =>
+            envOutput({
+              PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
+              SSH_AUTH_SOCK: "/tmp/secretive.sock",
+              SHUV2CODE_TELEMETRY_ENABLED: "false",
+              [mirrorKey]: "https://mirror.example.com/s2code",
+            }),
+        });
 
-      assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
-      assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
-      assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
-    }),
+        assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
+        assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
+        assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
+        assert.equal(env[mirrorKey], "https://mirror.example.com/s2code");
+      }),
   );
 
   it.effect("hydrates missing CA trust variables from the login shell", () =>
@@ -752,6 +758,8 @@ describe("DesktopShellEnvironment", () => {
           Effect.gen(function* () {
             assert.isTrue(yield* service.awaitDiscovery);
             assert.equal(env.PATH, "/usr/bin");
+            // The user's shell may still opt out of telemetry, so discovery has not settled.
+            assert.isFalse(yield* service.discoveryFinished);
             // The Linux probe checks the D-Bus socket on the real filesystem, which the clock does not await.
             const published = yield* service.updates.pipe(
               Stream.filter((snapshot) => snapshot.environment.PATH === "/fish/bin:/usr/bin"),

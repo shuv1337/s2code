@@ -729,6 +729,31 @@ it.effect("idle compaction filters keep the latest run, live work and the newest
       .join("\n");
     assert.notInclude(runPlan, "orchestration_v2_projection_runs_thread_ordinal_idx");
     assert.match(runPlan, /SEARCH orchestration_v2_projection_runs USING INDEX \w*status\w*/);
+    // The newest runs by ordinal, whatever their status, plus older runs the statuses match.
+    for (const [filter, expected] of [
+      [{ latestRunLimit: 2 }, [4, 5]],
+      [{ latestRunLimit: 2, runStatuses: ["rolled_back"] as const }, [1, 4, 5]],
+    ] as const) {
+      const traced = traceSqlStatements();
+      const recent = yield* store
+        .getThreadRecords(threadId, ["runs"], filter)
+        .pipe(Effect.withTracer(traced.tracer));
+      assert.deepEqual(
+        recent.runs.map((run) => run.ordinal),
+        [...expected],
+      );
+      const recentQuery = traced.statements.find((statement) =>
+        statement.includes("FROM orchestration_v2_projection_runs"),
+      );
+      assert.isDefined(recentQuery);
+      // Fetches the chosen runs by key instead of walking every run of the thread.
+      assert.match(
+        (yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${recentQuery}`))
+          .map((row) => row.detail)
+          .join("\n"),
+        /^SEARCH orchestration_v2_projection_runs USING INDEX \w+ \(run_id=\?\)/,
+      );
+    }
     // An id filter reads by primary key, not every row of the thread.
     const byId = traceSqlStatements();
     const found = yield* store
@@ -1492,8 +1517,8 @@ it.effect("SQL run existence is scoped to the thread and counts settled runs", (
       occurredAt: yield* DateTime.now,
       payload: { ...thread, id: runless, lineage: { ...thread.lineage, rootThreadId: runless } },
     });
-    assert.isTrue(yield* store.hasRuns(withRuns));
-    assert.isFalse(yield* store.hasRuns(runless));
+    assert.isAbove(yield* store.getRunCount(withRuns), 0);
+    assert.strictEqual(yield* store.getRunCount(runless), 0);
   }).pipe(Effect.provide(layerTest)),
 );
 

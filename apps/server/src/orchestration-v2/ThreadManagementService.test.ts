@@ -121,7 +121,7 @@ const layerDispatchChokepointTest =
                 },
               },
             } as unknown as OrchestrationV2ThreadProjection),
-          hasRuns: () => Effect.succeed(true),
+          getRunCount: () => Effect.succeed(1),
           dispatch: (command) =>
             Effect.sync(() => {
               dispatched.push(

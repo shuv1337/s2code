@@ -101,11 +101,11 @@ export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.T
 
 /** Opt-in for a named instance, shared by every tool that can name one. */
 export const OrchestratorMcpAllowPoolFailover = Schema.Boolean.annotate({
-  description: "If the named seat can't run, fall back to another member of its pool.",
+  description: "If named seat fails, allow a pool fallback.",
 });
 
 export const OrchestratorMcpPoolSelector = Schema.optional(ProviderDriverKind).annotate({
-  description: "From capabilities `pools`; T3 picks the member.",
+  description: "From capabilities `pools`; auto-select seat.",
 });
 
 /** The member a `pool` request landed on. */

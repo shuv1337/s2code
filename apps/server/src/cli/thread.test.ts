@@ -11,14 +11,13 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as TestClock from "effect/testing/TestClock";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
 import { vi } from "vite-plus/test";
-
-import * as Option from "effect/Option";
 
 import * as McpBridge from "../mcp/AcpMcpStdioBridge.ts";
 import {
@@ -27,6 +26,7 @@ import {
 } from "../serverRuntimeState.ts";
 import {
   launchModelFields,
+  launchModelSelection,
   readLatestMessages,
   resolveProject,
   threadCommand,
@@ -378,6 +378,50 @@ it.effect("--wait reports its run's result when a later run is the one waiting",
   }),
 );
 
+it.effect("start sends each --option as a typed model option", () =>
+  Effect.gen(function* () {
+    const selection = yield* launchModelSelection({
+      provider: Option.some("codex"),
+      model: Option.some("gpt-6.1-sol"),
+      option: ["reasoningEffort=high", " fastMode = false ", "note=a=b"],
+    });
+
+    assert.deepStrictEqual(selection, {
+      instanceId: "codex",
+      model: "gpt-6.1-sol",
+      options: [
+        { id: "reasoningEffort", value: "high" },
+        { id: "fastMode", value: false },
+        { id: "note", value: "a=b" },
+      ],
+    });
+  }),
+);
+
+it.effect("start rejects a repeated --option before reaching the server", () =>
+  Effect.gen(function* () {
+    const error = yield* Command.runWith(threadCommand, { version: "0.0.0" })([
+      "start",
+      ".",
+      "hi",
+      "--provider",
+      "codex",
+      "--model",
+      "gpt-6.1-sol",
+      "--option",
+      "reasoningEffort=high",
+      "--option",
+      "reasoningEffort=low",
+    ]).pipe(Effect.flip);
+
+    assert.strictEqual(error.message, "--option reasoningEffort is given more than once.");
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer, TestConsole.layer),
+    ),
+  ),
+);
+
 /** Serves t3_thread_read pages the way the server does: positions count every item. */
 const timelineTools = (types: ReadonlyArray<string>) => {
   const items = types.map((type, position) => ({ position, itemId: `item-${position}`, type }));
@@ -473,20 +517,27 @@ it("titles from a long first line without splitting an emoji", () => {
 it("start names --provider with --allow-pool-failover, and warns when there is no --provider", () => {
   assert.deepStrictEqual(
     launchModelFields({
-      provider: Option.some("codex"),
-      model: Option.some("gpt-5.4"),
+      modelSelection: {
+        instanceId: "codex",
+        model: "gpt-5.4",
+        options: [{ id: "effort", value: "high" }],
+      },
       allowPoolFailover: true,
     }),
     {
       fields: {
-        modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+        modelSelection: {
+          instanceId: "codex",
+          model: "gpt-5.4",
+          options: [{ id: "effort", value: "high" }],
+        },
         allowPoolFailover: true,
       },
       warning: undefined,
     },
   );
   assert.deepStrictEqual(
-    launchModelFields({ provider: Option.none(), model: Option.none(), allowPoolFailover: true }),
+    launchModelFields({ modelSelection: undefined, allowPoolFailover: true }),
     {
       fields: {},
       warning: "Warning: --allow-pool-failover was ignored: it applies only with --provider.",

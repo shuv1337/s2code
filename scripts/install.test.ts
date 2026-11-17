@@ -702,3 +702,115 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
     },
   );
 });
+
+// regression: #38234
+describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("concurrent installers", () => {
+  it("publishes one runtime without nesting the other install's staging directory", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-concurrent-"));
+    const version = "1.2.3";
+    const stem = `s2code-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+    const archiveName = `${stem}.tar.gz`;
+    const target = NodePath.join(root, "home/runtime/versions", version);
+    const waiting = new Map<string, NodeHttp.ServerResponse>();
+    const server = NodeHttp.createServer();
+    try {
+      const tools = NodePath.join(root, "tools");
+      const home = NodePath.join(root, "home");
+      await NodeFSP.mkdir(home);
+      await NodeFSP.writeFile(NodePath.join(home, ".product-identity"), "s2code\n");
+      await NodeFSP.mkdir(tools);
+      await NodeFSP.mkdir(NodePath.join(root, stem));
+      await NodeFSP.writeFile(NodePath.join(root, stem, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
+        mode: 0o755,
+      });
+      const archivePath = NodePath.join(root, archiveName);
+      NodeChildProcess.execFileSync("tar", ["-czf", archivePath, "-C", root, stem]);
+      const archive = await NodeFSP.readFile(archivePath);
+      const digest = NodeCrypto.createHash("sha256").update(archive).digest("hex");
+      server.on("request", (request, response) => {
+        if (request.url?.startsWith("/ready/")) {
+          waiting.set(request.url.slice(7), response);
+          if (waiting.size === 2) waiting.get("first")!.end("go");
+        } else if (request.url === "/published") {
+          waiting.get("second")!.end("go");
+          response.end("ok");
+        } else {
+          response.end(
+            request.url?.endsWith("/SHA256SUMS") ? `${digest}  ${archiveName}\n` : archive,
+          );
+        }
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP listener");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const realMv = NodeChildProcess.execFileSync("sh", ["-c", "command -v mv"], {
+        encoding: "utf8",
+      }).trim();
+      // Hold the runtime renames until both installers have reached publication.
+      const wrapper = NodePath.join(tools, "mv.mjs");
+      await NodeFSP.writeFile(
+        wrapper,
+        `
+import { execFileSync } from 'node:child_process';
+const args = process.argv.slice(2);
+const publish = args[0]?.includes('/.staging-');
+if (publish) await fetch(process.env.T3_TEST_ORIGIN + '/ready/' + process.env.T3_TEST_INSTALLER);
+execFileSync(${JSON.stringify(realMv)}, args);
+if (publish && process.env.T3_TEST_INSTALLER === 'first') await fetch(process.env.T3_TEST_ORIGIN + '/published');
+`,
+      );
+      await NodeFSP.writeFile(
+        NodePath.join(tools, "mv"),
+        `#!/bin/sh\nexec '${process.execPath}' '${wrapper}' "$@"\n`,
+        { mode: 0o755 },
+      );
+      const install = (id: string) =>
+        new Promise<{ code: number | null; output: string }>((resolve, reject) => {
+          const child = NodeChildProcess.spawn(
+            "sh",
+            [NodePath.join(import.meta.dirname, "install.sh")],
+            {
+              env: {
+                HOME: root,
+                VITEST: "true",
+                TMPDIR: NodeOS.tmpdir(),
+                PATH: `${tools}:${process.env.PATH}`,
+                S2CODE_VERSION: version,
+                S2CODE_HOME: home,
+                S2CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin", id),
+                S2CODE_RELEASE_BASE_URL: origin,
+                T3_TEST_ORIGIN: origin,
+                T3_TEST_INSTALLER: id,
+              },
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          );
+          let output = "";
+          child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+          child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+          child.on("error", reject);
+          child.on("close", (code) => {
+            if (code !== 0) reject(new Error(`${id} installer exited ${code}: ${output}`));
+            else resolve({ code, output });
+          });
+        });
+      const results = await Promise.all([install("first"), install("second")]);
+      for (const result of results) expect(result.code, result.output).toBe(0);
+      expect(await NodeFSP.readFile(NodePath.join(target, ".install-complete"), "utf8")).toBe(
+        `${version}\n`,
+      );
+      expect(await NodeFSP.readFile(NodePath.join(target, ".install-product"), "utf8")).toBe(
+        "s2code\n",
+      );
+      expect(
+        (await NodeFSP.readdir(target)).filter((name) => name.startsWith(".staging-")),
+        "concurrent installs must not leave a nested runtime",
+      ).toEqual([]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+});

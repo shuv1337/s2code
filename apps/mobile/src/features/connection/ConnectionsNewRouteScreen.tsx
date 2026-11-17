@@ -97,7 +97,13 @@ function PairingForm({
   };
 
   const handleHostChange = (value: string) => {
-    setHostInput(value);
+    const pairing = parsePairingUrl(value);
+    if (pairing.code) {
+      setHostInput(pairing.host);
+      setCodeInput(pairing.code);
+    } else {
+      setHostInput(value);
+    }
     clearError();
   };
 
@@ -197,10 +203,10 @@ function PairingForm({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         className="flex-1"
-        contentInset={{ bottom: Math.max(insets.bottom, 18) + 18 }}
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: 4,
+          paddingBottom: Math.max(insets.bottom, 18) + 18,
         }}
       >
         <View collapsable={false} className="gap-6.5">
