@@ -2,6 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const {
   peSignature,
+  findUninstaller,
   windowsVerifier,
   validateUpdateConfiguration,
 } = require("./verify-private-windows.cjs");
@@ -39,6 +40,10 @@ test("Windows trust is authoritative and checks all payload hashes, publisher, a
   const script = windowsVerifier();
   for (const required of [
     "Get-AuthenticodeSignature",
+    "Expected one unique S2Code nightly NSIS uninstaller",
+    "nsis-uninstaller/$uninstallerRelative",
+    "$item.area -eq 'nsis-uninstaller'",
+    "$candidate = $uninstaller[0].FullName",
     "[switch]$RunRuntimeChecks",
     "if ($RunRuntimeChecks)",
     "verify-windows-desktop-artifact.mjs",
@@ -78,4 +83,26 @@ test("updater configuration pins actual product repository and publisher", () =>
     { url: "https://example.com" },
   ])
     assert.throws(() => validateUpdateConfiguration({ ...valid, ...bad }, publisher));
+});
+
+test("NSIS uninstaller outside app archive is required uniquely and bound to the nightly product", (t) => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nsis-uninstaller-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const plugin = path.join(root, "$PLUGINSDIR");
+  fs.mkdirSync(plugin);
+  fs.writeFileSync(path.join(plugin, "System.dll"), "NSIS helper, not installed app");
+  assert.throws(() => findUninstaller(root), /unique/);
+  const uninstaller = path.join(root, "Uninstall S2Code (Nightly).exe");
+  fs.writeFileSync(uninstaller, pe());
+  assert.equal(findUninstaller(root), uninstaller);
+  assert.ok(peSignature(fs.readFileSync(findUninstaller(root))));
+  const duplicate = path.join(plugin, path.basename(uninstaller));
+  fs.copyFileSync(uninstaller, duplicate);
+  assert.throws(() => findUninstaller(root), /unique/);
+  fs.unlinkSync(duplicate);
+  fs.renameSync(uninstaller, path.join(root, "Uninstall Other Product.exe"));
+  assert.throws(() => findUninstaller(root), /unique/);
 });

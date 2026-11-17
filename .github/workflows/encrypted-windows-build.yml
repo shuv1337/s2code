@@ -25,14 +25,23 @@ jobs:
       S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/s2code
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/.repos/
+      # Public fetch needs no credential injection or recursive submodule cleanup.
+      # The vendored .repos tree contains incomplete nested submodule metadata.
+      - name: Fetch exact public source without credentials or submodules
+        shell: bash
+        env:
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          git init .
+          git remote add origin https://github.com/shuv1337/s2code.git
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git -c submodule.recurse=false checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Validate recipient and exact trusted source
         shell: bash
         run: |

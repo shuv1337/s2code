@@ -123,8 +123,9 @@ test("workflow uses protected exact-main source, isolated OIDC and only cipherte
     "github.event_name == 'workflow_dispatch'",
     "github.ref == 'refs/heads/main'",
     "environment: fork-release",
-    "ref: ${{ github.sha }}",
-    "persist-credentials: false",
+    'git -c credential.helper= -c http.extraheader= fetch --no-tags --depth=1 origin "$GITHUB_SHA"',
+    'GIT_TERMINAL_PROMPT: "0"',
+    "GIT_CONFIG_GLOBAL: /dev/null",
     'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
   ])
     assert.ok(workflow.includes(guard), guard);
@@ -136,7 +137,7 @@ test("workflow uses protected exact-main source, isolated OIDC and only cipherte
   assert.match(workflow, /retention-days: 7/);
   assert.doesNotMatch(
     workflow,
-    /actions\/cache|actions\/download-artifact|gh release|AZURE_SIGNING_RELEASE_ENABLED|secrets\.|workflow_call|pull_request/,
+    /actions\/checkout|actions\/cache|actions\/download-artifact|gh release|AZURE_SIGNING_RELEASE_ENABLED|secrets\.|workflow_call|pull_request/,
   );
   assert.equal((workflow.match(/uses: azure\/login@/g) || []).length, 2);
   assert.equal((workflow.match(/az account get-access-token/g) || []).length, 2);
@@ -144,4 +145,67 @@ test("workflow uses protected exact-main source, isolated OIDC and only cipherte
   assert.match(workflow, /--signed --skip-build/);
   assert.match(workflow, /S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337\/s2code/);
   assert.match(workflow, /--frozen-lockfile/);
+});
+
+test("public source fetch checks out exact SHA with malformed vendored submodule metadata", (t) => {
+  const { execFileSync } = require("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "encrypted-checkout-test-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "source");
+  const destination = path.join(dir, "destination");
+  fs.mkdirSync(source);
+  fs.mkdirSync(destination);
+  const git = (...args) =>
+    execFileSync("git", args, {
+      cwd: source,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  git("init");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.invalid");
+  fs.writeFileSync(path.join(source, "README.md"), "exact source");
+  git("add", "README.md");
+  git("commit", "-m", "base");
+  const base = git("rev-parse", "HEAD");
+  git(
+    "update-index",
+    "--add",
+    "--cacheinfo",
+    `160000,${base},.repos/alchemy-effect/submodules/distilled`,
+  );
+  git("commit", "-m", "malformed nested gitlink without gitmodules");
+  const sha = git("rev-parse", "HEAD");
+  const workflow = fs.readFileSync(
+    path.join(__dirname, "../workflows/encrypted-windows-build.yml"),
+    "utf8",
+  );
+  const step = workflow
+    .split("- name: Fetch exact public source without credentials or submodules")[1]
+    .split("      - name:")[0];
+  const script = step
+    .split("        run: |\n")[1]
+    .split("\n")
+    .map((line) => line.replace(/^          /, ""))
+    .join("\n")
+    .replace("https://github.com/shuv1337/s2code.git", source);
+  execFileSync("bash", ["-c", script], {
+    cwd: destination,
+    env: {
+      ...process.env,
+      GITHUB_SHA: sha,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+    stdio: "pipe",
+  });
+  assert.equal(
+    execFileSync("git", ["rev-parse", "HEAD"], { cwd: destination, encoding: "utf8" }).trim(),
+    sha,
+  );
+  assert.equal(fs.readFileSync(path.join(destination, "README.md"), "utf8"), "exact source");
+  assert.equal(fs.existsSync(path.join(destination, ".repos")), false);
+  const config = fs.readFileSync(path.join(destination, ".git/config"), "utf8");
+  assert.doesNotMatch(config, /extraheader|credential|sshCommand/i);
 });
