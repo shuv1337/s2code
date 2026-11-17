@@ -3652,16 +3652,51 @@ export const assertStagedFfmpeg = Effect.fn("desktopArtifact.assertStagedFfmpeg"
     readonly arch: typeof BuildArch.Type;
     readonly label: string;
   }) {
-    const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const resolved = yield* Effect.try({
+    // The installer receives npm_config_platform in its child environment, but
+    // requiring the package here evaluates (and caches) the build host's path.
+    // Resolve the package without executing it and select the target filename.
+    const packageJson = yield* Effect.try({
       try: () =>
-        NodeModule.createRequire(path.join(input.stageDir, "package.json"))("ffmpeg-static"),
+        NodeModule.createRequire(path.join(input.stageDir, "package.json")).resolve(
+          "ffmpeg-static/package.json",
+        ),
       catch: () => new StagedFfmpegMissingError({ stageDir: input.stageDir, label: input.label }),
     });
-    if (typeof resolved !== "string")
-      return yield* new StagedFfmpegMissingError({ stageDir: input.stageDir, label: input.label });
-    if (!(yield* fs.exists(resolved).pipe(Effect.orElseSucceed(() => false))))
+    const resolved = path.join(
+      path.dirname(packageJson),
+      input.platform === "win" ? "ffmpeg.exe" : "ffmpeg",
+    );
+    const usable = yield* Effect.tryPromise({
+      try: async () => {
+        const stat = await NodeFSP.stat(resolved);
+        if (!stat.isFile() || stat.size === 0) return false;
+        if (input.platform !== "win") return true;
+        // A cached/renamed host binary must not satisfy a Windows artifact.
+        const fd = await NodeFSP.open(resolved, "r");
+        try {
+          const dos = Buffer.alloc(64);
+          if (
+            (await fd.read(dos, 0, dos.length, 0)).bytesRead !== dos.length ||
+            dos.readUInt16LE(0) !== 0x5a4d
+          )
+            return false;
+          const offset = dos.readUInt32LE(0x3c);
+          if (offset < 64 || offset + 6 > stat.size) return false;
+          const pe = Buffer.alloc(6);
+          if ((await fd.read(pe, 0, pe.length, offset)).bytesRead !== pe.length) return false;
+          return (
+            pe.readUInt32LE(0) === 0x4550 &&
+            pe.readUInt16LE(4) === (input.arch === "arm64" ? 0xaa64 : 0x8664)
+          );
+        } finally {
+          await fd.close();
+        }
+      },
+      catch: () =>
+        new StagedFfmpegMissingError({ stageDir: input.stageDir, label: input.label, resolved }),
+    });
+    if (!usable)
       return yield* new StagedFfmpegMissingError({
         stageDir: input.stageDir,
         label: input.label,

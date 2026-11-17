@@ -27,6 +27,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import {
+  assertStagedFfmpeg,
   buildDesktopBundles,
   copyDesktopBuildArtifacts,
   DesktopBuildManifestRestoreError,
@@ -276,6 +277,70 @@ const makePackagedAppFixture = Effect.fn("test.makePackagedAppFixture")(function
 });
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it.effect(
+    "validates target FFmpeg for both Windows staging callers without evaluating host exports",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const stageDir = yield* fs.makeTempDirectoryScoped({ prefix: "ffmpeg-target-" });
+        const packageDir = path.join(stageDir, "node_modules/ffmpeg-static");
+        yield* fs.makeDirectory(packageDir, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(packageDir, "package.json"),
+          JSON.stringify({ name: "ffmpeg-static", main: "index.js" }),
+        );
+        yield* fs.writeFileString(
+          path.join(packageDir, "index.js"),
+          "throw new Error('Do not execute host-dependent export');",
+        );
+        const executable = path.join(packageDir, "ffmpeg.exe");
+        const valid = Buffer.alloc(256);
+        valid.writeUInt16LE(0x5a4d, 0);
+        valid.writeUInt32LE(128, 0x3c);
+        valid.writeUInt32LE(0x4550, 128);
+        valid.writeUInt16LE(0x8664, 132);
+        for (const label of ["The win-x64 CLI archive", "The Windows server sidecar"]) {
+          const input = { stageDir, platform: "win" as const, arch: "x64" as const, label };
+          yield* fs.writeFile(executable, valid);
+          yield* assertStagedFfmpeg(input);
+          for (const invalid of [
+            Buffer.from("\x7fELF host binary"),
+            Buffer.alloc(0),
+            valid.subarray(0, 130),
+          ]) {
+            yield* fs.writeFile(executable, invalid);
+            assert.equal(
+              (yield* Effect.flip(assertStagedFfmpeg(input)))._tag,
+              "StagedFfmpegMissingError",
+            );
+          }
+          const wrongArch = Buffer.from(valid);
+          wrongArch.writeUInt16LE(0xaa64, 132);
+          yield* fs.writeFile(executable, wrongArch);
+          assert.equal(
+            (yield* Effect.flip(assertStagedFfmpeg(input)))._tag,
+            "StagedFfmpegMissingError",
+          );
+          yield* fs.remove(executable);
+          yield* fs.writeFileString(
+            path.join(packageDir, "ffmpeg"),
+            "host executable cannot satisfy Windows",
+          );
+          assert.equal(
+            (yield* Effect.flip(assertStagedFfmpeg(input)))._tag,
+            "StagedFfmpegMissingError",
+          );
+        }
+        yield* assertStagedFfmpeg({
+          stageDir,
+          platform: "linux",
+          arch: "x64",
+          label: "Linux runtime",
+        });
+      }).pipe(Effect.scoped),
+  );
+
   it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1", "1.2.3-preview.20261014.1"])(
     "packages only the channel-owned identities and schemes for %s",
     (version) =>
