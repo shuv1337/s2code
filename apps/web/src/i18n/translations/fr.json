@@ -75,5 +75,12 @@
   "1d5052cbe70d0b28": "Confirmation de l'archivage",
   "d5dd27a4eb853248": "Confirmation de la suppression",
   "5503ef439beb8d42": "Confirmation de la fermeture des terminaux",
-  "86b43caa9ff41ea2": "Raccourci Quitter"
+  "86b43caa9ff41ea2": "Raccourci Quitter",
+  "684e516076de81fe": "Standard",
+  "0bde867dbbca0798": "Compact",
+  "6fc87b282c827266": "Une ligne",
+  "a0eeb06bfd5cb7ee": "Densité de la barre latérale",
+  "86a23837645a7e15": "Hauteur des lignes pour les fils épinglés, dans la boîte de réception et en cours. Le mode Compact utilise deux lignes, et le mode Une ligne n’en utilise qu’une. Le mode Standard ne change pas.",
+  "0716adb0d55ffa58": "Appels vocaux",
+  "724baefb1716842b": "Serveurs MCP"
 }

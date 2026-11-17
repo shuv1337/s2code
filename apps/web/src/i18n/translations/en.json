@@ -75,5 +75,12 @@
   "1d5052cbe70d0b28": "Archive confirmation",
   "d5dd27a4eb853248": "Delete confirmation",
   "5503ef439beb8d42": "Terminal close confirmation",
-  "86b43caa9ff41ea2": "Quit shortcut"
+  "86b43caa9ff41ea2": "Quit shortcut",
+  "684e516076de81fe": "Standard",
+  "0bde867dbbca0798": "Compact",
+  "6fc87b282c827266": "Single-line",
+  "a0eeb06bfd5cb7ee": "Sidebar density",
+  "86a23837645a7e15": "Row height for pinned, inbox, and Working threads. Compact uses two lines; Single-line keeps one. Standard is unchanged.",
+  "0716adb0d55ffa58": "Voice calls",
+  "724baefb1716842b": "MCP servers"
 }

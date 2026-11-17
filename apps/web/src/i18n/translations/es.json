@@ -75,5 +75,12 @@
   "1d5052cbe70d0b28": "Confirmación al archivar",
   "d5dd27a4eb853248": "Confirmación al eliminar",
   "5503ef439beb8d42": "Confirmación al cerrar terminales",
-  "86b43caa9ff41ea2": "Atajo para salir"
+  "86b43caa9ff41ea2": "Atajo para salir",
+  "684e516076de81fe": "Estándar",
+  "0bde867dbbca0798": "Compacta",
+  "6fc87b282c827266": "Una línea",
+  "a0eeb06bfd5cb7ee": "Densidad de la barra lateral",
+  "86a23837645a7e15": "Altura de las filas de los hilos fijados, en la bandeja de entrada y en curso. Compacta usa dos líneas; Una línea usa solo una. Estándar no cambia.",
+  "0716adb0d55ffa58": "Llamadas de voz",
+  "724baefb1716842b": "Servidores MCP"
 }

@@ -75,5 +75,12 @@
   "1d5052cbe70d0b28": "Confirmação ao arquivar",
   "d5dd27a4eb853248": "Confirmação ao excluir",
   "5503ef439beb8d42": "Confirmação ao fechar terminais",
-  "86b43caa9ff41ea2": "Atalho de saída"
+  "86b43caa9ff41ea2": "Atalho de saída",
+  "684e516076de81fe": "Padrão",
+  "0bde867dbbca0798": "Compacta",
+  "6fc87b282c827266": "Uma linha",
+  "a0eeb06bfd5cb7ee": "Densidade da barra lateral",
+  "86a23837645a7e15": "Altura das linhas dos tópicos fixados, na caixa de entrada e em andamento. Compacta usa duas linhas; Uma linha usa apenas uma. O modo Padrão não muda.",
+  "0716adb0d55ffa58": "Chamadas de voz",
+  "724baefb1716842b": "Servidores MCP"
 }

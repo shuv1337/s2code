@@ -75,5 +75,12 @@
   "1d5052cbe70d0b28": "Archivieren bestätigen",
   "d5dd27a4eb853248": "Löschen bestätigen",
   "5503ef439beb8d42": "Bestätigung beim Schließen von Terminals",
-  "86b43caa9ff41ea2": "Tastenkürzel zum Beenden"
+  "86b43caa9ff41ea2": "Tastenkürzel zum Beenden",
+  "684e516076de81fe": "Standard",
+  "0bde867dbbca0798": "Kompakt",
+  "6fc87b282c827266": "Einzeilig",
+  "a0eeb06bfd5cb7ee": "Dichte der Seitenleiste",
+  "86a23837645a7e15": "Zeilenhöhe für angeheftete Threads, Threads im Posteingang und laufende Threads. Kompakt nutzt zwei Zeilen, Einzeilig nur eine. Standard bleibt unverändert.",
+  "0716adb0d55ffa58": "Sprachanrufe",
+  "724baefb1716842b": "MCP-Server"
 }
