@@ -257,7 +257,7 @@ export const replayServer = (
       url: BASE_URL,
       version: transcript.version,
       external: options?.external ?? false,
-      mcpReachable: options?.mcpReachable ?? options?.external !== true,
+      mcpReachable: Effect.succeed(options?.mcpReachable ?? options?.external !== true),
       ...(options?.external ? {} : { processExit: options?.processExit ?? Effect.never }),
     };
     const borrowers = options?.borrowers;

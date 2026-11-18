@@ -119,8 +119,6 @@ describe("OpenCode2Server error details", () => {
 
   it.effect("never include the server URL", () =>
     Effect.gen(function* () {
-      // A configured server now resolves this host's addresses before dialing, so wait for the
-      // request itself rather than for the fiber to be scheduled.
       const dialing = yield* Deferred.make<void>();
       const layerHanging = Layer.succeed(
         HttpClient.HttpClient,
@@ -157,9 +155,10 @@ describe("OpenCode2Server error details", () => {
 });
 
 describe("OpenCode2Server external server", () => {
-  it.effect("reverifies after forgetting, so a replaced service's version is seen", () =>
+  it.effect("picks up late MCP reachability and reverifies after forgetting", () =>
     Effect.gen(function* () {
       let version = "2.2.4";
+      let addresses = new Set<string>();
       const layerService = Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
@@ -174,21 +173,33 @@ describe("OpenCode2Server external server", () => {
           ),
         ),
       );
-      const versions = yield* Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const server = yield* OpenCode2Server.make({
           binaryPath: "opencode",
-          serverUrl: "http://127.0.0.1:49374",
+          serverUrl: "http://100.64.0.1:49374",
           serverPassword: "secret",
           directory: "/project",
           environment: {},
         });
-        const read = server.withConnection((connection) => Effect.succeed(connection.version));
+        const read = server.withConnection(Effect.succeed);
         const before = yield* read;
+        assert.strictEqual(before.version, "2.2.4");
+        assert.isFalse(yield* before.mcpReachable);
         version = "2.2.5";
+        addresses = new Set(["100.64.0.1"]);
+        assert.isTrue(yield* before.mcpReachable);
         const cached = yield* read;
+        assert.strictEqual(cached.version, "2.2.4");
         yield* server.forget;
-        return [before, cached, yield* read];
+        addresses = new Set();
+        const after = yield* read;
+        assert.strictEqual(after.version, "2.2.5");
+        assert.isFalse(yield* after.mcpReachable);
       }).pipe(
+        Effect.provideService(
+          HostProcess.Addresses,
+          Effect.sync(() => addresses),
+        ),
         Effect.provide(
           Layer.mergeAll(
             OpenCode2Client.layer.pipe(Layer.provide(layerService)),
@@ -196,7 +207,6 @@ describe("OpenCode2Server external server", () => {
           ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
         ),
       );
-      assert.deepStrictEqual(versions, ["2.2.4", "2.2.4", "2.2.5"]);
     }),
   );
 });

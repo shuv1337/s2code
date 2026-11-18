@@ -4381,7 +4381,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const directory = turnInput.runtimePolicy.cwd ?? host.paths.cwd;
       // A configured server on another machine cannot reach T3's loopback endpoint (as in 1.x).
       const wanted: ReadonlyArray<McpRegistration> =
-        mcpSession === undefined || !connection.mcpReachable
+        mcpSession === undefined || !(yield* connection.mcpReachable)
           ? []
           : [
               {
