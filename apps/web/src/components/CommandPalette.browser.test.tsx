@@ -296,7 +296,11 @@ describe("CommandPalette open intents", () => {
         projectId: archived.id,
       }),
     });
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({ open: "new-thread-in" });
     await page.getByRole("option", { name: /acme/i }).click();
