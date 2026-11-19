@@ -1,3 +1,5 @@
+import { msg } from "gt-react";
+import { m } from "../i18n/messages";
 import { VoiceSessionError } from "./voiceErrors";
 import { acquireVoiceMicrophoneStream } from "./voiceMicrophoneAccess";
 
@@ -150,7 +152,9 @@ export class WebRtcVoiceTransport {
             JSON.stringify({
               type: "client.playback-error",
               message:
-                error instanceof Error ? error.message : "Remote audio playback was blocked.",
+                error instanceof Error
+                  ? error.message
+                  : m(msg("Remote audio playback was blocked.")),
             }),
           );
         });

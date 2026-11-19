@@ -1,3 +1,4 @@
+import { useGT, useMessages } from "gt-react-native";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import {
@@ -56,6 +57,7 @@ function useMcpServers(environmentId: EnvironmentId) {
 }
 
 function useWriteMcpServers(environmentId: EnvironmentId) {
+  const gt = useGT();
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "MCP server settings update",
     reportFailure: true,
@@ -67,7 +69,7 @@ function useWriteMcpServers(environmentId: EnvironmentId) {
     if (!isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       Dialog.alert(
-        "Could not save MCP server",
+        gt("Could not save MCP server"),
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -78,6 +80,8 @@ function useWriteMcpServers(environmentId: EnvironmentId) {
 export function SettingsMcpServersRouteScreen({
   route,
 }: StaticScreenProps<{ readonly environmentId: EnvironmentId }>) {
+  const gt = useGT();
+  const messages = useMessages();
   const { environmentId } = route.params;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -97,7 +101,7 @@ export function SettingsMcpServersRouteScreen({
   };
 
   return (
-    <SettingsScreen title="MCP servers">
+    <SettingsScreen title={gt("MCP servers")}>
       <ScreenScrollView
         contentInsetAdjustmentBehavior="automatic"
         className="flex-1"
@@ -106,20 +110,24 @@ export function SettingsMcpServersRouteScreen({
       >
         {!loaded ? (
           <Text className="px-2 text-base text-foreground-muted">
-            Connect this environment to manage its MCP servers.
+            {gt("Connect this environment to manage its MCP servers.")}
           </Text>
         ) : (
           <>
             <SettingsSection
-              title="Servers"
-              footer="Agents in Full access threads get the servers that are on. Turning one off stops its calls immediately. Agents pick up new servers in their next session."
+              title={gt("Servers")}
+              footer={gt(
+                "Agents in Full access threads get the servers that are on. Turning one off stops its calls immediately. Agents pick up new servers in their next session.",
+              )}
             >
               {entries.length === 0 ? (
-                <Text className="p-4 text-base text-foreground-muted">No MCP servers yet.</Text>
+                <Text className="p-4 text-base text-foreground-muted">
+                  {gt("No MCP servers yet.")}
+                </Text>
               ) : (
                 entries.map(({ id, config }, index) => {
                   const name = config.label ?? id;
-                  const audience = mcpServerAudience(config, projectTitle);
+                  const audience = mcpServerAudience(config, projectTitle, messages);
                   return (
                     <View
                       key={id}
@@ -131,7 +139,9 @@ export function SettingsMcpServersRouteScreen({
                     >
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={`${canManage ? "Edit" : "View"} ${name}`}
+                        accessibilityLabel={
+                          canManage ? gt("Edit {name}", { name }) : gt("View {name}", { name })
+                        }
                         onPress={() =>
                           navigation.navigate("SettingsMcpServerEdit", {
                             environmentId,
@@ -162,7 +172,7 @@ export function SettingsMcpServersRouteScreen({
                         ) : null}
                       </Pressable>
                       <ThemedSwitch
-                        accessibilityLabel={`${name} enabled`}
+                        accessibilityLabel={gt("{name} enabled", { name })}
                         disabled={!canManage || toggling !== null}
                         value={toggling?.id === id ? toggling.enabled : config.enabled}
                         onValueChange={(enabled) => void setEnabled(id, config, enabled)}
@@ -175,7 +185,7 @@ export function SettingsMcpServersRouteScreen({
                 <View className={entries.length > 0 ? "border-t border-border-subtle" : undefined}>
                   <ListActionRow
                     icon="plus"
-                    label="Add MCP server"
+                    label={gt("Add MCP server")}
                     onPress={() => navigation.navigate("SettingsMcpServerEdit", { environmentId })}
                   />
                 </View>
@@ -183,7 +193,7 @@ export function SettingsMcpServersRouteScreen({
             </SettingsSection>
             {!canManage ? (
               <Text className="px-2 text-sm text-foreground-muted">
-                This connection does not have permission to manage MCP servers.
+                {gt("This connection does not have permission to manage MCP servers.")}
               </Text>
             ) : null}
           </>
@@ -209,6 +219,7 @@ function McpServerEditor(props: {
   readonly environmentId: EnvironmentId;
   readonly serverId: string | null;
 }) {
+  const gt = useGT();
   const { environmentId, serverId } = props;
   const isNew = serverId === null;
   const insets = useSafeAreaInsets();
@@ -263,7 +274,7 @@ function McpServerEditor(props: {
       const cause = squashAtomCommandFailure(result);
       setTest({
         tone: "danger",
-        message: cause instanceof Error ? cause.message : "Could not test the server.",
+        message: cause instanceof Error ? cause.message : gt("Could not test the server."),
       });
     }
   };
@@ -271,12 +282,12 @@ function McpServerEditor(props: {
   const confirmRemove = () => {
     if (readOnly || serverId === null) return;
     Dialog.alert(
-      `Remove ${saved?.label ?? serverId}?`,
-      "Agents lose access to its tools immediately.",
+      gt("Remove {value1}?", { value1: saved?.label ?? serverId }),
+      gt("Agents lose access to its tools immediately."),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: gt("Cancel"), style: "cancel" },
         {
-          text: "Remove",
+          text: gt("Remove"),
           style: "destructive",
           onPress: () =>
             void (async () => {
@@ -293,7 +304,7 @@ function McpServerEditor(props: {
   const urlChanged = saved !== undefined && draft.url.trim() !== saved.url;
 
   return (
-    <SettingsScreen title={isNew ? "Add MCP server" : (saved?.label ?? serverId)}>
+    <SettingsScreen title={isNew ? gt("Add MCP server") : (saved?.label ?? serverId)}>
       <ScreenScrollView
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -304,32 +315,34 @@ function McpServerEditor(props: {
       >
         {!loaded ? (
           <Text className="px-2 text-base text-foreground-muted">
-            Connect this environment to manage its MCP servers.
+            {gt("Connect this environment to manage its MCP servers.")}
           </Text>
         ) : !isNew && saved === undefined ? (
-          <Text className="px-2 text-base text-foreground-muted">This server was removed.</Text>
+          <Text className="px-2 text-base text-foreground-muted">
+            {gt("This server was removed.")}
+          </Text>
         ) : (
           <>
             <SettingsSection
-              title="Server"
+              title={gt("Server")}
               footer={
                 isNew
-                  ? "Agents see it with a “shared-” prefix. The name can't be changed later."
-                  : `Agents see it as ${sharedMcpServerHarnessName(draft.id)}.`
+                  ? gt("Agents see it with a “shared-” prefix. The name can't be changed later.")
+                  : gt("Agents see it as {name}.", { name: sharedMcpServerHarnessName(draft.id) })
               }
             >
               <FormField
-                label="Name"
+                label={gt("Name")}
                 value={draft.id}
                 onChange={(id) => update({ id })}
                 placeholder="executor"
                 readOnly={readOnly || !isNew}
               />
               <FormField
-                label="Label"
+                label={gt("Label")}
                 value={draft.label}
                 onChange={(label) => update({ label })}
-                placeholder="Optional"
+                placeholder={gt("Optional")}
                 readOnly={readOnly}
                 borderTop
               />
@@ -344,19 +357,21 @@ function McpServerEditor(props: {
               />
             </SettingsSection>
             <SettingsSection
-              title="Bearer token"
+              title={gt("Bearer token")}
               footer={
                 urlChanged && hasSavedToken && !draft.token.trim()
-                  ? "The saved token never goes to a new URL, so saving removes it. Enter it again to keep using one."
-                  : "Stays on this environment. Agents never see it."
+                  ? gt(
+                      "The saved token never goes to a new URL, so saving removes it. Enter it again to keep using one.",
+                    )
+                  : gt("Stays on this environment. Agents never see it.")
               }
             >
               <FormField
-                label="Token"
+                label={gt("Token")}
                 value={draft.token}
                 onChange={(token) => update({ token, clearToken: false })}
                 placeholder={
-                  mcpSavedTokenKept(draft, saved) ? "Saved. Type to replace." : "Optional"
+                  mcpSavedTokenKept(draft, saved) ? gt("Saved. Type to replace.") : gt("Optional")
                 }
                 readOnly={readOnly}
                 secure
@@ -366,9 +381,9 @@ function McpServerEditor(props: {
                   <ListActionRow
                     icon={draft.clearToken ? "arrow.uturn.backward" : "trash"}
                     tone={draft.clearToken ? "default" : "danger"}
-                    label={draft.clearToken ? "Keep saved token" : "Remove saved token"}
+                    label={draft.clearToken ? gt("Keep saved token") : gt("Remove saved token")}
                     description={
-                      draft.clearToken ? "The saved token is removed when you save." : undefined
+                      draft.clearToken ? gt("The saved token is removed when you save.") : undefined
                     }
                     disabled={readOnly}
                     onPress={() => update({ token: "", clearToken: !draft.clearToken })}
@@ -379,18 +394,18 @@ function McpServerEditor(props: {
             <SettingsSection>
               <SettingsSwitchRow
                 icon="bolt.horizontal.circle"
-                label="Enabled"
-                subtitle="Turning a server off stops its calls immediately."
+                label={gt("Enabled")}
+                subtitle={gt("Turning a server off stops its calls immediately.")}
                 value={draft.enabled}
                 disabled={readOnly}
                 onValueChange={(enabled) => update({ enabled })}
               />
             </SettingsSection>
             {canManage ? (
-              <SettingsSection title="Connection">
+              <SettingsSection title={gt("Connection")}>
                 <ListActionRow
                   icon="checkmark.circle"
-                  label="Test connection"
+                  label={gt("Test connection")}
                   loading={pending === "test"}
                   disabled={readOnly}
                   onPress={() => void runTest()}
@@ -403,7 +418,7 @@ function McpServerEditor(props: {
               </SettingsSection>
             ) : (
               <Text className="px-2 text-sm text-foreground-muted">
-                This connection does not have permission to manage MCP servers.
+                {gt("This connection does not have permission to manage MCP servers.")}
               </Text>
             )}
             {error ? (
@@ -414,7 +429,7 @@ function McpServerEditor(props: {
             {canManage ? (
               <View className="gap-3">
                 <Button
-                  label={isNew ? "Add server" : "Save"}
+                  label={isNew ? gt("Add server") : gt("Save")}
                   tone="primary"
                   fullWidth
                   loading={pending === "save"}
@@ -423,7 +438,7 @@ function McpServerEditor(props: {
                 />
                 {!isNew ? (
                   <Button
-                    label="Remove server"
+                    label={gt("Remove server")}
                     tone="danger"
                     fullWidth
                     loading={pending === "remove"}

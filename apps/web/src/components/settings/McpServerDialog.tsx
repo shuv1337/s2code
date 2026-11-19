@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import {
   sharedMcpServerHarnessName,
   type EnvironmentId,
@@ -50,6 +51,7 @@ export function McpServerDialog({
   readonly existingIds: ReadonlySet<string>;
   readonly existing?: { readonly id: McpServerId; readonly config: McpServerConfig };
 }) {
+  const gt = useGT();
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const testMcpServer = useAtomCommand(serverEnvironment.testMcpServer, { reportFailure: false });
   const target: McpServerTarget = existing
@@ -87,7 +89,7 @@ export function McpServerDialog({
             result:
               response._tag === "Success"
                 ? response.value
-                : { _tag: "Failed", message: "The test could not run. Try reconnecting." },
+                : { _tag: "Failed", message: gt("The test could not run. Try reconnecting.") },
           }
         : previous,
     );
@@ -103,11 +105,15 @@ export function McpServerDialog({
       <DialogPopup className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {existing ? `Edit ${existing.config.label ?? existing.id}` : "Add an MCP server"}
+            {existing
+              ? gt("Edit {id}", { id: existing.config.label ?? existing.id })
+              : gt("Add an MCP server")}
           </DialogTitle>
           <DialogDescription>
-            Agents in Full access threads on {environmentLabel} get this server's tools. The token
-            stays on that environment; agents call the server through it.
+            {gt(
+              "Agents in Full access threads on {environment} get this server's tools. The token stays on that environment; agents call the server through it.",
+              { environment: environmentLabel },
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -120,7 +126,7 @@ export function McpServerDialog({
             }}
           >
             <div className="grid gap-1.5">
-              <Label htmlFor="mcp-server-id">Name</Label>
+              <Label htmlFor="mcp-server-id">{gt("Name")}</Label>
               <Input
                 id="mcp-server-id"
                 placeholder="executor"
@@ -141,16 +147,20 @@ export function McpServerDialog({
               ) : (
                 <p id="mcp-server-id-hint" className="text-xs text-muted-foreground">
                   {existing
-                    ? `Agents see it as ${sharedMcpServerHarnessName(draft.id)}. The name can't be changed.`
-                    : "Agents see it with a “shared-” prefix. Lowercase letters, digits, and hyphens; names starting with “t3” are reserved."}
+                    ? gt("Agents see it as {value1}. The name can't be changed.", {
+                        value1: sharedMcpServerHarnessName(draft.id),
+                      })
+                    : gt(
+                        "Agents see it with a “shared-” prefix. Lowercase letters, digits, and hyphens; names starting with “t3” are reserved.",
+                      )}
                 </p>
               )}
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="mcp-server-label">Label (optional)</Label>
+              <Label htmlFor="mcp-server-label">{gt("Label (optional)")}</Label>
               <Input
                 id="mcp-server-label"
-                placeholder="Shown in settings instead of the name"
+                placeholder={gt("Shown in settings instead of the name")}
                 value={draft.label}
                 onChange={(event) => update({ label: event.target.value })}
               />
@@ -175,14 +185,14 @@ export function McpServerDialog({
               ) : null}
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="mcp-server-token">Bearer token</Label>
+              <Label htmlFor="mcp-server-token">{gt("Bearer token")}</Label>
               <div className="flex items-center gap-2">
                 <SecretInput
                   id="mcp-server-token"
                   className="min-w-0 flex-1"
                   configured={draft.token.kind === "saved" && !tokenDropped}
                   value={draft.token.kind === "new" ? draft.token.value : ""}
-                  placeholder="Optional"
+                  placeholder={gt("Optional")}
                   onChange={(event) =>
                     update({ token: nextMcpServerToken(event.target.value, target) })
                   }
@@ -192,7 +202,7 @@ export function McpServerDialog({
                     type="button"
                     size="icon-sm"
                     variant="ghost-destructive"
-                    aria-label="Clear bearer token"
+                    aria-label={gt("Clear bearer token")}
                     onClick={() => update({ token: { kind: "cleared" } })}
                   >
                     <XIcon className="size-3.5" />
@@ -201,10 +211,12 @@ export function McpServerDialog({
               </div>
               <p className="text-xs text-muted-foreground">
                 {tokenDropped
-                  ? "The saved token never goes to a new URL, so saving removes it. Enter it again to keep using one."
+                  ? gt(
+                      "The saved token never goes to a new URL, so saving removes it. Enter it again to keep using one.",
+                    )
                   : draft.token.kind === "cleared" && existing?.config.bearerToken
-                    ? "The saved token is removed when you save."
-                    : "Sent as Authorization: Bearer on every call."}
+                    ? gt("The saved token is removed when you save.")
+                    : gt("Sent as Authorization: Bearer on every call.")}
               </p>
             </div>
             <div className="grid gap-1.5">
@@ -218,7 +230,7 @@ export function McpServerDialog({
                   disabled={testInput === null || currentTest?.result === null}
                   onClick={() => void runTest()}
                 >
-                  Test
+                  {gt("Test")}
                 </Button>
               </div>
             </div>
@@ -226,14 +238,14 @@ export function McpServerDialog({
         </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {gt("Cancel")}
           </Button>
           <Button
             type="submit"
             form="mcp-server-form"
             disabled={submitted && Result.isFailure(result)}
           >
-            {existing ? "Save changes" : "Add server"}
+            {existing ? gt("Save changes") : gt("Add server")}
           </Button>
         </DialogFooter>
       </DialogPopup>

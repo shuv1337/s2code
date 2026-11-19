@@ -1,3 +1,4 @@
+import { useGT } from "gt-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
@@ -8,11 +9,12 @@ import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilt
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 
 export function SettingsVoiceCallsRouteScreen() {
+  const gt = useGT();
   const { selectedTargets } = useSettingsEnvironmentFilter();
   const environmentMenu = useSettingsEnvironmentMenu();
   const insets = useSafeAreaInsets();
   return (
-    <SettingsScreen title="Voice calls" menus={[environmentMenu]}>
+    <SettingsScreen title={gt("Voice calls")} menus={[environmentMenu]}>
       <ScreenScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="gap-6 px-5 pt-4"
@@ -25,7 +27,7 @@ export function SettingsVoiceCallsRouteScreen() {
             </SettingsSection>
           ))
         ) : (
-          <Text>Select a connected environment.</Text>
+          <Text>{gt("Select a connected environment.")}</Text>
         )}
       </ScreenScrollView>
     </SettingsScreen>

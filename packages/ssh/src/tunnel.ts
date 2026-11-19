@@ -1114,6 +1114,19 @@ if [ -z "$REMOTE_PORT" ]; then
   while [ "$(date +%s)" -lt "$RECORD_DEADLINE" ]; do
     DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
     [ "\${DEFAULT_RUNTIME_INFO%% *}" = "$REMOTE_PID" ] && break
+    # A host wrapper can spawn the server instead of replacing itself.
+    RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
+    if [ "\${DEFAULT_RUNTIME_INFO#* }" = "$REMOTE_PORT" ] && managed_server_running "$RUNTIME_PID"; then
+      RUNTIME_ANCESTOR="$RUNTIME_PID"
+      while [ -n "$RUNTIME_ANCESTOR" ] && [ "$RUNTIME_ANCESTOR" != "1" ] && [ "$RUNTIME_ANCESTOR" != "$REMOTE_PID" ]; do
+        RUNTIME_ANCESTOR="$(ps -o ppid= -p "$RUNTIME_ANCESTOR" 2>/dev/null | tr -d '[:space:]')"
+      done
+      if [ "$RUNTIME_ANCESTOR" = "$REMOTE_PID" ]; then
+        REMOTE_PID="$RUNTIME_PID"
+        printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
+        break
+      fi
+    fi
     sleep 0.1
   done
 fi
@@ -1294,6 +1307,16 @@ function buildRemoteLogTailScript(stateKey: string, input?: RemoteT3RunnerOption
   });
 }
 
+// Shells known to take `-l -c` with a POSIX-style `exec` read their own login
+// profiles first; any other shell (csh, pwsh, ...) keeps the plain `sh -l` launch.
+const remoteLoginShellArgs = (args = "") => [
+  "sh",
+  "-c",
+  shellSingleQuote(
+    `case "\${SHELL##*/}" in bash|zsh|ksh|fish|nu) exec "$SHELL" -l -c "exec sh -s${args ? ` -- ${args}` : ""}" ;; *) exec sh -l -s${args ? ` -- ${args}` : ""} ;; esac`,
+  ),
+];
+
 export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemoteServer")(
   function* (
     target: DesktopSshEnvironmentTarget,
@@ -1317,15 +1340,7 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
       stateKey,
     });
     const result = yield* runSshCommand(target, {
-      // Shells known to take `-l -c` with a POSIX-style `exec` read their own login
-      // profiles first; any other shell (csh, pwsh, ...) keeps the plain `sh -l` launch.
-      remoteCommandArgs: [
-        "sh",
-        "-c",
-        shellSingleQuote(
-          `case "\${SHELL##*/}" in bash|zsh|ksh|fish|nu) exec "$SHELL" -l -c "exec sh -s -- ${launchArgs}" ;; *) exec sh -l -s -- ${launchArgs} ;; esac`,
-        ),
-      ],
+      remoteCommandArgs: remoteLoginShellArgs(launchArgs),
       stdin: buildRemoteLaunchScript(runner),
       timeoutMs: isNodeScriptRunner(runner)
         ? REMOTE_LAUNCH_TIMEOUT_MS
@@ -1386,7 +1401,7 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
     stateKey,
   });
   const result = yield* runSshCommand(target, {
-    remoteCommandArgs: ["sh", "-s"],
+    remoteCommandArgs: remoteLoginShellArgs(),
     stdin: buildRemotePairingScript(stateKey, runner),
     ...(isNodeScriptRunner(runner) ? {} : { timeoutMs: REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS }),
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),

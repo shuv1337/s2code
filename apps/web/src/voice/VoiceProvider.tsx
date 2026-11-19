@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { useParams } from "@tanstack/react-router";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
@@ -42,6 +43,7 @@ const VoiceContext = createContext<{
 } | null>(null);
 
 export function VoiceProvider({ children }: { children: ReactNode }) {
+  const gt = useGT();
   const registry = useContext(RegistryContext);
   const route = resolveThreadRouteTarget(useParams({ strict: false }));
   const thread = useThreadShell(route?.kind === "server" ? route.threadRef : null);
@@ -70,8 +72,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     if (environmentId)
       controller.selectTarget({
         environmentId,
-        label: thread?.title ?? environment?.label ?? "Current environment",
-        environmentLabel: environment?.label ?? "Current environment",
+        label: thread?.title ?? environment?.label ?? gt("Current environment"),
+        environmentLabel: environment?.label ?? gt("Current environment"),
         ...(thread ? { threadId: thread.id, projectId: thread.projectId } : {}),
       });
     setOpen(true);
@@ -134,8 +136,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           commitRef.current = null;
           setDraftMessage(
             committed
-              ? "Added to your draft. Review it before sending."
-              : "Your draft changed. Copy the transcript below to keep it.",
+              ? gt("Added to your draft. Review it before sending.")
+              : gt("Your draft changed. Copy the transcript below to keep it."),
           );
         },
       }}

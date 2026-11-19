@@ -1,3 +1,4 @@
+import { useGT, useMessages } from "gt-react";
 import type { McpServerTestResult } from "@t3tools/contracts";
 
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
@@ -10,7 +11,9 @@ export type McpServerTestState = {
 };
 
 export function McpServerTestStatus({ test }: { readonly test: McpServerTestState }) {
-  const described = test.result === null ? null : describeMcpServerTest(test.result);
+  const gt = useGT();
+  const messages = useMessages();
+  const described = test.result === null ? null : describeMcpServerTest(test.result, messages);
   return (
     <span role="status" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       <ConnectionStatusDot
@@ -18,7 +21,7 @@ export function McpServerTestStatus({ test }: { readonly test: McpServerTestStat
           described === null ? "bg-warning" : described.ok ? "bg-success" : "bg-destructive"
         }
       />
-      <span className="min-w-0 wrap-anywhere">{described?.label ?? "Testing…"}</span>
+      <span className="min-w-0 wrap-anywhere">{described?.label ?? gt("Testing…")}</span>
     </span>
   );
 }

@@ -1,3 +1,4 @@
+import { useGT } from "gt-react-native";
 import { RegistryContext } from "@effect/atom-react";
 import { VoiceController, type VoiceTarget } from "@t3tools/client-runtime/voice/controller";
 import { createVoiceEnvironmentAtoms } from "@t3tools/client-runtime/state/voice";
@@ -31,6 +32,7 @@ const Context = createContext<{
   draftMessage: string | null;
 } | null>(null);
 export function VoiceProvider({ children }: { children: ReactNode }) {
+  const gt = useGT();
   const registry = useContext(RegistryContext);
   const localVoice = useGlobalVoiceInput();
   const [controller] = useState(() => {
@@ -100,8 +102,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           commitRef.current = null;
           setDraftMessage(
             committed
-              ? "Added to your draft. Review it before sending."
-              : "Your draft changed. Copy the transcript to keep it.",
+              ? gt("Added to your draft. Review it before sending.")
+              : gt("Your draft changed. Copy the transcript to keep it."),
           );
         },
       }}

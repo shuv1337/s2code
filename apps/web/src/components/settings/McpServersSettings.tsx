@@ -7,6 +7,7 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
+import { T, useGT, useMessages, Var } from "gt-react";
 import { useState } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -29,10 +30,11 @@ import { McpServerDialog } from "./McpServerDialog";
 import { McpServerTestStatus, type McpServerTestState } from "./McpServerTestStatus";
 import { mcpServerHost } from "./McpServersSettings.logic";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function McpServersSettingsPanel() {
+  const searchableSetting = useSearchableSetting();
   const { scope, environment } = useSettingsScope();
   return (
     <SettingsPageContainer>
@@ -40,7 +42,9 @@ export function McpServersSettingsPanel() {
       environment.serverConfig?.environment.capabilities.sharedMcpServers !== true ? (
         <SettingsSection {...searchableSetting("mcp-servers")}>
           <p className="px-4 py-3 text-sm text-muted-foreground">
-            Update S2Code on {environment.label} to add MCP servers for its agents.
+            <T>
+              Update S2Code on <Var>{environment.label}</Var> to add MCP servers for its agents.
+            </T>
           </p>
         </SettingsSection>
       ) : environment?.connection.phase === "connected" ? (
@@ -52,7 +56,7 @@ export function McpServersSettingsPanel() {
       ) : (
         <SettingsSection {...searchableSetting("mcp-servers")}>
           <p className="px-4 py-3 text-sm text-muted-foreground">
-            Connect an environment to manage the MCP servers its agents can use.
+            <T>Connect an environment to manage the MCP servers its agents can use.</T>
           </p>
         </SettingsSection>
       )}
@@ -67,6 +71,9 @@ function EnvironmentMcpServers({
   readonly environment: EnvironmentPresentation;
   readonly projectScoped: boolean;
 }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const messages = useMessages();
   const environmentId = environment.environmentId;
   const canManage = useAtomValue(serverEnvironment.testMcpServer.permissionAtom(environmentId));
   const readOnly = !canManage || projectScoped;
@@ -100,7 +107,7 @@ function EnvironmentMcpServers({
               result:
                 response._tag === "Success"
                   ? response.value
-                  : { _tag: "Failed", message: "The test could not run. Try reconnecting." },
+                  : { _tag: "Failed", message: gt("The test could not run. Try reconnecting.") },
             },
           }
         : previous,
@@ -115,28 +122,32 @@ function EnvironmentMcpServers({
           !readOnly ? (
             <Button size="xs" variant="outline" onClick={() => setDialog({ mode: "add" })}>
               <PlusIcon className="size-3" aria-hidden />
-              Add server
+              <T>Add server</T>
             </Button>
           ) : null
         }
       >
         <p className="px-4 pt-3 text-xs text-muted-foreground">
-          Remote MCP servers that agents in Full access threads on this environment can use. Tokens
-          stay on this environment.
+          <T>
+            Remote MCP servers that agents in Full access threads on this environment can use.
+            Tokens stay on this environment.
+          </T>{" "}
           {projectScoped
-            ? " Environment-wide setting. Select an environment to change it."
+            ? gt("Environment-wide setting. Select an environment to change it.")
             : !canManage
-              ? ` This connection lacks permission to manage MCP servers on ${environment.label}.`
+              ? gt("This connection lacks permission to manage MCP servers on {environment}.", {
+                  environment: environment.label,
+                })
               : ""}
         </p>
         {entries.length === 0 ? (
-          <SettingsRow title="No MCP servers configured." />
+          <SettingsRow title={gt("No MCP servers configured.")} />
         ) : (
           entries.map(([id, config]) => {
             const name = config.label ?? id;
             const test = tests[id];
             const currentTest = test?.key === JSON.stringify({ id, url: config.url }) ? test : null;
-            const audience = mcpServerAudience(config, projectTitle);
+            const audience = mcpServerAudience(config, projectTitle, messages);
             return (
               <SettingsRow
                 key={id}
@@ -144,7 +155,12 @@ function EnvironmentMcpServers({
                 description={
                   <span className="grid gap-1">
                     <span className="wrap-anywhere">
-                      Agents see <code className="font-mono">{sharedMcpServerHarnessName(id)}</code>{" "}
+                      <T>
+                        Agents see{" "}
+                        <code className="font-mono">
+                          <Var>{sharedMcpServerHarnessName(id)}</Var>
+                        </code>
+                      </T>{" "}
                       · {mcpServerHost(config.url)}
                     </span>
                     {audience ? <span className="wrap-anywhere">{audience}</span> : null}
@@ -161,14 +177,14 @@ function EnvironmentMcpServers({
                           disabled={currentTest?.result === null}
                           onClick={() => void runTest(id, config.url)}
                         >
-                          Test
+                          <T>Test</T>
                         </Button>
                         <Button
                           size="xs"
                           variant="ghost"
                           onClick={() => setDialog({ mode: "edit", id })}
                         >
-                          Edit
+                          <T>Edit</T>
                         </Button>
                         <RemoveMcpServerButton
                           name={name}
@@ -178,7 +194,7 @@ function EnvironmentMcpServers({
                       </>
                     ) : null}
                     <Switch
-                      aria-label={`Enable ${name}`}
+                      aria-label={gt("Enable {name}", { name })}
                       checked={config.enabled}
                       disabled={readOnly}
                       onCheckedChange={(enabled) =>
@@ -192,8 +208,10 @@ function EnvironmentMcpServers({
           })
         )}
         <p className="px-4 py-3 text-xs text-muted-foreground">
-          Turning a server off or removing it stops its calls right away. Agents pick up new servers
-          and tool changes when their next session starts.
+          <T>
+            Turning a server off or removing it stops its calls right away. Agents pick up new
+            servers and tool changes when their next session starts.
+          </T>
         </p>
       </SettingsSection>
       {dialog !== null && !readOnly && (dialog.mode === "add" || editing !== undefined) ? (
@@ -222,19 +240,27 @@ function RemoveMcpServerButton({
   return (
     <>
       <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
-        Remove
+        <T>Remove</T>
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {name}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              <T>
+                Remove <Var>{name}</Var>?
+              </T>
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Agents on {environmentLabel} stop reaching its tools right away, and its token is
-              deleted from that environment. The server itself is untouched.
+              <T>
+                Agents on <Var>{environmentLabel}</Var> stop reaching its tools right away, and its
+                token is deleted from that environment. The server itself is untouched.
+              </T>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              <T>Cancel</T>
+            </AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -242,7 +268,7 @@ function RemoveMcpServerButton({
                 onConfirm();
               }}
             >
-              Remove server
+              <T>Remove server</T>
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

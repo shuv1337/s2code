@@ -1,3 +1,5 @@
+import { msg } from "gt-react-native";
+import { m } from "../../i18n/messages";
 import {
   McpServerConfig,
   McpServerId,
@@ -64,16 +66,17 @@ export function parseMcpServerId(
   isNew: boolean,
 ): Parsed<McpServerId> {
   const trimmed = id.trim();
-  if (!trimmed) return { ok: false, error: "Enter a name." };
-  if (trimmed.startsWith("t3")) return { ok: false, error: "Names starting with t3 are reserved." };
+  if (!trimmed) return { ok: false, error: m(msg("Enter a name.")) };
+  if (trimmed.startsWith("t3"))
+    return { ok: false, error: m(msg("Names starting with t3 are reserved.")) };
   const decoded = decodeId(trimmed);
   if (Option.isNone(decoded))
     return {
       ok: false,
-      error: "Use up to 24 lowercase letters, digits, or hyphens, starting with a letter.",
+      error: m(msg("Use up to 24 lowercase letters, digits, or hyphens, starting with a letter.")),
     };
   if (isNew && trimmed in existing)
-    return { ok: false, error: `A server named ${trimmed} already exists.` };
+    return { ok: false, error: m(msg("A server named {name} already exists.", { name: trimmed })) };
   return { ok: true, value: decoded.value };
 }
 
@@ -106,7 +109,7 @@ export function parseMcpServerDraft(
     ...(saved?.excludeSubagents === undefined ? {} : { excludeSubagents: saved.excludeSubagents }),
   });
   if (Option.isNone(config))
-    return { ok: false, error: "Enter a URL starting with http:// or https://." };
+    return { ok: false, error: m(msg("Enter a URL starting with http:// or https://.")) };
   return { ok: true, value: { id: id.value, config: config.value } };
 }
 
@@ -136,15 +139,23 @@ export function describeMcpServerTest(result: McpServerTestResult): {
 } {
   switch (result._tag) {
     case "Connected": {
-      const name = result.serverName ?? "the server";
+      const name = result.serverName ?? m(msg("the server"));
       const count = result.tools.length;
       if (count === 0)
-        return { tone: "default", message: `Connected to ${name}. No tools listed.` };
+        return {
+          tone: "default",
+          message: m(msg("Connected to {name}. No tools listed.", { name })),
+        };
       const shown = result.tools.slice(0, 8).join(", ");
-      const more = count > 8 ? `, and ${count - 8} more` : "";
+      const more = count > 8 ? m(msg(", and {count} more", { count: count - 8 })) : "";
       return {
         tone: "default",
-        message: `Connected to ${name}. ${count === 1 ? "1 tool" : `${count} tools`}: ${shown}${more}.`,
+        message: m(
+          msg(
+            "Connected to {name}. {count, plural, one {{count} tool} other {{count} tools}}: {shown}{more}.",
+            { name, count, shown, more },
+          ),
+        ),
       };
     }
     case "Rejected":
@@ -152,15 +163,15 @@ export function describeMcpServerTest(result: McpServerTestResult): {
         tone: "danger",
         message:
           result.status === 401 || result.status === 403
-            ? `The server rejected the token (HTTP ${result.status}).`
-            : `The server responded with HTTP ${result.status}.`,
+            ? m(msg("The server rejected the token (HTTP {status}).", { status: result.status }))
+            : m(msg("The server responded with HTTP {status}.", { status: result.status })),
       };
     case "Unreachable":
       return {
         tone: "danger",
         message: result.timedOut
-          ? "The server did not respond in time."
-          : "Could not reach the server.",
+          ? m(msg("The server did not respond in time."))
+          : m(msg("Could not reach the server.")),
       };
     case "Failed":
       return { tone: "danger", message: result.message };

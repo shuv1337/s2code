@@ -1,6 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - runs once at test setup, outside any Effect runtime.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
+import * as HostProcess from "../HostProcess.ts";
+import { unsetInheritedGitRepositoryEnv } from "./gitRepositoryEnv.ts";
 
 // A test that runs from a git hook or an agent shell inherits GIT_DIR and friends. Git then ignores
 // the temp repo a test just created, so `git init --bare` and `git config` rewrite the outer
@@ -29,4 +31,12 @@ export function isolateGitEnv(root: string = NodeFS.realpathSync(NodeOS.tmpdir()
   }
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   process.env.GIT_CEILING_DIRECTORIES = root;
+}
+
+// A test run started from `git bisect run`, `git rebase --exec` or a hook inherits GIT_DIR. Every git
+// command a test or the code under test starts would then write into that repository.
+for (const name of Object.keys(
+  unsetInheritedGitRepositoryEnv(process.env, HostProcess.Platform.defaultValue()),
+)) {
+  delete process.env[name];
 }

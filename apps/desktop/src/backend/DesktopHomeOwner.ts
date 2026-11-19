@@ -7,8 +7,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import { msg } from "gt-i18n";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { m } from "../i18n/messages.ts";
 import { BACKEND_QUIT_STOP_TIMEOUT } from "./DesktopBackendManager.ts";
 
 // The fields of the server's `server-runtime.json` that identify the owner of a T3 home.
@@ -98,15 +100,46 @@ export const readLiveHomeOwner = Effect.fn("DesktopHomeOwner.readLiveHomeOwner")
 export const homeOwnedMessage = (owner: Option.Option<HomeOwner>, cli = "s2code"): string =>
   Option.match(owner, {
     onNone: () =>
-      `Another S2Code server, such as the background service, is using this data directory, or an older background service is set up for it. Stop that server or try \`${cli} update\`. If the older launcher cannot update, run \`${cli} service uninstall\` and optionally reinstall with \`${cli} service install\` from a current CLI. Use \`npx shuv2code@latest\` if \`${cli}\` is missing or outdated, and pass \`--base-dir\` with the service's S2Code home to each command. Then reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.`,
+      m(
+        msg(
+          "Another S2Code server, such as the background service, is using this data directory, or an older background service is set up for it. Stop that server or try `{cli} update`. If the older launcher cannot update, run `{cli} service uninstall` and optionally reinstall with `{cli} service install` from a current CLI. Use `npx shuv2code@latest` if `{cli}` is missing or outdated, and pass `--base-dir` with the service's S2Code home to each command. Then reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+        ),
+        { cli },
+      ),
     onSome: (owner) => {
-      const kind = owner.serviceManaged
-        ? "The S2Code background service"
-        : `Another S2Code server (for example \`${cli} serve\`, or one started over SSH)`;
-      const version = owner.serverVersion ? `, version ${owner.serverVersion}` : "";
-      const stop = owner.serviceManaged
-        ? `Stop it with \`${cli} service uninstall\`, passing \`--base-dir\` with this S2Code home`
-        : "If an S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server";
-      return `${kind} is using this S2Code home (PID ${owner.pid}, port ${owner.port}${version}). ${stop}, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.`;
+      const variables = {
+        cli,
+        pid: String(owner.pid),
+        port: String(owner.port),
+        version: owner.serverVersion ?? "",
+      };
+      if (owner.serviceManaged) {
+        return owner.serverVersion
+          ? m(
+              msg(
+                "The S2Code background service is using this S2Code home (PID {pid}, port {port}, version {version}). Stop it with `{cli} service uninstall`, passing `--base-dir` with this S2Code home, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+              ),
+              variables,
+            )
+          : m(
+              msg(
+                "The S2Code background service is using this S2Code home (PID {pid}, port {port}). Stop it with `{cli} service uninstall`, passing `--base-dir` with this S2Code home, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+              ),
+              variables,
+            );
+      }
+      return owner.serverVersion
+        ? m(
+            msg(
+              "Another S2Code server (for example `{cli} serve`, or one started over SSH) is using this S2Code home (PID {pid}, port {port}, version {version}). If an S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+            ),
+            variables,
+          )
+        : m(
+            msg(
+              "Another S2Code server (for example `{cli} serve`, or one started over SSH) is using this S2Code home (PID {pid}, port {port}). If an S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+            ),
+            variables,
+          );
     },
   });

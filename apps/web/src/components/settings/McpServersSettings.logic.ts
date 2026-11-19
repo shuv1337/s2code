@@ -1,3 +1,5 @@
+import { msg } from "gt-react";
+import { m } from "../../i18n/messages";
 import {
   McpServerId,
   type McpServerConfig,
@@ -67,23 +69,26 @@ function validateId(
 ): Result.Result<McpServerId, string> {
   if (target.mode === "edit") return Result.succeed(target.id);
   const id = raw.trim();
-  if (id === "") return Result.fail("Enter a name.");
-  if (id.startsWith("t3")) return Result.fail("Names starting with “t3” are reserved for T3 Code.");
+  if (id === "") return Result.fail(m(msg("Enter a name.")));
+  if (id.startsWith("t3")) {
+    return Result.fail(m(msg("Names starting with “t3” are reserved for T3 Code.")));
+  }
   const decoded = decodeMcpServerId(id);
   if (Result.isFailure(decoded)) {
     return Result.fail(
-      "Use up to 24 lowercase letters, digits, and hyphens, starting with a letter.",
+      m(msg("Use up to 24 lowercase letters, digits, and hyphens, starting with a letter.")),
     );
   }
-  if (existingIds.has(decoded.success)) return Result.fail("A server with this name exists.");
+  if (existingIds.has(decoded.success))
+    return Result.fail(m(msg("A server with this name exists.")));
   return Result.succeed(decoded.success);
 }
 
 function validateUrl(raw: string): Result.Result<string, string> {
   const url = raw.trim();
-  if (url === "") return Result.fail("Enter the server URL.");
+  if (url === "") return Result.fail(m(msg("Enter the server URL.")));
   if (!/^https?:\/\/./i.test(url) || !URL.canParse(url)) {
-    return Result.fail("Enter an http:// or https:// URL.");
+    return Result.fail(m(msg("Enter an http:// or https:// URL.")));
   }
   return Result.succeed(url);
 }
@@ -153,7 +158,10 @@ export function mcpServerHost(url: string): string {
 
 const TOOLS_SHOWN = 3;
 
-export function describeMcpServerTest(result: McpServerTestResult): {
+export function describeMcpServerTest(
+  result: McpServerTestResult,
+  resolve: typeof m = m,
+): {
   readonly label: string;
   readonly ok: boolean;
 } {
@@ -163,9 +171,19 @@ export function describeMcpServerTest(result: McpServerTestResult): {
       const names = result.tools.slice(0, TOOLS_SHOWN).join(", ");
       const more = count > TOOLS_SHOWN ? ", …" : "";
       const tools =
-        count === 0 ? "no tools" : `${count} ${count === 1 ? "tool" : "tools"}: ${names}${more}`;
+        count === 0
+          ? resolve(msg("no tools"))
+          : resolve(
+              msg("{count, plural, one {{count} tool} other {{count} tools}}: {names}{more}", {
+                count,
+                names,
+                more,
+              }),
+            );
       return {
-        label: `Connected${result.serverName ? ` to ${result.serverName}` : ""} · ${tools}`,
+        label: result.serverName
+          ? resolve(msg("Connected to {name} · {tools}", { name: result.serverName, tools }))
+          : resolve(msg("Connected · {tools}", { tools })),
         ok: true,
       };
     }
@@ -173,12 +191,15 @@ export function describeMcpServerTest(result: McpServerTestResult): {
       return {
         label:
           result.status === 401 || result.status === 403
-            ? `Rejected (HTTP ${result.status}): check the token`
-            : `Rejected (HTTP ${result.status})`,
+            ? resolve(msg("Rejected (HTTP {status}): check the token", { status: result.status }))
+            : resolve(msg("Rejected (HTTP {status})", { status: result.status })),
         ok: false,
       };
     case "Unreachable":
-      return { label: result.timedOut ? "Timed out" : "Unreachable", ok: false };
+      return {
+        label: result.timedOut ? resolve(msg("Timed out")) : resolve(msg("Unreachable")),
+        ok: false,
+      };
     case "Failed":
       return { label: result.message, ok: false };
   }

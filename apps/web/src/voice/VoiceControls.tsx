@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { useEnvironment } from "../state/environments";
 import { useAtomValue } from "@effect/atom-react";
 import type { VoiceTarget } from "@t3tools/client-runtime/voice/controller";
@@ -13,9 +14,13 @@ export function VoiceControls({
   target: VoiceTarget;
   commitDictation: () => (text: string) => boolean;
 }) {
+  const gt = useGT();
   const voice = useVoice();
   const environment = useEnvironment(target.environmentId);
-  const callTarget = { ...target, environmentLabel: environment?.label ?? "Current environment" };
+  const callTarget = {
+    ...target,
+    environmentLabel: environment?.label ?? gt("Current environment"),
+  };
   const allowed = useAtomValue(voiceEnvironment.start.permissionAtom(target.environmentId));
   const configured = useEnvironmentQuery(
     voiceEnvironment.status({ environmentId: target.environmentId, input: {} }),
@@ -28,8 +33,8 @@ export function VoiceControls({
         size="xs"
         variant="ghost"
         disabled={!allowed}
-        aria-label="Dictate into draft"
-        title="Dictate into draft"
+        aria-label={gt("Dictate into draft")}
+        title={gt("Dictate into draft")}
         onClick={() => voice.startDictation(callTarget, commitDictation())}
       >
         <MicIcon className="size-4" />
@@ -40,8 +45,8 @@ export function VoiceControls({
           size="xs"
           variant={active ? "secondary" : "ghost"}
           disabled={!allowed}
-          aria-label={active ? "Open voice call" : "Start voice call"}
-          title={active ? "Open voice call" : "Start voice call"}
+          aria-label={active ? gt("Open voice call") : gt("Start voice call")}
+          title={active ? gt("Open voice call") : gt("Start voice call")}
           onClick={() => {
             voice.setOpen(true);
             if (!active) void voice.controller.start(callTarget);
