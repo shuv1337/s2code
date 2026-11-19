@@ -8673,6 +8673,58 @@
   "6896cbdf732d5453": "S2Code va redémarrer et exécuter à nouveau un serveur sur cet ordinateur.",
   "5741e027bc5d5e4c": "Redémarrer et désactiver",
   "e09686bd65886c10": "Redémarrer et activer",
+  "f590bc37c83925ba": "Impossible d’exécuter le test. Essayez de vous reconnecter.",
+  "cf4b285ffd971f80": "Paramètre propre à l’environnement. Sélectionnez un environnement pour le modifier.",
+  "24fd89ae5fcf3723": "Cette connexion ne permet pas de gérer les serveurs MCP dans {environment}.",
+  "afcb5ac7c7a0054d": "Aucun serveur MCP n’est configuré.",
+  "ebffe4dabf52835f": "Activer {name}",
+  "9afb8f2c4ff0ff26": [
+    "Mettez à jour S2Code dans ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " pour ajouter des serveurs MCP pour ses agents."
+  ],
+  "e7b75d6e357bc598": "Connectez un environnement pour gérer les serveurs MCP que ses agents peuvent utiliser.",
+  "27b44316eab62b46": "Ajouter un serveur",
+  "d8cd3404b17169f5": "Serveurs MCP distants utilisables par les agents des fils en accès complet dans cet environnement. Les jetons restent dans cet environnement.",
+  "e410dc53a90f9c11": [
+    "Les agents voient ",
+    {
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      "i": 1,
+      "t": "code"
+    },
+    ""
+  ],
+  "f7c3ae7a79ede728": "Tester",
+  "aaf0fc9860e23b0d": "Désactiver ou supprimer un serveur arrête immédiatement ses appels. Les agents prennent en compte les nouveaux serveurs et les changements d’outils au lancement de leur prochaine session.",
+  "111a44209dc6e701": "Supprimer",
+  "a3538ba5ca802bd7": [
+    "Supprimer ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " ?"
+  ],
+  "2a87d4baaa5ba557": [
+    "Les agents sur ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " perdent immédiatement l’accès à ses outils et son jeton est supprimé de cet environnement. Le serveur lui-même reste inchangé."
+  ],
+  "a32fc6c5a36b6a95": "Supprimer le serveur",
   "b8c82ba62b34f0e4": "Microphones, par ordre de préférence",
   "9fe08946d6dbd618": "Microphone enregistré",
   "8101bb8e3c7427bf": "Monter {name}",
@@ -9612,16 +9664,6 @@
   ],
   "13d4f258e93f1dc1": "Connectez un environnement pour gérer les fournisseurs de secrets lus par ses variables de fournisseur.",
   "88466f5a03be2419": "Paramètre propre à l’environnement. Sélectionnez un environnement pour le modifier.",
-  "111a44209dc6e701": "Supprimer",
-  "a3538ba5ca802bd7": [
-    "Supprimer ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " ?"
-  ],
   "0d5b3b39f92c04e4": "Supprimer le fournisseur",
   "c52bdbe39649742c": [
     "Rien ne lit depuis ",
@@ -10787,7 +10829,6 @@
   "5b928a84a624e831": "En cours : {url}",
   "b07718fe86a16cc6": "Exécution : désactivée",
   "6d0831556a517821": "Envoie les traces, métriques et journaux à un récepteur OTLP HTTP. Redémarrez le serveur pour appliquer. Les variables d’environnement remplacent ces paramètres.",
-  "f7c3ae7a79ede728": "Tester",
   "b93d2ec53e944576": [
     "En cours : ",
     {
@@ -10830,7 +10871,6 @@
   "85eb2d15da7d016f": "Ajoutez une API de modèle pour rédiger les titres des fils, les messages de commit et d’autres textes courts sans démarrer d’agent de code.",
   "1d32dad13ca765db": "Désactivé · ",
   "1ece6e9c15a13601": "Plus d’actions pour {name}",
-  "ebffe4dabf52835f": "Activer {name}",
   "b663e2e129c61493": "Ajouter un générateur de texte",
   "149ffa363168a419": "Rédige les titres des fils, les messages de commit et d’autres textes courts sans démarrer d’agent de code. Votre clé d’API est stockée dans cet environnement.",
   "1e0a645ef3661af3": "Service",
@@ -11384,7 +11424,6 @@
   "21a440a3cf8b9e8d": "Revenir à la valeur héritée",
   "386e2a06d51a833b": "Cette connexion n’est pas autorisée à modifier les paramètres de l’environnement principal.",
   "685224e7178f4db7": "Reconnectez l’environnement sélectionné pour modifier ce paramètre.",
-  "cf4b285ffd971f80": "Paramètre propre à l’environnement. Sélectionnez un environnement pour le modifier.",
   "dfd5b72fe7308d9e": "Enregistré sur cet appareil. Sélectionnez Tous les projets pour le modifier.",
   "091be13f50490708": "Varie selon les environnements sélectionnés",
   "06e9973f7537ed51": "Remplacé pour ce projet",

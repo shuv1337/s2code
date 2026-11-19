@@ -8681,6 +8681,58 @@
   "6896cbdf732d5453": "S2Code will restart and start running a server on this computer again.",
   "5741e027bc5d5e4c": "Restart and turn off",
   "e09686bd65886c10": "Restart and turn on",
+  "f590bc37c83925ba": "The test could not run. Try reconnecting.",
+  "cf4b285ffd971f80": "Environment-wide setting. Select an environment to change it.",
+  "24fd89ae5fcf3723": "This connection lacks permission to manage MCP servers on {environment}.",
+  "afcb5ac7c7a0054d": "No MCP servers configured.",
+  "ebffe4dabf52835f": "Enable {name}",
+  "9afb8f2c4ff0ff26": [
+    "Update S2Code on ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " to add MCP servers for its agents."
+  ],
+  "e7b75d6e357bc598": "Connect an environment to manage the MCP servers its agents can use.",
+  "27b44316eab62b46": "Add server",
+  "d8cd3404b17169f5": "Remote MCP servers that agents in Full access threads on this environment can use. Tokens stay on this environment.",
+  "e410dc53a90f9c11": [
+    "Agents see",
+    " ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    }
+  ],
+  "f7c3ae7a79ede728": "Test",
+  "aaf0fc9860e23b0d": "Turning a server off or removing it stops its calls right away. Agents pick up new servers and tool changes when their next session starts.",
+  "111a44209dc6e701": "Remove",
+  "a3538ba5ca802bd7": [
+    "Remove ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "2a87d4baaa5ba557": [
+    "Agents on ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " stop reaching its tools right away, and its token is deleted from that environment. The server itself is untouched."
+  ],
+  "a32fc6c5a36b6a95": "Remove server",
   "b8c82ba62b34f0e4": "Microphones, preferred first",
   "9fe08946d6dbd618": "Saved microphone",
   "8101bb8e3c7427bf": "Move {name} up",
@@ -9622,16 +9674,6 @@
   ],
   "13d4f258e93f1dc1": "Connect an environment to manage the secret providers its provider variables read from.",
   "88466f5a03be2419": "Environment-wide setting. Select an environment to change it.",
-  "111a44209dc6e701": "Remove",
-  "a3538ba5ca802bd7": [
-    "Remove ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "?"
-  ],
   "0d5b3b39f92c04e4": "Remove provider",
   "c52bdbe39649742c": [
     "Nothing reads from ",
@@ -10797,7 +10839,6 @@
   "5b928a84a624e831": "Running: {url}",
   "b07718fe86a16cc6": "Running: Disabled",
   "6d0831556a517821": "Send traces, metrics, and logs to an OTLP HTTP receiver. Restart the server to apply. Environment variables override these settings.",
-  "f7c3ae7a79ede728": "Test",
   "b93d2ec53e944576": [
     "Running: ",
     {
@@ -10840,7 +10881,6 @@
   "85eb2d15da7d016f": "Add a model API to write thread titles, commit messages, and other short text without starting a coding agent.",
   "1d32dad13ca765db": "Off · ",
   "1ece6e9c15a13601": "More actions for {name}",
-  "ebffe4dabf52835f": "Enable {name}",
   "b663e2e129c61493": "Add a text generator",
   "149ffa363168a419": "Writes thread titles, commit messages, and other short text without starting a coding agent. Your API key is stored on this environment.",
   "1e0a645ef3661af3": "Service",
@@ -11394,7 +11434,6 @@
   "21a440a3cf8b9e8d": "Reset to inherited value",
   "386e2a06d51a833b": "This connection lacks permission to change settings on the primary environment.",
   "685224e7178f4db7": "Reconnect the selected environment to change this setting.",
-  "cf4b285ffd971f80": "Environment-wide setting. Select an environment to change it.",
   "dfd5b72fe7308d9e": "Saved on this device. Select All projects to change it.",
   "091be13f50490708": "Mixed across selected environments",
   "06e9973f7537ed51": "Overridden for this project",

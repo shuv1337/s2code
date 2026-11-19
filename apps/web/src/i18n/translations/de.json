@@ -8673,6 +8673,57 @@
   "6896cbdf732d5453": "S2Code startet neu und führt wieder einen Server auf diesem Computer aus.",
   "5741e027bc5d5e4c": "Neu starten und ausschalten",
   "e09686bd65886c10": "Neu starten und einschalten",
+  "f590bc37c83925ba": "Der Test konnte nicht ausgeführt werden. Versuche, die Verbindung wiederherzustellen.",
+  "cf4b285ffd971f80": "Umgebungsweite Einstellung. Wähle eine Umgebung, um sie zu ändern.",
+  "24fd89ae5fcf3723": "Diese Verbindung darf keine MCP-Server in {environment} verwalten.",
+  "afcb5ac7c7a0054d": "Keine MCP-Server konfiguriert.",
+  "ebffe4dabf52835f": "{name} aktivieren",
+  "9afb8f2c4ff0ff26": [
+    "Aktualisiere S2Code in ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ", um MCP-Server für die dortigen Agenten hinzuzufügen."
+  ],
+  "e7b75d6e357bc598": "Verbinde eine Umgebung, um die MCP-Server zu verwalten, die ihre Agenten nutzen können.",
+  "27b44316eab62b46": "Server hinzufügen",
+  "d8cd3404b17169f5": "Externe MCP-Server, die Agenten in Threads mit Vollzugriff in dieser Umgebung nutzen können. Tokens bleiben in dieser Umgebung.",
+  "e410dc53a90f9c11": [
+    "Agenten sehen ",
+    {
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      "i": 1,
+      "t": "code"
+    },
+    ""
+  ],
+  "f7c3ae7a79ede728": "Testen",
+  "aaf0fc9860e23b0d": "Wenn du einen Server deaktivierst oder entfernst, werden seine Aufrufe sofort gestoppt. Agenten übernehmen neue Server und Werkzeugänderungen beim Start ihrer nächsten Sitzung.",
+  "111a44209dc6e701": "Entfernen",
+  "a3538ba5ca802bd7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " entfernen?"
+  ],
+  "2a87d4baaa5ba557": [
+    "Agenten in ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " verlieren sofort den Zugriff auf seine Werkzeuge und sein Token wird aus dieser Umgebung gelöscht. Der Server selbst bleibt unverändert."
+  ],
+  "a32fc6c5a36b6a95": "Server entfernen",
   "b8c82ba62b34f0e4": "Mikrofone, bevorzugte zuerst",
   "9fe08946d6dbd618": "Gespeichertes Mikrofon",
   "8101bb8e3c7427bf": "{name} nach oben verschieben",
@@ -9614,15 +9665,6 @@
   ],
   "13d4f258e93f1dc1": "Verbinde eine Umgebung, um die Geheimnisanbieter zu verwalten, aus denen ihre Anbietervariablen lesen.",
   "88466f5a03be2419": "Umgebungsweite Einstellung. Wähle eine Umgebung, um sie zu ändern.",
-  "111a44209dc6e701": "Entfernen",
-  "a3538ba5ca802bd7": [
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " entfernen?"
-  ],
   "0d5b3b39f92c04e4": "Anbieter entfernen",
   "c52bdbe39649742c": [
     "Nichts liest aus ",
@@ -10788,7 +10830,6 @@
   "5b928a84a624e831": "Aktiv: {url}",
   "b07718fe86a16cc6": "Laufend: Deaktiviert",
   "6d0831556a517821": "Traces, Metriken und Logs an einen OTLP-HTTP-Empfänger senden. Starte den Server neu, um es anzuwenden. Umgebungsvariablen überschreiben diese Einstellungen.",
-  "f7c3ae7a79ede728": "Testen",
   "b93d2ec53e944576": [
     "Aktiv: ",
     {
@@ -10831,7 +10872,6 @@
   "85eb2d15da7d016f": "Füge eine Modell-API hinzu, um Thread-Titel, Commit-Nachrichten und andere kurze Texte zu schreiben, ohne einen Coding-Agenten zu starten.",
   "1d32dad13ca765db": "Aus · ",
   "1ece6e9c15a13601": "Weitere Aktionen für {name}",
-  "ebffe4dabf52835f": "{name} aktivieren",
   "b663e2e129c61493": "Textgenerator hinzufügen",
   "149ffa363168a419": "Schreibt Thread-Titel, Commit-Nachrichten und andere kurze Texte, ohne einen Coding-Agenten zu starten. Dein API-Schlüssel wird in dieser Umgebung gespeichert.",
   "1e0a645ef3661af3": "Dienst",
@@ -11385,7 +11425,6 @@
   "21a440a3cf8b9e8d": "Auf übernommenen Wert zurücksetzen",
   "386e2a06d51a833b": "Dieser Verbindung fehlt die Berechtigung, Einstellungen in der primären Umgebung zu ändern.",
   "685224e7178f4db7": "Verbinde die ausgewählte Umgebung erneut, um diese Einstellung zu ändern.",
-  "cf4b285ffd971f80": "Umgebungsweite Einstellung. Wähle eine Umgebung, um sie zu ändern.",
   "dfd5b72fe7308d9e": "Auf diesem Gerät gespeichert. Wähle „Alle Projekte“, um sie zu ändern.",
   "091be13f50490708": "Unterschiedlich in den ausgewählten Umgebungen",
   "06e9973f7537ed51": "Für dieses Projekt überschrieben",

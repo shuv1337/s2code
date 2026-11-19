@@ -8679,6 +8679,58 @@
   "6896cbdf732d5453": "S2Code startar om och börjar köra en server på den här datorn igen.",
   "5741e027bc5d5e4c": "Starta om och stäng av",
   "e09686bd65886c10": "Starta om och aktivera",
+  "f590bc37c83925ba": "Testet kunde inte köras. Försök ansluta igen.",
+  "cf4b285ffd971f80": "Inställning för hela miljön. Välj en miljö för att ändra den.",
+  "24fd89ae5fcf3723": "Den här anslutningen har inte behörighet att hantera MCP-servrar i {environment}.",
+  "afcb5ac7c7a0054d": "Inga MCP-servrar har konfigurerats.",
+  "ebffe4dabf52835f": "Aktivera {name}",
+  "9afb8f2c4ff0ff26": [
+    "Uppdatera S2Code i ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " för att lägga till MCP-servrar åt dess agenter."
+  ],
+  "e7b75d6e357bc598": "Anslut en miljö för att hantera de MCP-servrar som dess agenter kan använda.",
+  "27b44316eab62b46": "Lägg till server",
+  "d8cd3404b17169f5": "Fjärranslutna MCP-servrar som agenter i trådar med full åtkomst kan använda i den här miljön. Token stannar i miljön.",
+  "e410dc53a90f9c11": [
+    "Agenter ser ",
+    {
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      "i": 1,
+      "t": "code"
+    },
+    ""
+  ],
+  "f7c3ae7a79ede728": "Testa",
+  "aaf0fc9860e23b0d": "Om du stänger av eller tar bort en server stoppas dess anrop direkt. Agenter får nya servrar och verktygsändringar när deras nästa session startar.",
+  "111a44209dc6e701": "Ta bort",
+  "a3538ba5ca802bd7": [
+    "Ta bort ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "2a87d4baaa5ba557": [
+    "Agenter i ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " förlorar direkt åtkomsten till serverns verktyg och dess token tas bort från miljön. Själva servern påverkas inte."
+  ],
+  "a32fc6c5a36b6a95": "Ta bort server",
   "b8c82ba62b34f0e4": "Mikrofoner, föredragen först",
   "9fe08946d6dbd618": "Sparad mikrofon",
   "8101bb8e3c7427bf": "Flytta upp {name}",
@@ -9620,16 +9672,6 @@
   ],
   "13d4f258e93f1dc1": "Anslut en miljö för att hantera de hemlighetsleverantörer som dess leverantörsvariabler läser från.",
   "88466f5a03be2419": "Inställning för hela miljön. Välj en miljö för att ändra den.",
-  "111a44209dc6e701": "Ta bort",
-  "a3538ba5ca802bd7": [
-    "Ta bort ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "?"
-  ],
   "0d5b3b39f92c04e4": "Ta bort leverantör",
   "c52bdbe39649742c": [
     "Inget läser från ",
@@ -10795,7 +10837,6 @@
   "5b928a84a624e831": "Körs: {url}",
   "b07718fe86a16cc6": "Körning: inaktiverad",
   "6d0831556a517821": "Skicka spårningar, mätvärden och loggar till en OTLP HTTP-mottagare. Starta om servern för att tillämpa. Miljövariabler åsidosätter de här inställningarna.",
-  "f7c3ae7a79ede728": "Testa",
   "b93d2ec53e944576": [
     "Körs: ",
     {
@@ -10838,7 +10879,6 @@
   "85eb2d15da7d016f": "Lägg till ett modell-API för att skriva trådtitlar, commit-meddelanden och annan kort text utan att starta en kodagent.",
   "1d32dad13ca765db": "Av · ",
   "1ece6e9c15a13601": "Fler åtgärder för {name}",
-  "ebffe4dabf52835f": "Aktivera {name}",
   "b663e2e129c61493": "Lägg till en textgenerator",
   "149ffa363168a419": "Skriver trådtitlar, commit-meddelanden och annan kort text utan att starta en kodagent. Din API-nyckel lagras i den här miljön.",
   "1e0a645ef3661af3": "Tjänst",
@@ -11392,7 +11432,6 @@
   "21a440a3cf8b9e8d": "Återställ till ärvt värde",
   "386e2a06d51a833b": "Den här anslutningen saknar behörighet att ändra inställningar i den primära miljön.",
   "685224e7178f4db7": "Återanslut den valda miljön för att ändra inställningen.",
-  "cf4b285ffd971f80": "Inställning för hela miljön. Välj en miljö för att ändra den.",
   "dfd5b72fe7308d9e": "Sparad på den här enheten. Välj Alla projekt för att ändra den.",
   "091be13f50490708": "Blandat bland valda miljöer",
   "06e9973f7537ed51": "Åsidosatt för det här projektet",

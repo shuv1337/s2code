@@ -8671,6 +8671,58 @@
   "6896cbdf732d5453": "S2Code se reiniciará y volverá a ejecutar un servidor en este equipo.",
   "5741e027bc5d5e4c": "Reiniciar y desactivar",
   "e09686bd65886c10": "Reiniciar y activar",
+  "f590bc37c83925ba": "No se pudo ejecutar la prueba. Intenta volver a conectarte.",
+  "cf4b285ffd971f80": "Ajuste de todo el entorno. Selecciona un entorno para cambiarlo.",
+  "24fd89ae5fcf3723": "Esta conexión no tiene permiso para gestionar servidores MCP en {environment}.",
+  "afcb5ac7c7a0054d": "No hay servidores MCP configurados.",
+  "ebffe4dabf52835f": "Activar {name}",
+  "9afb8f2c4ff0ff26": [
+    "Actualiza S2Code en ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " para añadir servidores MCP para sus agentes."
+  ],
+  "e7b75d6e357bc598": "Conecta un entorno para gestionar los servidores MCP que pueden usar sus agentes.",
+  "27b44316eab62b46": "Añadir servidor",
+  "d8cd3404b17169f5": "Servidores MCP remotos que pueden usar los agentes de hilos con acceso completo en este entorno. Los tokens se conservan en este entorno.",
+  "e410dc53a90f9c11": [
+    "Los agentes ven ",
+    {
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      "i": 1,
+      "t": "code"
+    },
+    ""
+  ],
+  "f7c3ae7a79ede728": "Probar",
+  "aaf0fc9860e23b0d": "Al desactivar o quitar un servidor, sus llamadas se detienen de inmediato. Los agentes incorporan los nuevos servidores y cambios de herramientas al iniciar su siguiente sesión.",
+  "111a44209dc6e701": "Quitar",
+  "a3538ba5ca802bd7": [
+    "¿Quitar ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "2a87d4baaa5ba557": [
+    "Los agentes de ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " pierden de inmediato el acceso a sus herramientas y se elimina su token de ese entorno. El servidor no se modifica."
+  ],
+  "a32fc6c5a36b6a95": "Eliminar servidor",
   "b8c82ba62b34f0e4": "Micrófonos, el preferido primero",
   "9fe08946d6dbd618": "Micrófono guardado",
   "8101bb8e3c7427bf": "Subir {name}",
@@ -9610,16 +9662,6 @@
   ],
   "13d4f258e93f1dc1": "Conecta un entorno para gestionar los proveedores de secretos de los que leen sus variables de proveedor.",
   "88466f5a03be2419": "Ajuste de todo el entorno. Selecciona un entorno para cambiarlo.",
-  "111a44209dc6e701": "Quitar",
-  "a3538ba5ca802bd7": [
-    "¿Quitar ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "?"
-  ],
   "0d5b3b39f92c04e4": "Quitar proveedor",
   "c52bdbe39649742c": [
     "Nada lee de ",
@@ -10782,7 +10824,6 @@
   "5b928a84a624e831": "En ejecución: {url}",
   "b07718fe86a16cc6": "En ejecución: desactivado",
   "6d0831556a517821": "Envía trazas, métricas y registros a un receptor OTLP HTTP. Reinicia el servidor para aplicarlo. Las variables de entorno anulan estos ajustes.",
-  "f7c3ae7a79ede728": "Probar",
   "b93d2ec53e944576": [
     "En ejecución: ",
     {
@@ -10825,7 +10866,6 @@
   "85eb2d15da7d016f": "Añade una API de modelos para escribir títulos de hilos, mensajes de commit y otros textos breves sin iniciar un agente de código.",
   "1d32dad13ca765db": "Desactivado · ",
   "1ece6e9c15a13601": "Más acciones para {name}",
-  "ebffe4dabf52835f": "Activar {name}",
   "b663e2e129c61493": "Añadir un generador de texto",
   "149ffa363168a419": "Escribe títulos de hilos, mensajes de commit y otros textos breves sin iniciar un agente de código. Tu clave de API se guarda en este entorno.",
   "1e0a645ef3661af3": "Servicio",
@@ -11379,7 +11419,6 @@
   "21a440a3cf8b9e8d": "Restablecer al valor heredado",
   "386e2a06d51a833b": "Esta conexión no tiene permiso para cambiar los ajustes del entorno principal.",
   "685224e7178f4db7": "Vuelve a conectar el entorno seleccionado para cambiar este ajuste.",
-  "cf4b285ffd971f80": "Ajuste de todo el entorno. Selecciona un entorno para cambiarlo.",
   "dfd5b72fe7308d9e": "Guardado en este dispositivo. Selecciona Todos los proyectos para cambiarlo.",
   "091be13f50490708": "Varía entre los entornos seleccionados",
   "06e9973f7537ed51": "Anulado para este proyecto",

@@ -8672,6 +8672,58 @@
   "6896cbdf732d5453": "O S2Code vai reiniciar e voltar a executar um servidor neste computador.",
   "5741e027bc5d5e4c": "Reiniciar e desativar",
   "e09686bd65886c10": "Reiniciar e ativar",
+  "f590bc37c83925ba": "Não foi possível executar o teste. Tente reconectar.",
+  "cf4b285ffd971f80": "Configuração do ambiente inteiro. Selecione um ambiente para alterá-la.",
+  "24fd89ae5fcf3723": "Esta conexão não tem permissão para gerenciar servidores MCP em {environment}.",
+  "afcb5ac7c7a0054d": "Nenhum servidor MCP configurado.",
+  "ebffe4dabf52835f": "Ativar {name}",
+  "9afb8f2c4ff0ff26": [
+    "Atualize o S2Code em ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " para adicionar servidores MCP para seus agentes."
+  ],
+  "e7b75d6e357bc598": "Conecte um ambiente para gerenciar os servidores MCP que seus agentes podem usar.",
+  "27b44316eab62b46": "Adicionar servidor",
+  "d8cd3404b17169f5": "Servidores MCP remotos que os agentes podem usar em conversas com acesso total neste ambiente. Os tokens permanecem neste ambiente.",
+  "e410dc53a90f9c11": [
+    "Os agentes veem ",
+    {
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      },
+      "i": 1,
+      "t": "code"
+    },
+    ""
+  ],
+  "f7c3ae7a79ede728": "Testar",
+  "aaf0fc9860e23b0d": "Desativar ou remover um servidor interrompe suas chamadas imediatamente. Os agentes passam a usar os novos servidores e as alterações de ferramentas quando a próxima sessão começa.",
+  "111a44209dc6e701": "Remover",
+  "a3538ba5ca802bd7": [
+    "Remover ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "?"
+  ],
+  "2a87d4baaa5ba557": [
+    "Os agentes em ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " perdem o acesso às ferramentas imediatamente, e o token é excluído desse ambiente. O servidor em si não é alterado."
+  ],
+  "a32fc6c5a36b6a95": "Remover servidor",
   "b8c82ba62b34f0e4": "Microfones, preferido primeiro",
   "9fe08946d6dbd618": "Microfone salvo",
   "8101bb8e3c7427bf": "Mover {name} para cima",
@@ -9611,16 +9663,6 @@
   ],
   "13d4f258e93f1dc1": "Conecte um ambiente para gerenciar os provedores de segredos de onde as variáveis de provedor dele leem.",
   "88466f5a03be2419": "Configuração do ambiente inteiro. Selecione um ambiente para alterá-la.",
-  "111a44209dc6e701": "Remover",
-  "a3538ba5ca802bd7": [
-    "Remover ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "?"
-  ],
   "0d5b3b39f92c04e4": "Remover provedor",
   "c52bdbe39649742c": [
     "Nada lê de ",
@@ -10786,7 +10828,6 @@
   "5b928a84a624e831": "Em execução: {url}",
   "b07718fe86a16cc6": "Em execução: desativado",
   "6d0831556a517821": "Envia traces, métricas e logs a um receptor OTLP HTTP. Reinicie o servidor para aplicar. Variáveis de ambiente substituem estas configurações.",
-  "f7c3ae7a79ede728": "Testar",
   "b93d2ec53e944576": [
     "Em execução: ",
     {
@@ -10829,7 +10870,6 @@
   "85eb2d15da7d016f": "Adicione uma API de modelo para escrever títulos de threads, mensagens de commit e outros textos curtos sem iniciar um agente de código.",
   "1d32dad13ca765db": "Desativado · ",
   "1ece6e9c15a13601": "Mais ações para {name}",
-  "ebffe4dabf52835f": "Ativar {name}",
   "b663e2e129c61493": "Adicionar um gerador de texto",
   "149ffa363168a419": "Escreve títulos de threads, mensagens de commit e outros textos curtos sem iniciar um agente de código. Sua chave de API é armazenada neste ambiente.",
   "1e0a645ef3661af3": "Serviço",
@@ -11383,7 +11423,6 @@
   "21a440a3cf8b9e8d": "Redefinir para o valor herdado",
   "386e2a06d51a833b": "Esta conexão não tem permissão para alterar configurações no ambiente principal.",
   "685224e7178f4db7": "Reconecte o ambiente selecionado para alterar esta configuração.",
-  "cf4b285ffd971f80": "Configuração do ambiente inteiro. Selecione um ambiente para alterá-la.",
   "dfd5b72fe7308d9e": "Salvo neste dispositivo. Selecione Todos os projetos para alterar.",
   "091be13f50490708": "Misto entre os ambientes selecionados",
   "06e9973f7537ed51": "Substituído neste projeto",
