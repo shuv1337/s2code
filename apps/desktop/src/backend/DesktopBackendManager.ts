@@ -440,11 +440,24 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
 ): Effect.fn.Return<BackendProcessExit, BackendProcessError, BackendProcessRunRequirements> {
   if (options.attachedPid !== undefined) {
     const pid = options.attachedPid;
+    const scope = yield* Scope.Scope;
+    const detached = yield* Deferred.make<void>();
+    yield* Scope.addFinalizer(scope, Deferred.succeed(detached, undefined).pipe(Effect.asVoid));
+    if (yield* Deferred.isDone(detached)) {
+      return { code: Option.none(), reason: "detached from attached server" };
+    }
     yield* options.onStarted?.(pid) ?? Effect.void;
     yield* options.onReady?.(pid) ?? Effect.void;
-    yield* Effect.sync(() => DesktopLocalServerAttach.isProcessAlive(pid)).pipe(
-      Effect.repeat({ while: (alive) => alive, schedule: Schedule.spaced("2 seconds") }),
+    const stopped = yield* Effect.raceFirst(
+      Effect.sync(() => DesktopLocalServerAttach.isProcessAlive(pid)).pipe(
+        Effect.repeat({ while: (alive) => alive, schedule: Schedule.spaced("2 seconds") }),
+        Effect.as(true),
+      ),
+      Deferred.await(detached).pipe(Effect.as(false)),
     );
+    if (!stopped) {
+      return { code: Option.none(), reason: "detached from attached server" };
+    }
     yield* options.onExitObserved?.() ?? Effect.void;
     return { code: Option.none(), reason: "attached server stopped" };
   }

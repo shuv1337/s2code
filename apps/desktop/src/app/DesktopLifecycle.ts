@@ -107,6 +107,9 @@ const requestDesktopShutdownAndWait = Effect.fn("desktop.lifecycle.requestShutdo
 interface QuitState {
   phase: "running" | "waiting" | "allowed";
   waitingSinceNanos: bigint;
+  // Tracks the first signal received while another flow (such as update install or relaunch)
+  // holds state.quitting = true without going through before-quit.
+  externalSignalWaitingSinceNanos: bigint | null;
 }
 
 // Longer than a backend's stop budget (SIGTERM, 5s grace, SIGKILL, 1s wait),
@@ -119,18 +122,17 @@ const startWaitingForShutdown = Effect.fn("desktop.lifecycle.startWaitingForShut
 ) {
   quit.phase = "waiting";
   quit.waitingSinceNanos = yield* Clock.monotonicTimeNanos;
+  quit.externalSignalWaitingSinceNanos = null;
 });
 
 // While a quit waits on shutdown, `quitting` makes activation open nothing. If
 // that shutdown stalls, a repeated Quit or SIGTERM is the user's only way out
 // short of SIGKILL.
 const exitIfShutdownStalled = Effect.fn("desktop.lifecycle.exitIfShutdownStalled")(function* (
-  quit: QuitState,
+  waitingSinceNanos: bigint,
   source: string,
 ) {
-  const pendingMs = Number(
-    ((yield* Clock.monotonicTimeNanos) - quit.waitingSinceNanos) / 1_000_000n,
-  );
+  const pendingMs = Number(((yield* Clock.monotonicTimeNanos) - waitingSinceNanos) / 1_000_000n);
   if (pendingMs < Duration.toMillis(SHUTDOWN_STALL_THRESHOLD)) {
     yield* logLifecycleInfo("quit already in progress", { source, pendingMs });
     return;
@@ -160,7 +162,7 @@ function handleBeforeQuit(
 
   event.preventDefault();
   if (quit.phase === "waiting") {
-    void runEffect(exitIfShutdownStalled(quit, "before-quit"));
+    void runEffect(exitIfShutdownStalled(quit.waitingSinceNanos, "before-quit"));
     return;
   }
   void runEffect(
@@ -197,7 +199,7 @@ function quitFromSignal(
   quit: QuitState,
 ): void {
   if (quit.phase === "waiting") {
-    void runEffect(exitIfShutdownStalled(quit, signal));
+    void runEffect(exitIfShutdownStalled(quit.waitingSinceNanos, signal));
     return;
   }
   void runEffect(
@@ -206,7 +208,15 @@ function quitFromSignal(
       const electronApp = yield* ElectronApp.ElectronApp;
       const state = yield* DesktopState.DesktopState;
       const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
-      if (wasQuitting) return;
+      if (wasQuitting) {
+        if (quit.externalSignalWaitingSinceNanos === null) {
+          quit.externalSignalWaitingSinceNanos = yield* Clock.monotonicTimeNanos;
+          yield* logLifecycleInfo("quit already in progress", { source: signal, pendingMs: 0 });
+          return;
+        }
+        yield* exitIfShutdownStalled(quit.externalSignalWaitingSinceNanos, signal);
+        return;
+      }
       yield* startWaitingForShutdown(quit);
       yield* logLifecycleInfo("process signal received", { signal });
       yield* requestDesktopShutdownAndWait();
@@ -259,7 +269,11 @@ export const make = DesktopLifecycle.of({
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const context = yield* Effect.context<DesktopLifecycleRegistrationServices>();
     const runEffect = Effect.runPromiseWith(context);
-    const quit: QuitState = { phase: "running", waitingSinceNanos: 0n };
+    const quit: QuitState = {
+      phase: "running",
+      waitingSinceNanos: 0n,
+      externalSignalWaitingSinceNanos: null,
+    };
     yield* electronTheme.onUpdated(() => {
       void runEffect(
         desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.themeUpdated")),
@@ -292,6 +306,7 @@ export const make = DesktopLifecycle.of({
         Effect.gen(function* () {
           const state = yield* DesktopState.DesktopState;
           if (yield* Ref.get(state.quitting)) return;
+          quit.externalSignalWaitingSinceNanos = null;
           yield* desktopWindow.activate;
         }).pipe(Effect.withSpan("desktop.lifecycle.activate")),
       );
@@ -301,8 +316,11 @@ export const make = DesktopLifecycle.of({
         Effect.gen(function* () {
           const app = yield* ElectronApp.ElectronApp;
           const state = yield* DesktopState.DesktopState;
-          if (environment.platform !== "darwin" && !(yield* Ref.get(state.quitting))) {
-            yield* app.quit;
+          if (!(yield* Ref.get(state.quitting))) {
+            quit.externalSignalWaitingSinceNanos = null;
+            if (environment.platform !== "darwin") {
+              yield* app.quit;
+            }
           }
         }).pipe(Effect.withSpan("desktop.lifecycle.windowAllClosed")),
       );

@@ -2,6 +2,7 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import desktopPackageJson from "../../package.json" with { type: "json" };
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -395,4 +396,57 @@ describe("DesktopObservability", () => {
       Effect.provide(Layer.mergeAll(NodeServices.layer, layerCollector(requests), layerEmptyEnv)),
     );
   });
+
+  it.effect("writes desktop component logs to desktop.log with redacted credentials", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-component-log-test-",
+      });
+      const layerEnvironment = layerEnvironmentFor(baseDir, false);
+      const desktopLogPath = yield* Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        return environment.path.join(environment.logDir, "desktop.log");
+      }).pipe(Effect.provide(layerEnvironment));
+      const { logWarning, logError } =
+        DesktopObservability.makeComponentLogger("desktop-backend-process");
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* logWarning("backend shutdown exceeded timeout; waiting for exit", {
+            timeoutMs: 7_000,
+          });
+          yield* Effect.logError(
+            "failed request",
+            Cause.fail(new Error("connect wss://example.com/ws?wsTicket=secret-ticket")),
+          );
+          yield* logError("unrecoverable desktop error");
+        }).pipe(
+          Effect.annotateLogs({ runId: "test-run" }),
+          Effect.provide(DesktopObservability.layer.pipe(Layer.provideMerge(layerEnvironment))),
+        ),
+      );
+
+      const content = yield* fileSystem.readFileString(desktopLogPath);
+      const records = content
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const warning = records.find(
+        (record) => record.message === "backend shutdown exceeded timeout; waiting for exit",
+      );
+      assert.isDefined(warning);
+      assert.equal(warning?.level, "WARN");
+      assert.equal(
+        (warning?.annotations as Record<string, unknown> | undefined)?.component,
+        "desktop-backend-process",
+      );
+      assert.equal((warning?.annotations as Record<string, unknown> | undefined)?.timeoutMs, 7_000);
+      assert.include(content, "wsTicket=<redacted>");
+      assert.notInclude(content, "secret-ticket");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, layerEmptyEnv)),
+    ),
+  );
 });

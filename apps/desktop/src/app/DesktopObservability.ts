@@ -1,4 +1,7 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off - flushSync must write before the process exits.
+import * as NodeFS from "node:fs";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import { makeAsyncRotatingFileSink } from "@t3tools/shared/logging";
 import {
   makeLocalFileTracer,
   makeTraceSink,
@@ -23,8 +26,10 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Queue from "effect/Queue";
 import * as References from "effect/References";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -36,8 +41,10 @@ import desktopPackageJson from "../../package.json" with { type: "json" };
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
+const DESKTOP_LOG_FILE_NAME = "desktop.log";
 const DESKTOP_LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const DESKTOP_LOG_FILE_MAX_FILES = 10;
+const DESKTOP_LOG_MAX_BUFFER_BYTES = Math.max(DESKTOP_LOG_FILE_MAX_BYTES, 4 * 1024 * 1024);
 const DESKTOP_BACKEND_CHILD_LOG_FIBER_ID = "#backend-child";
 const DESKTOP_TRACE_BATCH_WINDOW_MS = 1_000;
 const DESKTOP_BACKEND_OUTPUT_BUFFER_MAX_BYTES = 1024 * 1024;
@@ -599,6 +606,100 @@ const layerBackendOutputLogFactory = Layer.effect(
   }),
 );
 
+const makeDesktopFileLogger = Effect.fn("desktop.observability.makeDesktopFileLogger")(function* (
+  filePath: string,
+) {
+  const sink = yield* makeAsyncRotatingFileSink({
+    filePath,
+    maxBytes: DESKTOP_LOG_FILE_MAX_BYTES,
+    maxFiles: DESKTOP_LOG_FILE_MAX_FILES,
+  });
+
+  let buffer: Array<{ readonly text: string; readonly bytes: number }> = [];
+  let bufferBytes = 0;
+  const flushRequests = yield* Queue.sliding<void>(1);
+  const flushSemaphore = yield* Semaphore.make(1);
+
+  const flush = flushSemaphore
+    .withPermits(1)(
+      Effect.gen(function* () {
+        if (buffer.length === 0) return;
+        const records = buffer;
+        buffer = [];
+        bufferBytes = 0;
+        let index = 0;
+        while (index < records.length) {
+          let nextIndex = index + 1;
+          let chunkBytes = records[index]!.bytes;
+          while (nextIndex < records.length) {
+            const nextBytes = records[nextIndex]!.bytes;
+            if (chunkBytes + nextBytes > DESKTOP_LOG_FILE_MAX_BYTES) break;
+            chunkBytes += nextBytes;
+            nextIndex += 1;
+          }
+          const chunk = records
+            .slice(index, nextIndex)
+            .map((record) => record.text)
+            .join("");
+          const written = yield* sink.write(chunk).pipe(Effect.result);
+          if (Result.isFailure(written)) {
+            return;
+          }
+          index = nextIndex;
+        }
+      }),
+    )
+    .pipe(
+      Effect.uninterruptible,
+      Effect.withTracerEnabled(false),
+      Effect.updateContext(Context.omit(Tracer.ParentSpan)<never>),
+    );
+
+  const flushSync = () => {
+    if (buffer.length === 0) return;
+    const text = buffer.map((record) => record.text).join("");
+    buffer = [];
+    bufferBytes = 0;
+    try {
+      NodeFS.appendFileSync(filePath, text);
+    } catch {
+      return;
+    }
+  };
+
+  // Unscoped until scope release: Electron can exit without closing the app scope.
+  process.once("exit", flushSync);
+  yield* Effect.addFinalizer(() =>
+    flush.pipe(
+      Effect.andThen(
+        Effect.sync(() => {
+          process.removeListener("exit", flushSync);
+        }),
+      ),
+      Effect.ignore,
+    ),
+  );
+  yield* Effect.forkScoped(Queue.take(flushRequests).pipe(Effect.andThen(flush), Effect.forever));
+
+  const jsonLogger = Logger.map(Logger.formatJson, (line) => {
+    const text = `${line}\n`;
+    const bytes = Buffer.byteLength(text);
+    if (bytes > DESKTOP_LOG_FILE_MAX_BYTES || bufferBytes + bytes > DESKTOP_LOG_MAX_BUFFER_BYTES) {
+      return;
+    }
+    buffer.push({ text, bytes });
+    bufferBytes += bytes;
+    Queue.offerUnsafe(flushRequests, undefined);
+  });
+
+  return Logger.make<unknown, void>((options) => {
+    jsonLogger.log({
+      ...options,
+      cause: SharedObservability.redactCauseCredentials(options.cause),
+    });
+  });
+});
+
 const layerTelemetry = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -624,12 +725,20 @@ const layerTelemetry = Layer.unwrap(
       },
     };
 
+    const desktopFileLogger = yield* makeDesktopFileLogger(
+      environment.path.join(environment.logDir, DESKTOP_LOG_FILE_NAME),
+    ).pipe(Effect.option);
+    const localLoggers: Array<Logger.Logger<unknown, unknown>> = [
+      Logger.consolePretty(),
+      ...(Option.isSome(desktopFileLogger) ? [desktopFileLogger.value] : []),
+    ];
+
     // Logger.layer replaces the logger set. tracerLogger would duplicate OTLP in-span messages.
     const layerLogger = Logger.layer(
       endpoints.logs === undefined
-        ? [Logger.consolePretty(), Logger.tracerLogger]
+        ? [...localLoggers, Logger.tracerLogger]
         : [
-            Logger.consolePretty(),
+            ...localLoggers,
             OtlpLogger.make({
               url: endpoints.logs.url,
               exportInterval: `${endpoints.logs.export.exportIntervalMs} millis`,

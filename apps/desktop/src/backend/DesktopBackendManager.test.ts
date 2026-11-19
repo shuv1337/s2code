@@ -857,4 +857,56 @@ describe("DesktopBackendManager", () => {
       assert.isTrue(yield* Deferred.isDone(teardownFinished));
     }).pipe(Effect.provide(TestClock.layer())),
   );
+
+  it.effect("stops an attached backend without waiting for its process to exit", () =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      let persistedFailureCount = 0;
+      let discardedSessionCount = 0;
+      let shutdownCount = 0;
+      const instance = yield* makeTestInstance({
+        config: { ...baseConfig, attachedPid: process.pid },
+        spawnerLayer: Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => Effect.die("must not spawn an attached backend")),
+        ),
+        onReady: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
+        onShutdown: Effect.sync(() => {
+          shutdownCount += 1;
+        }),
+        backendOutputLog: {
+          persistFailure: () =>
+            Effect.sync(() => {
+              persistedFailureCount += 1;
+            }),
+          discardSession: Effect.sync(() => {
+            discardedSessionCount += 1;
+          }),
+        },
+      });
+
+      yield* instance.start;
+      yield* Deferred.await(ready);
+      const runningSnapshot = yield* instance.snapshot;
+      assert.isTrue(runningSnapshot.ready);
+      assert.deepEqual(runningSnapshot.activePid, Option.some(process.pid));
+
+      const stopDone = yield* Deferred.make<void>();
+      const stopFiber = yield* instance
+        .stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT })
+        .pipe(Effect.andThen(Deferred.succeed(stopDone, undefined)), Effect.forkChild);
+      yield* TestClock.adjust(Duration.seconds(1));
+
+      assert.isTrue(yield* Deferred.isDone(stopDone));
+      yield* Fiber.join(stopFiber);
+      assert.doesNotThrow(() => process.kill(process.pid, 0));
+      assert.equal(shutdownCount, 1);
+      assert.equal(persistedFailureCount, 0);
+      assert.equal(discardedSessionCount, 1);
+      const stoppedSnapshot = yield* instance.snapshot;
+      assert.isFalse(stoppedSnapshot.desiredRunning);
+      assert.isFalse(stoppedSnapshot.ready);
+      assert.isTrue(Option.isNone(stoppedSnapshot.activePid));
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
 });

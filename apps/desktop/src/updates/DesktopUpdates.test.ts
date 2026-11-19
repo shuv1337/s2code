@@ -878,6 +878,49 @@ describe("DesktopUpdates", () => {
     }),
   );
 
+  it.effect("recovers quitting state and restarts backends when install stop times out", () =>
+    Effect.gen(function* () {
+      const stopping = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        stopBackend: Deferred.succeed(stopping, undefined).pipe(Effect.andThen(Effect.never)),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const desktopState = yield* DesktopState.DesktopState;
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const installDone = yield* Deferred.make<void>();
+          const installFiber = yield* updates.install.pipe(
+            Effect.tap(() => Deferred.succeed(installDone, undefined)),
+            Effect.forkScoped,
+          );
+          yield* Deferred.await(stopping);
+          assert.isTrue(yield* Ref.get(desktopState.quitting));
+
+          yield* TestClock.adjust(Duration.seconds(15));
+          assert.isTrue(yield* Deferred.isDone(installDone));
+
+          const result = yield* Fiber.join(installFiber);
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+          assert.isFalse(yield* Ref.get(desktopState.quitting));
+          assert.equal(harness.quitAndInstalls(), 0);
+          assert.equal(harness.updateRestartMarkers.size, 0);
+          assert.isUndefined(harness.updateInProgressMarker());
+          assert.equal(harness.installRecords.size, 0);
+          assert.include(harness.installSteps, "startBackend");
+          assert.equal(result.state.status, "downloaded");
+          assert.equal(result.state.errorContext, "install");
+          assert.include(result.state.message ?? "", "Timed out");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
   it.effect("keeps windows and restarts backends when quitAndInstall fails", () => {
     const harness = makeHarness({
       quitAndInstall: Effect.fail(

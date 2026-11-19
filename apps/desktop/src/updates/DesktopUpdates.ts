@@ -66,6 +66,8 @@ const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
 const UPDATE_CHECK_WAIT = Duration.seconds(90);
+// Exceeds BACKEND_QUIT_STOP_TIMEOUT plus output drain so healthy backends finish before failing install.
+const INSTALL_STOP_TIMEOUT = Duration.seconds(15);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
 
@@ -933,7 +935,7 @@ export const make = Effect.gen(function* () {
             instance.snapshot.pipe(Effect.map((snapshot) => snapshot.desiredRunning)),
           );
           yield* Ref.set(installRunningBackendsRef, runningInstances);
-          yield* Effect.all(
+          const stopped = yield* Effect.all(
             [
               Effect.forEach(
                 instances,
@@ -944,7 +946,15 @@ export const make = Effect.gen(function* () {
               sshEnvironment.closeAllTunnels,
             ],
             { concurrency: "unbounded" },
-          );
+          ).pipe(Effect.timeoutOption(INSTALL_STOP_TIMEOUT));
+          if (Option.isNone(stopped)) {
+            const message = "Timed out stopping local services before installing the update.";
+            yield* recoverFailedInstall(message);
+            yield* logUpdaterError(message, {
+              timeoutMs: Duration.toMillis(INSTALL_STOP_TIMEOUT),
+            });
+            return { accepted: true, completed: false, failed: true };
+          }
           yield* electronUpdater.quitAndInstall({
             isSilent: true,
             isForceRunAfter: true,
