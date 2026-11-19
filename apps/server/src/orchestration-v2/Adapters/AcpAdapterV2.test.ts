@@ -660,6 +660,7 @@ const makePromptInactivityHarness = Effect.fnUntraced(function* (input: {
     modelSelection,
     runtimePolicy,
   });
+  assert.isTrue(runtime.backgroundTasksEndWithProcess);
   const providerThread = yield* runtime.ensureThread({ threadId, modelSelection, runtimePolicy });
   const startTurn = (ordinal: number) =>
     DateTime.now.pipe(

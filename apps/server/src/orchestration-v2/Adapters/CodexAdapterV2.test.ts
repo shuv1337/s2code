@@ -1582,6 +1582,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       if (runtime.hasPendingBackgroundWork === undefined) {
         return yield* Effect.die("Codex adapter runtime must expose hasPendingBackgroundWork.");
       }
+      assert.isTrue(runtime.backgroundTasksEndWithProcess);
       const hasPendingBackgroundWork = runtime.hasPendingBackgroundWork;
       const terminalEvents = () =>
         events.filter(

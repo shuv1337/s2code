@@ -3242,6 +3242,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         get providerSession() {
           return sessionEntity;
         },
+        backgroundTasksEndWithProcess: true,
         events: Stream.fromQueue(events),
         hasPendingBackgroundWork: Effect.sync(() => pendingWake !== null),
         hasPendingBackgroundWorkForThread: (providerThread) =>

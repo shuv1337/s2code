@@ -3011,6 +3011,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           driver: CursorAgentSdk.CURSOR_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
+          backgroundTasksEndWithProcess: true,
           getModelContextWindow: (selection) =>
             selection.instanceId === adapterOptions.instanceId
               ? cursorContextWindowTokens(selection, adapterOptions.getModels?.() ?? [])

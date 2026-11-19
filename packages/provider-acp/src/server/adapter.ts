@@ -9154,6 +9154,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           providerSession,
           canResumeAfterRestart: canLoadSession || canResumeSession,
+          backgroundTasksEndWithProcess: true,
           events: Stream.fromEffectRepeat(Queue.take(events)),
           ...(flavor.getModelContextWindow === undefined
             ? {}

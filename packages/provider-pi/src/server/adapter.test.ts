@@ -651,6 +651,7 @@ describe("PiAdapterV2", () => {
       Effect.gen(function* () {
         const fake = yield* makeFakePi;
         const { runtime, takeEvent } = yield* openRuntime(fake);
+        assert.isTrue(runtime.backgroundTasksEndWithProcess);
         const updates = [
           { statusKey: "watch", statusText: "\u001b[32mWatching 3 files\u001b[0m\u0007" },
           { statusKey: "lint", statusText: "Lint clean" },
