@@ -185,21 +185,47 @@ function runShellEnvironment(input: {
 
 describe("DesktopShellEnvironment", () => {
   it.effect.each([
-    { platform: "linux" as const, runtime: { APPDIR: "/opt/t3.AppDir/" }, scrub: true },
-    { platform: "linux" as const, runtime: { APPIMAGE: "/opt/T3.AppImage" }, scrub: true },
-    { platform: "linux" as const, runtime: {}, scrub: false },
-    { platform: "darwin" as const, runtime: { APPDIR: "/opt/t3.AppDir/" }, scrub: false },
+    {
+      platform: "linux" as const,
+      runtime: { APPDIR: "/opt/t3.AppDir/" },
+      scrub: true,
+      mount: "T3-Cod",
+    },
+    {
+      platform: "linux" as const,
+      runtime: { APPIMAGE: "/opt/T3.AppImage" },
+      scrub: true,
+      mount: "T3-Cod",
+    },
+    {
+      platform: "linux" as const,
+      runtime: { APPIMAGE: "/opt/S2Code-1.2.3-x86_64.AppImage" },
+      scrub: true,
+      mount: "S2Code",
+    },
+    {
+      platform: "linux" as const,
+      runtime: { APPIMAGE: "/opt/shuv2code.AppImage" },
+      scrub: true,
+      mount: "shuv2c",
+    },
+    { platform: "linux" as const, runtime: {}, scrub: false, mount: "T3-Cod" },
+    {
+      platform: "darwin" as const,
+      runtime: { APPDIR: "/opt/t3.AppDir/" },
+      scrub: false,
+      mount: "T3-Cod",
+    },
   ])(
     "keeps AppImage mounts out of cached and discovered PATH: %j",
-    ({ platform, runtime, scrub }) =>
+    ({ platform, runtime, scrub, mount }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const stateDir = yield* fs.makeTempDirectoryScoped();
         const cachePath = `${stateDir}/shell-environment-cache.json`;
-        const inheritedPath =
-          "/tmp/.mount_T3-Codold123/usr/bin:/launcher/bin:/opt/t3.AppDir/usr/bin";
-        const cachedPath = "/cached/bin:/tmp/.mount_T3-Codcache1/usr/bin";
-        const discoveredPath = "/fresh/bin:/tmp/.mount_T3-Codprobe1/usr/bin";
+        const inheritedPath = `/tmp/.mount_${mount}old123/usr/bin:/launcher/bin:/opt/t3.AppDir/usr/bin`;
+        const cachedPath = `/cached/bin:/tmp/.mount_${mount}cache1/usr/bin`;
+        const discoveredPath = `/fresh/bin:/tmp/.mount_${mount}probe1/usr/bin`;
         const retainedPath = "/tmp/tools:/tmp/.mount_Other123/usr/bin:/opt/t3.AppDir-backup/bin";
         const cleanInherited = scrub
           ? `/launcher/bin${runtime.APPDIR ? "" : ":/opt/t3.AppDir/usr/bin"}`

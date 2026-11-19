@@ -690,7 +690,7 @@ export const make = Effect.gen(function* () {
     const kept = target.PATH.split(":").filter(
       (entry) =>
         !(appDir && (entry === appDir || entry.startsWith(`${appDir}/`))) &&
-        !/^\/tmp\/\.mount_T3-[^/]+(?:\/|$)/u.test(entry),
+        !/^\/tmp\/\.mount_(?:T3-|S2Code|s2code|Shuv2C|shuv2c)[^/]+(?:\/|$)/u.test(entry),
     );
     if (kept.length > 0) target.PATH = kept.join(":");
     else delete target.PATH;
