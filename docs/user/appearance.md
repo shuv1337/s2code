@@ -57,7 +57,7 @@ change. Export your theme as JSON to share it.
 ### Custom CSS
 
 For a change that colors cannot make, open **Custom CSS** in the theme editor. The CSS is saved with
-the theme, applies after T3 Code's own styles on web and desktop, and is included in exports. Use
+the theme, applies after S2Code's own styles on web and desktop, and is included in exports. Use
 `.dark` or `:root:not(.dark)` to target one appearance.
 
 Custom CSS cannot load files. `@import`, `image-set()`, and `url()` are ignored, except `url()`
@@ -67,14 +67,14 @@ to another site. For a full-size image, use a [background image](#background-ima
 Class names in the app change between releases. For rules that keep working, target `data-slot`
 and other `data-` attributes, such as `[data-chat-header]` or `[data-slot="button"]`.
 
-If a rule hides something you need, run `t3 theme set t3-chat` on the server to switch to a
+If a rule hides something you need, run `s2code-nightly theme set t3-chat` on the server to switch to a
 built-in theme, or press **Cmd+Option+A** on macOS or **Ctrl+Alt+A** on Windows/Linux to pick
 another theme.
 
 ### Ask an agent
 
-An agent on the same machine as the server can restyle T3 Code for you. Ask it to change the look,
-for example "make T3 Code's chat header taller" or "give T3 Code a solarized theme". It publishes
+An agent on the same machine as the server can restyle S2Code for you. Ask it to change the look,
+for example "make S2Code's chat header taller" or "give S2Code a solarized theme". It publishes
 an [environment theme](#environment-themes) with colors and CSS, and web and desktop clients of that
 server switch to it. It can also switch them to light, dark, or system mode. The thread must run
 in Full access. Ask the agent to set a built-in theme to undo it.
@@ -136,7 +136,7 @@ Invalid files are not published.
 ### Background image
 
 A published theme can have a full-size background image. Ask an agent, for example "use
-~/Pictures/wallpaper.jpg as T3 Code's background", or save a JPEG, PNG, or WebP file of up to
+~/Pictures/wallpaper.jpg as S2Code's background", or save a JPEG, PNG, or WebP file of up to
 16 MB beside the theme file: `nightfall.jpg` beside `nightfall.json`. The theme's CSS decides
 where the image shows:
 

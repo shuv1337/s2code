@@ -20,7 +20,7 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 If `pi` is not on the server's `PATH`, set Pi's binary path to the executable. Provider environment
 variables and launch arguments are also available for installations that need a custom agent
 directory, endpoint, or model configuration. `--provider` must be paired with `--model`. S2Code
-rejects launch arguments that change Pi's execution mode or select a session because T3 owns those
+rejects launch arguments that change Pi's execution mode or select a session because S2Code owns those
 parts of the process lifecycle.
 
 On a remote or headless server, connect to that machine over SSH and run `pi`, then `/login`.
