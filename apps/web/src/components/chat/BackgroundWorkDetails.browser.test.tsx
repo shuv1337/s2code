@@ -96,7 +96,7 @@ it("opens full command details for short labels and keeps pending tasks current"
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
 });
 
-it("lists a subagent with its follow-ups in one row and keeps its waiting status", async () => {
+it("counts child threads in the banner and groups their follow-ups in the dialog", async () => {
   const child = ThreadId.make("child");
   await using screen = await render(
     <ThreadNow
@@ -118,7 +118,6 @@ it("lists a subagent with its follow-ups in one row and keeps its waiting status
             kind: "subagent",
             description: "Check tests",
             childThreadId: child,
-            awaited: true,
           },
           {
             taskId: "other-subagent",
@@ -141,6 +140,7 @@ it("lists a subagent with its follow-ups in one row and keeps its waiting status
       })}
     />,
   );
+  await expect.element(page.getByText("Waiting on 2 subagents", { exact: false })).toBeVisible();
   await screen.getByRole("button", { name: "Details", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await vi.waitFor(() =>

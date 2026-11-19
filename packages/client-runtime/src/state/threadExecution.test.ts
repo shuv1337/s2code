@@ -18,7 +18,6 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { createModelCapabilities, createModelSelection } from "@t3tools/shared/model";
-import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { usageLimitBlockedRun } from "@t3tools/shared/orchestrationV2ThreadError";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -771,7 +770,6 @@ describe("presentPendingBackgroundWork", () => {
         kind: "subagent",
         description: "Check tests",
         childThreadId: childA,
-        awaited: true,
       },
       { taskId: "other", kind: "subagent", description: "Review diffs", childThreadId: childB },
       { taskId: "unattached-1", kind: "subagent", description: "Remote review" },
@@ -827,14 +825,12 @@ describe("presentPendingBackgroundWork", () => {
     const childTasks = tasks.filter((task) => task.childThreadId === childA);
     const child = presentPendingBackgroundWork(childTasks);
     expect(child?.title).toBe("Waiting · Review diffs");
-    expect(child?.waiting).toBe(true);
     const [group] = groupPendingBackgroundTasks(childTasks);
     expect(group?.members.map((task) => task.taskId)).toEqual([
       "launch",
       "follow-up-1",
       "follow-up-2",
     ]);
-    expect(backgroundWorkHoldsCompletion(group?.members ?? [])).toBe(true);
     expect(presentPendingBackgroundWork(childTasks.slice(1))?.items).toMatchObject([
       {
         key: "subagent:child-a",
