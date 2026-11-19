@@ -756,6 +756,7 @@
   "070cd11c15ede233": "백그라운드 작업",
   "714e6506edaca58c": "{count, plural, other {백그라운드 작업 {count}개}}",
   "215994ea6db338ce": "{items} 및 {last}",
+  "7ec394560ccf4989": "{count, plural, other {+{count}개의 후속 메시지}}",
   "566398d7fbe74c7c": "대기 중 · {label}",
   "3ad38b2ce47e50d8": "실행 중 · {label}",
   "9ee216518400e98d": "{groups} 대기 중",

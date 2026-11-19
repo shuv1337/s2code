@@ -4,8 +4,12 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
+import {
+  backgroundWorkFollowUpsLabel,
+  groupPendingBackgroundTasks,
+} from "@t3tools/client-runtime/state/thread-execution";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { T, useGT } from "gt-react";
+import { T, useGT, useMessages } from "gt-react";
 import { useState } from "react";
 
 import { InlineButton } from "../ui/button";
@@ -28,6 +32,7 @@ export function BackgroundWorkDetails(props: {
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const gt = useGT();
+  const m = useMessages();
   const kindLabel = (kind: string) => {
     switch (kind) {
       case "subagent":
@@ -57,7 +62,8 @@ export function BackgroundWorkDetails(props: {
         </DialogHeader>
         <DialogPanel>
           <div className="space-y-5">
-            {props.tasks.map((task) => {
+            {groupPendingBackgroundTasks(props.tasks).map(({ key, members }) => {
+              const [task] = members;
               const item = props.turnItems.findLast((candidate) =>
                 task.itemId === undefined
                   ? (candidate.nativeItemRef?.nativeId || candidate.id) === task.taskId
@@ -75,16 +81,20 @@ export function BackgroundWorkDetails(props: {
               const itemId =
                 task.itemId ?? (item?.type === "command_execution" ? item.id : undefined);
               const childThreadId = task.kind === "subagent" ? task.childThreadId : undefined;
+              const followUps = backgroundWorkFollowUpsLabel(members.length - 1, m);
               return (
-                <section key={task.taskId} className="space-y-2 text-sm">
+                <section key={key} className="space-y-2 text-sm">
                   <div className="flex items-baseline justify-between gap-3">
                     <h3 className="font-medium">{title}</h3>
                     <span className="shrink-0 text-xs text-muted-foreground">
-                      {backgroundWorkHoldsCompletion([task])
+                      {backgroundWorkHoldsCompletion(members)
                         ? gt("Waiting", { $context: "status of background work" })
                         : gt("Running", { $context: "status of background work" })}
                     </span>
                   </div>
+                  {followUps === null ? null : (
+                    <p className="text-xs text-muted-foreground">{followUps}</p>
+                  )}
                   {command ? (
                     <div className="rounded-md border border-border bg-muted/20 p-3 font-mono text-xs whitespace-pre-wrap break-words">
                       <ShellCommandBlock command={command} />

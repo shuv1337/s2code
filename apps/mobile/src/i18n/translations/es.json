@@ -756,6 +756,7 @@
   "070cd11c15ede233": "tarea en segundo plano",
   "714e6506edaca58c": "{count, plural, one {{count} tarea en segundo plano} other {{count} tareas en segundo plano}}",
   "215994ea6db338ce": "{items} y {last}",
+  "7ec394560ccf4989": "{count, plural, one {+{count} mensaje de seguimiento} other {+{count} mensajes de seguimiento}}",
   "566398d7fbe74c7c": "Esperando · {label}",
   "3ad38b2ce47e50d8": "Ejecutando · {label}",
   "9ee216518400e98d": "Esperando a {groups}",
