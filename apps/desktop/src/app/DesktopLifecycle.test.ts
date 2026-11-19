@@ -367,6 +367,63 @@ describe("DesktopLifecycle", () => {
     }),
   );
 
+  it.effect("exits on a repeated SIGTERM when quitting was started outside lifecycle", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      const exitCodes: number[] = [];
+      const exit = (code: number) =>
+        Effect.sync(() => {
+          exitCodes.push(code);
+        });
+      const layerEnvironment = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "linux",
+        isDevelopment: false,
+        appImagePath: Option.none(),
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(layerElectronApp(appListeners, Effect.void, exit)),
+        Layer.provideMerge(layerElectronTheme),
+        Layer.provideMerge(layerElectronWindow()),
+        Layer.provideMerge(layerDesktopWindow()),
+        Layer.provideMerge(layerEnvironment),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+          const state = yield* DesktopState.DesktopState;
+          const beforeCount = process.listeners("SIGTERM").length;
+          yield* lifecycle.register;
+          const sigtermListener = process.listeners("SIGTERM").at(-1);
+          assert.isAbove(process.listeners("SIGTERM").length, beforeCount);
+          assert.isDefined(sigtermListener);
+          if (!sigtermListener) return;
+
+          // Update install or relaunch sets quitting without going through before-quit.
+          yield* Ref.set(state.quitting, true);
+
+          sigtermListener("SIGTERM");
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust("9999 millis");
+          sigtermListener("SIGTERM");
+          yield* Effect.yieldNow;
+          assert.deepEqual(
+            exitCodes,
+            [],
+            "a repeated signal before the threshold must not cut shutdown short",
+          );
+
+          yield* TestClock.adjust("1 millis");
+          sigtermListener("SIGTERM");
+          yield* Effect.yieldNow;
+          assert.deepEqual(exitCodes, [0]);
+        }),
+      ).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("ignores app activation while quitting", () =>
     Effect.gen(function* () {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
