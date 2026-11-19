@@ -1,3 +1,5 @@
+import { msg } from "gt-react";
+import { m } from "../../i18n/messages";
 import {
   McpServerId,
   type McpServerConfig,
@@ -153,7 +155,10 @@ export function mcpServerHost(url: string): string {
 
 const TOOLS_SHOWN = 3;
 
-export function describeMcpServerTest(result: McpServerTestResult): {
+export function describeMcpServerTest(
+  result: McpServerTestResult,
+  resolve: typeof m = m,
+): {
   readonly label: string;
   readonly ok: boolean;
 } {
@@ -163,9 +168,19 @@ export function describeMcpServerTest(result: McpServerTestResult): {
       const names = result.tools.slice(0, TOOLS_SHOWN).join(", ");
       const more = count > TOOLS_SHOWN ? ", …" : "";
       const tools =
-        count === 0 ? "no tools" : `${count} ${count === 1 ? "tool" : "tools"}: ${names}${more}`;
+        count === 0
+          ? resolve(msg("no tools"))
+          : resolve(
+              msg("{count, plural, one {{count} tool} other {{count} tools}}: {names}{more}", {
+                count,
+                names,
+                more,
+              }),
+            );
       return {
-        label: `Connected${result.serverName ? ` to ${result.serverName}` : ""} · ${tools}`,
+        label: result.serverName
+          ? resolve(msg("Connected to {name} · {tools}", { name: result.serverName, tools }))
+          : resolve(msg("Connected · {tools}", { tools })),
         ok: true,
       };
     }
@@ -173,12 +188,15 @@ export function describeMcpServerTest(result: McpServerTestResult): {
       return {
         label:
           result.status === 401 || result.status === 403
-            ? `Rejected (HTTP ${result.status}): check the token`
-            : `Rejected (HTTP ${result.status})`,
+            ? resolve(msg("Rejected (HTTP {status}): check the token", { status: result.status }))
+            : resolve(msg("Rejected (HTTP {status})", { status: result.status })),
         ok: false,
       };
     case "Unreachable":
-      return { label: result.timedOut ? "Timed out" : "Unreachable", ok: false };
+      return {
+        label: result.timedOut ? resolve(msg("Timed out")) : resolve(msg("Unreachable")),
+        ok: false,
+      };
     case "Failed":
       return { label: result.message, ok: false };
   }

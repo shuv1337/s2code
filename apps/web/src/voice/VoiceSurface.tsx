@@ -1,3 +1,4 @@
+import { useGT } from "gt-react";
 import { MicIcon, MicOffIcon, PhoneOffIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
@@ -6,6 +7,7 @@ import { useVoice, voiceEnvironment } from "./VoiceProvider";
 import { VoiceSettings } from "./VoiceSettings";
 
 export function VoiceSurface() {
+  const gt = useGT();
   const voice = useVoice();
   const { state, controller } = voice;
   const allowed = useAtomValue(
@@ -17,21 +19,27 @@ export function VoiceSurface() {
     return active ? (
       <div className="fixed bottom-4 right-4 z-40">
         <Button size="sm" variant="secondary" onClick={() => voice.setOpen(true)}>
-          Voice · {state.muted ? "Muted" : state.phase === "live" ? "Live" : "Connecting"}
+          {gt("Voice · {status}", {
+            status: state.muted
+              ? gt("Muted")
+              : state.phase === "live"
+                ? gt("Live")
+                : gt("Connecting"),
+          })}
         </Button>
       </div>
     ) : null;
   return (
     <aside
-      aria-label="Voice call"
+      aria-label={gt("Voice call")}
       className="fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col border-l bg-background shadow-lg max-sm:top-auto max-sm:max-h-[85dvh] max-sm:max-w-none max-sm:rounded-t-xl max-sm:border-t"
     >
       <header className="flex items-start justify-between gap-3 border-b px-5 py-4">
         <div>
           <h2 className="text-base font-semibold">
-            {state.mode === "dictation" ? "Dictate" : "Call"}
+            {state.mode === "dictation" ? gt("Dictate") : gt("Call")}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">{state.target?.label ?? "Voice"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{state.target?.label ?? gt("Voice")}</p>
           {state.target?.environmentLabel ? (
             <p className="text-xs text-muted-foreground">{state.target.environmentLabel}</p>
           ) : null}
@@ -39,7 +47,7 @@ export function VoiceSurface() {
         <Button
           size="icon-sm"
           variant="ghost"
-          aria-label="Minimize voice panel"
+          aria-label={gt("Minimize voice panel")}
           onClick={() => voice.setOpen(false)}
         >
           <XIcon className="size-4" />
@@ -49,17 +57,17 @@ export function VoiceSurface() {
         <p role="status" className="text-sm font-medium">
           {state.phase === "live"
             ? state.muted
-              ? "Microphone muted"
+              ? gt("Microphone muted")
               : state.mode === "dictation"
-                ? "Listening · draft only"
-                : "Connected · microphone on"
+                ? gt("Listening · draft only")
+                : gt("Connected · microphone on")
             : state.phase === "connecting"
-              ? "Connecting microphone and speaker…"
+              ? gt("Connecting microphone and speaker…")
               : state.phase === "finishing"
-                ? "Finishing transcription…"
+                ? gt("Finishing transcription…")
                 : state.phase === "error"
-                  ? "Could not continue"
-                  : "Voice ended"}
+                  ? gt("Could not continue")
+                  : gt("Voice ended")}
         </p>
         {state.error ? (
           <p role="alert" className="text-sm text-destructive">
@@ -73,35 +81,35 @@ export function VoiceSurface() {
         ) : null}
         {state.confirmation ? (
           <section className="space-y-3 rounded-lg border p-3">
-            <h3 className="text-sm font-medium">Confirm action</h3>
+            <h3 className="text-sm font-medium">{gt("Confirm action")}</h3>
             <p className="break-words text-sm">{state.confirmation.prompt}</p>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => void controller.confirm(true)}>
-                Confirm
+                {gt("Confirm")}
               </Button>
               <Button size="sm" variant="outline" onClick={() => void controller.confirm(false)}>
-                Cancel action
+                {gt("Cancel action")}
               </Button>
             </div>
           </section>
         ) : null}
         <section className="space-y-2">
-          <h3 className="text-sm font-medium">You</h3>
+          <h3 className="text-sm font-medium">{gt("You")}</h3>
           <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-            {state.userText || "Your words will appear here."}
+            {state.userText || gt("Your words will appear here.")}
           </p>
         </section>
         {state.mode === "call" ? (
           <section className="space-y-2">
-            <h3 className="text-sm font-medium">Assistant</h3>
+            <h3 className="text-sm font-medium">{gt("Assistant")}</h3>
             <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-              {state.assistantText || "Ask about your projects or threads."}
+              {state.assistantText || gt("Ask about your projects or threads.")}
             </p>
           </section>
         ) : null}
         {state.tools.length ? (
           <section className="space-y-2">
-            <h3 className="text-sm font-medium">Activity</h3>
+            <h3 className="text-sm font-medium">{gt("Activity")}</h3>
             {state.tools.map((tool) => (
               <details key={tool.callId} className="text-sm">
                 <summary className="cursor-pointer break-words">
@@ -118,7 +126,7 @@ export function VoiceSurface() {
         {state.events.length ? (
           <details className="text-sm">
             <summary className="cursor-pointer text-muted-foreground">
-              Events ({state.events.length})
+              {gt("Events ({count})", { count: state.events.length })}
             </summary>
             <ol className="mt-2 space-y-1 font-mono text-xs text-muted-foreground">
               {state.events.map((entry) => (
@@ -131,7 +139,7 @@ export function VoiceSurface() {
           </details>
         ) : null}
         <Button size="sm" variant="ghost" onClick={() => setSettings(!settings)}>
-          {settings ? "Hide voice settings" : "Voice settings"}
+          {settings ? gt("Hide voice settings") : gt("Voice settings")}
         </Button>
         {settings && state.target ? (
           <VoiceSettings environmentId={state.target.environmentId} />
@@ -148,7 +156,7 @@ export function VoiceSurface() {
                 onClick={() => controller.setMuted(!state.muted)}
               >
                 {state.muted ? <MicOffIcon className="size-4" /> : <MicIcon className="size-4" />}
-                {state.muted ? "Unmute" : "Mute"}
+                {state.muted ? gt("Unmute") : gt("Mute")}
               </Button>
               {state.mode === "dictation" ? (
                 <Button
@@ -156,12 +164,12 @@ export function VoiceSurface() {
                   disabled={state.phase !== "live"}
                   onClick={() => void voice.finishDictation()}
                 >
-                  Use transcript
+                  {gt("Use transcript")}
                 </Button>
               ) : null}
               <Button size="sm" variant="destructive" onClick={() => void controller.end()}>
                 <PhoneOffIcon className="size-4" />
-                {state.mode === "dictation" ? "Cancel" : "End"}
+                {state.mode === "dictation" ? gt("Cancel") : "End"}
               </Button>
             </>
           ) : state.target ? (
@@ -170,13 +178,13 @@ export function VoiceSurface() {
               disabled={!allowed}
               onClick={() => void controller.start(state.target!, "call")}
             >
-              Start call
+              {gt("Start call")}
             </Button>
           ) : null}
         </div>
         {state.mode === "call" ? (
           <p className="text-xs text-muted-foreground">
-            Ending voice leaves work already sent to agents running.
+            {gt("Ending voice leaves work already sent to agents running.")}
           </p>
         ) : null}
       </footer>

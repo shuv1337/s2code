@@ -1,3 +1,4 @@
+import { useGT } from "gt-react-native";
 import { VoiceSettings } from "./VoiceSettings";
 import { useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
@@ -8,6 +9,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { useVoice, voiceEnvironment } from "./VoiceProvider";
 
 export function VoiceSurface() {
+  const gt = useGT();
   const voice = useVoice();
   const { state, controller } = voice;
   const allowed = useAtomValue(
@@ -22,7 +24,15 @@ export function VoiceSurface() {
       {!voice.open && active ? (
         <View className="absolute bottom-24 right-4">
           <Button
-            label={`Voice · ${state.muted ? "muted" : state.phase}`}
+            label={gt("Voice · {status}", {
+              status: state.muted
+                ? gt("Muted")
+                : state.phase === "live"
+                  ? gt("Live")
+                  : state.phase === "finishing"
+                    ? gt("Finishing transcription…")
+                    : gt("Connecting"),
+            })}
             onPress={() => voice.setOpen(true)}
           />
         </View>
@@ -39,9 +49,9 @@ export function VoiceSurface() {
         >
           <View className="flex-row items-center justify-between gap-3 border-b border-border px-5 py-3">
             <Text className="text-xl font-t3-bold">
-              {state.mode === "dictation" ? "Dictate" : "Call"}
+              {state.mode === "dictation" ? gt("Dictate") : gt("Call")}
             </Text>
-            <Button label="Minimize" tone="text" onPress={() => voice.setOpen(false)} />
+            <Button label={gt("Minimize")} tone="text" onPress={() => voice.setOpen(false)} />
           </View>
           <ScrollView
             contentContainerStyle={{ padding: 20, gap: 20 }}
@@ -54,33 +64,36 @@ export function VoiceSurface() {
             <Text accessibilityLiveRegion="polite">
               {state.phase === "live"
                 ? state.muted
-                  ? "Microphone muted"
-                  : "Connected · microphone on"
+                  ? gt("Microphone muted")
+                  : gt("Connected · microphone on")
                 : state.phase === "connecting"
-                  ? "Connecting microphone and speaker…"
+                  ? gt("Connecting microphone and speaker…")
                   : state.phase === "finishing"
-                    ? "Finishing transcription…"
-                    : "Voice ended"}
+                    ? gt("Finishing transcription…")
+                    : gt("Voice ended")}
             </Text>
             {state.error ? <Text accessibilityRole="alert">{state.error}</Text> : null}
             {state.confirmation ? (
               <View className="gap-3">
                 <Text>{state.confirmation.prompt}</Text>
                 <View className="flex-row gap-2">
-                  <Button label="Confirm" onPress={() => void controller.confirm(true)} />
-                  <Button label="Cancel action" onPress={() => void controller.confirm(false)} />
+                  <Button label={gt("Confirm")} onPress={() => void controller.confirm(true)} />
+                  <Button
+                    label={gt("Cancel action")}
+                    onPress={() => void controller.confirm(false)}
+                  />
                 </View>
               </View>
             ) : null}
             <View className="gap-2">
-              <Text className="font-t3-bold">You</Text>
-              <Text selectable>{state.userText || "Your words will appear here."}</Text>
+              <Text className="font-t3-bold">{gt("You")}</Text>
+              <Text selectable>{state.userText || gt("Your words will appear here.")}</Text>
             </View>
             {state.mode === "call" ? (
               <View className="gap-2">
-                <Text className="font-t3-bold">Assistant</Text>
+                <Text className="font-t3-bold">{gt("Assistant")}</Text>
                 <Text selectable>
-                  {state.assistantText || "Ask about your projects or threads."}
+                  {state.assistantText || gt("Ask about your projects or threads.")}
                 </Text>
               </View>
             ) : null}
@@ -101,7 +114,11 @@ export function VoiceSurface() {
             {state.events.length ? (
               <View className="gap-1">
                 <Button
-                  label={eventsOpen ? "Hide events" : `Events (${state.events.length})`}
+                  label={
+                    eventsOpen
+                      ? gt("Hide events")
+                      : gt("Events ({count})", { count: state.events.length })
+                  }
                   tone="text"
                   onPress={() => setEventsOpen(!eventsOpen)}
                 />
@@ -116,7 +133,7 @@ export function VoiceSurface() {
               </View>
             ) : null}
             <Button
-              label={settings ? "Hide voice settings" : "Voice settings"}
+              label={settings ? gt("Hide voice settings") : gt("Voice settings")}
               tone="text"
               onPress={() => setSettings(!settings)}
             />
@@ -129,33 +146,33 @@ export function VoiceSurface() {
               {active ? (
                 <>
                   <Button
-                    label={state.muted ? "Unmute" : "Mute"}
+                    label={state.muted ? gt("Unmute") : gt("Mute")}
                     disabled={state.phase !== "live"}
                     onPress={() => controller.setMuted(!state.muted)}
                   />
                   {state.mode === "dictation" ? (
                     <Button
-                      label="Use transcript"
+                      label={gt("Use transcript")}
                       disabled={state.phase !== "live"}
                       onPress={() => void voice.finishDictation()}
                     />
                   ) : null}
                   <Button
-                    label={state.mode === "dictation" ? "Cancel" : "End"}
+                    label={state.mode === "dictation" ? gt("Cancel") : "End"}
                     tone="danger"
                     onPress={() => void controller.end()}
                   />
                 </>
               ) : state.target ? (
                 <Button
-                  label="Start call"
+                  label={gt("Start call")}
                   disabled={!allowed}
                   onPress={() => voice.startCall(state.target!)}
                 />
               ) : null}
             </View>
             <Text className="text-xs text-foreground-muted">
-              Ending voice leaves work already sent to agents running.
+              {gt("Ending voice leaves work already sent to agents running.")}
             </Text>
           </View>
         </View>
