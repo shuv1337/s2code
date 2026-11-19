@@ -682,7 +682,8 @@ const makeDesktopFileLogger = Effect.fn("desktop.observability.makeDesktopFileLo
   yield* Effect.forkScoped(Queue.take(flushRequests).pipe(Effect.andThen(flush), Effect.forever));
 
   const jsonLogger = Logger.map(Logger.formatJson, (line) => {
-    const text = `${line}\n`;
+    // Message and annotations carry URLs too, so redact the whole record, as the trace sink does.
+    const text = `${SharedObservability.redactUrlCredentials(line)}\n`;
     const bytes = Buffer.byteLength(text);
     if (bytes > DESKTOP_LOG_FILE_MAX_BYTES || bufferBytes + bytes > DESKTOP_LOG_MAX_BUFFER_BYTES) {
       return;

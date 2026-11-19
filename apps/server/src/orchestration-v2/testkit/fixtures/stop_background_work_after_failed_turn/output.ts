@@ -8,7 +8,10 @@ import {
   assertUserMessagesInclude,
   projectionFor,
 } from "../shared.ts";
-import { STOP_BACKGROUND_WORK_AFTER_FAILED_TURN_PROMPT } from "./input.ts";
+import {
+  BEFORE_RELEASE_SHELL_SNAPSHOT_KEY,
+  STOP_BACKGROUND_WORK_AFTER_FAILED_TURN_PROMPT,
+} from "./input.ts";
 
 export function assertStopBackgroundWorkAfterFailedTurnOutput(
   result: OrchestratorV2ScenarioResult,
@@ -38,4 +41,35 @@ export function assertStopBackgroundWorkAfterFailedTurnOutput(
     "run_interrupt_request",
   );
   assert.equal(projection.runs[0]?.status, "failed");
+}
+
+export function assertStopBackgroundWorkAfterReleaseOutput(
+  result: OrchestratorV2ScenarioResult,
+  transcript: ProviderReplayTranscript,
+) {
+  assertBaseProjection({ result, transcript, runCount: 1, runStatuses: ["failed"] });
+  const projection = projectionFor(result, transcript.scenario);
+  assertSemanticProjectionIntegrity(projection);
+  assertUserMessagesInclude(projection, [STOP_BACKGROUND_WORK_AFTER_FAILED_TURN_PROMPT]);
+
+  const before = result.capturedShellSnapshots
+    .get(BEFORE_RELEASE_SHELL_SNAPSHOT_KEY)
+    ?.threads.find((thread) => thread.id === projection.thread.id);
+  assert.deepEqual(
+    before?.pendingBackgroundTasks?.map((task) => task.kind),
+    ["command"],
+    "the failed turn leaves its command on the Waiting strip until the session is released",
+  );
+
+  // Releasing the idle session ends the provider process, which ends the command with it.
+  const command = projection.turnItems.find((item) => item.type === "command_execution");
+  assert.equal(command?.status, "interrupted");
+  assert.isNotNull(command?.completedAt);
+  const shell = result.shellSnapshot.threads.find((thread) => thread.id === projection.thread.id);
+  assert.deepEqual(shell?.pendingBackgroundTasks ?? [], []);
+  assert.notInclude(
+    projection.turnItems.map((item) => item.type),
+    "run_interrupt_request",
+    "no stop step is needed once the release has ended the command",
+  );
 }

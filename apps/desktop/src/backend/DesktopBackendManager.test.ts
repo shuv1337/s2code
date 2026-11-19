@@ -858,6 +858,75 @@ describe("DesktopBackendManager", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  // regression: #467 review MED-1. After the updater gives up on a stuck stop, its recovery
+  // start must bring a backend back instead of waiting for the stuck teardown to end.
+  it.effect("starts a fresh backend when start follows a stop that was given up on", () =>
+    Effect.gen(function* () {
+      const teardownStarted = yield* Deferred.make<void>();
+      const finishTeardown = yield* Deferred.make<void>();
+      yield* Effect.gen(function* () {
+        let spawnCount = 0;
+        const instance = yield* makeTestInstance({
+          spawnerLayer: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.gen(function* () {
+                const scope = yield* Scope.Scope;
+                const closed = yield* Deferred.make<void>();
+                spawnCount += 1;
+                // Only the first backend's teardown gets stuck.
+                const stuck = spawnCount === 1;
+                yield* Scope.addFinalizer(
+                  scope,
+                  (stuck
+                    ? Deferred.succeed(teardownStarted, undefined).pipe(
+                        Effect.andThen(Deferred.await(finishTeardown)),
+                      )
+                    : Effect.void
+                  ).pipe(Effect.andThen(Deferred.succeed(closed, undefined)), Effect.asVoid),
+                );
+                return makeProcess({
+                  exitCode: Deferred.await(closed).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+                });
+              }),
+            ),
+          ),
+        });
+        yield* instance.start;
+        yield* TestClock.adjust(Duration.millis(10));
+        assert.equal(spawnCount, 1);
+
+        // The updater stops every backend with the quit deadline, bounded by its own timeout.
+        const stopFiber = yield* instance
+          .stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT })
+          .pipe(Effect.timeoutOption(Duration.seconds(15)), Effect.forkChild);
+        yield* Deferred.await(teardownStarted);
+        yield* TestClock.adjust(Duration.seconds(15));
+        assert.isTrue(Option.isNone(yield* Fiber.join(stopFiber)), "the stop timed out");
+
+        // Install recovery restarts the backend.
+        yield* instance.start;
+        yield* TestClock.adjust(Duration.seconds(5));
+        assert.equal(spawnCount, 2, "recovery spawned a fresh backend");
+        const recovered = yield* instance.snapshot;
+        assert.isTrue(recovered.desiredRunning);
+        assert.isTrue(recovered.ready);
+        assert.isTrue(Option.isSome(recovered.activePid));
+
+        // The stuck teardown ending later must not disturb the new backend.
+        yield* Deferred.succeed(finishTeardown, undefined);
+        yield* TestClock.adjust(Duration.seconds(5));
+        assert.equal(spawnCount, 2);
+        const settled = yield* instance.snapshot;
+        assert.isTrue(settled.desiredRunning);
+        assert.isTrue(settled.ready);
+      }).pipe(
+        // A failed assertion must not leave scope cleanup waiting on the stuck teardown.
+        Effect.ensuring(Deferred.succeed(finishTeardown, undefined)),
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("stops an attached backend without waiting for its process to exit", () =>
     Effect.gen(function* () {
       const ready = yield* Deferred.make<void>();

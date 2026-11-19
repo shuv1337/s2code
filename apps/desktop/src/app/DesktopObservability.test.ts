@@ -449,4 +449,35 @@ describe("DesktopObservability", () => {
       Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, layerEmptyEnv)),
     ),
   );
+
+  // regression: #467 review LOW-2. Only the cause was redacted; messages and annotations were not.
+  it.effect("redacts credentials in desktop.log messages and annotations", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-log-redaction-test-",
+      });
+      const layerEnvironment = layerEnvironmentFor(baseDir, false);
+      const desktopLogPath = yield* Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        return environment.path.join(environment.logDir, "desktop.log");
+      }).pipe(Effect.provide(layerEnvironment));
+
+      yield* Effect.scoped(
+        Effect.logWarning("connect wss://example.com/ws?wsTicket=message-secret").pipe(
+          Effect.annotateLogs({ url: "wss://example.com/ws?dpop=annotation-secret&keep=1" }),
+          Effect.provide(DesktopObservability.layer.pipe(Layer.provideMerge(layerEnvironment))),
+        ),
+      );
+
+      const content = yield* fileSystem.readFileString(desktopLogPath);
+      assert.include(content, "wsTicket=<redacted>");
+      assert.include(content, "dpop=<redacted>&keep=1");
+      assert.notInclude(content, "message-secret");
+      assert.notInclude(content, "annotation-secret");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici, layerEmptyEnv)),
+    ),
+  );
 });
