@@ -253,11 +253,11 @@ const SETTINGS_SCREENS = {
   SettingsMcpServers: createNativeStackScreen({
     screen: SettingsMcpServersRouteScreen,
     linking: "settings/environments/:environmentId/mcp-servers",
-    options: settingsPage("MCP servers"),
+    options: settingsPage(),
   }),
   SettingsMcpServerEdit: createNativeStackScreen({
     screen: SettingsMcpServerEditRouteScreen,
-    options: settingsPage("MCP server"),
+    options: settingsPage(),
   }),
   // Old links to New threads and Agent behavior open Threads, which absorbed them.
   SettingsEnvironmentNewThreads: createNativeStackScreen({
@@ -296,7 +296,7 @@ const SETTINGS_SCREENS = {
   SettingsVoiceCalls: createNativeStackScreen({
     screen: SettingsVoiceCallsRouteScreen,
     linking: "settings/voice-calls",
-    options: settingsPage("Voice calls"),
+    options: settingsPage(),
   }),
   SettingsProviderAccounts: createNativeStackScreen({
     screen: SettingsProviderAccountsRouteScreen,

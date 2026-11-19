@@ -131,13 +131,13 @@ export const homeOwnedMessage = (owner: Option.Option<HomeOwner>, cli = "s2code"
       return owner.serverVersion
         ? m(
             msg(
-              "Another S2Code server (for example `{cli} serve`, or one started over SSH) is using this S2Code home (PID {pid}, port {port}, version {version}). If a S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+              "Another S2Code server (for example `{cli} serve`, or one started over SSH) is using this S2Code home (PID {pid}, port {port}, version {version}). If an S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
             ),
             variables,
           )
         : m(
             msg(
-              "Another S2Code server (for example `{cli} serve`, or one started over SSH) is using this S2Code home (PID {pid}, port {port}). If a S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
+              "Another S2Code server (for example `{cli} serve`, or one started over SSH) is using this S2Code home (PID {pid}, port {port}). If an S2Code app on another machine started it over SSH, that app restarts it: remove or disconnect that SSH environment there, or quit that app. Then stop the server, and reopen S2Code. You can also set a separate T3CODE_HOME and pair with the running server.",
             ),
             variables,
           );

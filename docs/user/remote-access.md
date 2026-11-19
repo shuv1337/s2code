@@ -516,7 +516,7 @@ already on, turn it off and on again. Either needs a client paired with
 `relay:read`, `relay:write`, and `relay:configure`. The desktop app's own session
 and the startup pairing link include all three; a pairing link created in
 **Settings → Sharing & access** needs `relay:configure` selected. You can also
-run `t3 connect link` on the host and then restart S2Code there. A
+run `s2code connect link` on the host and then restart S2Code there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `s2code connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on

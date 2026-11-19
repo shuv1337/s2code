@@ -318,7 +318,7 @@ and so does an agent creating one with `gh pr create` or `glab mr create`. Agent
 pull requests with the `link_pull_request` tool.
 
 Agents can also read, open, update, reply on, and merge pull requests in the thread's repository
-through T3 Code's own tools, which use the same sign-in as the Pull requests page. An agent merges
+through S2Code's own tools, which use the same sign-in as the Pull requests page. An agent merges
 only the commit it last read: if someone pushed since, the merge is refused. On github.com an
 agent can also land a GitHub stack in one merge, like **Merge stack** below.
 

@@ -37,6 +37,6 @@ npx t3 triage --agent codex
 ```
 
 Antigravity needs Google's standalone `agy` CLI on your `PATH` and its own sign-in.
-The ACP runtime installed through T3 Code does not include this terminal CLI.
+The ACP runtime installed through S2Code does not include this terminal CLI.
 Install it using [Google's CLI setup guide](https://antigravity.google/docs/cli-getting-started).
 Pass `--model <model-id>` to choose a model, or leave it out to use the CLI's default.

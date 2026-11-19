@@ -166,7 +166,7 @@ function AboutVersionSection() {
   const checkProviderUpdates = useCheckProviderUpdates();
 
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
-  const installedChannel = resolveInstalledDesktopChannel(updateState, APP_VERSION);
+  const installedChannel = resolveInstalledDesktopChannel(updateState, APP_VERSION, messages);
   // The desktop updates this machine, whose policy the primary environment reports.
   const primaryPolicy = usePrimaryManagedPolicy();
   const updatesDenial = hasDesktopBridge
