@@ -43,7 +43,7 @@ to manage providers. Full-access agents can also manage shared servers through t
   outside the limit don't get the server, can't call it, and can't change,
   remove, or test it; they see only its name and limit. Changing the limit
   applies to running sessions on their next call.
-- "Subagents" means threads T3 Code delegated, including tasks handed over from
+- "Subagents" means threads S2Code delegated, including tasks handed over from
   another project or a linked environment and their forks. A fork of a subagent
   in its own project is a top-level thread. A provider's own
   built-in subagents (Claude's, Codex's, Cursor's, and OpenCode 1.x's) run
@@ -56,7 +56,7 @@ to manage providers. Full-access agents can also manage shared servers through t
 - Changing the URL, allowed projects, or subagent access through a settings client
   removes the saved token unless you supply it again. The agent tool instead
   refuses the change unless the agent supplies a token or explicitly clears it.
-- Once a server is added here, Codex through ACP asks before T3 Code's own
+- Once a server is added here, Codex through ACP asks before S2Code's own
   tools outside Full access, because it doesn't say which server a call is for.
 - If the server is unreachable, takes more than 5 seconds to connect or list
   its tools, or rejects its token, its tools fail with a message saying so and

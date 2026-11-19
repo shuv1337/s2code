@@ -22,6 +22,7 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { forkCliCommand } from "../cli/invocation.ts";
 import { CLOUD_ENDPOINT_RUNTIME_CONFIG } from "./config.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 
@@ -84,21 +85,21 @@ export function classifyReachability(
     fix: string,
     hint: string | null = null,
   ): Unreachable => ({ status: "unreachable", checkedAt, cause, reason, hint, fix });
-  const restart = "Restart T3 Code. If it stays, run `t3 connect` again.";
+  const restart = `Restart S2Code. If it stays, run \`${forkCliCommand("connect")}\` again.`;
 
   if (!facts.managedTunnelConfigured) {
     // A running server reads the link `t3 connect` stores only at startup.
     return fail(
       "not_linked",
       "The server has not set up a T3 Connect tunnel.",
-      "Run `t3 connect`, then restart T3 Code so it applies the link.",
+      `Run \`${forkCliCommand("connect")}\`, then restart S2Code so it applies the link.`,
     );
   }
   if (connector === null) {
     return fail(
       "connector_not_running",
       "The tunnel client (cloudflared) is not running.",
-      "Restart T3 Code. If it stays down, check the server log for relay client errors.",
+      "Restart S2Code. If it stays down, check the server log for relay client errors.",
     );
   }
   const status = endpoint?.kind === "status" ? endpoint.status : null;
@@ -130,8 +131,8 @@ export function classifyReachability(
   if (status === 502) {
     return fail(
       "origin_unreachable",
-      "The tunnel is up, but it cannot reach the T3 server on this machine.",
-      "Restart T3 Code so the tunnel uses the port the server listens on.",
+      "The tunnel is up, but it cannot reach the S2Code server on this machine.",
+      "Restart S2Code so the tunnel uses the port the server listens on.",
     );
   }
   if (endpoint === null || connector.readyConnections === 0) {
@@ -155,7 +156,7 @@ export function classifyReachability(
     return fail(
       "dns_failed",
       "The T3 Connect address no longer points to this machine's tunnel (Cloudflare error 1016). T3 Connect may have removed this environment.",
-      "Link this environment again. Turn T3 Connect off and on in Settings > Sharing & access, or run `t3 connect link` and then restart T3 Code.",
+      `Link this environment again. Turn T3 Connect off and on in Settings > Sharing & access, or run \`${forkCliCommand("connect link")}\` and then restart S2Code.`,
     );
   }
   if (status !== null) {

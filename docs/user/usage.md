@@ -28,15 +28,15 @@ prunes older history on the next refresh, and raising it again does not bring pr
 While `settings.json` cannot be read, nothing is pruned.
 
 OpenCode reads its SQLite database and older JSON history. Antigravity reads local conversation
-databases, including T3-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the
+databases, including S2Code-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the
 server to read a different data directory; comma-separated paths read multiple directories.
 
-Cursor reads account usage from Cursor's API for the account you signed in with in T3 or set as
+Cursor reads account usage from Cursor's API for the account you signed in with in S2Code or set as
 `CURSOR_API_KEY`, or otherwise the CLI login saved on the server.
-This includes headless T3 sessions and desktop usage across machines; the same account counts
-once across connected environments. Without any of these, T3 shows a
-notice instead of incomplete local totals. T3 does not estimate missing tokens from conversation text.
-On macOS without a T3 sign-in, choose **Enable Cursor usage** on Usage to allow T3 to read your
+This includes headless S2Code sessions and desktop usage across machines; the same account counts
+once across connected environments. Without any of these, S2Code shows a
+notice instead of incomplete local totals. S2Code does not estimate missing tokens from conversation text.
+On macOS without a Cursor sign-in in S2Code, choose **Enable Cursor usage** on Usage to allow S2Code to read your
 existing CLI login from Keychain. You can turn it off in **Settings → Providers → Usage providers**. macOS may ask
 you to allow access on the server Mac.
 
@@ -54,7 +54,7 @@ depend on each project's working directory and cannot be reliably discovered by 
 sharing a history directory count once.
 
 The server saves its first hostname in `<T3 home>/usage-host-id`, so a recreated container keeps
-its usage identity when T3 home is persisted. Set `T3CODE_HOST_ID` to choose the identity
+its usage identity when the S2Code home is persisted. Set `T3CODE_HOST_ID` to choose the identity
 explicitly.
 
 When your app and server support different providers, usage totals may cover only the providers
@@ -162,13 +162,13 @@ context use against the model's limit. A tick on the bar marks where the provide
 automatically, when it reports that point.
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
-the environment. T3 cannot report limits for external OpenCode servers because their credentials
+the environment. S2Code cannot report limits for external OpenCode servers because their credentials
 belong to the remote server. Limits need an OpenCode Go API key, or an OpenCode Console connected
 in OpenCode with an API key. A Console browser sign-in alone does not report them. You can also add
 your Go API key as `OPENCODE_API_KEY` in the OpenCode instance's **Environment variables**, then
 refresh provider status. Cursor reports
 its monthly allowance, including separate Auto and API usage, for `CURSOR_AUTH_TOKEN` when it is set,
-otherwise for the account you signed in with in T3 or set as `CURSOR_API_KEY`, otherwise for the CLI
+otherwise for the account you signed in with in S2Code or set as `CURSOR_API_KEY`, otherwise for the CLI
 login. On macOS, this includes the default Keychain login after you enable Cursor usage. Sign-in, API key,
 and Keychain login report limits only with Cursor's default API endpoint. If you configure a custom
 Cursor endpoint, use an explicit token or file-based CLI login for limits.
@@ -191,7 +191,7 @@ thread starts on the pool account with the most headroom for its model, and acco
 most headroom take turns. When an account's quota runs out, S2Code turns that instance off and
 moves the thread to the pool account with the most headroom.
 
-An agent or the `t3 thread start` command can name one account instead. That thread runs there or
+An agent or the `s2code-nightly thread start` command can name one account instead. That thread runs there or
 fails with an error saying why the account cannot take it, such as being out of quota or signed
 out. To let the pool take over when the named account cannot, the agent passes
 `allowPoolFailover: true`, or the command adds `--allow-pool-failover`.
@@ -217,9 +217,9 @@ settings section when you no longer need it.
 ## Subscription usage widget
 
 Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
-Claude quotas. Tap it to open **Usage → Limits**; on Android this works while T3 is running in
+Claude quotas. Tap it to open **Usage → Limits**; on Android this works while S2Code is running in
 the background, otherwise open the app from the launcher. On iOS, use **Edit Widget** to choose
-Session, Weekly, or both for each provider. Reopen T3 to refresh expired readings.
+Session, Weekly, or both for each provider. Reopen S2Code to refresh expired readings.
 
 ## Keyboard shortcuts
 

@@ -3,9 +3,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import * as NetService from "@t3tools/shared/Net";
 
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendConfiguration from "../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import type {
@@ -150,6 +153,7 @@ describe("DesktopWslBackend", () => {
       yield* recordOwnershipFailure();
       const refusal = yield* backend.lastPreflightError;
       assert.include(Option.getOrThrow(refusal), "Another S2Code server");
+      assert.include(Option.getOrThrow(refusal), "`s2code-nightly update`");
       yield* backend.reconcile;
       assert.equal(startCount, 1);
       assert.deepEqual(yield* backend.lastPreflightError, refusal);
@@ -174,6 +178,19 @@ describe("DesktopWslBackend", () => {
     }).pipe(
       Effect.provide(
         DesktopWslBackend.layer.pipe(
+          Layer.provide(
+            DesktopEnvironment.layer({
+              dirname: "/desktop",
+              homeDirectory: "/home/test",
+              platform: "win32",
+              processArch: "x64",
+              appVersion: "1.2.3-nightly.20261119.1",
+              appPath: "/desktop",
+              isPackaged: true,
+              resourcesPath: "/desktop/resources",
+              runningUnderArm64Translation: false,
+            }).pipe(Layer.provide([Path.layer, DesktopConfig.layerTest({})])),
+          ),
           Layer.provideMerge(layerPool),
           Layer.provideMerge(layerBackendConfiguration),
           Layer.provideMerge(layerServerExposure),

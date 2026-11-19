@@ -1,4 +1,5 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -14,6 +15,7 @@ import * as NodeOS from "node:os";
 import * as SqlClient from "effect/sql/SqlClient";
 import { isSqlError } from "effect/sql/SqlError";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
 import { rebuildMessageSearch } from "../orchestration-v2/messageSearchIndex.ts";
 
@@ -301,7 +303,7 @@ export const runRequestedReclaim = Effect.fn("DatabaseMaintenance.runRequestedRe
             .writeFileString(
               files.failure,
               error._tag === "DatabaseInUseError"
-                ? "Another program kept the database open. Close other S2Code apps and s2code commands on this machine, then try again."
+                ? `Another program kept the database open. Close other S2Code apps and ${resolveChannelIdentity(packageJson.version).executableName} commands on this machine, then try again.`
                 : error.message,
             )
             .pipe(

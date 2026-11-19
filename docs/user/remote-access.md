@@ -211,9 +211,9 @@ HTTPS** in **Settings → Sharing & access**. Turn it off there to remove that r
 
 Your tailnet needs MagicDNS and HTTPS certificates enabled; see
 [Tailscale's HTTPS setup](https://tailscale.com/docs/how-to/set-up-https-certificates).
-On Linux, T3 Code also needs permission to manage Tailscale; see
+On Linux, S2Code also needs permission to manage Tailscale; see
 [operator permission](https://tailscale.com/docs/reference/troubleshooting/linux/linux-operator-permission)
-for non-root users. If any of these is missing, T3 Code still starts but can't
+for non-root users. If any of these is missing, S2Code still starts but can't
 add the HTTPS route.
 
 To start a command-line server with Tailscale HTTPS:
@@ -288,7 +288,7 @@ directly. Every other device, and the desktop app for other environments,
 streams them from the host. Agents keep using them while no device is
 connected, and `localhost` addresses reach servers on the host.
 
-The first tab downloads a headless Chrome, about 120 MB, into the T3 home. It
+The first tab downloads a headless Chrome, about 120 MB, into the S2Code home. It
 is the same browser [HTML renders](html-renders.md) use, so a host downloads it
 only once. Some Linux hosts need [setup](#browser-host-setup) before it can
 start.
@@ -533,7 +533,7 @@ desktop app, open **Settings → Environments** and switch off **Local
 environment**. S2Code restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
 history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
-If a [background service](./background-service.md) on this computer uses the same T3 home, the
+If a [background service](./background-service.md) on this computer uses the same S2Code home, the
 app still treats it as this computer: **Open in** and file reveal for its projects run here,
 whichever connection you reach it through.
 

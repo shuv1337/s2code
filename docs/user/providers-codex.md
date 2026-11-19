@@ -37,12 +37,12 @@ picker. See [Use multiple accounts](#use-multiple-accounts).
 
 If an authenticated Codex installation reports “Timed out while checking Codex
 app-server provider status,” set `T3CODE_CODEX_PROBE_TIMEOUT_MS=60000` in the
-T3 server's environment and restart it. See [Provider check timeouts](./install.md#provider-check-timeouts)
+S2Code server's environment and restart it. See [Provider check timeouts](./install.md#provider-check-timeouts)
 for configuration and other providers.
 
 ## Generate images
 
-Codex can generate images directly in a T3 Code thread when your Codex version,
+Codex can generate images directly in an S2Code thread when your Codex version,
 model, and account support native image generation.
 
 If Codex reports that its image tool is unavailable, image generation may be
@@ -53,7 +53,7 @@ Codex provider and add this to **Launch arguments**, keeping any other arguments
 -c features.image_generation=true
 ```
 
-This enables the feature for that T3 Code provider without changing your shared
+This enables the feature for that S2Code provider without changing your shared
 Codex configuration. You do not need another provider instance or a separate image
 API key. The flag does not add image support to an unsupported model or account.
 

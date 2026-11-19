@@ -7,7 +7,9 @@ import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
 
 import * as NetService from "@t3tools/shared/Net";
+import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
 
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopBackendConfiguration from "../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
@@ -59,6 +61,8 @@ const scanForWslPort = Effect.fn("desktop.wslBackend.scanForWslPort")(function* 
 export const layer = Layer.effect(
   DesktopWslBackend,
   Effect.gen(function* () {
+    const { appVersion } = yield* DesktopEnvironment.DesktopEnvironment;
+    const cli = resolveChannelIdentity(appVersion).executableName;
     const pool = yield* DesktopBackendPool.DesktopBackendPool;
     const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
@@ -128,7 +132,7 @@ export const layer = Layer.effect(
                 Ref.set(
                   preflightErrorRef,
                   Option.some(
-                    "Another S2Code server is using this distro's S2Code home, or an older background service is set up for it. Stop that server or pair with it, or try `s2code update` in the distro. If the older launcher cannot update, run `s2code service uninstall` and optionally reinstall with `s2code service install` from a current CLI in the distro. Use `npx shuv2code@latest` if `s2code` is missing or outdated, and pass `--base-dir` with the service's S2Code home to each command.",
+                    `Another S2Code server is using this distro's S2Code home, or an older background service is set up for it. Stop that server or pair with it, or try \`${cli} update\` in the distro. If the older launcher cannot update, run \`${cli} service uninstall\` and optionally reinstall with \`${cli} service install\` from a current CLI in the distro. Use \`npx shuv2code@latest\` if \`${cli}\` is missing or outdated, and pass \`--base-dir\` with the service's S2Code home to each command.`,
                   ),
                 ),
               ),

@@ -21,7 +21,7 @@ authenticated connection, transcribed there, and discarded. The choice is saved
 on this device only, so every computer and browser you use asks for it once.
 Set it back to **Off** at any time; a recording in progress is discarded.
 
-If the chosen environment goes offline, voice input waits for it. T3 Code never
+If the chosen environment goes offline, voice input waits for it. S2Code never
 substitutes another environment.
 
 For cloud dictation, choose **OpenAI** or **Grok Voice Transcribe** via the environment
@@ -40,7 +40,7 @@ on the environment.
 speech-to-text catalog when you enable it, or later under **Manage OpenRouter**.
 The model choice is yours alone and needs no settings access, so anyone with
 dictation access can pick a different model without touching the saved key.
-OpenRouter chooses who runs the model. T3 requests zero data retention; your
+OpenRouter chooses who runs the model. S2Code requests zero data retention; your
 OpenRouter account can also allow safety retention. If no endpoint qualifies,
 dictation fails instead of switching models.
 Vocabulary hints are not sent to OpenRouter; dictionary spellings are applied
@@ -59,8 +59,8 @@ If another app already downloaded one of these models, you don’t need a second
 environment and uses a copy it finds there instead of downloading. For a copy anywhere
 else, on web or desktop, paste the path of the model file or its folder under the model
 list and choose **Use existing**. The path is on the environment
-that transcribes, not on the device you are using. T3 Code checks that the file is exactly a
-model from its list and then uses it in place. Removing the model in T3 Code leaves your file
+that transcribes, not on the device you are using. S2Code checks that the file is exactly a
+model from its list and then uses it in place. Removing the model in S2Code leaves your file
 alone; if the other app deletes it, download or link the model again. Files in another
 format, such as Core ML, ONNX, or MLX builds of the same model, can’t be used.
 
@@ -97,7 +97,7 @@ the other editors, Save, Comment, Reply, Submit review, or Attach works the
 same way, and the shortcut targets the editor that has focus, or the composer
 when none does. In the desktop browser's annotation editor, the microphone and
 the shortcut work while the page has focus; the page you are annotating never
-sees the recording, which runs in T3 Code itself.
+sees the recording, which runs in S2Code itself.
 
 **Dictation shortcut** in Voice settings picks how the keybinding behaves:
 **Auto** tap-toggles or records while held, **Hold** records only while the keys

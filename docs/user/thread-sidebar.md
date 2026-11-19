@@ -33,7 +33,7 @@ from the machine menu to move it there. To move a draft into a project, pick the
 project in the heading.
 
 Each thread without a project works in its own folder under `~/.t3/scratch` (the
-`scratch` folder of your T3 data directory), named after its date, the first words
+`scratch` folder of your S2Code data directory), named after its date, the first words
 of its first message, and a short id, like
 `2026-09-25-convert-these-pngs-to-webp-a1b2c3d4`. Deleting a thread keeps its
 folder, so the files the agent wrote stay until you delete them. Branch, worktree, and diff controls stay hidden because
@@ -180,7 +180,7 @@ terminals that wait at an idle prompt, and keeps their output. A terminal that
 runs a command, such as a dev server, stays open unless its action has **Stop this action
 when the thread settles** enabled in Settings > Projects > Actions. You can also set
 `"stopOnSettle": true` on a `t3.json` action and import it there. Start the command through
-that action so T3 can stop its terminal and child processes. Commands started through an
+that action so S2Code can stop its terminal and child processes. Commands started through an
 agent's own shell tools are managed by the provider.
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
@@ -250,7 +250,7 @@ you paste it and pastes into a composer as a thread chip (see
 [sharing a thread](./prompt-links.md#share-a-thread)). To copy the thread even
 when it has a PR, choose **Copy → Thread** from its context menu, or **Copy
 thread** from its long-press menu on mobile.
-**Thread ID** copies the bare ID for scripts and the `t3` CLI. See
+**Thread ID** copies the bare ID for scripts and the S2Code CLI. See
 [keybindings](./keybindings.md) for custom configuration.
 
 ## Inspect agent work
@@ -298,7 +298,7 @@ thread's terminals or its Claude agent started, with their ports. Not every one
 serves a web page. A server the agent started stays listed after the agent's
 turn ends.
 Select a server to open it in the browser panel. **Stop** ends the server's job
-and keeps the agent, the terminal, and T3 Code running. Stop needs terminal
+and keeps the agent, the terminal, and S2Code running. Stop needs terminal
 access to the environment and is not available on Windows.
 
 To choose what the thread details card shows, right-click the card or open

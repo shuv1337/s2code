@@ -16,8 +16,8 @@ shows its changes against its first parent.
 
 A commit link from a supported code host opens in the Diff pane when the thread's repository has
 that commit locally, on any branch. Otherwise a pull request commit link opens the pull request. Other
-commit links follow your **Open links in** setting; on web, when that opens a new tab, T3 Code first
-shows an **Open link** button. Command/Ctrl+Click always opens the link in your browser. Commit links follow the **Open pull requests in T3 Code**
+commit links follow your **Open links in** setting; on web, when that opens a new tab, S2Code first
+shows an **Open link** button. Command/Ctrl+Click always opens the link in your browser. Commit links follow the **Open pull requests in S2Code**
 setting in **Settings → Diffs**.
 
 ## Connect an account
@@ -147,7 +147,7 @@ from GitHub keep their pull requests on GitHub; open those from the GitHub remot
 
 To start from nothing, choose **New project** in the command palette (`Cmd/Ctrl+K`), or
 **New project** under **Add Project** on any client, and type a name. S2Code makes a Git
-repository in `~/.t3/projects` (the `projects` folder of your T3 data directory) with a README,
+repository in `~/.t3/projects` (the `projects` folder of your S2Code data directory) with a README,
 an icon, and a first commit, then opens a new thread in it. Until the project has a thread, new
 threads work in its folder, even when your default is a new worktree. The folder is named after the project,
 like `pinball-stats` for "Pinball Stats". Turn on **Create private repository on GitHub** to also
@@ -158,7 +158,7 @@ Use **Add Project** in the command palette (`Cmd/Ctrl+K`) to clone a repository.
 provider or paste a Git URL, then choose where to save it. Only GitHub is listed at first. To list
 another provider here and in **Publish Repository**, turn on its switch under
 **Settings → Source control & issues**. A branch or file page copied from GitHub,
-GitLab, GitCafe, Codeberg or Bitbucket also works: T3 Code clones that repository's default branch.
+GitLab, GitCafe, Codeberg or Bitbucket also works: S2Code clones that repository's default branch.
 On other hosts, paste the repository's clone URL. The project opens right away while the
 clone runs in the background: you can write your first prompt, and sending waits until the files
 are in place. A toast tracks progress and lets you cancel; if the clone fails, retry it from the

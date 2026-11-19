@@ -484,7 +484,7 @@ export function IssuesScreen(
                     : capable.length > 0
                       ? "Reconnect to load issues."
                       : environments.length > 0
-                        ? "Update the environment's T3 Code server to browse issues."
+                        ? "Update the environment's S2Code server to browse issues."
                         : "Add an environment in Settings to browse its issues.")
                 }
                 variant="plain"

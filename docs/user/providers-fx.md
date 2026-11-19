@@ -1,6 +1,6 @@
 # fx
 
-T3 Code can run [fx](https://fx.sh). fx uses the login on the machine that runs the T3 Code server.
+S2Code can run [fx](https://fx.sh). fx uses the login on the machine that runs the S2Code server.
 
 ## Set up fx
 
@@ -15,7 +15,7 @@ T3 Code can run [fx](https://fx.sh). fx uses the login on the machine that runs 
 
 If `fx` is not on the server's `PATH`, set **Binary path** to the executable.
 
-Every fx instance on the same machine shares that machine's fx login. T3 Code does not keep a separate login per instance.
+Every fx instance on the same machine shares that machine's fx login. S2Code does not keep a separate login per instance.
 
 ## Models and effort
 
@@ -23,11 +23,11 @@ The model picker lists **Default** first. That option runs the model `fx status`
 
 fx also has an **Effort** control. A new thread starts at Medium.
 
-T3 Code does not show fx's backend selector. To use Codex, Grok, or Vercel AI Gateway, run `fx provider` on the environment's machine.
+S2Code does not show fx's backend selector. To use Codex, Grok, or Vercel AI Gateway, run `fx provider` on the environment's machine.
 
 Type `$` in the composer to list the skills fx finds in its skill folders, in the order fx's own skill menu shows them. When two different skills share a name, the menu lists the one fx loads for that name: the first copy in fx's folder order, starting with the workspace. The menu shows one skill per name regardless of case; to run a skill whose name differs only in case, such as `Review` next to `review`, type its exact name.
 
-fx threads load the MCP servers from fx's profile config, `~/.fx/mcp.json`, on the machine that runs the T3 Code server.
+fx threads load the MCP servers from fx's profile config, `~/.fx/mcp.json`, on the machine that runs the S2Code server.
 
 ## Permission modes
 
@@ -38,9 +38,9 @@ fx offers two composer modes.
 | **Supervised** | fx asks before it changes files or runs commands. Read requests run without asking. |
 | **Auto**       | fx handles routine actions itself. Anything it still asks about reaches you.        |
 
-T3 Code does not offer **Full access** or **Auto-accept edits** for fx. A thread already set to one of those runs in **Supervised**. Changing the permission mode restarts the connection and reloads the same fx session.
+S2Code does not offer **Full access** or **Auto-accept edits** for fx. A thread already set to one of those runs in **Supervised**. Changing the permission mode restarts the connection and reloads the same fx session.
 
-On fx versions after [vercel-labs/fx#1189](https://github.com/vercel-labs/fx/pull/1189), fx saves the mode T3 Code sets as its default permission mode. T3 Code sets it each time it opens an fx thread, so fx in the terminal then starts in that thread's mode.
+On fx versions after [vercel-labs/fx#1189](https://github.com/vercel-labs/fx/pull/1189), fx saves the mode S2Code sets as its default permission mode. S2Code sets it each time it opens an fx thread, so fx in the terminal then starts in that thread's mode.
 
 A message steered into a running turn stops that turn, and fx answers the new message in the same session.
 

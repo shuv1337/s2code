@@ -120,13 +120,13 @@ update can roll back to the previous version. If the update still fails:
 2. Check that you updated the server's machine, not only the device you are using.
 3. For a command-line server, stop it and relaunch the exact version shown in the notice.
 
-Only one server can use a T3 home directory at a time. If startup reports that
+Only one server can use an S2Code home directory at a time. If startup reports that
 another server owns it, stop that server before retrying, or use a separate home
 directory and pair with the running server.
 
 ### macOS app does not reopen after an Alpha update
 
-Updating an older **T3 Code (Alpha)** installation can replace it with
+Updating an older upstream **T3 Code (Alpha)** installation can replace it with
 **T3 Code (Beta)** without reopening the app. Open **T3 Code (Beta)** from
 Applications, or run:
 
@@ -139,20 +139,20 @@ from Applications again.
 
 ## If the desktop app does not start
 
-If the desktop app's server keeps failing at startup, T3 Code shows a "T3 Code
-could not start" window instead of the app. If a newer version is available,
+If the desktop app's server keeps failing at startup, S2Code shows a startup error
+window instead of the app. If a newer version is available,
 choose **Update** to install it. If not, the window links to the last version
 that started on your computer. Download and install it to go back. Use **Copy
 details** to include the error in a bug report.
 
 ## Registries and proxies
 
-Each server checks T3 Code releases, and providers installed with npm, through
+Each server checks S2Code releases, and providers installed with npm, through
 its own npm, so the checks use npm's configured registry, authentication, and
 proxy settings. Providers installed with Homebrew or pnpm check through those
 tools.
 Configure npm on the server's machine. If that registry cannot be reached, the
-release shows as unavailable; T3 Code does not try the public registry instead.
+release shows as unavailable; S2Code does not try the public registry instead.
 Machines without npm check the public npm registry directly.
 
 ## Update providers
@@ -165,10 +165,10 @@ or when its instances use different update commands, such as two instances that
 run different CLI installs. Update those by hand, or point every instance of the
 provider at the same CLI.
 
-After a successful provider CLI update, T3 Code refreshes model discovery for
+After a successful provider CLI update, S2Code refreshes model discovery for
 every enabled instance of that provider using its own configuration. Connected
 clients receive the refreshed catalogs automatically. Provider update checks
-must be enabled to download the latest T3 Code model catalog.
+must be enabled to download the latest S2Code model catalog.
 
 Provider updates do not restart running chats. An existing session can keep
 using the previous CLI until it ends. If discovery fails, check the provider
