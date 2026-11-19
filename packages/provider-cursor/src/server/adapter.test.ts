@@ -214,6 +214,7 @@ describe("CursorAdapterV2", () => {
           modelSelection,
           runtimePolicy,
         });
+        assert.isTrue(runtime.backgroundTasksEndWithProcess);
         const providerThread = yield* runtime.ensureThread({
           threadId,
           modelSelection,
