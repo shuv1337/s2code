@@ -1657,7 +1657,9 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     let removed = false;
     for (const manager of managers) {
       if (manager === undefined) continue;
-      const installedUnit = yield* fs.readFileString(manager.unitPath).pipe(Effect.option);
+      const installedUnit = yield* fs
+        .readFile(manager.unitPath)
+        .pipe(Effect.map(decodeServiceUnit), Effect.option);
       if (Option.isNone(installedUnit) || !servesHome(serviceUnitHomeOf(installedUnit.value)))
         continue;
       yield* runSteps(manager.deactivate);

@@ -461,7 +461,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       Effect.gen(function* () {
         const { service, makeService, fs, commands } = yield* makeHarness(platform);
         const plan = yield* service.install();
-        const legacyUnitPath = plan.unitPath.replace("s2code", "shuv2code");
+        const legacyUnitPath = plan.unitPath.replace(/s2code(?=[^/\\]+$)/, "shuv2code");
         const legacyUnit = (yield* fs.readFileString(plan.unitPath))
           .replaceAll("s2code-v2.service", "shuv2code-v2.service")
           .replaceAll("dev.shuv.s2code.v2.service", "dev.shuv.shuv2code.v2.service")
@@ -487,7 +487,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         const { service, makeService, fs, commands, statePath } = yield* makeHarness(platform);
         const plan = yield* service.install();
         const contents = yield* fs.readFileString(plan.unitPath);
-        const legacyUnitPath = plan.unitPath.replace("s2code", "shuv2code");
+        const legacyUnitPath = plan.unitPath.replace(/s2code(?=[^/\\]+$)/, "shuv2code");
         yield* fs.writeFileString(legacyUnitPath, contents);
         const duplicate = yield* makeService();
         const status = yield* duplicate.status;
@@ -522,7 +522,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         const { service, makeService, fs, commands } = yield* makeHarness();
         const plan = yield* service.install();
         const contents = yield* fs.readFileString(plan.unitPath);
-        const legacyUnitPath = plan.unitPath.replace("s2code", "shuv2code");
+        const legacyUnitPath = plan.unitPath.replace(/s2code(?=[^/\\]+$)/, "shuv2code");
         const foreignContents = contents.replaceAll(plan.baseDir, `${plan.baseDir}-other`);
         yield* fs.writeFileString(
           legacyUnitPath,

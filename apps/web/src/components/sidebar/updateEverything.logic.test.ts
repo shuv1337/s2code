@@ -122,7 +122,7 @@ describe("collectServerUpdateTargets", () => {
         entry.label,
         entry.reason,
       ]),
-    ).toEqual([["off", "Example Corp manages S2Code updates."]]);
+    ).toEqual([["off", "Example Corp manages T3 Code updates."]]);
     expect(
       collectServerUpdateTargets(
         machines.map((entry) => ({

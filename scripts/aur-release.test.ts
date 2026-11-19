@@ -34,14 +34,12 @@ const run = Effect.fn("test.aur.run")(function* (
 
 describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("AUR release", () => {
   it.live.each([
-    { nightly: false, naming: "versioned", failure: undefined },
-    { nightly: true, naming: "versioned", failure: undefined },
-    { nightly: false, naming: "versionless", failure: undefined },
-    { nightly: true, naming: "versionless", failure: undefined },
-    { nightly: false, naming: "versioned", failure: "missing" },
-    { nightly: false, naming: "versioned", failure: "digest" },
-    { nightly: false, naming: "versioned", failure: "version" },
-  ])("updates architecture-specific sources: %j", ({ nightly, naming, failure }) =>
+    { nightly: false, failure: undefined },
+    { nightly: true, failure: undefined },
+    { nightly: true, failure: "missing" },
+    { nightly: true, failure: "digest" },
+    { nightly: true, failure: "version" },
+  ])("updates only the fork nightly x86_64 recipe: %j", ({ nightly, failure }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -62,20 +60,19 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("AUR release", 
         yield* fs.chmod(file, 0o755);
       }
       const version = nightly ? "1.2.4-nightly.20261104.1" : "1.2.3";
-      const pkgname = nightly ? "t3code-nightly-bin" : "t3code-bin";
-      const prefix =
-        naming === "versioned" ? `T3-Code-${version}` : nightly ? "T3-Code-Nightly" : "T3-Code";
+      const pkgname = "s2code-nightly-bin";
+      const localName = `S2Code-${version}-x86_64.AppImage`;
       const assets = [
-        { name: `${prefix}-x86_64.AppImage`, digest: `sha256:${"a".repeat(64)}` },
+        { name: `S2Code-${version}-arm64.AppImage`, digest: `sha256:${"b".repeat(64)}` },
         ...(failure === "missing"
           ? []
           : [
               {
                 name:
                   failure === "version"
-                    ? "T3-Code-1.2.2-arm64.AppImage"
-                    : `${prefix}-arm64.AppImage`,
-                digest: failure === "digest" ? "invalid" : `sha256:${"b".repeat(64)}`,
+                    ? "S2Code-1.2.2-nightly.20261104.1-x86_64.AppImage"
+                    : localName,
+                digest: failure === "digest" ? "invalid" : `sha256:${"a".repeat(64)}`,
               },
             ]),
       ];
@@ -89,6 +86,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("AUR release", 
         RELEASE_TAG: `v${version}`,
         AUR_FIXTURE_RELEASE: fixture,
         AUR_SSH_PRIVATE_KEY: "",
+        S2CODE_AUR_PRODUCT_ID: "s2code",
+        S2CODE_AUR_RELEASE_REPO: "shuv1337/s2code",
       };
       const result = yield* run("bash", [path.join(aur, "scripts/release.sh")], root, env);
       if (failure) {
@@ -97,28 +96,26 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("AUR release", 
         return;
       }
       assert.equal(Number(result.code), 0, result.stdout + result.stderr);
-      for (const [arch, upstreamArch, checksum] of [
-        ["x86_64", "x86_64", "a"],
-        ["aarch64", "arm64", "b"],
-      ] as const) {
+      if (!nightly) {
+        assert.include(result.stdout, "this fork publishes only nightly");
+        assert.equal(yield* fs.readFileString(recipe), before);
+      } else {
         const selected = yield* run(
           "bash",
           [
             "-c",
             `source PKGBUILD
-          declare -n sources="source_$CARCH" sums="sha256sums_$CARCH"
-          printf '%s\\n' "$pkgver" "\${arch[*]}" "\${sources[@]}" "\${sums[@]}" "$_appimage"`,
+          printf '%s\\n' "$pkgver" "\${arch[*]}" "\${source[0]}" "\${sha256sums[0]}" "$_appimage"`,
           ],
           packageDir,
-          { ...env, CARCH: arch },
+          env,
         );
         assert.equal(Number(selected.code), 0, selected.stderr);
-        const localName = `T3-Code-${version}-${upstreamArch}.AppImage`;
         assert.deepEqual(selected.stdout.trim().split("\n"), [
           version.replace("-nightly.", "_nightly."),
-          "x86_64 aarch64",
-          `${localName}::https://github.com/pingdotgg/t3code/releases/download/v${version}/${prefix}-${upstreamArch}.AppImage`,
-          checksum.repeat(64),
+          "x86_64",
+          `${localName}::https://github.com/shuv1337/s2code/releases/download/v${version}/${localName}`,
+          "a".repeat(64),
           localName,
         ]);
       }

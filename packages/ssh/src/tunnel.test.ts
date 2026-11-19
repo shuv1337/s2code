@@ -433,18 +433,18 @@ describe("ssh tunnel scripts", () => {
   );
 
   it.each([
-    { installed: ARCHIVE.archiveVersion, status: 0, reuses: true },
-    { installed: ARCHIVE.archiveVersion, status: 1, reuses: false },
-    { installed: "9.9.9", status: 0, reuses: false },
+    { installed: ARCHIVE.archiveVersion, status: 0 },
+    { installed: ARCHIVE.archiveVersion, status: 1 },
+    { installed: "9.9.9", status: 0 },
   ])(
-    "reuses a host t3 only at exactly the requested version: installed $installed, status $status",
-    ({ installed, status, reuses }) => {
+    "does not execute a host t3: installed $installed, status $status",
+    ({ installed, status }) => {
       const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-runner-"));
       try {
         const bin = NodePath.join(root, "bin");
         NodeFS.mkdirSync(bin);
         NodeFS.mkdirSync(NodePath.join(root, "home"));
-        // A host the release archive cannot run on, so only reuse can succeed.
+        // A host without a supported release archive.
         NodeFS.writeFileSync(
           NodePath.join(bin, "uname"),
           `#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo x86_64 ;; esac\n`,
@@ -452,7 +452,7 @@ describe("ssh tunnel scripts", () => {
         );
         NodeFS.writeFileSync(
           NodePath.join(bin, "t3"),
-          `#!/bin/sh\ncase "$1" in --version) echo "t3 v${installed}"; exit ${status} ;; *) echo "host t3 $*" ;; esac\n`,
+          `#!/bin/sh\ntouch "$HOME/host-t3-called"\ncase "$1" in --version) echo "t3 v${installed}"; exit ${status} ;; *) echo "host t3 $*" ;; esac\n`,
           { mode: 0o755 },
         );
         const runner = NodePath.join(root, "run-t3.sh");
@@ -461,13 +461,9 @@ describe("ssh tunnel scripts", () => {
           encoding: "utf8",
           env: { HOME: NodePath.join(root, "home"), PATH: `${bin}:${process.env.PATH ?? ""}` },
         });
-        if (reuses) {
-          assert.equal(result.status, 0);
-          assert.equal(result.stdout, "host t3 serve\n");
-        } else {
-          assert.notEqual(result.status, 0);
-          assert.include(result.stderr, "has no t3 release archive.");
-        }
+        assert.notEqual(result.status, 0);
+        assert.include(result.stderr, "has no t3 release archive.");
+        assert.isFalse(NodeFS.existsSync(NodePath.join(root, "home", "host-t3-called")));
       } finally {
         NodeFS.rmSync(root, { recursive: true, force: true });
       }

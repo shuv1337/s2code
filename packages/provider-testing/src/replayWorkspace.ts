@@ -65,7 +65,12 @@ const makeCheckpointWorkspaceEffect = Effect.fn("makeCheckpointWorkspace")(funct
     yield* fs.writeFileString(filePath, contents);
   }
   yield* runGit(cwd, ["add", "README.md", ...Object.keys(files)]);
-  yield* runGit(cwd, ["commit", "-m", "initial"]);
+  yield* runGit(cwd, [
+    "commit",
+    "--author=T3 Code Test <t3code-test@example.com>",
+    "-m",
+    "initial",
+  ]);
   return cwd;
 });
 

@@ -844,15 +844,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
           });
         }
       });
-      const result = yield* relink.pipe(
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromEnv({ env: { T3CODE_RELAY_URL: "https://relay.example.test" } }),
-          ),
-        ),
-        Effect.flip,
-        Effect.option,
-      );
+      const result = yield* relink.pipe(Effect.flip, Effect.option);
       if (revoked && !startup) {
         expect(result).toEqual(Option.none());
         expect(yield* link.linkState()).toMatchObject({
