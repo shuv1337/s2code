@@ -7,7 +7,7 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
-import { T, useGT, Var } from "gt-react";
+import { T, useGT, useMessages, Var } from "gt-react";
 import { useState } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -73,6 +73,7 @@ function EnvironmentMcpServers({
 }) {
   const searchableSetting = useSearchableSetting();
   const gt = useGT();
+  const messages = useMessages();
   const environmentId = environment.environmentId;
   const canManage = useAtomValue(serverEnvironment.testMcpServer.permissionAtom(environmentId));
   const readOnly = !canManage || projectScoped;
@@ -146,7 +147,7 @@ function EnvironmentMcpServers({
             const name = config.label ?? id;
             const test = tests[id];
             const currentTest = test?.key === JSON.stringify({ id, url: config.url }) ? test : null;
-            const audience = mcpServerAudience(config, projectTitle);
+            const audience = mcpServerAudience(config, projectTitle, messages);
             return (
               <SettingsRow
                 key={id}

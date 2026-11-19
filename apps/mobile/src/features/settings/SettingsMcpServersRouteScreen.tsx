@@ -1,4 +1,4 @@
-import { useGT } from "gt-react-native";
+import { useGT, useMessages } from "gt-react-native";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import {
@@ -81,6 +81,7 @@ export function SettingsMcpServersRouteScreen({
   route,
 }: StaticScreenProps<{ readonly environmentId: EnvironmentId }>) {
   const gt = useGT();
+  const messages = useMessages();
   const { environmentId } = route.params;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -115,7 +116,9 @@ export function SettingsMcpServersRouteScreen({
           <>
             <SettingsSection
               title={gt("Servers")}
-              footer="Agents in Full access threads get the servers that are on. Turning one off stops its calls immediately. Agents pick up new servers in their next session."
+              footer={gt(
+                "Agents in Full access threads get the servers that are on. Turning one off stops its calls immediately. Agents pick up new servers in their next session.",
+              )}
             >
               {entries.length === 0 ? (
                 <Text className="p-4 text-base text-foreground-muted">
@@ -124,7 +127,7 @@ export function SettingsMcpServersRouteScreen({
               ) : (
                 entries.map(({ id, config }, index) => {
                   const name = config.label ?? id;
-                  const audience = mcpServerAudience(config, projectTitle);
+                  const audience = mcpServerAudience(config, projectTitle, messages);
                   return (
                     <View
                       key={id}
@@ -136,7 +139,9 @@ export function SettingsMcpServersRouteScreen({
                     >
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={`${canManage ? "Edit" : "View"} ${name}`}
+                        accessibilityLabel={
+                          canManage ? gt("Edit {name}", { name }) : gt("View {name}", { name })
+                        }
                         onPress={() =>
                           navigation.navigate("SettingsMcpServerEdit", {
                             environmentId,
@@ -167,7 +172,7 @@ export function SettingsMcpServersRouteScreen({
                         ) : null}
                       </Pressable>
                       <ThemedSwitch
-                        accessibilityLabel={`${name} enabled`}
+                        accessibilityLabel={gt("{name} enabled", { name })}
                         disabled={!canManage || toggling !== null}
                         value={toggling?.id === id ? toggling.enabled : config.enabled}
                         onValueChange={(enabled) => void setEnabled(id, config, enabled)}
@@ -322,8 +327,8 @@ function McpServerEditor(props: {
               title={gt("Server")}
               footer={
                 isNew
-                  ? "Agents see it with a “shared-” prefix. The name can't be changed later."
-                  : `Agents see it as ${sharedMcpServerHarnessName(draft.id)}.`
+                  ? gt("Agents see it with a “shared-” prefix. The name can't be changed later.")
+                  : gt("Agents see it as {name}.", { name: sharedMcpServerHarnessName(draft.id) })
               }
             >
               <FormField
@@ -355,8 +360,10 @@ function McpServerEditor(props: {
               title={gt("Bearer token")}
               footer={
                 urlChanged && hasSavedToken && !draft.token.trim()
-                  ? "The saved token never goes to a new URL, so saving removes it. Enter it again to keep using one."
-                  : "Stays on this environment. Agents never see it."
+                  ? gt(
+                      "The saved token never goes to a new URL, so saving removes it. Enter it again to keep using one.",
+                    )
+                  : gt("Stays on this environment. Agents never see it.")
               }
             >
               <FormField

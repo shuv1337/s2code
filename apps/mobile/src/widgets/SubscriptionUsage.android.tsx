@@ -62,12 +62,19 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
     tapToConnect: "Tap to connect in S2Code",
     moreInApp: {} as Record<string, string>,
   };
-  const connectDetail = "Open S2Code to connect";
   const providers = props.providers ?? [
-    { name: "Codex", detail: connectDetail, windows: [], expiresAt: 0, totalWindows: 0 },
+    {
+      name: "Codex",
+      // oxlint-disable-next-line t3code/no-untranslated-copy -- widget fallback until the app publishes translated text
+      detail: "Open S2Code to connect",
+      windows: [],
+      expiresAt: 0,
+      totalWindows: 0,
+    },
     {
       name: "Claude",
-      detail: connectDetail,
+      // oxlint-disable-next-line t3code/no-untranslated-copy -- widget fallback until the app publishes translated text
+      detail: "Open S2Code to connect",
       windows: [],
       expiresAt: 0,
       totalWindows: 0,

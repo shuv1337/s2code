@@ -169,7 +169,9 @@ export function VoiceSurface() {
               ) : null}
               <Button size="sm" variant="destructive" onClick={() => void controller.end()}>
                 <PhoneOffIcon className="size-4" />
-                {state.mode === "dictation" ? gt("Cancel") : "End"}
+                {state.mode === "dictation"
+                  ? gt("Cancel")
+                  : gt("End", { $context: "verb, ends a voice call" })}
               </Button>
             </>
           ) : state.target ? (

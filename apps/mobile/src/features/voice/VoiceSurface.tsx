@@ -158,7 +158,11 @@ export function VoiceSurface() {
                     />
                   ) : null}
                   <Button
-                    label={state.mode === "dictation" ? gt("Cancel") : "End"}
+                    label={
+                      state.mode === "dictation"
+                        ? gt("Cancel")
+                        : gt("End", { $context: "verb, ends a voice call" })
+                    }
                     tone="danger"
                     onPress={() => void controller.end()}
                   />
