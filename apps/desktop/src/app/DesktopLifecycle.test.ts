@@ -424,6 +424,65 @@ describe("DesktopLifecycle", () => {
     }),
   );
 
+  // regression: #467 review MED-2. A failed install resets `quitting`, and the first signal
+  // of the next external quit then counted as a repeat of one from the failed install.
+  it.effect("does not force-exit on the first signal of a later external quit", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      const exitCodes: number[] = [];
+      const exit = (code: number) =>
+        Effect.sync(() => {
+          exitCodes.push(code);
+        });
+      const layerEnvironment = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "linux",
+        isDevelopment: false,
+        appImagePath: Option.none(),
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(layerElectronApp(appListeners, Effect.void, exit)),
+        Layer.provideMerge(layerElectronTheme),
+        Layer.provideMerge(layerElectronWindow()),
+        Layer.provideMerge(layerDesktopWindow()),
+        Layer.provideMerge(layerEnvironment),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+          const state = yield* DesktopState.DesktopState;
+          yield* lifecycle.register;
+          const sigtermListener = process.listeners("SIGTERM").at(-1);
+          assert.isDefined(sigtermListener);
+          if (!sigtermListener) return;
+
+          // Install 1 holds quitting and receives one SIGTERM, which is swallowed.
+          yield* Ref.set(state.quitting, true);
+          sigtermListener("SIGTERM");
+          yield* Effect.yieldNow;
+          // Its stop times out and recovery resets quitting, as DesktopUpdates does.
+          yield* Ref.set(state.quitting, false);
+          yield* Ref.set(state.externalQuitSignalSinceNanos, null);
+          yield* TestClock.adjust("60 seconds");
+
+          // A later external quit holds quitting again and gets a single SIGTERM.
+          yield* Ref.set(state.quitting, true);
+          sigtermListener("SIGTERM");
+          yield* Effect.yieldNow;
+          assert.deepEqual(exitCodes, [], "one signal is not a repeated signal");
+
+          // A genuine repeat after the stall threshold still exits.
+          yield* TestClock.adjust("10 seconds");
+          sigtermListener("SIGTERM");
+          yield* Effect.yieldNow;
+          assert.deepEqual(exitCodes, [0]);
+        }),
+      ).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("ignores app activation while quitting", () =>
     Effect.gen(function* () {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();

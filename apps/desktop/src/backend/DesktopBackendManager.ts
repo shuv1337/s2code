@@ -275,6 +275,8 @@ interface ActiveBackendRun {
   readonly pid: Option.Option<number>;
   readonly exitObserved: boolean;
   readonly stopRequested: boolean;
+  // The caller of `stop` gave up (interrupted) while the run was still tearing down.
+  readonly stopAbandoned: boolean;
 }
 
 interface BackendManagerState {
@@ -760,7 +762,20 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
     mutex.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* SubscriptionRef.get(state);
-        if (Option.isSome(current.active)) {
+        const abandoned = Option.filter(current.active, (run) => run.stopAbandoned);
+        if (Option.isSome(abandoned)) {
+          // A stop gave up on this run (the install-stop timeout) and its teardown is still
+          // stuck. Replace it so a start after that gives up really starts a backend; the
+          // stale run finishes in the background and finalizeRun ignores it as not current.
+          yield* SubscriptionRef.update(state, (latest) =>
+            Option.exists(latest.active, (run) => run.id === abandoned.value.id)
+              ? { ...latest, active: Option.none<ActiveBackendRun>(), ready: false }
+              : latest,
+          );
+          yield* desktopTelemetryPublisher.removeControlSource(spec.id);
+          yield* backendOutputLog.discardSession;
+        }
+        if (Option.isSome(current.active) && Option.isNone(abandoned)) {
           if (!current.desiredRunning) {
             yield* SubscriptionRef.update(state, (latest) => ({
               ...latest,
@@ -877,6 +892,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               pid: Option.none(),
               exitObserved: false,
               stopRequested: false,
+              stopAbandoned: false,
             } satisfies ActiveBackendRun),
             nextRunId: latest.nextRunId + 1,
           },
@@ -1173,7 +1189,11 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
       onNone: () => Effect.void,
       // The enclosing operation owns the span for this inline handler.
       onSome: Effect.fnUntraced(function* (run) {
-        yield* closeRun(run, parentScope, options);
+        yield* closeRun(run, parentScope, options).pipe(
+          Effect.onInterrupt(() =>
+            updateActiveRun(run.id, (latest) => ({ ...latest, stopAbandoned: true })),
+          ),
+        );
         const cleanup = yield* mutex.withPermits(1)(
           SubscriptionRef.modify(
             state,

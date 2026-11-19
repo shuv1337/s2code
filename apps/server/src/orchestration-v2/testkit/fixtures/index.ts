@@ -211,7 +211,10 @@ import {
   stopBackgroundWorkAfterFailedTurnInput,
   stopBackgroundWorkAfterReleaseInput,
 } from "./stop_background_work_after_failed_turn/input.ts";
-import { assertStopBackgroundWorkAfterFailedTurnOutput } from "./stop_background_work_after_failed_turn/output.ts";
+import {
+  assertStopBackgroundWorkAfterFailedTurnOutput,
+  assertStopBackgroundWorkAfterReleaseOutput,
+} from "./stop_background_work_after_failed_turn/output.ts";
 import { assertToolCallRestrictedGranularClaudeOutput } from "./tool_call_restricted_granular/claude_output.ts";
 import { assertToolCallRestrictedGranularOutput } from "./tool_call_restricted_granular/codex_output.ts";
 import { toolCallRestrictedGranularInput } from "./tool_call_restricted_granular/input.ts";
@@ -2098,7 +2101,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         recordedScenario: "stop_background_work_after_failed_turn",
         modelSelection: ACP_REGISTRY_MODEL_SELECTION,
-        assertOutput: assertStopBackgroundWorkAfterFailedTurnOutput,
+        assertOutput: assertStopBackgroundWorkAfterReleaseOutput,
       },
     ],
   },

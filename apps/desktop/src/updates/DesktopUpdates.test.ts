@@ -900,6 +900,7 @@ describe("DesktopUpdates", () => {
           );
           yield* Deferred.await(stopping);
           assert.isTrue(yield* Ref.get(desktopState.quitting));
+          yield* Ref.set(desktopState.externalQuitSignalSinceNanos, 1n);
 
           yield* TestClock.adjust(Duration.seconds(15));
           assert.isTrue(yield* Deferred.isDone(installDone));
@@ -908,6 +909,9 @@ describe("DesktopUpdates", () => {
           assert.isTrue(result.accepted);
           assert.isFalse(result.completed);
           assert.isFalse(yield* Ref.get(desktopState.quitting));
+          // regression: #467 review MED-2. A signal swallowed during this install must not
+          // count toward the next one's force-exit window.
+          assert.isNull(yield* Ref.get(desktopState.externalQuitSignalSinceNanos));
           assert.equal(harness.quitAndInstalls(), 0);
           assert.equal(harness.updateRestartMarkers.size, 0);
           assert.isUndefined(harness.updateInProgressMarker());

@@ -841,6 +841,7 @@ export const make = Effect.gen(function* () {
     [
       finishUpdateAction("install"),
       Ref.set(desktopState.quitting, false),
+      Ref.set(desktopState.externalQuitSignalSinceNanos, null),
       Ref.set(installRunningBackendsRef, []),
       removeUpdateRestartMarker,
       removeUpdateInProgressMarker,
@@ -860,6 +861,7 @@ export const make = Effect.gen(function* () {
     if (!ownsRecovery) return;
 
     yield* Ref.set(desktopState.quitting, false);
+    yield* Ref.set(desktopState.externalQuitSignalSinceNanos, null);
     yield* removeUpdateRestartMarker;
     yield* removeUpdateInProgressMarker;
     yield* removeInstallRecord;
