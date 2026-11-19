@@ -1035,15 +1035,19 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   });
   // Ending the task closes the launcher's console, which the launcher takes as its SIGTERM.
   // Task Scheduler then reports the task stopped at once, so the lock says when it really is.
-  const stopWindowsLauncher = Effect.gen(function* () {
-    const unit = yield* readUnit().pipe(Effect.option);
-    yield* runner.run({ command: "schtasks", args: ["/End", ...windowsTask] }).pipe(Effect.ignore);
-    yield* Effect.tryPromise({
-      try: (signal) => waitForServiceLauncherExit(launcherLockPath(unit), signal),
-      catch: (cause) =>
-        new BootServiceCommandError({ step: "stopping the installed service", cause }),
-    });
-  });
+  const stopWindowsLauncher: Effect.Effect<void, BootServiceCommandError> = Effect.gen(
+    function* () {
+      const unit = yield* readUnit().pipe(Effect.option);
+      yield* runner
+        .run({ command: "schtasks", args: ["/End", ...windowsTask] })
+        .pipe(Effect.ignore);
+      yield* Effect.tryPromise({
+        try: (signal) => waitForServiceLauncherExit(launcherLockPath(unit), signal),
+        catch: (cause) =>
+          new BootServiceCommandError({ step: "stopping the installed service", cause }),
+      });
+    },
+  );
   const logPath = path.join(input.logsDir, BOOT_SERVICE_LOG_FILE);
   const resolveTarget = Effect.fn("cloud.boot_service.resolve_target")(function* (
     systemdUnitDir: string | undefined,
