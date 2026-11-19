@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
+  backgroundWorkFollowUpsLabel,
   presentPendingBackgroundWork,
   type PendingBackgroundWorkItem,
 } from "@t3tools/client-runtime/state/thread-execution";
@@ -57,7 +58,7 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
         </Text>
       ) : (
         presentation.items.map((item) => (
-          <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
+          <BackgroundWorkRow key={item.key} item={item} onOpen={openThread} />
         ))
       )}
     </ScrollView>
@@ -78,6 +79,7 @@ function BackgroundWorkRow(props: {
   const gt = useGT();
   const m = useMessages();
   const childThreadId = item.childThreadId;
+  const followUps = backgroundWorkFollowUpsLabel(item.followUps, m);
   const row = (
     <View className="flex-row items-center gap-3 border-b border-border py-3.5">
       <SymbolView
@@ -92,6 +94,9 @@ function BackgroundWorkRow(props: {
         <Text className="font-t3-medium text-sm text-foreground">{item.label}</Text>
         <Text className="text-xs text-foreground-muted">{m(KIND_LABELS[item.kind])}</Text>
       </View>
+      {followUps === null ? null : (
+        <Text className="max-w-[40%] text-right text-xs text-foreground-muted">{followUps}</Text>
+      )}
       {childThreadId === undefined ? null : (
         <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-subtle" />
       )}
@@ -102,7 +107,9 @@ function BackgroundWorkRow(props: {
   ) : (
     <Pressable
       accessibilityRole="link"
-      accessibilityLabel={gt("Open subagent {label}", { label: item.label })}
+      accessibilityLabel={[gt("Open subagent {label}", { label: item.label }), followUps]
+        .filter(Boolean)
+        .join(", ")}
       onPress={() => props.onOpen(childThreadId)}
       className="active:opacity-70"
     >

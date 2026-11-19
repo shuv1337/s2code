@@ -756,6 +756,7 @@
   "070cd11c15ede233": "tâche en arrière-plan",
   "714e6506edaca58c": "{count, plural, one {{count} tâche en arrière-plan} other {{count} tâches en arrière-plan}}",
   "215994ea6db338ce": "{items} et {last}",
+  "7ec394560ccf4989": "{count, plural, one {+{count} message de suivi} other {+{count} messages de suivi}}",
   "566398d7fbe74c7c": "En attente · {label}",
   "3ad38b2ce47e50d8": "En cours · {label}",
   "9ee216518400e98d": "En attente de {groups}",

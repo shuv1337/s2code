@@ -756,6 +756,7 @@
   "070cd11c15ede233": "Hintergrundaufgabe",
   "714e6506edaca58c": "{count, plural, one {{count} Hintergrundaufgabe} other {{count} Hintergrundaufgaben}}",
   "215994ea6db338ce": "{items} und {last}",
+  "7ec394560ccf4989": "{count, plural, one {+{count} Folgenachricht} other {+{count} Folgenachrichten}}",
   "566398d7fbe74c7c": "Wartet · {label}",
   "3ad38b2ce47e50d8": "Läuft · {label}",
   "9ee216518400e98d": "Wartet auf {groups}",

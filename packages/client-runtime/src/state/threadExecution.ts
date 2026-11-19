@@ -581,10 +581,12 @@ export function presentRunStop(
 }
 
 export interface PendingBackgroundWorkItem {
+  readonly key: string;
   readonly taskId: string;
   readonly kind: BackgroundWorkKind;
   readonly label: string;
   readonly childThreadId: ThreadId | undefined;
+  readonly followUps: number;
 }
 
 export interface PendingBackgroundWorkPresentation {
@@ -620,14 +622,53 @@ export function isBackgroundWorkStopPending(
   return request.retryAt === null || tasks.some((task) => request.taskIds.includes(task.taskId));
 }
 
+export function groupPendingBackgroundTasks(
+  tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>,
+): ReadonlyArray<{
+  readonly key: string;
+  readonly members: readonly [
+    OrchestrationV2PendingBackgroundTask,
+    ...OrchestrationV2PendingBackgroundTask[],
+  ];
+}> {
+  type Members = [OrchestrationV2PendingBackgroundTask, ...OrchestrationV2PendingBackgroundTask[]];
+  const groups: Array<{ key: string; members: Members }> = [];
+  const byChildThread = new Map<ThreadId, Members>();
+  for (const task of tasks) {
+    if (task.kind !== "subagent" || task.childThreadId == null) {
+      groups.push({ key: task.taskId, members: [task] });
+      continue;
+    }
+    const childThreadId = task.childThreadId;
+    const members = byChildThread.get(childThreadId);
+    if (members !== undefined) {
+      members.push(task);
+    } else {
+      const members: Members = [task];
+      byChildThread.set(childThreadId, members);
+      groups.push({ key: `subagent:${childThreadId}`, members });
+    }
+  }
+  return groups;
+}
+
+export function backgroundWorkFollowUpsLabel(count: number, resolve: MFunctionType): string | null {
+  return count === 0
+    ? null
+    : resolve(msg("{count, plural, one {+{count} follow-up} other {+{count} follow-ups}}"), {
+        count,
+      });
+}
+
 export function presentPendingBackgroundWork(
   tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>,
   resolve: MFunctionType = mFallback,
 ): PendingBackgroundWorkPresentation | null {
   if (tasks.length === 0) return null;
   const waiting = backgroundWorkHoldsCompletion(tasks);
-  const items = tasks
-    .map((task): PendingBackgroundWorkItem => {
+  const items = groupPendingBackgroundTasks(tasks)
+    .map(({ key, members }): PendingBackgroundWorkItem => {
+      const [task] = members;
       const description = task.description?.trim();
       const label =
         description === undefined
@@ -638,13 +679,15 @@ export function presentPendingBackgroundWork(
               ? commandDisplayText(description)
               : description;
       return {
+        key,
         taskId: task.taskId,
         kind: task.kind,
         label:
           label === undefined || label.length === 0
             ? resolve(BACKGROUND_WORK_KINDS[task.kind].singular)
             : label,
-        childThreadId: task.kind === "subagent" ? task.childThreadId : undefined,
+        childThreadId: task.kind === "subagent" ? (task.childThreadId ?? undefined) : undefined,
+        followUps: members.length - 1,
       };
     })
     // `map` returned a new array; Hermes has no `toSorted`.

@@ -756,6 +756,7 @@
   "070cd11c15ede233": "background task",
   "714e6506edaca58c": "{count, plural, one {{count} background task} other {{count} background tasks}}",
   "215994ea6db338ce": "{items} and {last}",
+  "7ec394560ccf4989": "{count, plural, one {+{count} follow-up} other {+{count} follow-ups}}",
   "566398d7fbe74c7c": "Waiting · {label}",
   "3ad38b2ce47e50d8": "Running · {label}",
   "9ee216518400e98d": "Waiting on {groups}",

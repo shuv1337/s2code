@@ -12,6 +12,7 @@ import {
   RuntimeRequestId,
   ThreadId,
   type OrchestrationV2ExecutionNode,
+  type OrchestrationV2PendingBackgroundTask,
   type OrchestrationV2RunStatus,
   type OrchestrationV2RuntimeRequest,
 } from "@t3tools/contracts";
@@ -32,6 +33,7 @@ import {
   deriveThreadActivityRun,
   deriveThreadRuntime,
   formatModelSelectionEffort,
+  groupPendingBackgroundTasks,
   isBackgroundWorkStopPending,
   presentPendingBackgroundWork,
   presentProviderGoal,
@@ -755,5 +757,91 @@ describe("presentPendingBackgroundWork", () => {
       },
     ]);
     expect(presentation?.items[0]?.label).toBe("mv a.ts b.ts\ncat > b.ts <<'EOF'\nexport {};\nEOF");
+  });
+
+  it("shows one row per child thread and keeps its identity as calls settle", () => {
+    const childA = ThreadId.make("child-a");
+    const childB = ThreadId.make("child-b");
+    const tasks = [
+      { taskId: "launch", kind: "subagent", description: "Review diffs", childThreadId: childA },
+      { taskId: "dev", kind: "command", description: "Dev server" },
+      {
+        taskId: "follow-up-1",
+        kind: "subagent",
+        description: "Check tests",
+        childThreadId: childA,
+      },
+      { taskId: "other", kind: "subagent", description: "Review diffs", childThreadId: childB },
+      { taskId: "unattached-1", kind: "subagent", description: "Remote review" },
+      {
+        taskId: "follow-up-2",
+        kind: "subagent",
+        description: "Check docs",
+        childThreadId: childA,
+      },
+      { taskId: "unattached-2", kind: "subagent", description: "Remote review" },
+    ] satisfies ReadonlyArray<OrchestrationV2PendingBackgroundTask>;
+
+    const presentation = presentPendingBackgroundWork(tasks);
+    expect(presentation?.title).toBe("Waiting on 4 subagents and 1 command");
+    expect(presentation?.items).toMatchObject([
+      {
+        key: "subagent:child-a",
+        taskId: "launch",
+        label: "Review diffs",
+        childThreadId: "child-a",
+        followUps: 2,
+      },
+      {
+        key: "subagent:child-b",
+        taskId: "other",
+        label: "Review diffs",
+        childThreadId: "child-b",
+        followUps: 0,
+      },
+      {
+        key: "unattached-1",
+        taskId: "unattached-1",
+        label: "Remote review",
+        childThreadId: undefined,
+        followUps: 0,
+      },
+      {
+        key: "unattached-2",
+        taskId: "unattached-2",
+        label: "Remote review",
+        childThreadId: undefined,
+        followUps: 0,
+      },
+      {
+        key: "dev",
+        taskId: "dev",
+        label: "Dev server",
+        childThreadId: undefined,
+        followUps: 0,
+      },
+    ]);
+
+    const childTasks = tasks.filter((task) => task.childThreadId === childA);
+    const child = presentPendingBackgroundWork(childTasks);
+    expect(child?.title).toBe("Waiting · Review diffs");
+    const [group] = groupPendingBackgroundTasks(childTasks);
+    expect(group?.members.map((task) => task.taskId)).toEqual([
+      "launch",
+      "follow-up-1",
+      "follow-up-2",
+    ]);
+    expect(presentPendingBackgroundWork(childTasks.slice(1))?.items).toMatchObject([
+      {
+        key: "subagent:child-a",
+        taskId: "follow-up-1",
+        label: "Check tests",
+        childThreadId: "child-a",
+        followUps: 1,
+      },
+    ]);
+    expect(presentPendingBackgroundWork(childTasks.slice(0, -1))?.items).toMatchObject([
+      { key: "subagent:child-a", taskId: "launch", label: "Review diffs", followUps: 1 },
+    ]);
   });
 });

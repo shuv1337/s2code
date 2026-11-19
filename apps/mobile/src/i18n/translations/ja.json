@@ -756,6 +756,7 @@
   "070cd11c15ede233": "バックグラウンドタスク",
   "714e6506edaca58c": "{count, plural, other {{count} 個のバックグラウンドタスク}}",
   "215994ea6db338ce": "{items}、{last}",
+  "7ec394560ccf4989": "{count, plural, other {+{count} 件の追加メッセージ}}",
   "566398d7fbe74c7c": "待機中 · {label}",
   "3ad38b2ce47e50d8": "実行中 · {label}",
   "9ee216518400e98d": "{groups} を待っています",

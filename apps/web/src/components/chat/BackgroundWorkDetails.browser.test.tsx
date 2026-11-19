@@ -96,7 +96,8 @@ it("opens full command details for short labels and keeps pending tasks current"
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
 });
 
-it("gives a subagent the same status as the background work line", async () => {
+it("counts child threads in the banner and groups their follow-ups in the dialog", async () => {
+  const child = ThreadId.make("child");
   await using screen = await render(
     <ThreadNow
       attention={null}
@@ -110,7 +111,25 @@ it("gives a subagent the same status as the background work line", async () => {
             taskId: "subagent-task",
             kind: "subagent",
             description: "Review refactor diffs",
-            childThreadId: ThreadId.make("child"),
+            childThreadId: child,
+          },
+          {
+            taskId: "follow-up-1",
+            kind: "subagent",
+            description: "Check tests",
+            childThreadId: child,
+          },
+          {
+            taskId: "other-subagent",
+            kind: "subagent",
+            description: "Review documentation",
+            childThreadId: ThreadId.make("other-child"),
+          },
+          {
+            taskId: "follow-up-2",
+            kind: "subagent",
+            description: "Check formatting",
+            childThreadId: child,
           },
         ],
         turnItems: [],
@@ -121,9 +140,14 @@ it("gives a subagent the same status as the background work line", async () => {
       })}
     />,
   );
-  await expect.element(page.getByText("Waiting · Review refactor diffs")).toBeVisible();
+  await expect.element(page.getByText("Waiting on 2 subagents", { exact: false })).toBeVisible();
   await screen.getByRole("button", { name: "Details", exact: true }).click();
-  await expect
-    .element(page.getByRole("dialog").getByText("Waiting", { exact: true }))
-    .toBeVisible();
+  const dialog = page.getByRole("dialog");
+  await vi.waitFor(() =>
+    expect(
+      dialog.getByRole("button", { name: "Open subagent", exact: true }).elements(),
+    ).toHaveLength(2),
+  );
+  await expect.element(dialog.getByText("+2 follow-ups", { exact: true })).toBeVisible();
+  expect(dialog.getByText("Waiting", { exact: true }).elements()).toHaveLength(2);
 });
