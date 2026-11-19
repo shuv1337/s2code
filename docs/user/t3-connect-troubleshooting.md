@@ -5,7 +5,7 @@ A T3 Connect connection goes through four parts, in this order:
 1. **This device** reaches T3 Connect over the internet.
 2. **T3 Connect** checks your sign-in and the host's link.
 3. **The host's tunnel** (cloudflared on the host) carries the request to the host.
-4. **S2Code on the host** answers.
+4. **T3 Code on the host** answers.
 
 When a connection fails, open **Settings > Environments**, find the environment,
 and select **Details**. The first part marked as failed is the cause. Find its

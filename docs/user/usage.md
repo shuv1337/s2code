@@ -22,7 +22,7 @@ the totals for Codex or Claude Code 2.0.63 and newer, because those runs save no
 
 The server keeps scanned usage history for 92 days by default. Claude Code deletes its own
 transcripts after 30 days, so for older Claude usage this history is the only record left. To keep
-it longer, set `usageHistoryRetentionDays` in `<T3 home>/userdata/settings.json` to a number of days
+it longer, set `usageHistoryRetentionDays` in `<S2Code home>/userdata/settings.json` to a number of days
 such as `365`, or to `"unlimited"`. Usage views still show at most 90 days. Lowering the value
 prunes older history on the next refresh, and raising it again does not bring pruned history back.
 While `settings.json` cannot be read, nothing is pruned.
@@ -53,7 +53,7 @@ Use absolute paths or `~/` paths in the account's environment settings; relative
 depend on each project's working directory and cannot be reliably discovered by Usage. Accounts
 sharing a history directory count once.
 
-The server saves its first hostname in `<T3 home>/usage-host-id`, so a recreated container keeps
+The server saves its first hostname in `<S2Code home>/usage-host-id`, so a recreated container keeps
 its usage identity when the S2Code home is persisted. Set `T3CODE_HOST_ID` to choose the identity
 explicitly.
 

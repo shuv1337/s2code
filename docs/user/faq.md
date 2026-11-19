@@ -4,7 +4,7 @@
 
 No. A harness is what turns an LLM into an agent: it gives the model tools, a way to call them, runs them, and hands the results back. Claude Code is kind of a harness. It is an interface (the TUI, the Code tab in the desktop app) plus a harness underneath (the Anthropic Agent SDK). Codex is the same split: the app plus the Codex App Server. S2Code uses those harnesses. It is not a harness, and it does not work without one.
 
-Chef = LLM. Kitchen = harness. S2Code = the restaurant that lets you bring whatever kitchen you want. Our MCP is a cookbook we hand the kitchen, but the chef won't open it unless you tell them to :) See [What is a harness?](https://t3.gg/blog/post/what-is-a-harness) for the long version.
+Chef = LLM. Kitchen = harness. S2Code = the restaurant that lets you bring whatever kitchen you want. Our MCP is a cookbook we hand the kitchen, but the chef won't open it unless you tell them to :) I wrote the long version here: [What is a harness?](https://t3.gg/blog/post/what-is-a-harness)
 
 Bring your own: Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, Kiro, Pi, Muse Code, or fx. [Provider setup](./install.md#providers)
 
@@ -25,19 +25,19 @@ Yes.
 
 ## How much does S2Code cost?
 
-Nothing. S2Code is free and open source (MIT). You bring your own sub and still pay your provider like you already do. Upstream T3 Connect is free too, for now. Every account can connect up to 3 machines running T3 Code. Phones and browsers that connect to them do not count. Need more? Link a paid T3 Chat account. [More machines](#can-i-connect-more-than-3-machines-with-t3-connect) If you hit limits or have issues, you can always fork it, self host, or use Tailscale. [Install](./install.md)
+Nothing. There's no way to pay us to use S2Code. You bring your own sub. It is free and open source (MIT). You still pay your provider like you already do. T3 Connect is free too, for now. Every account can connect up to 3 machines running S2Code. Phones and browsers that connect to them do not count. Need more? Link a paid T3 Chat account. [More machines](#can-i-connect-more-than-3-machines-with-t3-connect) We don't want to charge for this, but if the bill gets unacceptable we may have to change course. If you hit limits or have issues, you can always fork it, self host, or use Tailscale. [Install](./install.md)
 
 ## Can I connect more than 3 machines with T3 Connect?
 
-Yes. Link your T3 Chat account and T3 Connect raises your limit: up to 10 machines with T3 Chat Pro, or 100 with Premier. Open your account menu in upstream T3 Code, go to **T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat and approve. The free T3 Chat plan keeps the normal limit of 3. [More machines with T3 Chat](./remote-access.md#more-machines-with-t3-chat)
+Yes. Link your T3 Chat account and T3 Connect raises your limit: up to 10 machines with T3 Chat Pro, or 100 with Premier. Open your account menu in S2Code, go to **T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat and approve. The free T3 Chat plan keeps the normal limit of 3. [More machines with T3 Chat](./remote-access.md#more-machines-with-t3-chat)
 
 ## Why is my Claude 5-hour limit draining so fast?
 
-It shouldn't anymore. S2Code drives Claude through Anthropic's Agent SDK, and Anthropic's 5h meter used to charge Agent SDK usage about 1.7x more than using Claude Code directly. Weekly limits were never affected. Since upstream v0.1.7, Claude in the app drains your 5h limit at the same rate as Claude Code. Still seeing it? [Update S2Code](./updating.md) on the machine that runs your agents. [Upstream post](https://x.com/theo/status/2114166439813017873) · [Tracking issue](https://github.com/pingdotgg/t3code/issues/24649)
+It shouldn't anymore. S2Code drives Claude through Anthropic's Agent SDK, and Anthropic's 5h meter used to charge Agent SDK usage about 1.7x more than using Claude Code directly. Weekly limits were never affected. Since upstream v0.1.7, Claude in S2Code drains your 5h limit at the same rate as Claude Code. Still seeing it? [Update S2Code](./updating.md) on the machine that runs your agents. [My post on it](https://x.com/theo/status/2114166439813017873) · [Tracking issue](https://github.com/pingdotgg/t3code/issues/24649)
 
 ## How do I use S2Code remotely?
 
-Your agents run wherever S2Code runs: your desktop, a server, or a VPS. Run `s2code-nightly up` on that machine and connect using LAN pairing or Tailscale. T3 Connect and the hosted web client at [app.t3.codes](https://app.t3.codes) are upstream services. [Remote access](./remote-access.md)
+Your agents run wherever S2Code runs: your desktop, a server, a VPS. You connect to it from anywhere. I do this constantly. Less than 5% of my prompts run on my laptop. Run `s2code-nightly up` on that machine and you get really good remote support. T3 Connect is the easy path. LAN pairing and Tailscale work too, and [app.t3.codes](https://app.t3.codes) is the web client. [Remote access](./remote-access.md)
 
 ## How do I use S2Code on my phone?
 
@@ -49,15 +49,15 @@ T3 Connect is our built-in alternative to Tailscale for remote connections. If i
 
 ## Will I get banned for using my subscription?
 
-Upstream T3 Code works with the labs and is within the TOS of Claude Code, Codex, and Google Antigravity. The upstream team worked directly with [SpaceXAI](https://x.com/SpaceXSI/status/2070195830192320600) on the Grok Build and Cursor integrations. Everything else uses official ACP bindings.
+No. We work with all of the labs and S2Code is within the TOS of Claude Code, Codex, and Google Antigravity. We worked directly with [SpaceXAI](https://x.com/SpaceXSI/status/2070195830192320600) to collaborate on the Grok Build and Cursor integrations. Everything else uses official ACP bindings.
 
-For a specific provider or account, check its current terms.
+If it works in S2Code, you can trust it is safe.
 
 ## Can I add a bunch of accounts for one provider?
 
-S2Code does not auto-switch between accounts. That could risk TOS bans.
+I don't think S2Code is the right place to manage a pile of accounts. If we add an auto-switcher, we are risking TOS bans for our users.
 
-A separate work account is fine. Setup for two: [Codex](./providers-codex.md#use-multiple-accounts) · [Claude](./providers-claude.md#separate-accounts-or-configurations). For a bigger pool, manage them outside S2Code with a self-hosted proxy like [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). The upstream team walks through one setup in [this video](https://www.youtube.com/watch?v=D8PikZ1KhUo) and [this guide](https://gist.github.com/t3dotgg/59a521d2ee8d70aaf90e280c175072af). After you set up a hub, S2Code can show its pooled limits under Usage. [Connect a hub](./usage.md#connect-a-cliproxyapi-hub)
+A separate work account is fine. Setup for two: [Codex](./providers-codex.md#use-multiple-accounts) · [Claude](./providers-claude.md#separate-accounts-or-configurations). For a bigger pool, manage them outside S2Code with a self-hosted proxy like [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). I walked through how I use 6 Claude subs and 3 Codex subs in [this video](https://www.youtube.com/watch?v=D8PikZ1KhUo), and wrote up the setup in [this guide](https://gist.github.com/t3dotgg/59a521d2ee8d70aaf90e280c175072af). Hand it to your agent and it will walk you through it. Early apologies if it gets you banned 💀 After you set up a hub, S2Code can show its pooled limits under Usage. [Connect a hub](./usage.md#connect-a-cliproxyapi-hub)
 
 ## Can I use an API key or OpenRouter instead of a subscription?
 
@@ -69,7 +69,7 @@ No. S2Code is a serious developer tool. Locally runnable models are not capable 
 
 ## Does my code go to T3 servers?
 
-No. Your code and prompts go from your machine to your provider (Anthropic, OpenAI, etc.), not to us. With T3 Connect, traffic rides a Cloudflare tunnel (`cloudflared` on your machine). The relay sets up the link. It does not proxy your HTTP or WebSocket sessions. S2Code does send basic product usage events (provider, model, token totals, that kind of thing). No prompts, no file contents. That is the same on Tailscale, LAN, or T3 Connect. Set `T3CODE_TELEMETRY_ENABLED=false` if you want it off. [Product usage data](./telemetry.md)
+No. Your code and prompts go from your machine to your provider (Anthropic, OpenAI, etc.), not to us. With T3 Connect, traffic rides a Cloudflare tunnel (`cloudflared` on your machine). Our relay sets up the link. It does not proxy your HTTP or WebSocket sessions. S2Code does send basic product usage events (provider, model, token totals, that kind of thing). No prompts, no file contents. That is the same on Tailscale, LAN, or T3 Connect. Set `T3CODE_TELEMETRY_ENABLED=false` if you want it off. [Product usage data](./telemetry.md)
 
 ## Worktrees are eating my disk. How do I clean them up?
 
