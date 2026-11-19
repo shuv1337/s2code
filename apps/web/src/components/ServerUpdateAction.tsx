@@ -180,9 +180,7 @@ export function useServerUpdate() {
                   version: result.value.targetVersion,
                 }),
               )
-            : m(
-                msg("Reconnected on shuv2code@{version}.", { version: result.value.targetVersion }),
-              ),
+            : m(msg("Reconnected on s2code@{version}.", { version: result.value.targetVersion })),
       });
     }
     return { status: "updated" };
@@ -340,7 +338,7 @@ export function ServerUpdateAction({
               serverLabel,
             })
           : gt(
-              "Stop S2Code on {serverLabel}, then relaunch with `{command}` using the same subcommand and options. This does not update an installed S2Code service.",
+              "Stop S2Code on {serverLabel}, then relaunch with `{command}` using the same subcommand and options. This does not update an installed s2code command.",
               { command, serverLabel },
             ),
       });
@@ -496,7 +494,7 @@ export function OutdatedServerUpdateAction({
       type: "success",
       title: m(msg("{serverLabel} updated", { serverLabel })),
       description: m(
-        msg("Reconnected on shuv2code@{version}.", { version: result.value.targetVersion }),
+        msg("Reconnected on s2code@{version}.", { version: result.value.targetVersion }),
       ),
     });
   };

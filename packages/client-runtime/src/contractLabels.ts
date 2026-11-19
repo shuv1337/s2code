@@ -70,7 +70,7 @@ export function managedUpdatesMessage(
   organization: string,
   resolve: MFunctionType = mFallback,
 ): string {
-  return resolve(msg("{organization} manages T3 Code updates.", { organization }));
+  return resolve(msg("{organization} manages S2Code updates.", { organization }));
 }
 
 /** @public */
@@ -79,7 +79,7 @@ export function managedNightlyDeniedMessage(
   resolve: MFunctionType = mFallback,
 ): string {
   return resolve(
-    msg("{organization} manages T3 Code updates. Only stable releases can be installed.", {
+    msg("{organization} manages S2Code updates. Only stable releases can be installed.", {
       organization,
     }),
   );

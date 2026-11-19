@@ -57,17 +57,17 @@ function SubscriptionUsage(
   const secondary = palette?.secondary ?? "secondary";
   // English until the app publishes its first snapshot in the UI language.
   const text = props.text ?? {
-    refresh: "Open T3 to refresh",
+    refresh: "Open S2Code to refresh",
     noSessionLimit: "No session limit reported",
     noWeeklyLimit: "No weekly limit reported",
     subscriptionRemaining: "Subscription remaining",
     percentLeft: "{remaining}% left",
     windowPercentLeft: "{window} · {remaining}% left",
     notApplicable: "N/A",
-    openApp: "Open T3",
+    openApp: "Open S2Code",
     noLimits: "No subscription limits available.",
     asOf: "As of {time}",
-    tapToConnect: "Tap to connect in T3",
+    tapToConnect: "Tap to connect in S2Code",
     providerAccessibility: "{provider}. {detail}.",
     windowAccessibility: "{provider}, {window}, {remaining} percent remaining. {reset}. {detail}.",
     moreInApp: {} as Record<string, string>,

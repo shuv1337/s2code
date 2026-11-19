@@ -56,15 +56,22 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
       };
   // English until the app publishes its first snapshot in the UI language.
   const text = props.text ?? {
-    refresh: "Open T3 to refresh",
+    refresh: "Open S2Code to refresh",
     left: "left",
     asOf: "As of {time}",
-    tapToConnect: "Tap to connect in T3",
+    tapToConnect: "Tap to connect in S2Code",
     moreInApp: {} as Record<string, string>,
   };
+  const connectDetail = "Open S2Code to connect";
   const providers = props.providers ?? [
-    { name: "Codex", detail: text.tapToConnect, windows: [], expiresAt: 0, totalWindows: 0 },
-    { name: "Claude", detail: text.tapToConnect, windows: [], expiresAt: 0, totalWindows: 0 },
+    { name: "Codex", detail: connectDetail, windows: [], expiresAt: 0, totalWindows: 0 },
+    {
+      name: "Claude",
+      detail: connectDetail,
+      windows: [],
+      expiresAt: 0,
+      totalWindows: 0,
+    },
   ];
 
   const pad = 14;

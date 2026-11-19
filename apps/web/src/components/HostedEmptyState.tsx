@@ -1,6 +1,5 @@
 import { useAuth } from "@clerk/react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { HOSTED_UNAVAILABLE_MESSAGE } from "@t3tools/shared/hostedConfig";
 import { Link } from "@tanstack/react-router";
 import { T } from "gt-react";
 import { CheckIcon } from "lucide-react";
@@ -47,7 +46,7 @@ export function HostedEmptyState() {
               ) : cloudEnabled ? (
                 <T>Your agents run on your computer.</T>
               ) : (
-                HOSTED_UNAVAILABLE_MESSAGE
+                <T>Your agents run on your computer. Start S2Code there first.</T>
               )}
             </EmptyDescription>
           </EmptyHeader>
