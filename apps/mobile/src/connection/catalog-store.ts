@@ -13,12 +13,14 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { msg } from "gt-react-native";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
+import { m } from "../i18n/messages";
 import * as MobileSecureStorage from "../persistence/mobile-secure-storage";
 import { migrateLegacyConnectionCatalog } from "./migration";
 
@@ -26,10 +28,19 @@ export const CONNECTION_CATALOG_KEY = "t3code.connection-catalog.v1";
 export const CONNECTION_CATALOG_BACKUP_KEY = `${CONNECTION_CATALOG_KEY}.unreadable`;
 export const LEGACY_CONNECTIONS_KEY = "t3code.connections";
 
-function catalogError(operation: string, cause: unknown) {
+const CATALOG_ERROR_MESSAGES = {
+  decode: msg("Could not decode the local connection catalog: {cause}"),
+  encode: msg("Could not encode the local connection catalog: {cause}"),
+  load: msg("Could not load the local connection catalog: {cause}"),
+  save: msg("Could not save the local connection catalog: {cause}"),
+  delete: msg("Could not delete the local connection catalog: {cause}"),
+  migrate: msg("Could not migrate the local connection catalog: {cause}"),
+};
+
+function catalogError(operation: keyof typeof CATALOG_ERROR_MESSAGES, cause: unknown) {
   return new ConnectionTransientError({
     reason: "remote-unavailable",
-    detail: `Could not ${operation} the local connection catalog: ${String(cause)}`,
+    detail: m(CATALOG_ERROR_MESSAGES[operation], { cause: String(cause) }),
   });
 }
 

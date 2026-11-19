@@ -4,10 +4,10 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-import { assert, it } from "@effect/vitest";
-import { vi } from "vite-plus/test";
+import { assert, describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { isolateGitEnv } from "./gitEnv.ts";
+import { unsetInheritedGitRepositoryEnv } from "./gitRepositoryEnv.ts";
 
 const git = (cwd: string, ...args: Array<string>) =>
   NodeChildProcess.execFileSync("git", args, { cwd, stdio: "pipe" });
@@ -84,4 +84,28 @@ it("drops repository selectors and config overrides and bounds discovery at the 
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+describe("git test setup", () => {
+  it("starts tests without the repository selectors git exported to the run", async () => {
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    vi.stubEnv("GIT_DIR", "/repo/.git/worktrees/wt");
+    vi.stubEnv("GIT_INDEX_FILE", "/repo/.git/worktrees/wt/index");
+    vi.stubEnv("GIT_EDITOR", "true");
+
+    vi.resetModules();
+    await import("./gitEnv.ts");
+
+    expect(process.env).not.toHaveProperty("GIT_DIR");
+    expect(process.env).not.toHaveProperty("GIT_INDEX_FILE");
+    expect(process.env.GIT_EDITOR).toBe("true");
+  });
+
+  it("unsets a selector under the spelling Windows passed it in", () => {
+    const inherited = { Git_Dir: "C:\\repo\\.git", GIT_EDITOR: "true", PATH: "C:\\bin" };
+    expect(Object.keys(unsetInheritedGitRepositoryEnv(inherited, "win32"))).toEqual(["Git_Dir"]);
+    expect(Object.keys(unsetInheritedGitRepositoryEnv(inherited, "linux"))).toEqual([]);
+  });
 });

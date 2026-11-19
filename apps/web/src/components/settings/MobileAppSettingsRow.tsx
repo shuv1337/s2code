@@ -1,13 +1,14 @@
-import { resolveProductDownload } from "@t3tools/shared/productIdentity";
-
+import { useGT } from "gt-react";
 import { SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 export function MobileAppSettingsRow() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
   return (
     <SettingsRow
       {...searchableSetting("mobile-app")}
-      description={resolveProductDownload(true).label}
+      description={gt("Fork mobile apps are not available yet.")}
       control={null}
     />
   );

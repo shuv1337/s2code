@@ -204,6 +204,8 @@ The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the
 update fails. Download the new `.deb` and install it the same way.
 
+Update AUR installs with your AUR helper, such as `yay -Syu`, instead of the in-app updater.
+
 ### The bundled command
 
 The desktop app includes a fork command-line tool. To run it from any

@@ -54,15 +54,17 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
         track: material.surfaceVariant,
         error: material.error,
       };
+  // English until the app publishes its first snapshot in the UI language.
+  const text = props.text ?? {
+    refresh: "Open T3 to refresh",
+    left: "left",
+    asOf: "As of {time}",
+    tapToConnect: "Tap to connect in T3",
+    moreInApp: {} as Record<string, string>,
+  };
   const providers = props.providers ?? [
-    { name: "Codex", detail: "Open S2Code to connect", windows: [], expiresAt: 0, totalWindows: 0 },
-    {
-      name: "Claude",
-      detail: "Open S2Code to connect",
-      windows: [],
-      expiresAt: 0,
-      totalWindows: 0,
-    },
+    { name: "Codex", detail: text.tapToConnect, windows: [], expiresAt: 0, totalWindows: 0 },
+    { name: "Claude", detail: text.tapToConnect, windows: [], expiresAt: 0, totalWindows: 0 },
   ];
 
   const pad = 14;
@@ -89,7 +91,7 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
         {
           type: "note",
           provider: provider.name,
-          text: stale ? "Open S2Code to refresh" : provider.detail,
+          text: stale ? text.refresh : provider.detail,
         },
       ];
     return [...provider.windows]
@@ -311,7 +313,7 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
               style={{ fontSize: 10 }}
               modifiers={[padding(3, 0, 0, 3)]}
             >
-              {`left${paceArrow(line.window.accounts ?? [])}`}
+              {`${text.left}${paceArrow(line.window.accounts ?? [])}`}
             </Text>
           </Row>
         </Column>
@@ -333,7 +335,8 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
           {shown.map(row)}
           {hidden > 0 ? (
             <Text color={colors.muted} maxLines={1} style={{ fontSize: 10 }}>
-              {`${hidden} more in S2Code`}
+              {/* oxlint-disable-next-line t3code/no-untranslated-copy -- widget fallback until the app publishes translated text */}
+              {text.moreInApp[String(hidden)] ?? `${hidden} more in S2Code`}
             </Text>
           ) : null}
         </Column>
@@ -344,8 +347,16 @@ export function SubscriptionUsage(props: SubscriptionUsageProps, environment: Wi
           modifiers={[height(footer)]}
         >
           {props.checkedAt
-            ? `As of ${new Date(props.checkedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}`
-            : "Tap to connect in S2Code"}
+            ? text.asOf.replace(
+                "{time}",
+                new Date(props.checkedAt).toLocaleString(undefined, {
+                  hour: "numeric",
+                  minute: "2-digit",
+                  month: "short",
+                  day: "numeric",
+                }),
+              )
+            : text.tapToConnect}
         </Text>
       </Column>
     </Button>
