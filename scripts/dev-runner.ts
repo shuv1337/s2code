@@ -7,7 +7,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import { resolveGitWorktreePath, resolveWorktreeT3Home } from "@t3tools/shared/devHome";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { applyDevelopmentProductOverrides } from "@t3tools/shared/productIdentity";
+import {
+  applyDevelopmentProductOverrides,
+  DEFAULT_HOME_DIRECTORY,
+  LEGACY_HOME_DIRECTORY,
+} from "@t3tools/shared/productIdentity";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -342,7 +346,20 @@ export const createDevRunnerEnv = Effect.fn("dev-runner.createDevRunnerEnv")(fun
       `http://${isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost"}:${webPort}`,
   };
 
-  if (configuredBaseDir !== undefined) {
+  const path = yield* Path.Path;
+  const homeDirectory = yield* HostProcess.HomeDirectory;
+  // The server stores an explicit home's state in userdata, which for a live home is the real
+  // install. Left implicit, dev state stays off live homes.
+  const isLiveHome = [
+    ".t3",
+    DEFAULT_HOME_DIRECTORY,
+    `${DEFAULT_HOME_DIRECTORY}-nightly`,
+    `${DEFAULT_HOME_DIRECTORY}-preview`,
+    LEGACY_HOME_DIRECTORY,
+    `${LEGACY_HOME_DIRECTORY}-nightly`,
+    `${LEGACY_HOME_DIRECTORY}-preview`,
+  ].some((dir) => resolvedBaseDir === path.join(homeDirectory, dir));
+  if (configuredBaseDir !== undefined && !isLiveHome) {
     // Internal alias only after explicit fork/worktree selection, never from ambient T3CODE_HOME.
     output.T3CODE_HOME = resolvedBaseDir;
     output.S2CODE_HOME = resolvedBaseDir;

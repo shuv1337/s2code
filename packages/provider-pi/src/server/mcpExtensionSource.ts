@@ -1,5 +1,6 @@
 // No T3 imports inside the string; resolve Pi and typebox from the user's Pi install.
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import { PULL_REQUEST_LINKING_INSTRUCTIONS } from "@t3tools/provider-core/server/runtimeInstructions";
 
 export const PI_T3_MCP_EXTENSION_FILENAME = "pi-t3-mcp-extension.ts";
 
@@ -27,6 +28,7 @@ const SHARED_SERVERS_ENV = ${JSON.stringify(T3_MCP_SHARED_SERVERS_ENV)};
 const RUNTIME_MODE_ENV = ${JSON.stringify(T3_PI_RUNTIME_MODE_ENV)};
 const EXTENSION_PATH_ENV = ${JSON.stringify(T3_PI_MCP_EXTENSION_PATH_ENV)};
 const ORCHESTRATION_INSTRUCTIONS = ${JSON.stringify(T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim())};
+const PULL_REQUEST_LINKING_INSTRUCTIONS = ${JSON.stringify(PULL_REQUEST_LINKING_INSTRUCTIONS)};
 const SERVICE_TIER_COMMAND = ${JSON.stringify(PI_T3_SERVICE_TIER_COMMAND)};
 const PROTOCOL = "2025-06-18";
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -416,15 +418,26 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // bridge as the credential owner: mcp.json overrides native registrations.
   const supportsExposure = "registerMcpServer" in pi && typeof pi.registerMcpServer === "function";
   const directTools = new Set(["orchestrator_capabilities", "delegate_task", "task_status"]);
+  const ALIAS_PREFIX = "mcp__t3_code__";
   let deferOptionalTools = supportsExposure;
-
   const makeBridge = (server: { readonly name: string; readonly url: string }, trusted: boolean) => {
     const client = createMcpClient(server.url, token);
-    // Preserve public names for saved loadouts and tool selectors. Hidden
-    // canonical names reserve ownership against Pi's configured MCP servers.
+    // Preserve public names for saved loadouts and tool selectors. Canonical
+    // names reserve ownership against Pi's configured MCP servers; the T3 alias
+    // uses model-only to stay out of codemode and hides its own declaration.
     const publicPrefix = \`mcp__\${server.name}__\`;
     const canonicalPrefix = \`mcp__\${server.name.replaceAll("-", "_")}__\`;
     const prefixes = supportsExposure && canonicalPrefix !== publicPrefix ? [publicPrefix, canonicalPrefix] : [publicPrefix];
+    const isDeferred = (name: string) => deferOptionalTools && !(trusted && directTools.has(name));
+    // An alias follows its public tool: gone when --exclude-tools removed it,
+    // off while a direct one is off.
+    const followsPublicTool = (
+      name: string,
+      registered: ReadonlySet<string>,
+      active: ReadonlyArray<string>,
+    ) =>
+      registered.has(publicPrefix + name) &&
+      (isDeferred(name) || active.includes(publicPrefix + name));
     let catalog: ReadonlyArray<McpTool> = [];
     let started: Promise<void> | undefined;
 
@@ -433,17 +446,30 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
       for (const tool of catalog) {
         const name = tool.name;
         for (const prefix of prefixes) {
-          if (trusted && tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(\`\${prefix}\${name}\`);
-          const exposure = prefix !== publicPrefix ? "hidden" :
-            deferOptionalTools && !(trusted && directTools.has(name)) ? "deferred" : "direct";
+          const toolName = \`\${prefix}\${name}\`;
+          if (trusted && tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(toolName);
+          const isAlias = trusted && prefix === ALIAS_PREFIX;
+          const exposure = prefix !== publicPrefix
+            ? (isAlias ? "model-only" : "hidden")
+            : isDeferred(name)
+              ? "deferred"
+              : "direct";
           pi.registerTool({
-            name: \`\${prefix}\${name}\`,
+            name: toolName,
             label: name,
             description: tool.description ?? name,
             parameters: jsonSchemaToTypebox(tool.inputSchema),
             ...(supportsExposure ? { outputSchema: mcpOutputSchema(tool) } : {}),
             ...(supportsExposure ? { exposure } : {}),
+            ...(isAlias ? { prepareLoadout: () => ({ hiddenDeclarations: [toolName] }) } : {}),
             async execute(_toolCallId, params, signal) {
+              // Another extension may switch the public tool off after reconciliation.
+              if (
+                isAlias &&
+                !followsPublicTool(name, new Set(pi.getAllTools().map((tool) => tool.name)), pi.getActiveTools())
+              ) {
+                return { content: [{ type: "text", text: \`Tool \${toolName} not found\` }], details: {}, isError: true };
+              }
               const result = await client.callTool(
                 name,
                 (params ?? {}) as Record<string, unknown>,
@@ -480,11 +506,12 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
       return attempt;
     };
 
-    return { name: server.name, publicPrefix, catalog: () => catalog, registerTools, ensureStarted };
+    return { name: server.name, publicPrefix, catalog: () => catalog, followsPublicTool, registerTools, ensureStarted };
   };
   // Shared servers reuse this session's token on T3's proxy but get none of T3's read-only trust.
+  const t3CodeBridge = makeBridge({ name: "t3-code", url: endpoint }, true);
   const bridges = [
-    makeBridge({ name: "t3-code", url: endpoint }, true),
+    t3CodeBridge,
     ...sharedServers().map((server) => makeBridge(server, false)),
   ];
 
@@ -500,7 +527,6 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     const exposureChanged = deferOptionalTools !== hasToolSearch;
     deferOptionalTools = hasToolSearch;
     if (exposureChanged) for (const bridge of bridges) bridge.registerTools();
-    const active = pi.getActiveTools();
     // Completion gateways can silently drop calls to undeclared tools named
     // in history or guidance. Eagerly load bridged schemas, including after tree
     // restores, while retaining deferred exposure for Pi's allowlist rules.
@@ -511,8 +537,19 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
         ? bridges.flatMap((bridge) => bridge.catalog().map((tool) => bridge.publicPrefix + tool.name))
         : []),
     ];
-    const missing = required.filter((name) => !active.includes(name));
-    if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+    const current = pi.getActiveTools();
+    const missing = required.filter((name) => !current.includes(name));
+    if (missing.length > 0) pi.setActiveTools([...current, ...missing]);
+    // An alias is callable only while active.
+    const registered = new Set(pi.getAllTools().map((tool) => tool.name));
+    const loaded = pi.getActiveTools();
+    const aliases = t3CodeBridge
+      .catalog()
+      .filter((tool) => registered.has(ALIAS_PREFIX + tool.name) && t3CodeBridge.followsPublicTool(tool.name, registered, loaded))
+      .map((tool) => ALIAS_PREFIX + tool.name);
+    const kept = loaded.filter((name) => !name.startsWith(ALIAS_PREFIX) || aliases.includes(name));
+    const added = aliases.filter((name) => !loaded.includes(name));
+    if (added.length > 0 || kept.length !== loaded.length) pi.setActiveTools([...kept, ...added]);
   };
 
   // Tree navigation restores its saved loadout after session_start.
@@ -535,13 +572,14 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Keep guidance in the system prompt so leading slash commands still expand.
   pi.on("before_agent_start", (event, ctx) => {
     reconcileDiscovery(ctx);
+    const instructions = ORCHESTRATION_INSTRUCTIONS + "\\n\\n" + PULL_REQUEST_LINKING_INSTRUCTIONS;
     const sections = event.systemPromptOptions?.sections;
     if (sections && typeof sections === "object" && event.systemPromptOptions?.forceSystemPrompt === undefined) {
       // A full prompt override bypasses Pi's later section rendering.
-      sections.t3_code_orchestration = ORCHESTRATION_INSTRUCTIONS;
+      sections.t3_code_orchestration = instructions;
       return undefined;
     }
-    return { systemPrompt: event.systemPrompt + "\\n\\n" + ORCHESTRATION_INSTRUCTIONS };
+    return { systemPrompt: event.systemPrompt + "\\n\\n" + instructions };
   });
 }
 `;
