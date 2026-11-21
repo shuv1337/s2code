@@ -54,6 +54,7 @@ const clientLaunchHarness = (input: {
   readonly defaultThreadEnvMode?: "local" | "worktree";
   readonly fallbackModel?: ModelSelection;
   readonly providers?: readonly ServerProvider[];
+  readonly refreshWorkspaceSnapshot?: ProviderRegistry.ProviderRegistry["Service"]["refreshWorkspaceSnapshot"];
   readonly providerInstances?: NonNullable<
     Parameters<typeof ServerSettings.layerTest>[0]
   >["providerInstances"];
@@ -78,7 +79,8 @@ const clientLaunchHarness = (input: {
   const layerDependencies = Layer.mergeAll(
     Layer.mock(ProviderRegistry.ProviderRegistry)({
       getProviders: Effect.succeed(input.providers ?? []),
-      refreshWorkspaceSnapshot: () => Effect.succeed(input.providers ?? []),
+      refreshWorkspaceSnapshot:
+        input.refreshWorkspaceSnapshot ?? (() => Effect.succeed(input.providers ?? [])),
     }),
     ServerSettings.layerTest({
       ...(input.providerInstances === undefined
@@ -604,6 +606,154 @@ it.effect(
         code: "invalid_request",
       });
       expect(launched).toHaveLength(1);
+    }),
+);
+
+it.effect(
+  "a pool launch resolves folder-scoped models from cached snapshots and refreshes on model_unavailable",
+  () =>
+    Effect.gen(function* () {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const codex = ProviderDriverKind.make("codex");
+      const cwd = "/projects/client-target";
+      const makeMember = (
+        id: string,
+        usedPercent: number,
+        workspaceModels?: ReadonlyArray<string>,
+      ) =>
+        ({
+          instanceId: ProviderInstanceId.make(id),
+          driver: codex,
+          enabled: true,
+          installed: true,
+          status: "ready",
+          version: null,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-01-01T00:00:00Z",
+          models: [{ slug: "gpt-5.4", name: "GPT", isCustom: false, capabilities: null }],
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            checkedAt: "2026-01-01T00:00:00Z",
+            windows: [{ id: "five_hour", kind: "session", label: "5h", usedPercent }],
+          },
+          ...(workspaceModels === undefined
+            ? {}
+            : {
+                workspaceSnapshots: [
+                  {
+                    cwd,
+                    checkedAt: "2026-01-01T00:00:00Z",
+                    slashCommands: [],
+                    skills: [],
+                    models: workspaceModels.map((slug) => ({
+                      slug,
+                      name: slug,
+                      isCustom: false,
+                      capabilities: null,
+                    })),
+                  },
+                ],
+              }),
+        }) satisfies ServerProvider;
+      const pooled = { driver: codex, enabled: true, disableOnUsageLimit: true };
+      const providerInstances = {
+        [ProviderInstanceId.make("codex_busy")]: pooled,
+        [ProviderInstanceId.make("codex_idle")]: pooled,
+      };
+
+      const cachedRefreshes: Array<string> = [];
+      const cached = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        providers: [
+          makeMember("codex_busy", 80, ["gpt-5.4", "folder-local"]),
+          makeMember("codex_idle", 10, ["gpt-5.4", "folder-local"]),
+        ],
+        providerInstances,
+        refreshWorkspaceSnapshot: ({ instanceId }) => {
+          cachedRefreshes.push(instanceId);
+          return Effect.succeed([]);
+        },
+      });
+      const cachedToolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(cached.dependencies),
+          ),
+        ),
+      );
+      const cachedResult = yield* cachedToolkit
+        .handle("t3_thread_launch", {
+          title: "Cached folder model",
+          projectId: cached.projectId,
+          pool: codex,
+          model: "folder-local",
+        })
+        .pipe(
+          Stream.unwrap,
+          Stream.runCollect,
+          Effect.map((chunks) => chunks.at(-1)?.result),
+          Effect.provide(cached.dependencies),
+        );
+      expect(cachedResult).toMatchObject({
+        modelSelection: { instanceId: "codex_idle", model: "folder-local" },
+        resolvedInstanceId: "codex_idle",
+      });
+      expect(cachedRefreshes).toEqual([]);
+
+      const refreshedIds: Array<string> = [];
+      let currentProviders: ReadonlyArray<ServerProvider> = [
+        makeMember("codex_busy", 80),
+        makeMember("codex_idle", 10),
+      ];
+      const stale = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        providers: currentProviders,
+        providerInstances,
+        refreshWorkspaceSnapshot: ({ instanceId, cwd: targetCwd, scanCwd }) =>
+          Effect.sync(() => {
+            expect(targetCwd).toBe(cwd);
+            expect(scanCwd).toBe(cwd);
+            refreshedIds.push(instanceId);
+            currentProviders = currentProviders.map((provider) =>
+              provider.instanceId === instanceId
+                ? makeMember(instanceId, instanceId === "codex_busy" ? 80 : 10, [
+                    "gpt-5.4",
+                    "folder-local",
+                  ])
+                : provider,
+            );
+            return currentProviders;
+          }),
+      });
+      const staleToolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(stale.dependencies),
+          ),
+        ),
+      );
+      const refreshedResult = yield* staleToolkit
+        .handle("t3_thread_launch", {
+          title: "Refreshed folder model",
+          projectId: stale.projectId,
+          pool: codex,
+          model: "folder-local",
+        })
+        .pipe(
+          Stream.unwrap,
+          Stream.runCollect,
+          Effect.map((chunks) => chunks.at(-1)?.result),
+          Effect.provide(stale.dependencies),
+        );
+      expect(refreshedResult).toMatchObject({
+        modelSelection: { instanceId: "codex_idle", model: "folder-local" },
+        resolvedInstanceId: "codex_idle",
+      });
+      expect(refreshedIds).toEqual(["codex_busy", "codex_idle"]);
+      expect(launched).toHaveLength(2);
     }),
 );
 

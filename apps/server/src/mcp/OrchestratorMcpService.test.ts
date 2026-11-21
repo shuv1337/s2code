@@ -4923,6 +4923,18 @@ describe("OrchestratorMcpService provider resolution", () => {
             },
           },
           {
+            name: "Antigravity model with a thinking suffix by driver",
+            target: {
+              driverKind: ProviderDriverKind.make("antigravity"),
+              model: "gemini-4-neon-high",
+            },
+            expected: {
+              instanceId: antigravityId,
+              model: "gemini-4-neon",
+              options: [{ id: "thought_level", value: "high" }],
+            },
+          },
+          {
             name: "explicit Antigravity thinking overrides the suffix",
             target: {
               providerInstanceId: antigravityId,
@@ -4972,6 +4984,7 @@ describe("OrchestratorMcpService provider resolution", () => {
               hasReceipt: () => Effect.succeed(false),
               resolveThreadStartInstance: (input) => Effect.succeed(input.modelSelection),
               assertProviderInstanceEnabled: () => Effect.void,
+              isProviderInstanceEnabledForProject: () => Effect.succeed(true),
               getThreadRecords: (threadId) =>
                 Effect.succeed(
                   threadId === parentThreadId

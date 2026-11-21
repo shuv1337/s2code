@@ -184,18 +184,53 @@ const poolLaunchSelection = Effect.fn("mcp.poolLaunchSelection")(function* (inpu
   readonly model: string | undefined;
   readonly projectId: ProjectId;
   readonly inherited: ModelSelection | undefined;
+  readonly cwd: string | undefined;
+  readonly replaying: boolean;
 }) {
-  return yield* poolStartSelection({
-    ...input,
-    settings: yield* ServerSettings.ServerSettingsService.pipe(
-      Effect.flatMap((service) => service.getSettings),
-      Effect.mapError(unavailable),
+  const settings = yield* ServerSettings.ServerSettingsService.pipe(
+    Effect.flatMap((service) => service.getSettings),
+    Effect.mapError(unavailable),
+  );
+  const registry = yield* ProviderRegistry.ProviderRegistry;
+  const now = DateTime.toEpochMillis(yield* DateTime.now);
+  const select = (providers: ReadonlyArray<ServerProvider>) =>
+    poolStartSelection({
+      pool: input.pool,
+      model: input.model,
+      projectId: input.projectId,
+      inherited: input.inherited,
+      settings,
+      providers: OrchestrationMcp.withWorkspaceModels(providers, input.cwd),
+      now,
+    });
+  const providers = yield* registry.getProviders;
+  const initial = select(providers);
+  const cwd = input.cwd;
+  if (input.replaying || cwd === undefined) return yield* initial;
+  return yield* initial.pipe(
+    Effect.catchIf(
+      (error) => error.code === "model_unavailable",
+      (error) =>
+        Effect.gen(function* () {
+          const targets = providers.filter(
+            (provider) => provider.driver === input.pool && provider.enabled,
+          );
+          if (targets.length === 0) return yield* error;
+          const scanCwd = yield* Project.ProjectService.pipe(
+            Effect.flatMap((projects) => projects.workspaceScanDirectory(cwd)),
+          );
+          let refreshed = providers;
+          for (const target of targets) {
+            refreshed = yield* registry.refreshWorkspaceSnapshot({
+              instanceId: target.instanceId,
+              cwd,
+              scanCwd,
+            });
+          }
+          return yield* select(refreshed);
+        }),
     ),
-    providers: yield* ProviderRegistry.ProviderRegistry.pipe(
-      Effect.flatMap((registry) => registry.getProviders),
-    ),
-    now: DateTime.toEpochMillis(yield* DateTime.now),
-  });
+  );
 });
 
 const access = Effect.gen(function* () {
@@ -302,14 +337,14 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               );
         if (project !== undefined && input.workspaceStrategy?.type === "existing_worktree")
           yield* assertProjectWorktree(project.workspaceRoot, input.workspaceStrategy.worktreePath);
+        // The thread runs in this folder, whose own provider config can add models.
+        const cwd =
+          input.workspaceStrategy?.type === "existing_worktree"
+            ? input.workspaceStrategy.worktreePath
+            : project?.workspaceRoot;
         if (!replaying && input.modelSelection !== undefined) {
           const { instanceId, model } = input.modelSelection;
           const registry = yield* ProviderRegistry.ProviderRegistry;
-          // The thread runs in this folder, whose own provider config can add models.
-          const cwd =
-            input.workspaceStrategy?.type === "existing_worktree"
-              ? input.workspaceStrategy.worktreePath
-              : project?.workspaceRoot;
           const requireModel = (
             providers: ReadonlyArray<ServerProvider>,
           ): Effect.Effect<void, OrchestratorMcpFailure> => {
@@ -406,6 +441,8 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 model: input.model,
                 projectId,
                 inherited: caller?.modelSelection,
+                cwd,
+                replaying,
               })) ??
           caller?.modelSelection ??
           (projectDefaults

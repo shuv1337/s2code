@@ -1738,7 +1738,8 @@ const make = Effect.gen(function* () {
           : drivers.filter(
               (provider) =>
                 provider.models.length === 0 ||
-                provider.models.some((candidate) => candidate.slug === requestedModel),
+                advertisedModel(provider, requestedModel) !== undefined ||
+                antigravitySuffixedModel(provider, requestedModel) !== undefined,
             );
       if (candidates.length === 0) {
         return yield* failure(
