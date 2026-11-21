@@ -43,6 +43,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -436,6 +437,7 @@ const runPool = <A, E, R>(
       ),
       Layer.provide(layerCheckpointStore),
       Layer.provide(layerServerConfig),
+      Layer.provide(ModelManifest.layerTest),
       Layer.provide(layerInstances),
       Layer.provide(
         Layer.mock(GitWorkflow.GitWorkflowService)({

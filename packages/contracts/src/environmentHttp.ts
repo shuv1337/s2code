@@ -64,6 +64,7 @@ import {
   EnvironmentSpeechAccelerationRequest,
   EnvironmentSpeechModelLinkRequest,
   EnvironmentSpeechModelRequest,
+  EnvironmentSpeechModelDownload,
   EnvironmentSpeechModels,
   EnvironmentSpeechModelUnloadTimeoutRequest,
   EnvironmentSpeechPostProcessingRequest,
@@ -1047,7 +1048,7 @@ export class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
     HttpApiEndpoint.post("downloadModel", "/api/voice/models/download", {
       headers: OptionalBearerHeaders,
       payload: EnvironmentSpeechModelRequest,
-      success: EnvironmentSpeechModels,
+      success: EnvironmentSpeechModelDownload,
       error: [...EnvironmentScopedOperationErrors, EnvironmentRequestInvalidError],
     }).middleware(EnvironmentAuthenticatedAuth),
   )
