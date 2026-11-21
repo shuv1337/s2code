@@ -578,6 +578,7 @@ const layerConfiguredServerMcp = McpSessionRegistry.layer.pipe(
       } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
       Layer.mock(ProviderRegistry.ProviderRegistry)({
         getProviders: Effect.succeed([]),
+        refreshWorkspaceSnapshot: () => Effect.succeed([]),
       } satisfies Partial<ProviderRegistry.ProviderRegistry["Service"]>),
       Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
         list: () => Effect.succeed([]),
@@ -585,7 +586,10 @@ const layerConfiguredServerMcp = McpSessionRegistry.layer.pipe(
       Layer.mock(ScheduledTaskService.ScheduledTaskService)({
         list: () => Effect.succeed({ tasks: [] }),
       } satisfies Partial<ScheduledTaskService.ScheduledTaskService["Service"]>),
-      Layer.mock(ProjectService.ProjectService)({}),
+      Layer.mock(ProjectService.ProjectService)({
+        getById: () => Effect.succeedNone,
+        workspaceScanDirectory: (directory) => Effect.succeed(directory),
+      }),
       Layer.mock(SecretRequests.SecretRequests)({}),
       Layer.mock(RemoteDelegation.RemoteDelegation)({}),
       Layer.mock(PeerForwarding.PeerForwarding)({}),

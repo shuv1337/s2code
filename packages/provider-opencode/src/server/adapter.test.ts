@@ -5100,6 +5100,7 @@ describe("OpenCodeAdapterV2", () => {
         Effect.provideService(ProviderHost.ProviderHost, {
           paths: { cwd: "/workspace" },
           resolveAttachmentPath: () => null,
+          compatibility: () => Effect.undefined,
         } as unknown as ProviderHost.ProviderHost["Service"]),
       );
       yield* adapter.openSession({
