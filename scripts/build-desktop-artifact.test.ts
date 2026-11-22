@@ -65,7 +65,6 @@ import {
   renderMacPasskeyEntitlements,
   resolveMacFileExclusions,
   resolveMacWebAuthnEntitlements,
-  isMacPasskeySigningConfigured,
   resolveMacPasskeySigningConfiguration,
   resolveMergedStageDependencies,
   resolveBuildOptions,
@@ -2321,25 +2320,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ),
     ),
   );
-
-  it("enables macOS passkey signing only when a provisioning profile or RP domains are configured", () => {
-    assert.isFalse(isMacPasskeySigningConfigured({}));
-    assert.isFalse(
-      isMacPasskeySigningConfigured({
-        T3CODE_CLERK_PUBLISHABLE_KEY: `pk_live_${btoa("clerk.s2code.dev$")}`,
-      }),
-    );
-    assert.isTrue(
-      isMacPasskeySigningConfigured({
-        T3CODE_MACOS_PROVISIONING_PROFILE: "/tmp/s2code.provisionprofile",
-      }),
-    );
-    assert.isTrue(
-      isMacPasskeySigningConfigured({
-        T3CODE_CLERK_PASSKEY_RP_DOMAINS: "clerk.s2code.dev",
-      }),
-    );
-  });
 
   it("derives macOS passkey signing configuration from the Clerk publishable key", () => {
     const configuration = resolveMacPasskeySigningConfiguration({

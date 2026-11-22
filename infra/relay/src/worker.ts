@@ -208,25 +208,6 @@ export const layer = Api.make(
       },
     });
     const hookInboxes = yield* HookInboxObject.HookInboxObject;
-    const mobileTelemetryBindings = observability
-      ? {
-          rateLimit: yield* Cloudflare.RateLimit("MOBILE_TELEMETRY_RATE_LIMIT", {
-            namespaceId: 1003,
-            simple: {
-              limit: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.limit,
-              period: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.periodSeconds,
-            },
-          }),
-          sourceMaps: yield* Cloudflare.R2.ReadBucket(observability.mobileSourceMaps),
-          token: yield* observability.mobileTelemetryIngestToken.token,
-          tracesUrl: yield* observability.traces.otelTracesEndpoint,
-          tracesDataset: yield* observability.traces.name,
-          logsUrl: yield* observability.mobileLogs.otelLogsEndpoint,
-          logsDataset: yield* observability.mobileLogs.name,
-          metricsUrl: yield* observability.mobileMetrics.otelMetricsEndpoint,
-          metricsDataset: yield* observability.mobileMetrics.name,
-        }
-      : undefined;
 
     const alchemyRuntimeContext: Alchemy.BaseRuntimeContext = yield* Cloudflare.Worker;
 
@@ -376,71 +357,74 @@ export const layer = Api.make(
       allowEndpoint: allowWith(hookEndpointRateLimit),
     });
 
-    // `fetch` rebuilds its layers per request; the source map cache must outlive one.
-    const layerMobileTelemetry = mobileTelemetryBindings
-      ? yield* Effect.gen(function* () {
-          const mobileSourceMapLookups = yield* MobileTelemetry.SourceMaps.pipe(
-            Effect.provide(MobileTelemetry.layerSourceMaps),
-            Effect.provideService(MobileTelemetry.SourceMapObjects, {
-              get: (key) =>
-                mobileTelemetryBindings.sourceMaps.get(key).pipe(
-                  Effect.map((object) =>
-                    object === null
-                      ? undefined
-                      : {
-                          size: object.size,
-                          text: object.text().pipe(
-                            Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
-                            Effect.mapError(
-                              (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
-                            ),
-                          ),
-                        },
-                  ),
-                  Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
-                  Effect.mapError(
-                    (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
-                  ),
-                ),
-            }),
-          );
-          return MobileTelemetry.layer.pipe(
-            Layer.provide(
-              Layer.mergeAll(
-                Layer.effect(
-                  MobileTelemetry.MobileTelemetrySettings,
-                  Effect.gen(function* () {
-                    return MobileTelemetry.MobileTelemetrySettings.of({
-                      axiomToken: yield* mobileTelemetryBindings.token,
-                      destinations: {
-                        traces: {
-                          url: yield* mobileTelemetryBindings.tracesUrl,
-                          dataset: yield* mobileTelemetryBindings.tracesDataset,
-                        },
-                        logs: {
-                          url: yield* mobileTelemetryBindings.logsUrl,
-                          dataset: yield* mobileTelemetryBindings.logsDataset,
-                        },
-                        metrics: {
-                          url: yield* mobileTelemetryBindings.metricsUrl,
-                          dataset: yield* mobileTelemetryBindings.metricsDataset,
-                        },
-                      },
-                    });
-                  }),
-                ),
-                Layer.succeed(MobileTelemetry.MobileTelemetryRateLimiter, {
-                  allow: allowWith(
-                    mobileTelemetryBindings.rateLimit,
-                    "relay.mobile_telemetry.rate_limiter_failed_open",
-                  ),
-                }),
-                Layer.succeed(MobileTelemetry.SourceMaps, mobileSourceMapLookups),
+    const layerMobileTelemetry = yield* Effect.gen(function* () {
+      if (observability === undefined) return MobileTelemetry.layerDisabled;
+      const mobileTelemetryRateLimit = yield* Cloudflare.RateLimit("MOBILE_TELEMETRY_RATE_LIMIT", {
+        namespaceId: 1003,
+        simple: {
+          limit: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.limit,
+          period: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.periodSeconds,
+        },
+      });
+      const mobileSourceMaps = yield* Cloudflare.R2.ReadBucket(observability.mobileSourceMaps);
+      const mobileTelemetryToken = yield* observability.mobileTelemetryIngestToken.token;
+      const mobileTracesUrl = yield* observability.traces.otelTracesEndpoint;
+      const mobileTracesDataset = yield* observability.traces.name;
+      const mobileLogsUrl = yield* observability.mobileLogs.otelLogsEndpoint;
+      const mobileLogsDataset = yield* observability.mobileLogs.name;
+      const mobileMetricsUrl = yield* observability.mobileMetrics.otelMetricsEndpoint;
+      const mobileMetricsDataset = yield* observability.mobileMetrics.name;
+      // `fetch` rebuilds its layers per request; the source map cache must outlive one.
+      const mobileSourceMapLookups = yield* MobileTelemetry.SourceMaps.pipe(
+        Effect.provide(MobileTelemetry.layerSourceMaps),
+        Effect.provideService(MobileTelemetry.SourceMapObjects, {
+          get: (key) =>
+            mobileSourceMaps.get(key).pipe(
+              Effect.map((object) =>
+                object === null
+                  ? undefined
+                  : {
+                      size: object.size,
+                      text: object.text().pipe(
+                        Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+                        Effect.mapError(
+                          (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
+                        ),
+                      ),
+                    },
               ),
+              Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
+              Effect.mapError((cause) => new MobileTelemetry.SourceMapObjectError({ key, cause })),
             ),
-          );
-        })
-      : MobileTelemetry.layerDisabled;
+        }),
+      );
+      return MobileTelemetry.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.effect(
+              MobileTelemetry.MobileTelemetrySettings,
+              Effect.gen(function* () {
+                return MobileTelemetry.MobileTelemetrySettings.of({
+                  axiomToken: yield* mobileTelemetryToken,
+                  destinations: {
+                    traces: { url: yield* mobileTracesUrl, dataset: yield* mobileTracesDataset },
+                    logs: { url: yield* mobileLogsUrl, dataset: yield* mobileLogsDataset },
+                    metrics: { url: yield* mobileMetricsUrl, dataset: yield* mobileMetricsDataset },
+                  },
+                });
+              }),
+            ),
+            Layer.succeed(MobileTelemetry.MobileTelemetryRateLimiter, {
+              allow: allowWith(
+                mobileTelemetryRateLimit,
+                "relay.mobile_telemetry.rate_limiter_failed_open",
+              ),
+            }),
+            Layer.succeed(MobileTelemetry.SourceMaps, mobileSourceMapLookups),
+          ),
+        ),
+      );
+    });
 
     const layerApp = Layer.mergeAll(
       layerRelayApi,

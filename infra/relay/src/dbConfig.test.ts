@@ -7,8 +7,6 @@ import * as Result from "effect/Result";
 import {
   DEFAULT_EXTERNAL_CONNECTION_LIMIT,
   DEFAULT_PLANETSCALE_CONNECTION_LIMIT,
-  DEFAULT_RELAY_DB_CLUSTER_SIZE,
-  DEFAULT_RELAY_DB_REPLICAS,
   relayDatabaseBackendConfig,
   relayDatabaseSizingConfig,
 } from "./dbConfig.ts";
@@ -18,10 +16,6 @@ const provideEnv = (env: Readonly<Record<string, string>>) =>
 
 it.effect("defaults PlanetScale sizing to single-node PS_5 rather than upstream PS_160", () =>
   Effect.gen(function* () {
-    assert.notEqual(DEFAULT_RELAY_DB_CLUSTER_SIZE, "PS_160");
-    assert.equal(DEFAULT_RELAY_DB_CLUSTER_SIZE, "PS_5");
-    assert.equal(DEFAULT_RELAY_DB_REPLICAS, 0);
-
     for (const env of [{}, { RELAY_DB_CLUSTER_SIZE: "", RELAY_DB_REPLICAS: "" }]) {
       const sizing = yield* relayDatabaseSizingConfig.pipe(provideEnv(env));
       assert.deepEqual(sizing, { clusterSize: "PS_5", replicas: 0 });

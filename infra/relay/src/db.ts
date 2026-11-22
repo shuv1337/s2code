@@ -14,6 +14,15 @@ import {
   relayDatabaseMode,
   relayDatabaseSizingConfig,
 } from "./dbConfig.ts";
+import { withoutWorkerConfigCapture } from "./forkOwnership.ts";
+
+function withLogicalId<Resource extends object>(resource: Resource, logicalId: string): Resource {
+  return new Proxy(resource, {
+    has: (target, property) => property === "LogicalId" || property in target,
+    get: (target, property, receiver) =>
+      property === "LogicalId" ? logicalId : Reflect.get(target, property, receiver),
+  });
+}
 
 export class RelayDb extends Context.Service<
   RelayDb,
@@ -51,7 +60,9 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
   const database =
     mode === "shared-database"
       ? yield* Effect.gen(function* () {
-          const { clusterSize, replicas } = yield* relayDatabaseSizingConfig;
+          const { clusterSize, replicas } = yield* relayDatabaseSizingConfig.pipe(
+            withoutWorkerConfigCapture,
+          );
           return yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
             name: "t3coderelay",
             region: { slug: "us-west" },
@@ -82,7 +93,7 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
 
 export const RelayDatabase = Effect.gen(function* () {
   const { stage } = yield* Alchemy.Stack;
-  const backend = yield* relayDatabaseBackendConfig;
+  const backend = yield* relayDatabaseBackendConfig.pipe(withoutWorkerConfigCapture);
   if (backend.kind === "planetscale") {
     const ps = yield* PlanetscaleDatabase;
     return {
@@ -110,6 +121,11 @@ export const RelayDatabase = Effect.gen(function* () {
 });
 
 export const RelayHyperdrive = Effect.gen(function* () {
+  if ((yield* Alchemy.ALCHEMY_PHASE.pipe(withoutWorkerConfigCapture)) === "runtime") {
+    // At runtime Hyperdrive.Connect only reads LogicalId to look up env.RelayHyperdrive.
+    const ref = yield* Cloudflare.Hyperdrive.Connection.ref("RelayHyperdrive");
+    return withLogicalId(ref, "RelayHyperdrive");
+  }
   const db = yield* RelayDatabase;
   return yield* Cloudflare.Hyperdrive.Connection("RelayHyperdrive", {
     origin: db.origin,

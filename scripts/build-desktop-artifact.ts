@@ -1284,9 +1284,7 @@ function normalizePasskeyRpDomain(value: string): string {
   return parsed.hostname;
 }
 
-export function isMacPasskeySigningConfigured(
-  env: Readonly<Record<string, string | undefined>>,
-): boolean {
+function isMacPasskeySigningConfigured(env: Readonly<Record<string, string | undefined>>): boolean {
   return Boolean(
     env.T3CODE_MACOS_PROVISIONING_PROFILE?.trim() || env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim(),
   );

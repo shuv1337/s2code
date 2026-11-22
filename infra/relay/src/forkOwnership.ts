@@ -1,4 +1,11 @@
+import * as Alchemy from "alchemy";
 import { forkClerkPublishableKey, forkHostedOrigin } from "@t3tools/shared/hostedConfig";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 
 const CLOUDFLARE_ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/iu;
 const PLACEHOLDER_DOMAINS = ["example.com", "example.net", "example.org"] as const;
@@ -13,6 +20,18 @@ export interface ForkRelayDeploymentEnv {
   readonly databaseBackend: "planetscale" | "external";
   readonly observabilityBackend: "axiom" | "none";
 }
+
+/**
+ * Strip Alchemy's Worker `RuntimeContext` around deploy-only `Config.*` reads so
+ * `Platform.ts` does not bind deploy-time secrets/vars onto the public Worker env.
+ */
+export const withoutWorkerConfigCapture = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.updateContext(
+    effect,
+    Context.omit(Alchemy.RuntimeContext) as (ctx: Context.Context<R>) => Context.Context<R>,
+  );
 
 function isPlaceholderDomain(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.+$/u, "");
@@ -38,6 +57,23 @@ export function assertForkRelayHost(name: string, value: string | undefined): st
     throw new Error(`${name} must be a fork-owned domain, not an upstream or placeholder host.`);
   }
   return normalized;
+}
+
+export function assertForkOtlpTracesUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    throw new Error("RELAY_OTLP_TRACES_URL must be a valid fork-owned HTTPS URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("RELAY_OTLP_TRACES_URL must use HTTPS.");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("RELAY_OTLP_TRACES_URL must not contain embedded credentials.");
+  }
+  assertForkRelayHost("RELAY_OTLP_TRACES_URL", parsed.hostname);
+  return parsed.toString();
 }
 
 function assertForkRelayClerkPublishableKey(value: string | undefined): string {
@@ -111,6 +147,10 @@ export function assertForkRelayDeploymentEnv(
     : undefined;
   const clerkPublishableKey = assertForkRelayClerkPublishableKey(env.CLERK_PUBLISHABLE_KEY);
   const databaseBackend = assertForkRelayDatabaseEnv(env);
+  const rawOtlpTracesUrl = env.RELAY_OTLP_TRACES_URL?.trim();
+  if (rawOtlpTracesUrl) {
+    assertForkOtlpTracesUrl(rawOtlpTracesUrl);
+  }
   const observabilityBackend = env.AXIOM_TOKEN?.trim() ? "axiom" : "none";
 
   return {
@@ -123,3 +163,45 @@ export function assertForkRelayDeploymentEnv(
     observabilityBackend,
   };
 }
+
+const optionalConfigString = (name: string) =>
+  Config.String(name).pipe(
+    Config.option,
+    Config.map((value) => Option.getOrUndefined(value)),
+  );
+
+const validateForkRelayConfig = Effect.fn("ForkOwnership.validate")(function* (
+  env: Readonly<Record<string, string | undefined>>,
+) {
+  return yield* Effect.try({
+    try: () => assertForkRelayDeploymentEnv(env),
+    catch: (error) =>
+      new Config.ConfigError(
+        new Schema.SchemaError(
+          new SchemaIssue.InvalidValue({
+            message:
+              error instanceof Error ? error.message : "Invalid fork relay deployment config.",
+          }),
+        ),
+      ),
+  });
+});
+
+/** Reads deployment ownership settings through Effect Config so Alchemy's `.env` loader applies. */
+export const forkRelayDeploymentConfig: Config.Config<ForkRelayDeploymentEnv> = Config.all({
+  CLOUDFLARE_ACCOUNT_ID: optionalConfigString("CLOUDFLARE_ACCOUNT_ID"),
+  RELAY_API_ZONE_NAME: optionalConfigString("RELAY_API_ZONE_NAME"),
+  RELAY_TUNNEL_ZONE_NAME: optionalConfigString("RELAY_TUNNEL_ZONE_NAME"),
+  RELAY_DOMAIN: optionalConfigString("RELAY_DOMAIN"),
+  CLERK_PUBLISHABLE_KEY: optionalConfigString("CLERK_PUBLISHABLE_KEY"),
+  RELAY_DB_HOST: optionalConfigString("RELAY_DB_HOST"),
+  RELAY_DB_PORT: optionalConfigString("RELAY_DB_PORT"),
+  RELAY_DB_NAME: optionalConfigString("RELAY_DB_NAME"),
+  RELAY_DB_USER: optionalConfigString("RELAY_DB_USER"),
+  RELAY_DB_PASSWORD: optionalConfigString("RELAY_DB_PASSWORD"),
+  RELAY_DB_ACCESS_CLIENT_ID: optionalConfigString("RELAY_DB_ACCESS_CLIENT_ID"),
+  RELAY_DB_ACCESS_CLIENT_SECRET: optionalConfigString("RELAY_DB_ACCESS_CLIENT_SECRET"),
+  PLANETSCALE_ORGANIZATION: optionalConfigString("PLANETSCALE_ORGANIZATION"),
+  RELAY_OTLP_TRACES_URL: optionalConfigString("RELAY_OTLP_TRACES_URL"),
+  AXIOM_TOKEN: optionalConfigString("AXIOM_TOKEN"),
+}).pipe(Config.mapEffect(validateForkRelayConfig));

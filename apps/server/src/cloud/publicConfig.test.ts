@@ -1,12 +1,14 @@
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 
 import {
   hostedAppUrlConfig,
   isCloudPublicConfigConfigured,
   makeCloudCliOAuthConfig,
+  makeOptionalHostedAppUrlConfig,
   makeRelayUrlConfig,
   resolveRelayClientTracingConfig,
 } from "./publicConfig.ts";
@@ -73,6 +75,38 @@ it.effect("derives direct Clerk OAuth endpoints from statically injected public 
       scopes: ["openid", "profile", "email", "offline_access"],
     });
   }),
+);
+
+it.effect(
+  "optionalHostedAppUrlConfig returns None only when unset/blank and rejects invalid or upstream URLs",
+  () =>
+    Effect.gen(function* () {
+      assert.isTrue(Option.isNone(yield* makeOptionalHostedAppUrlConfig("").pipe(provideEnv({}))));
+      assert.isTrue(
+        Option.isNone(
+          yield* makeOptionalHostedAppUrlConfig("").pipe(
+            provideEnv({ T3CODE_HOSTED_APP_URL: "   " }),
+          ),
+        ),
+      );
+      assert.deepEqual(
+        yield* makeOptionalHostedAppUrlConfig("").pipe(
+          provideEnv({ T3CODE_HOSTED_APP_URL: "https://app.fork.test" }),
+        ),
+        Option.some("https://app.fork.test"),
+      );
+      assert.deepEqual(
+        yield* makeOptionalHostedAppUrlConfig("https://embedded.fork.test").pipe(provideEnv({})),
+        Option.some("https://embedded.fork.test"),
+      );
+      for (const bad of ["https://app.t3.codes", "http://app.fork.test", "not-a-url"]) {
+        const result = yield* makeOptionalHostedAppUrlConfig("").pipe(
+          provideEnv({ T3CODE_HOSTED_APP_URL: bad }),
+          Effect.result,
+        );
+        assert.isTrue(Result.isFailure(result), bad);
+      }
+    }),
 );
 
 it("requires a pinned mint public key and does not require a hosted app URL", () => {

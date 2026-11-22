@@ -9,6 +9,7 @@ import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
@@ -129,12 +130,32 @@ function makeCloudMintPublicKeyConfig(fallback = buildTimeCloudMintPublicKey) {
 
 export const cloudMintPublicKeyConfig = makeCloudMintPublicKeyConfig();
 
-export const hostedAppUrlConfig = makePublicValueConfig(
-  "T3CODE_HOSTED_APP_URL",
+const buildTimeHostedAppUrl = readBuildTimeValue(
   typeof __T3CODE_BUILD_HOSTED_APP_URL__ === "undefined"
     ? DEFAULT_HOSTED_APP_URL
     : __T3CODE_BUILD_HOSTED_APP_URL__,
+);
+
+export const hostedAppUrlConfig = makePublicValueConfig(
+  "T3CODE_HOSTED_APP_URL",
+  buildTimeHostedAppUrl,
 ).pipe(Config.mapEffect(validateHostedAppUrl));
+
+/** `None` only when unset or blank; any non-empty value still fails closed if invalid or upstream. */
+export function makeOptionalHostedAppUrlConfig(fallback = buildTimeHostedAppUrl) {
+  return Config.String("T3CODE_HOSTED_APP_URL").pipe(
+    Config.option,
+    Config.mapEffect((runtime) => {
+      const raw = Option.isSome(runtime) ? runtime.value.trim() : fallback.trim();
+      if (raw.length === 0) {
+        return Effect.succeed(Option.none<string>());
+      }
+      return validateHostedAppUrl(raw).pipe(Effect.asSome);
+    }),
+  );
+}
+
+export const optionalHostedAppUrlConfig = makeOptionalHostedAppUrlConfig();
 
 function validateHostedAppUrl(value: string) {
   try {

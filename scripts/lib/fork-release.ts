@@ -1,3 +1,5 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Validates Ed25519 SPKI PEM in release preflight.
+import * as NodeCrypto from "node:crypto";
 import {
   CLI_ARCHIVE_PLATFORM_KEYS,
   cliArchiveFileName,
@@ -149,6 +151,18 @@ export function resolveForkConnectReleaseConfig(env: Environment): ForkConnectRe
   const relayUrl = forkHostedOrigin(rawRelayUrl);
   if (relayUrl === null) {
     throw new Error("T3CODE_RELAY_URL must be a fork-owned HTTPS origin.");
+  }
+  const pem = cloudMintPublicKey.replace(/\\n/gu, "\n");
+  if (/PRIVATE KEY/iu.test(pem) || !/^-----BEGIN PUBLIC KEY-----\n/u.test(pem)) {
+    throw new Error("T3CODE_CLOUD_MINT_PUBLIC_KEY must be an Ed25519 SPKI public key PEM.");
+  }
+  try {
+    const key = NodeCrypto.createPublicKey(pem);
+    if (key.asymmetricKeyType !== "ed25519") {
+      throw new Error("wrong key type");
+    }
+  } catch {
+    throw new Error("T3CODE_CLOUD_MINT_PUBLIC_KEY must be a valid Ed25519 SPKI public key PEM.");
   }
   const clerkPublishableKey = forkClerkPublishableKey(rawClerkPublishableKey);
   if (clerkPublishableKey === null) {

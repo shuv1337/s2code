@@ -43,7 +43,7 @@ import {
   PUBLISH_AGENT_ACTIVITY_SECRET,
   RELAY_URL_SECRET,
 } from "../cloud/config.ts";
-import { hostedAppUrlConfig, relayUrlConfig } from "../cloud/publicConfig.ts";
+import { optionalHostedAppUrlConfig, relayUrlConfig } from "../cloud/publicConfig.ts";
 import * as RelayTracing from "../cloud/relayTracing.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -99,26 +99,17 @@ function formatDeviceAuthorizationPrompt(
   ].join("\n");
 }
 
-export const shouldUseOutOfBandCliOAuth = (input: {
-  readonly headless: boolean;
-  readonly sshSession: boolean;
-  readonly interactiveTty: boolean;
-  readonly hasHostedAppUrl: boolean;
-}): boolean =>
-  input.headless || input.sshSession || !input.interactiveTty || !input.hasHostedAppUrl;
-
 const authorizeCli = Effect.fn("cloud.cli.authorize")(function* (options: {
   readonly headless: boolean;
 }) {
   const tokens = yield* CliTokenManager.CloudCliTokenManager;
-  const hasHostedAppUrl = Option.isSome(yield* Effect.option(hostedAppUrlConfig));
+  const hostedAppUrl = yield* optionalHostedAppUrlConfig;
   // Loopback OAuth needs a local interactive terminal and a hosted /connect page.
-  const useOutOfBandOAuth = shouldUseOutOfBandCliOAuth({
-    headless: options.headless,
-    sshSession: yield* headlessSessionConfig,
-    interactiveTty: Boolean(process.stdin.isTTY && process.stdout.isTTY),
-    hasHostedAppUrl,
-  });
+  const useOutOfBandOAuth =
+    options.headless ||
+    (yield* headlessSessionConfig) ||
+    !(process.stdin.isTTY && process.stdout.isTTY) ||
+    Option.isNone(hostedAppUrl);
   if (!useOutOfBandOAuth) {
     const authorization = yield* tokens.get;
     if (authorization._tag === "Authorized") {

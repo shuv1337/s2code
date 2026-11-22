@@ -23,7 +23,7 @@ import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "../serverRuntimeState.ts";
-import { acquireRelayClientForLink, shouldUseOutOfBandCliOAuth } from "./connect.ts";
+import { acquireRelayClientForLink } from "./connect.ts";
 import { resolveHostCliCommand } from "./invocation.ts";
 
 const managedExecutable = {
@@ -32,33 +32,6 @@ const managedExecutable = {
   source: "managed",
   version: RelayClient.CLOUDFLARED_VERSION,
 } as const;
-
-it("uses out-of-band device authorization when no hosted app URL is configured", () => {
-  assert.isTrue(
-    shouldUseOutOfBandCliOAuth({
-      headless: false,
-      sshSession: false,
-      interactiveTty: true,
-      hasHostedAppUrl: false,
-    }),
-  );
-  assert.isFalse(
-    shouldUseOutOfBandCliOAuth({
-      headless: false,
-      sshSession: false,
-      interactiveTty: true,
-      hasHostedAppUrl: true,
-    }),
-  );
-  assert.isTrue(
-    shouldUseOutOfBandCliOAuth({
-      headless: true,
-      sshSession: false,
-      interactiveTty: true,
-      hasHostedAppUrl: true,
-    }),
-  );
-});
 
 it.effect("does not install the relay client when the user declines the managed download", () =>
   Effect.gen(function* () {

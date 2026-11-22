@@ -10,7 +10,7 @@ import * as Planetscale from "@alchemy.run/planetscale";
 
 import { PublishClientConfig, tokenDigest } from "./src/clientConfig.ts";
 import * as RelayDb from "./src/db.ts";
-import { assertForkRelayDeploymentEnv } from "./src/forkOwnership.ts";
+import { forkRelayDeploymentConfig } from "./src/forkOwnership.ts";
 import {
   MobileSourceMapsUploadCredentials,
   OptionalRelayObservability,
@@ -19,9 +19,6 @@ import { isPreviewStage } from "./src/previewStages.ts";
 import { PreviewTunnelSweep, PreviewTunnelSweepProvider } from "./src/previewTunnelSweep.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./src/zone.ts";
 import * as RelayWorker from "./src/worker.ts";
-
-// Ownership preflight must precede Stack/layer construction so upstream or unconfigured runs fail closed.
-const forkRelayEnv = assertForkRelayDeploymentEnv(process.env);
 
 export default Alchemy.Stack(
   "T3CodeRelay",
@@ -35,7 +32,15 @@ export default Alchemy.Stack(
       Planetscale.providers(),
       PreviewTunnelSweepProvider(),
     ),
-    state: Cloudflare.state({ accountId: forkRelayEnv.cloudflareAccountId }),
+    // Validate ownership via Effect Config (including infra/relay/.env) before state or resources build.
+    state: Layer.unwrap(
+      forkRelayDeploymentConfig.pipe(
+        Effect.map((forkRelayEnv) =>
+          Cloudflare.state({ accountId: forkRelayEnv.cloudflareAccountId }),
+        ),
+        Effect.orDie,
+      ),
+    ),
   },
   Effect.gen(function* () {
     const { stage } = yield* Alchemy.Stack;

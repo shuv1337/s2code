@@ -6,7 +6,6 @@ import * as AlchemyTelemetry from "alchemy/Telemetry";
 import * as Axiom from "@alchemy.run/axiom";
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Output from "alchemy/Output";
-import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -19,6 +18,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as Tracer from "effect/Tracer";
 
 import { relayResourceNameForStage } from "./deploymentConfig.ts";
+import { assertForkOtlpTracesUrl, withoutWorkerConfigCapture } from "./forkOwnership.ts";
 import { MobileMonitoring } from "./mobileTelemetry/monitoring.ts";
 import { RelayMonitoring } from "./monitoring.ts";
 
@@ -129,21 +129,20 @@ const validateOtlpTracesUrl = Effect.fn("RelayObservability.validateOtlpTracesUr
   value: string | undefined,
 ) {
   if (value === undefined) return undefined;
-  const invalid = new Config.ConfigError(
-    new Schema.SchemaError(
-      new SchemaIssue.InvalidValue({
-        message: "RELAY_OTLP_TRACES_URL must be a fork-owned HTTPS URL.",
-      }),
-    ),
-  );
-  const parsed = yield* Effect.try({
-    try: () => new URL(value),
-    catch: () => invalid,
+  return yield* Effect.try({
+    try: () => assertForkOtlpTracesUrl(value),
+    catch: (error) =>
+      new Config.ConfigError(
+        new Schema.SchemaError(
+          new SchemaIssue.InvalidValue({
+            message:
+              error instanceof Error
+                ? error.message
+                : "RELAY_OTLP_TRACES_URL must be a fork-owned HTTPS URL.",
+          }),
+        ),
+      ),
   });
-  if (parsed.protocol !== "https:" || forkHostedOrigin(parsed.origin) === null) {
-    return yield* Effect.fail(invalid);
-  }
-  return parsed.toString();
 });
 
 export const relayOtlpTracesConfig = Config.all({
@@ -166,7 +165,18 @@ export const relayOtlpTracesConfig = Config.all({
 }).pipe(Config.map(({ url, token }) => (url === undefined ? undefined : { url, token })));
 
 export const OptionalRelayObservability = Effect.gen(function* () {
-  if (!(yield* isAxiomObservabilityEnabled)) {
+  const phase = yield* Alchemy.ALCHEMY_PHASE.pipe(withoutWorkerConfigCapture);
+  if (phase === "runtime") {
+    // At runtime, MobileSourceMapsBucket is bound onto WorkerEnvironment iff Axiom mode was planned.
+    const workerEnv = yield* Effect.serviceOption(Cloudflare.WorkerEnvironment);
+    const hasMobileTelemetryBinding =
+      Option.isSome(workerEnv) &&
+      typeof workerEnv.value === "object" &&
+      workerEnv.value !== null &&
+      "MobileSourceMapsBucket" in workerEnv.value;
+    return hasMobileTelemetryBinding ? yield* RelayObservability : undefined;
+  }
+  if (!(yield* isAxiomObservabilityEnabled.pipe(withoutWorkerConfigCapture))) {
     return undefined;
   }
   return yield* RelayObservability;
@@ -174,6 +184,11 @@ export const OptionalRelayObservability = Effect.gen(function* () {
 
 export const RelayTelemetryLayer = Layer.unwrap(
   Effect.gen(function* () {
+    const phase = yield* Alchemy.ALCHEMY_PHASE.pipe(withoutWorkerConfigCapture);
+    if (phase === "runtime") {
+      // Bound OTLP destinations are read per event via Alchemy.Telemetry.layer in worker.ts.
+      return Layer.empty;
+    }
     const observability = yield* OptionalRelayObservability;
     if (observability !== undefined) {
       return Axiom.Telemetry({
@@ -182,7 +197,7 @@ export const RelayTelemetryLayer = Layer.unwrap(
         traces: observability.traces,
       });
     }
-    const otlp = yield* relayOtlpTracesConfig;
+    const otlp = yield* relayOtlpTracesConfig.pipe(withoutWorkerConfigCapture);
     if (otlp !== undefined) {
       return AlchemyTelemetry.layerOtlp({
         serviceName: "t3code-relay",

@@ -108,7 +108,10 @@ Self-hosted Postgres mode (recommended for this fork; selected whenever `RELAY_D
 
 - Variables: `RELAY_DB_HOST` (tunnel/Access hostname), `RELAY_DB_NAME`,
   `RELAY_DB_USER`, optional `RELAY_DB_PORT` (public origin only; default `5432`),
-  optional `RELAY_DB_CONNECTION_LIMIT` (default `20`)
+  optional `RELAY_DB_CONNECTION_LIMIT` (default `20`), optional
+  `RELAY_DB_MIGRATION_SSLMODE` (`disable`, `allow`, `prefer`, `require`, `verify-ca`,
+  or `verify-full`; defaults to `disable` on the Access tunnel path and `require`
+  on the public path)
 - Secrets: `RELAY_DB_PASSWORD`, plus `RELAY_DB_ACCESS_CLIENT_ID` and
   `RELAY_DB_ACCESS_CLIENT_SECRET` (set both for Cloudflare Tunnel + Access
   `AccessOrigin`, or leave both unset for `PublicOrigin`; setting only one fails)

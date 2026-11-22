@@ -1,9 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Offline guard checks inspect source and workflows without provisioning providers.
 import * as NodeFS from "node:fs";
 import { UPSTREAM_HOSTED_DOMAINS } from "@t3tools/shared/hostedConfig";
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 
-import { assertForkRelayDeploymentEnv } from "./forkOwnership.ts";
+import { assertForkRelayDeploymentEnv, forkRelayDeploymentConfig } from "./forkOwnership.ts";
 
 const VALID_ACCOUNT_ID = "771240435fb4f1407f2b4669085dc79d";
 const VALID_CLERK_KEY = `pk_live_${btoa("clerk.s2code.dev$")}`;
@@ -70,7 +73,7 @@ describe("assertForkRelayDeploymentEnv", () => {
     ).toThrow("Configure either external Postgres (RELAY_DB_HOST) or PlanetScale");
   });
 
-  it("fails closed on empty env, malformed account IDs, or half-set external DB credentials", () => {
+  it("fails closed on empty env, malformed account IDs, half-set Access creds, or unsafe OTLP URLs", () => {
     expect(() => assertForkRelayDeploymentEnv({})).toThrow("CLOUDFLARE_ACCOUNT_ID");
     for (const badAccount of ["", "not-hex", "1234", "g".repeat(32)]) {
       expect(() =>
@@ -86,6 +89,18 @@ describe("assertForkRelayDeploymentEnv", () => {
     expect(() =>
       assertForkRelayDeploymentEnv(validExternalEnv({ RELAY_DB_ACCESS_CLIENT_ID: "" })),
     ).toThrow("RELAY_DB_ACCESS_CLIENT_ID and RELAY_DB_ACCESS_CLIENT_SECRET");
+    expect(() =>
+      assertForkRelayDeploymentEnv(
+        validExternalEnv({
+          RELAY_OTLP_TRACES_URL: "https://user:pass@traces.s2code.dev/v1/traces",
+        }),
+      ),
+    ).toThrow("embedded credentials");
+    expect(() =>
+      assertForkRelayDeploymentEnv(
+        validExternalEnv({ RELAY_OTLP_TRACES_URL: "https://traces.example.com/v1/traces" }),
+      ),
+    ).toThrow("RELAY_OTLP_TRACES_URL");
   });
 
   it.each(UPSTREAM_HOSTED_DOMAINS)(
@@ -141,12 +156,31 @@ describe("assertForkRelayDeploymentEnv", () => {
     ).toThrow("CLERK_PUBLISHABLE_KEY");
   });
 
-  it("runs before Alchemy.Stack and pins Cloudflare.state to the validated accountId", () => {
+  it.effect(
+    "resolves forkRelayDeploymentConfig through Effect ConfigProvider (for local .env)",
+    () =>
+      Effect.gen(function* () {
+        const env = Object.fromEntries(
+          Object.entries(validExternalEnv()).filter(([, value]) => value !== undefined),
+        ) as Record<string, string>;
+        const resolved = yield* forkRelayDeploymentConfig.pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+        );
+        assert.equal(resolved.cloudflareAccountId, VALID_ACCOUNT_ID);
+        assert.equal(resolved.databaseBackend, "external");
+
+        const empty = yield* forkRelayDeploymentConfig.pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+          Effect.result,
+        );
+        assert.isTrue(Result.isFailure(empty));
+      }),
+  );
+
+  it("pins Cloudflare.state through Effect Config rather than top-level process.env", () => {
     const source = NodeFS.readFileSync(new URL("../alchemy.run.ts", import.meta.url), "utf8");
-    const preflightIndex = source.indexOf("assertForkRelayDeploymentEnv(process.env)");
-    const stackIndex = source.indexOf("Alchemy.Stack(");
-    expect(preflightIndex).toBeGreaterThan(-1);
-    expect(stackIndex).toBeGreaterThan(preflightIndex);
+    expect(source).not.toContain("process.env");
+    expect(source).toContain("forkRelayDeploymentConfig");
     expect(source).toContain("Cloudflare.state({ accountId: forkRelayEnv.cloudflareAccountId })");
     expect(source).toContain("cloudMintPublicKey: cloudMintKeyPair.publicKey");
   });
@@ -156,7 +190,7 @@ describe("hosted workflow guards", () => {
   const readWorkflow = (name: string) =>
     NodeFS.readFileSync(new URL(`../../../.github/workflows/${name}`, import.meta.url), "utf8");
 
-  it("restricts deploy-relay.yml to shuv1337/s2code main, supports external Postgres migrations, and omits push/T3Chat secrets", () => {
+  it("enforces deploy-relay.yml repo/main guard, preflight-before-migrations order, env-only Access tokens, and token-free summary", () => {
     const deploy = readWorkflow("deploy-relay.yml");
     expect(deploy).toContain("github.repository == 'shuv1337/s2code'");
     expect(deploy).toContain("github.ref == 'refs/heads/main'");
@@ -166,32 +200,29 @@ describe("hosted workflow guards", () => {
     expect(deploy).toContain("runs-on: ubuntu-24.04");
     expect(deploy).toContain("name: production");
     expect(deploy).toContain("cancel-in-progress: false");
-    expect(deploy).toContain("APNS_ENABLED: ${{ vars.APNS_ENABLED || 'false' }}");
-    expect(deploy).toContain("RELAY_DB_HOST: ${{ vars.RELAY_DB_HOST }}");
-    expect(deploy).toContain("RELAY_DB_CLUSTER_SIZE: ${{ vars.RELAY_DB_CLUSTER_SIZE }}");
-    expect(deploy).toContain("RELAY_DB_REPLICAS: ${{ vars.RELAY_DB_REPLICAS }}");
-    expect(deploy).toContain("RELAY_OTLP_TRACES_URL: ${{ vars.RELAY_OTLP_TRACES_URL }}");
-    expect(deploy).toContain("RELAY_DB_PASSWORD: ${{ secrets.RELAY_DB_PASSWORD }}");
-    expect(deploy).toContain("RELAY_DB_ACCESS_CLIENT_ID: ${{ secrets.RELAY_DB_ACCESS_CLIENT_ID }}");
-    expect(deploy).toContain(
-      "RELAY_DB_ACCESS_CLIENT_SECRET: ${{ secrets.RELAY_DB_ACCESS_CLIENT_SECRET }}",
-    );
-    expect(deploy).toContain("RELAY_OTLP_TRACES_TOKEN: ${{ secrets.RELAY_OTLP_TRACES_TOKEN }}");
     expect(deploy).not.toMatch(/APNS_PRIVATE_KEY|FCM_SERVICE_ACCOUNT|T3CHAT_LINK_SECRET/);
 
+    const preflightIndex = deploy.indexOf("- name: Verify fork relay ownership configuration");
     const migrateIndex = deploy.indexOf("- name: Run external Postgres migrations");
     const deployIndex = deploy.indexOf("- name: Deploy production relay stage");
-    expect(migrateIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeGreaterThan(-1);
+    expect(migrateIndex).toBeGreaterThan(preflightIndex);
     expect(deployIndex).toBeGreaterThan(migrateIndex);
+
     const migrateStep = deploy.slice(migrateIndex, deployIndex);
     expect(migrateStep).toContain("if: env.RELAY_DB_HOST != ''");
-    expect(migrateStep).toContain("access tcp");
+    expect(migrateStep).toContain("TUNNEL_SERVICE_TOKEN_ID:");
+    expect(migrateStep).toContain("TUNNEL_SERVICE_TOKEN_SECRET:");
+    expect(migrateStep).not.toMatch(/--service-token-id|--service-token-secret/);
+    expect(migrateStep).toContain("${RELAY_DB_MIGRATION_SSLMODE:-disable}");
     expect(migrateStep).toContain("vp run --filter t3code-relay migrate:postgres");
 
     const summaryStep = deploy.split("- name: Publish public relay outputs to summary")[1]!;
-    expect(summaryStep).toContain(".url");
-    expect(summaryStep).toContain(".cloudMintPublicKey");
-    expect(summaryStep).not.toMatch(/Token|token|Credentials|credentials|PASSWORD/);
+    expect(summaryStep).toContain("relay-client-config.env");
+    expect(summaryStep).not.toContain("npx");
+    expect(summaryStep).not.toMatch(
+      /CLOUDFLARE_API_TOKEN|Token|token|Credentials|credentials|PASSWORD/,
+    );
   });
 
   it("gates every job in relay-preview.yml and relay-preview-cleanup.yml behind RELAY_PREVIEWS_ENABLED", () => {

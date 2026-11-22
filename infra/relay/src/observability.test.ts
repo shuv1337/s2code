@@ -36,6 +36,9 @@ it.effect("parses optional self-hosted OTLP trace config and rejects upstream or
     for (const badUrl of [
       "http://traces.s2code.dev/v1/traces",
       "https://relay.t3.codes/v1/traces",
+      "https://user:secret@traces.s2code.dev/v1/traces",
+      "https://traces.example.com/v1/traces",
+      "https://traces.test/v1/traces",
       "not-a-url",
     ]) {
       const result = yield* relayOtlpTracesConfig.pipe(
