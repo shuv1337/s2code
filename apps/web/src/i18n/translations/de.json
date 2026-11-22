@@ -9582,6 +9582,7 @@
   "c6473fd9810fe47f": "Genehmigung für neue T3-Connect-Geräte verlangen",
   "da7029b74a481832": "Deine Sitzung hat keine Berechtigung, den Zugriff zu verwalten.",
   "c7a49b7cba491fdc": "Gehostetes Connect",
+  "be2b49ee8afa65e1": "Die Browser-Anmeldung ist für diesen Ursprung nicht verfügbar. Melde dich in der Desktop-App an oder führe `s2code connect` auf diesem Host aus.",
   "b0b5de2fdc9514b5": "T3 Connect",
   "2c2a12fbdc300d03": "Um diese Einstellungen zu bearbeiten, kopple diese Verbindung mit den Berechtigungen „Relay anzeigen“ und „Relay verwalten“.",
   "3b3d299149f45c3d": "Klicke auf „Umgebung hinzufügen“, um eine weitere Umgebung zu koppeln, oder verbinde eine über T3 Connect.",

@@ -138,6 +138,7 @@ describe("fork public configuration", () => {
       S2CODE_HOME: " /new-home ",
       SHUV2CODE_HOME: "/old-home",
       T3CODE_HOME: "/upstream",
+      S2CODE_CLOUD_MINT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\\nKEY\\n-----END PUBLIC KEY-----",
       S2CODE_PORT: "5773",
       SHUV2CODE_PORT: "4773",
       s2code_otlp_headers: "canonical-observability",
@@ -148,6 +149,10 @@ describe("fork public configuration", () => {
       S2CODE_HOME: "/new-home",
       SHUV2CODE_HOME: "/new-home",
       T3CODE_HOME: "/new-home",
+      S2CODE_CLOUD_MINT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\\nKEY\\n-----END PUBLIC KEY-----",
+      SHUV2CODE_CLOUD_MINT_PUBLIC_KEY:
+        "-----BEGIN PUBLIC KEY-----\\nKEY\\n-----END PUBLIC KEY-----",
+      T3CODE_CLOUD_MINT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\\nKEY\\n-----END PUBLIC KEY-----",
       S2CODE_PORT: "5773",
       SHUV2CODE_PORT: "5773",
       T3CODE_PORT: "5773",

@@ -10,18 +10,24 @@ import * as Planetscale from "@alchemy.run/planetscale";
 
 import { PublishClientConfig, tokenDigest } from "./src/clientConfig.ts";
 import * as RelayDb from "./src/db.ts";
-import { MobileSourceMapsUploadCredentials, RelayObservability } from "./src/observability.ts";
+import { assertForkRelayDeploymentEnv } from "./src/forkOwnership.ts";
+import {
+  MobileSourceMapsUploadCredentials,
+  OptionalRelayObservability,
+} from "./src/observability.ts";
 import { isPreviewStage } from "./src/previewStages.ts";
 import { PreviewTunnelSweep, PreviewTunnelSweepProvider } from "./src/previewTunnelSweep.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./src/zone.ts";
 import * as RelayWorker from "./src/worker.ts";
 
-// Boundary guard must precede Stack/layer construction, which can provision resources.
-throw new Error("Hosted relay deployment is not supported in this fork.");
+// Ownership preflight must precede Stack/layer construction so upstream or unconfigured runs fail closed.
+const forkRelayEnv = assertForkRelayDeploymentEnv(process.env);
 
 export default Alchemy.Stack(
   "T3CodeRelay",
   {
+    // Axiom and PlanetScale providers resolve credentials lazily on first resource use,
+    // so keeping them registered requires no credentials in external-DB or no-Axiom mode.
     providers: Layer.mergeAll(
       Axiom.providers(),
       Cloudflare.providers(),
@@ -29,16 +35,19 @@ export default Alchemy.Stack(
       Planetscale.providers(),
       PreviewTunnelSweepProvider(),
     ),
-    state: Cloudflare.state(),
+    state: Cloudflare.state({ accountId: forkRelayEnv.cloudflareAccountId }),
   },
   Effect.gen(function* () {
     const { stage } = yield* Alchemy.Stack;
-    const db = yield* RelayDb.PlanetscaleDatabase;
+    const db = yield* RelayDb.RelayDatabase;
     const hyperdrive = yield* RelayDb.RelayHyperdrive;
     const managedEndpointZone = yield* ManagedEndpointZone.pipe(Effect.orDie);
     const relayApiZone = yield* RelayApiZone.pipe(Effect.orDie);
-    const observability = yield* RelayObservability;
-    const mobileSourceMapsUploadCredentials = yield* MobileSourceMapsUploadCredentials;
+    const observability = yield* OptionalRelayObservability;
+    const mobileSourceMapsUploadCredentials = observability
+      ? yield* MobileSourceMapsUploadCredentials
+      : undefined;
+    const cloudMintKeyPair = yield* RelayWorker.CloudMintKeyPair;
     const api = yield* RelayWorker.Api;
     if (isPreviewStage(stage)) {
       const { managedEndpointZoneName } = yield* RelayDeploymentConfig;
@@ -50,37 +59,50 @@ export default Alchemy.Stack(
     }
     yield* PublishClientConfig({
       url: api.url,
-      mobileTracingUrl: observability.traces.otelTracesEndpoint,
-      mobileTracingDataset: observability.traces.name,
-      mobileTracingToken: observability.mobileIngestToken.token,
-      clientTracingUrl: observability.traces.otelTracesEndpoint,
-      clientTracingDataset: observability.traces.name,
-      clientTracingToken: observability.clientIngestToken.token,
-      tokenDigest: Output.map(
-        Output.all(observability.mobileIngestToken.token, observability.clientIngestToken.token),
-        tokenDigest,
-      ),
+      cloudMintPublicKey: cloudMintKeyPair.publicKey,
+      ...(observability
+        ? {
+            mobileTracingUrl: observability.traces.otelTracesEndpoint,
+            mobileTracingDataset: observability.traces.name,
+            mobileTracingToken: observability.mobileIngestToken.token,
+            clientTracingUrl: observability.traces.otelTracesEndpoint,
+            clientTracingDataset: observability.traces.name,
+            clientTracingToken: observability.clientIngestToken.token,
+            tokenDigest: Output.map(
+              Output.all(
+                observability.mobileIngestToken.token,
+                observability.clientIngestToken.token,
+              ),
+              tokenDigest,
+            ),
+          }
+        : {}),
     });
 
     return {
-      databaseName: db.database.name,
-      databaseBranchName: db.branch?.name ?? "main",
+      databaseName: db.databaseName,
+      databaseBranchName: db.databaseBranchName,
       hyperdriveName: hyperdrive.name,
       workerName: api.workerName,
       url: api.url,
+      cloudMintPublicKey: cloudMintKeyPair.publicKey,
       relayApiZoneId: relayApiZone.zoneId,
       managedEndpointZoneId: managedEndpointZone.zoneId,
-      mobileTracingUrl: observability.traces.otelTracesEndpoint,
-      mobileTracingDataset: observability.traces.name,
-      mobileTracingToken: observability.mobileIngestToken.token,
-      clientTracingUrl: observability.traces.otelTracesEndpoint,
-      clientTracingDataset: observability.traces.name,
-      clientTracingToken: observability.clientIngestToken.token,
-      mobileLogsDataset: observability.mobileLogs.name,
-      mobileMetricsDataset: observability.mobileMetrics.name,
-      mobileSourceMapsBucket: observability.mobileSourceMaps.bucketName,
-      // The MOBILE_SOURCEMAPS_R2 secret for GitHub Actions and EAS Build.
-      mobileSourceMapsUploadCredentials,
+      ...(observability
+        ? {
+            mobileTracingUrl: observability.traces.otelTracesEndpoint,
+            mobileTracingDataset: observability.traces.name,
+            mobileTracingToken: observability.mobileIngestToken.token,
+            clientTracingUrl: observability.traces.otelTracesEndpoint,
+            clientTracingDataset: observability.traces.name,
+            clientTracingToken: observability.clientIngestToken.token,
+            mobileLogsDataset: observability.mobileLogs.name,
+            mobileMetricsDataset: observability.mobileMetrics.name,
+            mobileSourceMapsBucket: observability.mobileSourceMaps.bucketName,
+            // The MOBILE_SOURCEMAPS_R2 secret for GitHub Actions and EAS Build.
+            mobileSourceMapsUploadCredentials,
+          }
+        : {}),
     };
   }).pipe(Effect.provide(RelayWorker.layer)),
 );

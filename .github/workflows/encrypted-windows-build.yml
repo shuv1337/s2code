@@ -24,6 +24,12 @@ jobs:
       AGE_RECIPIENT: ${{ inputs.recipient }}
       S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/s2code
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
+      T3CODE_CLOUD_MINT_PUBLIC_KEY: ${{ vars.T3CODE_CLOUD_MINT_PUBLIC_KEY }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.T3CODE_CLERK_JWT_TEMPLATE }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
+      T3CODE_HOSTED_APP_URL: ${{ vars.T3CODE_HOSTED_APP_URL }}
     steps:
       # Public fetch needs no credential injection or recursive submodule cleanup.
       # The vendored .repos tree contains incomplete nested submodule metadata.
@@ -94,6 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module -e 'import { resolveForkConnectReleaseConfig } from "./scripts/lib/fork-release.ts"; resolveForkConnectReleaseConfig(process.env);'
           node scripts/update-release-package-versions.ts "$PRIVATE_BUILD_VERSION"
           cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml
           mkdir -p release-private/linux-resource-monitor

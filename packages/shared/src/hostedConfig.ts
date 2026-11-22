@@ -8,7 +8,7 @@ export const UPSTREAM_HOSTED_DOMAINS = [
   "t3tools.github.io",
 ] as const;
 export const HOSTED_UNAVAILABLE_MESSAGE =
-  "Hosted Connect is unavailable: this fork has no configured cloud service. Use direct or Tailscale pairing instead. Upstream accounts are separate.";
+  "Hosted Connect is not configured in this build. Use direct or Tailscale pairing instead. Upstream accounts are separate.";
 
 function isUpstreamHostedDomain(hostname: string) {
   const host = hostname.toLowerCase().replace(/\.+$/, "");

@@ -102,6 +102,12 @@ on:
       relay_url:
         required: false
         type: string
+      cloud_mint_public_key:
+        required: false
+        type: string
+      hosted_app_url:
+        required: false
+        type: string
       release_publication:
         required: false
         default: false
@@ -170,6 +176,8 @@ jobs:
       T3CODE_CLERK_JWT_TEMPLATE: ${{ inputs.clerk_jwt_template }}
       T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ inputs.clerk_cli_oauth_client_id }}
       T3CODE_RELAY_URL: ${{ inputs.relay_url }}
+      T3CODE_CLOUD_MINT_PUBLIC_KEY: ${{ inputs.cloud_mint_public_key }}
+      T3CODE_HOSTED_APP_URL: ${{ inputs.hosted_app_url }}
       AZURE_SIGNING_AUTH: ${{ inputs.platform == 'win' && inputs.win_signed && vars.AZURE_SIGNING_AUTH || '' }}
       AZURE_SUBSCRIPTION_ID: ${{ inputs.platform == 'win' && inputs.win_signed && vars.AZURE_SUBSCRIPTION_ID || '' }}
       S2CODE_DESKTOP_UPDATE_REPOSITORY: shuv1337/s2code

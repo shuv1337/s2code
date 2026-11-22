@@ -9,7 +9,11 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { relayDatabaseMode } from "./dbConfig.ts";
+import {
+  relayDatabaseBackendConfig,
+  relayDatabaseMode,
+  relayDatabaseSizingConfig,
+} from "./dbConfig.ts";
 
 export class RelayDb extends Context.Service<
   RelayDb,
@@ -46,13 +50,16 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
   const mode = relayDatabaseMode(stage);
   const database =
     mode === "shared-database"
-      ? yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
-          name: "t3coderelay",
-          region: { slug: "us-west" },
-          clusterSize: "PS_160",
-          migrations: { dir: schema.out, table: "relay_migrations" },
-          replicas: 2,
-        }).pipe(RemovalPolicy.retain())
+      ? yield* Effect.gen(function* () {
+          const { clusterSize, replicas } = yield* relayDatabaseSizingConfig;
+          return yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
+            name: "t3coderelay",
+            region: { slug: "us-west" },
+            clusterSize,
+            migrations: { dir: schema.out, table: "relay_migrations" },
+            replicas,
+          }).pipe(RemovalPolicy.retain());
+        })
       : yield* Planetscale.PostgresDatabase.ref("RelayPostgresDatabase", {
           stage: "prod",
         });
@@ -73,13 +80,42 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
   return { branch, database, runtimeRole };
 });
 
+export const RelayDatabase = Effect.gen(function* () {
+  const { stage } = yield* Alchemy.Stack;
+  const backend = yield* relayDatabaseBackendConfig;
+  if (backend.kind === "planetscale") {
+    const ps = yield* PlanetscaleDatabase;
+    return {
+      kind: "planetscale" as const,
+      databaseName: ps.database.name,
+      databaseBranchName: ps.branch?.name ?? "main",
+      origin: ps.runtimeRole.origin,
+      originConnectionLimit: backend.originConnectionLimit,
+    };
+  }
+  if (stage !== "prod") {
+    return yield* Effect.die(
+      new Error(
+        `External Postgres mode only supports the "prod" stage (got "${stage}"). Preview stages require PlanetScale branching.`,
+      ),
+    );
+  }
+  return {
+    kind: "external" as const,
+    databaseName: backend.databaseName,
+    databaseBranchName: "external",
+    origin: backend.origin,
+    originConnectionLimit: backend.originConnectionLimit,
+  };
+});
+
 export const RelayHyperdrive = Effect.gen(function* () {
-  const { runtimeRole } = yield* PlanetscaleDatabase;
+  const db = yield* RelayDatabase;
   return yield* Cloudflare.Hyperdrive.Connection("RelayHyperdrive", {
-    origin: runtimeRole.origin,
+    origin: db.origin,
     caching: {
       disabled: true,
     },
-    originConnectionLimit: 40,
+    originConnectionLimit: db.originConnectionLimit,
   });
 });

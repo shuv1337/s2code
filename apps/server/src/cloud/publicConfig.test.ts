@@ -5,6 +5,7 @@ import * as Result from "effect/Result";
 
 import {
   hostedAppUrlConfig,
+  isCloudPublicConfigConfigured,
   makeCloudCliOAuthConfig,
   makeRelayUrlConfig,
   resolveRelayClientTracingConfig,
@@ -73,6 +74,41 @@ it.effect("derives direct Clerk OAuth endpoints from statically injected public 
     });
   }),
 );
+
+it("requires a pinned mint public key and does not require a hosted app URL", () => {
+  const validBase = {
+    T3CODE_RELAY_URL: "https://relay.fork.test",
+    T3CODE_CLOUD_MINT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\\nKEY\\n-----END PUBLIC KEY-----",
+    T3CODE_CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("clerk.fork.test$")}`,
+    T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_123",
+  };
+
+  assert.isTrue(isCloudPublicConfigConfigured(validBase, {}));
+  assert.isFalse(
+    isCloudPublicConfigConfigured(
+      {
+        ...validBase,
+        T3CODE_CLOUD_MINT_PUBLIC_KEY: "",
+        T3CODE_HOSTED_APP_URL: "https://app.fork.test",
+      },
+      {},
+    ),
+  );
+  assert.isFalse(
+    isCloudPublicConfigConfigured({ ...validBase, T3CODE_RELAY_URL: "https://relay.t3.codes" }, {}),
+  );
+  assert.isTrue(
+    isCloudPublicConfigConfigured(
+      {},
+      {
+        relayUrl: validBase.T3CODE_RELAY_URL,
+        cloudMintPublicKey: validBase.T3CODE_CLOUD_MINT_PUBLIC_KEY,
+        clerkPublishableKey: validBase.T3CODE_CLERK_PUBLISHABLE_KEY,
+        clerkCliOAuthClientId: validBase.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID,
+      },
+    ),
+  );
+});
 
 it("product opt-out disables relay tracing with either built-in or runtime credentials", () => {
   const fallback = {

@@ -24,6 +24,8 @@ jobs:
   cleanup_pr:
     name: Tear down relay preview
     if: >-
+      github.repository == 'shuv1337/s2code' &&
+      vars.RELAY_PREVIEWS_ENABLED == 'true' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'pull_request_target' &&
       (
@@ -100,7 +102,11 @@ jobs:
 
   list_closed_previews:
     name: List closed relay previews
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request_target'
+    if: >-
+      github.repository == 'shuv1337/s2code' &&
+      vars.RELAY_PREVIEWS_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request_target'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -124,7 +130,11 @@ jobs:
   sweep_pr:
     name: Retry teardown for PR ${{ matrix.number }}
     needs: list_closed_previews
-    if: github.ref == 'refs/heads/main' && needs.list_closed_previews.outputs.numbers != '[]'
+    if: >-
+      github.repository == 'shuv1337/s2code' &&
+      vars.RELAY_PREVIEWS_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      needs.list_closed_previews.outputs.numbers != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:

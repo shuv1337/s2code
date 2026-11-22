@@ -9589,6 +9589,7 @@
   "c6473fd9810fe47f": "Kräv godkännande för nya T3 Connect-enheter",
   "da7029b74a481832": "Din session har inte behörighet att hantera åtkomst.",
   "c7a49b7cba491fdc": "Molnbaserad Connect",
+  "be2b49ee8afa65e1": "Webbläsarinloggning är inte tillgänglig för detta ursprung. Logga in från skrivbordsappen eller kör `s2code connect` på den här värden.",
   "b0b5de2fdc9514b5": "T3 Connect",
   "2c2a12fbdc300d03": "Parkoppla den här anslutningen med både behörigheterna Visa relä och Hantera relä för att redigera de här inställningarna.",
   "3b3d299149f45c3d": "Klicka på ”Lägg till miljö” för att parkoppla en annan miljö, eller anslut en från T3 Connect.",

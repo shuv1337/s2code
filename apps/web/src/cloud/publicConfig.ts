@@ -83,6 +83,11 @@ export function resolveRelayTracingConfig() {
     : null;
 }
 
+export function hasConfiguredCloudBuild(): boolean {
+  const config = resolveCloudPublicConfig();
+  return Boolean(config.clerkPublishableKey && config.clerkJwtTemplate && config.relayUrl);
+}
+
 export function hasCloudPublicConfig(): boolean {
   const config = resolveCloudPublicConfig();
   if (!config.clerkPublishableKey || !config.clerkJwtTemplate || !config.relayUrl) {

@@ -9,6 +9,7 @@ import {
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
   releaseSigningPolicy,
+  resolveForkConnectReleaseConfig,
   forkReleasePlan,
   forkReleaseBody,
   forkReleaseTitle,
@@ -369,5 +370,53 @@ describe("fork release contract", () => {
       expect(order).not.toContain("publishNpm");
       expect(order).not.toContain("promoteNpmTags");
     }
+  });
+  it("validates public Connect release variables all-or-nothing and rejects upstream targets", () => {
+    expect(resolveForkConnectReleaseConfig({})).toEqual({
+      enabled: false,
+      relayUrl: "",
+      cloudMintPublicKey: "",
+      clerkPublishableKey: "",
+      clerkJwtTemplate: "",
+      clerkCliOAuthClientId: "",
+      hostedAppUrl: "",
+    });
+    const complete = {
+      T3CODE_RELAY_URL: "https://relay.s2code.dev",
+      T3CODE_CLOUD_MINT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nKEY\n-----END PUBLIC KEY-----\n",
+      T3CODE_CLERK_PUBLISHABLE_KEY: `pk_live_${btoa("clerk.s2code.dev$")}`,
+      T3CODE_CLERK_JWT_TEMPLATE: "t3-relay",
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_123",
+    };
+    expect(resolveForkConnectReleaseConfig(complete)).toEqual({
+      enabled: true,
+      relayUrl: "https://relay.s2code.dev",
+      cloudMintPublicKey: "-----BEGIN PUBLIC KEY-----\\nKEY\\n-----END PUBLIC KEY-----",
+      clerkPublishableKey: complete.T3CODE_CLERK_PUBLISHABLE_KEY,
+      clerkJwtTemplate: "t3-relay",
+      clerkCliOAuthClientId: "oauth_client_123",
+      hostedAppUrl: "",
+    });
+    expect(
+      resolveForkConnectReleaseConfig({
+        ...complete,
+        T3CODE_HOSTED_APP_URL: "https://app.s2code.dev",
+      }).hostedAppUrl,
+    ).toBe("https://app.s2code.dev");
+    expect(() =>
+      resolveForkConnectReleaseConfig({ T3CODE_RELAY_URL: complete.T3CODE_RELAY_URL }),
+    ).toThrow("T3CODE_CLOUD_MINT_PUBLIC_KEY");
+    expect(() =>
+      resolveForkConnectReleaseConfig({ T3CODE_HOSTED_APP_URL: "https://app.s2code.dev" }),
+    ).toThrow("Incomplete Connect public configuration");
+    expect(() =>
+      resolveForkConnectReleaseConfig({ ...complete, T3CODE_RELAY_URL: "https://relay.t3.codes" }),
+    ).toThrow("T3CODE_RELAY_URL");
+    expect(() =>
+      resolveForkConnectReleaseConfig({
+        ...complete,
+        T3CODE_CLERK_PUBLISHABLE_KEY: `pk_live_${btoa("clerk.t3.codes$")}`,
+      }),
+    ).toThrow("T3CODE_CLERK_PUBLISHABLE_KEY");
   });
 });

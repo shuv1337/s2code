@@ -2,15 +2,20 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as Alchemy from "alchemy";
+import * as AlchemyTelemetry from "alchemy/Telemetry";
 import * as Axiom from "@alchemy.run/axiom";
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Output from "alchemy/Output";
+import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 import * as Cause from "effect/Cause";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import * as Tracer from "effect/Tracer";
 
 import { relayResourceNameForStage } from "./deploymentConfig.ts";
@@ -114,6 +119,88 @@ export const RelayObservability = Effect.gen(function* () {
     mobileSourceMaps,
   } as const;
 });
+
+export const isAxiomObservabilityEnabled = Config.String("AXIOM_TOKEN").pipe(
+  Config.option,
+  Config.map((value) => Option.getOrElse(value, () => "").trim().length > 0),
+);
+
+const validateOtlpTracesUrl = Effect.fn("RelayObservability.validateOtlpTracesUrl")(function* (
+  value: string | undefined,
+) {
+  if (value === undefined) return undefined;
+  const invalid = new Config.ConfigError(
+    new Schema.SchemaError(
+      new SchemaIssue.InvalidValue({
+        message: "RELAY_OTLP_TRACES_URL must be a fork-owned HTTPS URL.",
+      }),
+    ),
+  );
+  const parsed = yield* Effect.try({
+    try: () => new URL(value),
+    catch: () => invalid,
+  });
+  if (parsed.protocol !== "https:" || forkHostedOrigin(parsed.origin) === null) {
+    return yield* Effect.fail(invalid);
+  }
+  return parsed.toString();
+});
+
+export const relayOtlpTracesConfig = Config.all({
+  url: Config.String("RELAY_OTLP_TRACES_URL").pipe(
+    Config.option,
+    Config.map((value) => {
+      const trimmed = Option.getOrElse(value, () => "").trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }),
+    Config.mapEffect(validateOtlpTracesUrl),
+  ),
+  token: Config.Redacted("RELAY_OTLP_TRACES_TOKEN").pipe(
+    Config.option,
+    Config.map((value) => {
+      if (Option.isNone(value)) return undefined;
+      const trimmed = Redacted.value(value.value).trim();
+      return trimmed.length > 0 ? Redacted.make(trimmed) : undefined;
+    }),
+  ),
+}).pipe(Config.map(({ url, token }) => (url === undefined ? undefined : { url, token })));
+
+export const OptionalRelayObservability = Effect.gen(function* () {
+  if (!(yield* isAxiomObservabilityEnabled)) {
+    return undefined;
+  }
+  return yield* RelayObservability;
+});
+
+export const RelayTelemetryLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const observability = yield* OptionalRelayObservability;
+    if (observability !== undefined) {
+      return Axiom.Telemetry({
+        serviceName: "t3code-relay",
+        token: observability.workerIngestToken,
+        traces: observability.traces,
+      });
+    }
+    const otlp = yield* relayOtlpTracesConfig;
+    if (otlp !== undefined) {
+      return AlchemyTelemetry.layerOtlp({
+        serviceName: "t3code-relay",
+        traces: {
+          url: otlp.url,
+          ...(otlp.token
+            ? {
+                headers: {
+                  Authorization: Redacted.make(`Bearer ${Redacted.value(otlp.token)}`),
+                },
+              }
+            : {}),
+        },
+      });
+    }
+    return Layer.empty;
+  }),
+);
 
 const mobileSourceMapsBucketName = (stage: string) =>
   relayResourceNameForStage("t3-code-mobile-sourcemaps", stage);

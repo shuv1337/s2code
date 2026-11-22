@@ -9591,6 +9591,7 @@
   "c6473fd9810fe47f": "Require approval for new T3 Connect devices",
   "da7029b74a481832": "Your session does not have permission to manage access.",
   "c7a49b7cba491fdc": "Hosted Connect",
+  "be2b49ee8afa65e1": "Browser sign-in is unavailable on this origin. Sign in from the desktop app or run `s2code connect` on this host.",
   "b0b5de2fdc9514b5": "T3 Connect",
   "2c2a12fbdc300d03": "To edit these settings, pair this connection with both View relay and Manage relay permissions.",
   "3b3d299149f45c3d": "Click “Add environment” to pair another environment, or connect one from T3 Connect.",

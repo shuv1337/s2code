@@ -9580,6 +9580,7 @@
   "c6473fd9810fe47f": "Exigir aprovação de novos dispositivos do T3 Connect",
   "da7029b74a481832": "Sua sessão não tem permissão para gerenciar o acesso.",
   "c7a49b7cba491fdc": "Connect hospedado",
+  "be2b49ee8afa65e1": "O login pelo navegador não está disponível nesta origem. Entre pelo aplicativo desktop ou execute `s2code connect` neste host.",
   "b0b5de2fdc9514b5": "T3 Connect",
   "2c2a12fbdc300d03": "Para editar estas configurações, pareie esta conexão com as permissões View relay e Manage relay.",
   "3b3d299149f45c3d": "Clique em “Adicionar ambiente” para parear outro ambiente ou conecte um pelo T3 Connect.",
