@@ -36,6 +36,8 @@ describe("loadRepoEnv", () => {
           T3CODE_CLERK_JWT_TEMPLATE: "template_ci",
           T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
           T3CODE_RELAY_URL: "https://ci.example.test",
+          T3CODE_CLOUD_MINT_PUBLIC_KEY: "mint_key_ci",
+          T3CODE_HOSTED_APP_URL: "https://app.example.test",
         },
         repoRoot,
       }),
@@ -49,6 +51,9 @@ describe("loadRepoEnv", () => {
       EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "template_ci",
       T3CODE_RELAY_URL: "https://ci.example.test",
       VITE_T3CODE_RELAY_URL: "https://ci.example.test",
+      T3CODE_CLOUD_MINT_PUBLIC_KEY: "mint_key_ci",
+      T3CODE_HOSTED_APP_URL: "https://app.example.test",
+      VITE_HOSTED_APP_URL: "https://app.example.test",
     });
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { hasCloudPublicConfig } from "./publicConfig.ts";
+import { hasCloudPublicConfig, hasConfiguredCloudBuild } from "./publicConfig.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -18,6 +18,7 @@ describe("hasCloudPublicConfig", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", "");
     vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "");
     vi.stubEnv("VITE_T3CODE_RELAY_URL", "");
+    expect(hasConfiguredCloudBuild()).toBe(false);
     expect(hasCloudPublicConfig()).toBe(false);
 
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", `pk_test_${btoa("clerk.fork.test$")}`);
@@ -59,6 +60,7 @@ describe("hasCloudPublicConfig", () => {
       (origin) => {
         vi.stubGlobal("window", { location: new URL(origin) });
 
+        expect(hasConfiguredCloudBuild()).toBe(true);
         expect(hasCloudPublicConfig()).toBe(false);
       },
     );

@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Reads checked-in release recipes as contract fixtures.
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { CLI_ARCHIVE_PLATFORM_KEYS } from "@t3tools/shared/cliRelease";
@@ -9,6 +10,7 @@ import {
   MAC_RELEASE_CREDENTIALS,
   WIN_RELEASE_CREDENTIALS,
   releaseSigningPolicy,
+  resolveForkConnectReleaseConfig,
   forkReleasePlan,
   forkReleaseBody,
   forkReleaseTitle,
@@ -368,6 +370,70 @@ describe("fork release contract", () => {
       ).rejects.toThrow("fixture failure");
       expect(order).not.toContain("publishNpm");
       expect(order).not.toContain("promoteNpmTags");
+    }
+  });
+  it("validates public Connect release variables all-or-nothing, verifies Ed25519 SPKI mint key, and rejects upstream targets", () => {
+    expect(resolveForkConnectReleaseConfig({})).toEqual({
+      enabled: false,
+      relayUrl: "",
+      cloudMintPublicKey: "",
+      clerkPublishableKey: "",
+      clerkJwtTemplate: "",
+      clerkCliOAuthClientId: "",
+      hostedAppUrl: "",
+    });
+    const ed25519 = NodeCrypto.generateKeyPairSync("ed25519", {
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    const rsa = NodeCrypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    const escapedMintKey = ed25519.publicKey.trim().replaceAll("\n", "\\n");
+    const complete = {
+      T3CODE_RELAY_URL: "https://relay.s2code.dev",
+      T3CODE_CLOUD_MINT_PUBLIC_KEY: ed25519.publicKey,
+      T3CODE_CLERK_PUBLISHABLE_KEY: `pk_live_${btoa("clerk.s2code.dev$")}`,
+      T3CODE_CLERK_JWT_TEMPLATE: "t3-relay",
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_client_123",
+    };
+    expect(resolveForkConnectReleaseConfig(complete)).toEqual({
+      enabled: true,
+      relayUrl: "https://relay.s2code.dev",
+      cloudMintPublicKey: escapedMintKey,
+      clerkPublishableKey: complete.T3CODE_CLERK_PUBLISHABLE_KEY,
+      clerkJwtTemplate: "t3-relay",
+      clerkCliOAuthClientId: "oauth_client_123",
+      hostedAppUrl: "",
+    });
+    expect(
+      resolveForkConnectReleaseConfig({
+        ...complete,
+        T3CODE_CLOUD_MINT_PUBLIC_KEY: escapedMintKey,
+        T3CODE_HOSTED_APP_URL: "https://app.s2code.dev",
+      }).hostedAppUrl,
+    ).toBe("https://app.s2code.dev");
+    expect(() =>
+      resolveForkConnectReleaseConfig({ T3CODE_RELAY_URL: complete.T3CODE_RELAY_URL }),
+    ).toThrow("T3CODE_CLOUD_MINT_PUBLIC_KEY");
+    expect(() =>
+      resolveForkConnectReleaseConfig({ T3CODE_HOSTED_APP_URL: "https://app.s2code.dev" }),
+    ).toThrow("Incomplete Connect public configuration");
+    expect(() =>
+      resolveForkConnectReleaseConfig({ ...complete, T3CODE_RELAY_URL: "https://relay.t3.codes" }),
+    ).toThrow("T3CODE_RELAY_URL");
+    expect(() =>
+      resolveForkConnectReleaseConfig({
+        ...complete,
+        T3CODE_CLERK_PUBLISHABLE_KEY: `pk_live_${btoa("clerk.t3.codes$")}`,
+      }),
+    ).toThrow("T3CODE_CLERK_PUBLISHABLE_KEY");
+    for (const badKey of [ed25519.privateKey, rsa.publicKey, "not-a-pem"]) {
+      expect(() =>
+        resolveForkConnectReleaseConfig({ ...complete, T3CODE_CLOUD_MINT_PUBLIC_KEY: badKey }),
+      ).toThrow("T3CODE_CLOUD_MINT_PUBLIC_KEY");
     }
   });
 });

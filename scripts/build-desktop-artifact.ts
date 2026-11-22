@@ -1284,6 +1284,12 @@ function normalizePasskeyRpDomain(value: string): string {
   return parsed.hostname;
 }
 
+function isMacPasskeySigningConfigured(env: Readonly<Record<string, string | undefined>>): boolean {
+  return Boolean(
+    env.T3CODE_MACOS_PROVISIONING_PROFILE?.trim() || env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim(),
+  );
+}
+
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
   appId = DESKTOP_APP_ID,
@@ -4265,12 +4271,8 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
   const signingEnvironment = loadRepoEnv({ repoRoot });
-  // Local/direct signed builds do not require a hosted Clerk account or its
-  // associated-domain provisioning profile. Explicit hosted passkeys retain validation.
-  const hostedPasskeysConfigured = Boolean(
-    signingEnvironment.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ||
-    signingEnvironment.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim(),
-  );
+  // Signed macOS builds opt into Associated Domains passkeys only with a profile or RP domains.
+  const hostedPasskeysConfigured = isMacPasskeySigningConfigured(signingEnvironment);
   const configuredMacPasskeySigning =
     options.platform === "mac" && options.signed && hostedPasskeysConfigured
       ? yield* Effect.try({

@@ -377,9 +377,61 @@ echo "$ref" >> "${refs}"`,
       "CLERK_CLI_OAUTH_CLIENT_ID",
       "CLERK_PASSKEY_RP_DOMAINS",
       "RELAY_URL",
+      "CLOUD_MINT_PUBLIC_KEY",
+      "HOSTED_APP_URL",
     ])
       expect(desktop).toContain(`T3CODE_${name}:`);
     expect(desktop).not.toContain("S2CODE_CLERK_");
+  });
+
+  it("wires public Connect variables to build_bundle and every desktop caller without entering production", () => {
+    expect(workflow).not.toMatch(/environment:\s*(?:\n\s*name:\s*)?production/);
+    expect(workflow).not.toContain("CLERK_SECRET_KEY");
+    const preflightSection = workflow.split("  preflight:\n")[1]!.split("\n  build_bundle:")[0]!;
+    const buildBundleSection = workflow.split("  build_bundle:\n")[1]!.split("\n  desktop:")[0]!;
+    for (const name of [
+      "T3CODE_RELAY_URL",
+      "T3CODE_CLOUD_MINT_PUBLIC_KEY",
+      "T3CODE_CLERK_PUBLISHABLE_KEY",
+      "T3CODE_CLERK_JWT_TEMPLATE",
+      "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
+      "T3CODE_HOSTED_APP_URL",
+    ]) {
+      expect(preflightSection).toContain(`${name}: \${{ vars.${name} }}`);
+      expect(buildBundleSection).toContain(`${name}:`);
+    }
+    const callerBlocks = [
+      workflow.split("  desktop:\n")[1]!.split("\n  desktop_win_x64:")[0]!,
+      workflow.split("  desktop_win_x64:\n")[1]!.split("\n  desktop_mac_arm64:")[0]!,
+      workflow.split("  desktop_mac_arm64:\n")[1]!.split("\n  mac_arm64_queue_watch:")[0]!,
+      workflow.split("  desktop_mac_arm64_queue_fallback:\n")[1]!.split("\n  mac_arm64_ready:")[0]!,
+    ];
+    for (const caller of callerBlocks) {
+      for (const input of [
+        "relay_url",
+        "cloud_mint_public_key",
+        "clerk_publishable_key",
+        "clerk_jwt_template",
+        "clerk_cli_oauth_client_id",
+        "hosted_app_url",
+      ]) {
+        expect(caller).toContain(`${input}: \${{ needs.preflight.outputs.${input} }}`);
+      }
+    }
+    const encryptedWindows = NodeFS.readFileSync(
+      new URL("../.github/workflows/encrypted-windows-build.yml", import.meta.url),
+      "utf8",
+    );
+    for (const name of [
+      "T3CODE_RELAY_URL",
+      "T3CODE_CLOUD_MINT_PUBLIC_KEY",
+      "T3CODE_CLERK_PUBLISHABLE_KEY",
+      "T3CODE_CLERK_JWT_TEMPLATE",
+      "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
+      "T3CODE_HOSTED_APP_URL",
+    ]) {
+      expect(encryptedWindows).toContain(`${name}: \${{ vars.${name} }}`);
+    }
   });
 });
 

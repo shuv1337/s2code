@@ -20,6 +20,8 @@ jobs:
   deploy_preview:
     name: Deploy relay preview
     if: >-
+      github.repository == 'shuv1337/s2code' &&
+      vars.RELAY_PREVIEWS_ENABLED == 'true' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       contains(github.event.pull_request.labels.*.name, 'relay:preview')
     runs-on: ubuntu-24.04

@@ -77,6 +77,12 @@ jobs:
       mac_signed: ${{ steps.plan.outputs.mac_signed }}
       win_signed: ${{ steps.plan.outputs.win_signed }}
       apple_team_id: ${{ steps.plan.outputs.apple_team_id }}
+      relay_url: ${{ steps.plan.outputs.relay_url }}
+      cloud_mint_public_key: ${{ steps.plan.outputs.cloud_mint_public_key }}
+      clerk_publishable_key: ${{ steps.plan.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ steps.plan.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ steps.plan.outputs.clerk_cli_oauth_client_id }}
+      hosted_app_url: ${{ steps.plan.outputs.hosted_app_url }}
       matrix: ${{ steps.plan.outputs.matrix }}
       matrix_rest: ${{ steps.split_matrix.outputs.matrix_rest }}
       matrix_mac_arm64: ${{ steps.split_matrix.outputs.matrix_mac_arm64 }}
@@ -116,6 +122,13 @@ jobs:
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
           AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          # Public Connect build config from repository variables (all-or-nothing; never from production).
+          T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
+          T3CODE_CLOUD_MINT_PUBLIC_KEY: ${{ vars.T3CODE_CLOUD_MINT_PUBLIC_KEY }}
+          T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
+          T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.T3CODE_CLERK_JWT_TEMPLATE }}
+          T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
+          T3CODE_HOSTED_APP_URL: ${{ vars.T3CODE_HOSTED_APP_URL }}
         run: |
           RELEASE_DATE="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)"
           export RELEASE_DATE
@@ -163,7 +176,14 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION"
-      - run: vp run build:desktop
+      - env:
+          T3CODE_RELAY_URL: ${{ needs.preflight.outputs.relay_url }}
+          T3CODE_CLOUD_MINT_PUBLIC_KEY: ${{ needs.preflight.outputs.cloud_mint_public_key }}
+          T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.preflight.outputs.clerk_publishable_key }}
+          T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.preflight.outputs.clerk_jwt_template }}
+          T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.preflight.outputs.clerk_cli_oauth_client_id }}
+          T3CODE_HOSTED_APP_URL: ${{ needs.preflight.outputs.hosted_app_url }}
+        run: vp run build:desktop
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: js-bundle
@@ -205,6 +225,12 @@ jobs:
       # APPLE_TEAM_ID is a variable, and this job is outside the release
       # environment, so the team id comes from preflight rather than `vars`.
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+      relay_url: ${{ needs.preflight.outputs.relay_url }}
+      cloud_mint_public_key: ${{ needs.preflight.outputs.cloud_mint_public_key }}
+      clerk_publishable_key: ${{ needs.preflight.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.preflight.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.preflight.outputs.clerk_cli_oauth_client_id }}
+      hosted_app_url: ${{ needs.preflight.outputs.hosted_app_url }}
 
   # Publish does not require this job: a failed Windows build leaves the Windows
   # assets and npm package out of the release (see the publish job). GitHub
@@ -237,6 +263,12 @@ jobs:
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+      relay_url: ${{ needs.preflight.outputs.relay_url }}
+      cloud_mint_public_key: ${{ needs.preflight.outputs.cloud_mint_public_key }}
+      clerk_publishable_key: ${{ needs.preflight.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.preflight.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.preflight.outputs.clerk_cli_oauth_client_id }}
+      hosted_app_url: ${{ needs.preflight.outputs.hosted_app_url }}
 
   # macOS arm64 builds once on the self-hosted shuvbot runner (owned by Fleet
   # Ops; see docs/operations/release.md). If shuvbot never picks it up, the queue
@@ -277,6 +309,12 @@ jobs:
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+      relay_url: ${{ needs.preflight.outputs.relay_url }}
+      cloud_mint_public_key: ${{ needs.preflight.outputs.cloud_mint_public_key }}
+      clerk_publishable_key: ${{ needs.preflight.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.preflight.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.preflight.outputs.clerk_cli_oauth_client_id }}
+      hosted_app_url: ${{ needs.preflight.outputs.hosted_app_url }}
 
   # A queued shuvbot job cannot be cancelled on its own, but job-level
   # concurrency can. The hosted fallback below shares attempt 1's group (see
@@ -349,6 +387,12 @@ jobs:
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
       apple_team_id: ${{ needs.preflight.outputs.apple_team_id }}
+      relay_url: ${{ needs.preflight.outputs.relay_url }}
+      cloud_mint_public_key: ${{ needs.preflight.outputs.cloud_mint_public_key }}
+      clerk_publishable_key: ${{ needs.preflight.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.preflight.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.preflight.outputs.clerk_cli_oauth_client_id }}
+      hosted_app_url: ${{ needs.preflight.outputs.hosted_app_url }}
 
   mac_arm64_ready:
     name: macOS arm64 runner acquired

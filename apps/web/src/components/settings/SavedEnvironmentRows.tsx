@@ -50,7 +50,7 @@ import {
   resolveServerSelfUpdateCapability,
   supportsDesktopAppUpdate,
 } from "~/versionSkew";
-import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { hasCloudPublicConfig, hasConfiguredCloudBuild } from "~/cloud/publicConfig";
 import { HOSTED_UNAVAILABLE_MESSAGE } from "@t3tools/shared/hostedConfig";
 import { useT3ConnectTurnOn } from "~/cloud/useT3ConnectTurnOn";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
@@ -868,8 +868,20 @@ export function CloudLinkRow({
   readonly connectDeviceApproval: ConnectDeviceApprovalControl | null;
 }) {
   const gt = useGT();
-  if (!hasCloudPublicConfig())
-    return <SettingsRow title={gt("Hosted Connect")} description={HOSTED_UNAVAILABLE_MESSAGE} />;
+  if (!hasCloudPublicConfig()) {
+    return (
+      <SettingsRow
+        title={gt("Hosted Connect")}
+        description={
+          hasConfiguredCloudBuild()
+            ? gt(
+                "Browser sign-in is unavailable on this origin. Sign in from the desktop app or run `s2code connect` on this host.",
+              )
+            : HOSTED_UNAVAILABLE_MESSAGE
+        }
+      />
+    );
+  }
   if (!canReadRelay) {
     return (
       <SettingsRow
@@ -891,6 +903,11 @@ export function CloudLinkRow({
 
 function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
   const gt = useGT();
+  const cloudUnavailableReason = hasConfiguredCloudBuild()
+    ? gt(
+        "Browser sign-in is unavailable on this origin. Sign in from the desktop app or run `s2code connect` on this host.",
+      )
+    : HOSTED_UNAVAILABLE_MESSAGE;
   return (
     <Empty className="min-h-52">
       <EmptyMedia variant="icon">
@@ -906,7 +923,7 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
                 "Click “Add environment” to pair another environment, or connect one from T3 Connect.",
               )
             : gt("Click “Add environment” to pair another environment. {reason}", {
-                reason: HOSTED_UNAVAILABLE_MESSAGE,
+                reason: cloudUnavailableReason,
               })}
         </EmptyDescription>
       </EmptyHeader>

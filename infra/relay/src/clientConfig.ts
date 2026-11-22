@@ -13,14 +13,15 @@ import * as Schema from "effect/Schema";
 
 export interface RelayClientConfig {
   readonly url: string | undefined;
-  readonly mobileTracingUrl: string;
-  readonly mobileTracingDataset: string;
-  readonly mobileTracingToken: Redacted.Redacted<string>;
-  readonly clientTracingUrl: string;
-  readonly clientTracingDataset: string;
-  readonly clientTracingToken: Redacted.Redacted<string>;
+  readonly cloudMintPublicKey: string;
+  readonly mobileTracingUrl?: string | undefined;
+  readonly mobileTracingDataset?: string | undefined;
+  readonly mobileTracingToken?: Redacted.Redacted<string> | undefined;
+  readonly clientTracingUrl?: string | undefined;
+  readonly clientTracingDataset?: string | undefined;
+  readonly clientTracingToken?: Redacted.Redacted<string> | undefined;
   /** Alchemy hashes JSON inputs; Redacted hides token rotation, so hash the tokens without persisting secrets. */
-  readonly tokenDigest: string;
+  readonly tokenDigest?: string | undefined;
 }
 
 export class RelayUrlUnavailableError extends Schema.TaggedError<RelayUrlUnavailableError>()(
@@ -32,16 +33,33 @@ export class RelayUrlUnavailableError extends Schema.TaggedError<RelayUrlUnavail
   }
 }
 
-const relayClientConfigEnv = (config: RelayClientConfig & { readonly url: string }) =>
-  ({
-    T3CODE_RELAY_URL: config.url,
-    T3CODE_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl,
-    T3CODE_MOBILE_OTLP_TRACES_DATASET: config.mobileTracingDataset,
-    T3CODE_MOBILE_OTLP_TRACES_TOKEN: Redacted.value(config.mobileTracingToken),
-    T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl,
-    T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset,
-    T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: Redacted.value(config.clientTracingToken),
-  }) as const;
+const relayClientConfigEnv = (
+  config: RelayClientConfig & { readonly url: string },
+): Readonly<Record<string, string>> => ({
+  T3CODE_RELAY_URL: config.url,
+  T3CODE_CLOUD_MINT_PUBLIC_KEY: config.cloudMintPublicKey
+    .trim()
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\n", "\\n"),
+  ...(config.mobileTracingUrl !== undefined
+    ? { T3CODE_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl }
+    : {}),
+  ...(config.mobileTracingDataset !== undefined
+    ? { T3CODE_MOBILE_OTLP_TRACES_DATASET: config.mobileTracingDataset }
+    : {}),
+  ...(config.mobileTracingToken !== undefined
+    ? { T3CODE_MOBILE_OTLP_TRACES_TOKEN: Redacted.value(config.mobileTracingToken) }
+    : {}),
+  ...(config.clientTracingUrl !== undefined
+    ? { T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl }
+    : {}),
+  ...(config.clientTracingDataset !== undefined
+    ? { T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset }
+    : {}),
+  ...(config.clientTracingToken !== undefined
+    ? { T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: Redacted.value(config.clientTracingToken) }
+    : {}),
+});
 
 export class EnvValueNotSingleLineError extends Schema.TaggedError<EnvValueNotSingleLineError>()(
   "EnvValueNotSingleLineError",
@@ -101,10 +119,10 @@ export const PublishClientConfig = Alchemy.Action(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const override = yield* Config.String("T3CODE_RELAY_CLIENT_CONFIG_ENV").pipe(Config.option);
-    const repoRootEnv = path.fromFileUrl(new URL("../../../.env", import.meta.url));
-    const target = Option.isSome(override) ? override.value : yield* repoRootEnv;
+    const defaultTarget = yield* path.fromFileUrl(new URL("../../../.env", import.meta.url));
     return Effect.fn(function* (input: RelayClientConfig) {
+      const override = yield* Config.String("T3CODE_RELAY_CLIENT_CONFIG_ENV").pipe(Config.option);
+      const target = Option.isSome(override) ? override.value : defaultTarget;
       const url = input.url;
       if (url === undefined) return yield* new RelayUrlUnavailableError();
       const entries = relayClientConfigEnv({ ...input, url });

@@ -1,3 +1,5 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Validates Ed25519 SPKI PEM in release preflight.
+import * as NodeCrypto from "node:crypto";
 import {
   CLI_ARCHIVE_PLATFORM_KEYS,
   cliArchiveFileName,
@@ -5,6 +7,7 @@ import {
   cliArchivePreviousFileName,
 } from "@t3tools/shared/cliRelease";
 import { resolveChannelIdentity } from "@t3tools/shared/channelIdentity";
+import { forkClerkPublishableKey, forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 import { NPM_PACKAGE_NAME, PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 
 export const FORK_RELEASE_REPOSITORY = PRODUCT_RELEASE_REPOSITORY;
@@ -90,6 +93,105 @@ export const MAC_RELEASE_CREDENTIALS = [
 ];
 /** Signing inputs that are configuration rather than secrets, so they come from `vars`. */
 export const RELEASE_CREDENTIAL_VARIABLES = ["APPLE_TEAM_ID"];
+export const FORK_CONNECT_REQUIRED_VARIABLES = [
+  "T3CODE_RELAY_URL",
+  "T3CODE_CLOUD_MINT_PUBLIC_KEY",
+  "T3CODE_CLERK_PUBLISHABLE_KEY",
+  "T3CODE_CLERK_JWT_TEMPLATE",
+  "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
+] as const;
+
+export interface ForkConnectReleaseConfig {
+  readonly enabled: boolean;
+  readonly relayUrl: string;
+  readonly cloudMintPublicKey: string;
+  readonly clerkPublishableKey: string;
+  readonly clerkJwtTemplate: string;
+  readonly clerkCliOAuthClientId: string;
+  readonly hostedAppUrl: string;
+}
+
+/** Validate public Connect release variables all-or-nothing so nightlies stay cloudless until complete. */
+export function resolveForkConnectReleaseConfig(env: Environment): ForkConnectReleaseConfig {
+  const rawRelayUrl = env.T3CODE_RELAY_URL?.trim() ?? "";
+  const cloudMintPublicKey = (env.T3CODE_CLOUD_MINT_PUBLIC_KEY?.trim() ?? "")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\n", "\\n");
+  const rawClerkPublishableKey = env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "";
+  const clerkJwtTemplate = env.T3CODE_CLERK_JWT_TEMPLATE?.trim() ?? "";
+  const clerkCliOAuthClientId = env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "";
+  const rawHostedAppUrl = env.T3CODE_HOSTED_APP_URL?.trim() ?? "";
+
+  const values: Record<(typeof FORK_CONNECT_REQUIRED_VARIABLES)[number], string> = {
+    T3CODE_RELAY_URL: rawRelayUrl,
+    T3CODE_CLOUD_MINT_PUBLIC_KEY: cloudMintPublicKey,
+    T3CODE_CLERK_PUBLISHABLE_KEY: rawClerkPublishableKey,
+    T3CODE_CLERK_JWT_TEMPLATE: clerkJwtTemplate,
+    T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: clerkCliOAuthClientId,
+  };
+  const anySet =
+    Object.values(values).some((value) => value.length > 0) || rawHostedAppUrl.length > 0;
+  if (!anySet) {
+    return {
+      enabled: false,
+      relayUrl: "",
+      cloudMintPublicKey: "",
+      clerkPublishableKey: "",
+      clerkJwtTemplate: "",
+      clerkCliOAuthClientId: "",
+      hostedAppUrl: "",
+    };
+  }
+  const missing = FORK_CONNECT_REQUIRED_VARIABLES.filter((key) => values[key].length === 0);
+  if (missing.length > 0) {
+    throw new Error(
+      `Incomplete Connect public configuration: missing ${missing.join(", ")}. Set all five required repository variables (${FORK_CONNECT_REQUIRED_VARIABLES.join(", ")}) or leave all unset for a cloudless build.`,
+    );
+  }
+  const relayUrl = forkHostedOrigin(rawRelayUrl);
+  if (relayUrl === null) {
+    throw new Error("T3CODE_RELAY_URL must be a fork-owned HTTPS origin.");
+  }
+  const pem = cloudMintPublicKey.replace(/\\n/gu, "\n");
+  if (/PRIVATE KEY/iu.test(pem) || !/^-----BEGIN PUBLIC KEY-----\n/u.test(pem)) {
+    throw new Error("T3CODE_CLOUD_MINT_PUBLIC_KEY must be an Ed25519 SPKI public key PEM.");
+  }
+  try {
+    const key = NodeCrypto.createPublicKey(pem);
+    if (key.asymmetricKeyType !== "ed25519") {
+      throw new Error("wrong key type");
+    }
+  } catch {
+    throw new Error("T3CODE_CLOUD_MINT_PUBLIC_KEY must be a valid Ed25519 SPKI public key PEM.");
+  }
+  const clerkPublishableKey = forkClerkPublishableKey(rawClerkPublishableKey);
+  if (clerkPublishableKey === null) {
+    throw new Error("T3CODE_CLERK_PUBLISHABLE_KEY must be a valid fork-owned Clerk key.");
+  }
+  if (/[\r\n]/u.test(clerkJwtTemplate)) {
+    throw new Error("T3CODE_CLERK_JWT_TEMPLATE must be a single-line value.");
+  }
+  if (/[\r\n]/u.test(clerkCliOAuthClientId)) {
+    throw new Error("T3CODE_CLERK_CLI_OAUTH_CLIENT_ID must be a single-line value.");
+  }
+  let hostedAppUrl = "";
+  if (rawHostedAppUrl.length > 0) {
+    const validatedHostedAppUrl = forkHostedOrigin(rawHostedAppUrl);
+    if (validatedHostedAppUrl === null) {
+      throw new Error("T3CODE_HOSTED_APP_URL must be a fork-owned HTTPS origin.");
+    }
+    hostedAppUrl = validatedHostedAppUrl;
+  }
+  return {
+    enabled: true,
+    relayUrl,
+    cloudMintPublicKey,
+    clerkPublishableKey,
+    clerkJwtTemplate,
+    clerkCliOAuthClientId,
+    hostedAppUrl,
+  };
+}
 export const WIN_RELEASE_CREDENTIALS = [
   "AZURE_TENANT_ID",
   "AZURE_CLIENT_ID",

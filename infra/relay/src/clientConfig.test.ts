@@ -1,4 +1,5 @@
-// @effect-diagnostics anyUnknownInErrorContext:off - ScratchStack.deploy is typed with `any` in its error channel by Alchemy.
+// @effect-diagnostics anyUnknownInErrorContext:off nodeBuiltinImport:off - ScratchStack.deploy is typed with `any` in its error channel by Alchemy; crypto generates a real Ed25519 PEM fixture.
+import * as NodeCrypto from "node:crypto";
 import { inMemoryState } from "alchemy/State";
 import * as Test from "@alchemy.run/test/Vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -62,8 +63,14 @@ const { test } = Test.make({
   state: inMemoryState(),
 });
 
+const FIXTURE_MINT_PUBLIC_KEY = NodeCrypto.generateKeyPairSync("ed25519", {
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+}).publicKey;
+
 const clientConfig = (token: string) => ({
   url: "https://relay.example.com",
+  cloudMintPublicKey: FIXTURE_MINT_PUBLIC_KEY,
   mobileTracingUrl: "https://axiom.example.com/v1/traces",
   mobileTracingDataset: "relay-traces",
   mobileTracingToken: Redacted.make(`mobile-${token}`),
@@ -91,6 +98,22 @@ describe("PublishClientConfig", () => {
       const first = yield* fs.readFileString(target);
       expect(first).toContain("KEEP=yes\n");
       expect(first).toContain("T3CODE_RELAY_URL=https://relay.example.com\n");
+      const mintLine = first
+        .split("\n")
+        .find((line) => line.startsWith("T3CODE_CLOUD_MINT_PUBLIC_KEY="));
+      expect(mintLine).toBeDefined();
+      const escapedMintKey = mintLine!.slice("T3CODE_CLOUD_MINT_PUBLIC_KEY=".length);
+      expect(escapedMintKey).toContain("\\n");
+      expect(
+        NodeCrypto.createPublicKey(escapedMintKey.replace(/\\n/gu, "\n"))
+          .export({ type: "spki", format: "der" })
+          .equals(
+            NodeCrypto.createPublicKey(FIXTURE_MINT_PUBLIC_KEY).export({
+              type: "spki",
+              format: "der",
+            }),
+          ),
+      ).toBe(true);
       expect(first).toContain("T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=client-v1\n");
       expect(first).toContain("T3CODE_MOBILE_OTLP_TRACES_TOKEN=mobile-v1\n");
 
@@ -103,6 +126,34 @@ describe("PublishClientConfig", () => {
       expect(third).toContain("T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=client-v2\n");
       expect(third).not.toContain("client-v1");
       expect(third).toContain("KEEP=yes\n");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  test.provider("writes only relay URL and mint key when Axiom tracing is disabled", (stack) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-relay-client-config-no-axiom-" });
+      const target = path.join(dir, "client.env");
+      yield* stack
+        .deploy(
+          PublishClientConfig({
+            url: "https://relay.s2code.dev",
+            cloudMintPublicKey: FIXTURE_MINT_PUBLIC_KEY,
+          }),
+        )
+        .pipe(
+          Effect.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromUnknown({ T3CODE_RELAY_CLIENT_CONFIG_ENV: target }),
+            ),
+          ),
+        );
+      const written = yield* fs.readFileString(target);
+      expect(written).toContain("T3CODE_RELAY_URL=https://relay.s2code.dev\n");
+      expect(written).toContain("T3CODE_CLOUD_MINT_PUBLIC_KEY=");
+      expect(written).not.toContain("T3CODE_MOBILE_OTLP_TRACES_");
+      expect(written).not.toContain("T3CODE_RELAY_CLIENT_OTLP_TRACES_");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

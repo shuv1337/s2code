@@ -9581,6 +9581,7 @@
   "c6473fd9810fe47f": "Exiger l’approbation des nouveaux appareils T3 Connect",
   "da7029b74a481832": "Votre session n’est pas autorisée à gérer l’accès.",
   "c7a49b7cba491fdc": "Connect hébergé",
+  "be2b49ee8afa65e1": "La connexion via le navigateur n'est pas disponible sur cette origine. Connectez-vous depuis l'application de bureau ou exécutez `s2code connect` sur cet hôte.",
   "b0b5de2fdc9514b5": "T3 Connect",
   "2c2a12fbdc300d03": "Pour modifier ces paramètres, appairez cette connexion avec les autorisations Voir le relais et Gérer le relais.",
   "3b3d299149f45c3d": "Cliquez sur « Ajouter un environnement » pour appairer un autre environnement, ou connectez-en un depuis T3 Connect.",

@@ -46,7 +46,7 @@ import { connectCommand, statusCommand, upCommand } from "./cli/up.ts";
 const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer);
 
 const connectPublicConfigMissingMessage =
-  "Hosted Connect is unavailable: configure a fork-owned service first. Upstream accounts are separate. Use s2code pair for direct or Tailscale access.";
+  "Hosted Connect is not configured in this build. Use `s2code pair` for direct or Tailscale access. Upstream accounts are separate.";
 
 class ConnectPublicConfigMissingError extends CliError.UserError {
   override get message() {

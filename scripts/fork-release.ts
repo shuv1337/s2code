@@ -25,6 +25,7 @@ import {
   windowsSigningCredentials,
   RELEASE_CREDENTIAL_VARIABLES,
   releaseSigningPolicy,
+  resolveForkConnectReleaseConfig,
   forkReleasePlan,
   forkReleaseBody,
   forkReleaseTitle,
@@ -910,6 +911,7 @@ async function main() {
       process.env.ALLOW_UNSIGNED === "true",
       process.env,
     );
+    const connect = resolveForkConnectReleaseConfig(process.env);
     const npm = forkNpmPublishingReady(process.env);
     if (!npm)
       console.log(
@@ -956,7 +958,21 @@ async function main() {
     const team = process.env.APPLE_TEAM_ID?.trim() ?? "";
     FS.appendFileSync(
       process.env.GITHUB_OUTPUT!,
-      `ref=${sha}\nversion=${version}\nrelease_channel=${channel}\nmac_signed=${signing.mac}\nwin_signed=${signing.win}\napple_team_id=${/^[A-Za-z0-9]+$/.test(team) ? team : ""}\nmatrix=${JSON.stringify({ include: FORK_DESKTOP_MATRIX })}\n`,
+      [
+        `ref=${sha}`,
+        `version=${version}`,
+        `release_channel=${channel}`,
+        `mac_signed=${signing.mac}`,
+        `win_signed=${signing.win}`,
+        `apple_team_id=${/^[A-Za-z0-9]+$/.test(team) ? team : ""}`,
+        `relay_url=${connect.relayUrl}`,
+        `cloud_mint_public_key=${connect.cloudMintPublicKey}`,
+        `clerk_publishable_key=${connect.clerkPublishableKey}`,
+        `clerk_jwt_template=${connect.clerkJwtTemplate}`,
+        `clerk_cli_oauth_client_id=${connect.clerkCliOAuthClientId}`,
+        `hosted_app_url=${connect.hostedAppUrl}`,
+        `matrix=${JSON.stringify({ include: FORK_DESKTOP_MATRIX })}`,
+      ].join("\n") + "\n",
     );
   } else if (mode === "signing") {
     // Preflight resolved signing once, inside the release environment. A build
