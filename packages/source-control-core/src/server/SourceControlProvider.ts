@@ -36,6 +36,12 @@ export interface SourceControlRefSelector {
   readonly repository?: string;
 }
 
+/** Pins the `owner/name` repository a change request operation targets, ahead of host defaults. */
+export const ChangeRequestRepository = Context.Reference<string | null>(
+  "@t3tools/source-control-core/server/SourceControlProvider/ChangeRequestRepository",
+  { defaultValue: () => null },
+);
+
 const MAX_ERROR_TRANSPORT_VALUE_LENGTH = 256;
 
 /**

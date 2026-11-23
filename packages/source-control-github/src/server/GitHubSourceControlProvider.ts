@@ -577,9 +577,20 @@ export const make = Effect.gen(function* () {
       readonly host?: string | undefined;
       readonly context?: SourceControlProvider.SourceControlProviderContext | undefined;
     }) {
+      const pinned = yield* SourceControlProvider.ChangeRequestRepository;
       const envRepository = environment.GH_REPO?.trim();
       const hostHint = input.host ?? contextHost(input.context);
       const defaultHost = (hostHint ?? environment.GH_HOST ?? "github.com").toLowerCase();
+      if (pinned !== null) {
+        const { host } = resolveGitHubRepository({
+          ...(yield* readRemotes(input.cwd)),
+          hostHint,
+          defaultHost,
+        });
+        const locator = parseGitHubRepositorySelector(pinned, host);
+        if (locator !== null) return locator;
+        return yield* failure("Repositories are named owner/name.");
+      }
       if (envRepository) {
         const locator = parseGitHubRepositorySelector(envRepository, defaultHost);
         if (locator !== null) return locator;
@@ -1021,10 +1032,21 @@ export const make = Effect.gen(function* () {
     // mark is then ignored.
     createsChangeRequestsIn: Effect.fn("GitHubSourceControlProvider.createsChangeRequestsIn")(
       function* ({ cwd, context, repository }) {
+        const pinned = yield* SourceControlProvider.ChangeRequestRepository;
         const host = URL.canParse(context.provider.baseUrl)
           ? new URL(context.provider.baseUrl).host
           : null;
         const target = repository?.toLowerCase();
+        if (pinned !== null) {
+          const parsed = parseGitHubRepositorySelector(pinned, host ?? "github.com");
+          return (
+            parsed !== null &&
+            (host === null ||
+              (URL.canParse(`https://${parsed.host}`) &&
+                new URL(`https://${parsed.host}`).host === host)) &&
+            `${parsed.owner}/${parsed.name}`.toLowerCase() === target
+          );
+        }
         const fromEnvironment = parseGitHubRepositorySelector(
           environment.GH_REPO ?? "",
           host ?? "",

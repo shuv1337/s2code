@@ -586,6 +586,9 @@ export type ListPullRequestsResult = typeof ListPullRequestsResult.Type;
 
 export const CreatePullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
+  repository: Schema.String.annotate({
+    description: "The repository the PR is on (owner/name).",
+  }),
   created: Schema.Boolean.annotate({
     description: "False when the branch already had an open PR.",
   }),
@@ -652,14 +655,31 @@ const ListPullRequestsTool = Tool.make("pull_request_list", {
   .annotate(Tool.OpenWorld, true)
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
+const CreatePullRequestRepository = TrimmedNonEmptyString.check(
+  Schema.makeFilter((value) => {
+    const segments = value.split("/");
+    return (
+      (segments.length === 2 &&
+        segments.every(
+          (segment) => /^[\w.-]+$/u.test(segment) && segment !== "." && segment !== "..",
+        )) ||
+      "Repository must be named owner/name."
+    );
+  }),
+).annotate({
+  description: "Target repository (owner/name). Default: origin's repository.",
+});
+
 const CreatePullRequestTool = Tool.make("pull_request_create", {
-  description: "Open a PR from this thread's pushed branch and link it, or return its open PR.",
+  description:
+    "Open a PR from this thread's pushed branch on origin's repository and link it, or return its open PR. Pass repository to open it elsewhere, such as a fork's upstream.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     title: TrimmedNonEmptyString,
     body: Schema.String,
     base: Schema.optional(TrimmedNonEmptyString),
     draft: Schema.optional(Schema.Boolean),
+    repository: Schema.optional(CreatePullRequestRepository),
   }),
   success: CreatePullRequestResult,
   failure: PullRequestToolError,

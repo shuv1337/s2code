@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import * as TestClock from "effect/testing/TestClock";
+import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 
 import type * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
@@ -1219,29 +1220,47 @@ it.live.each([
 });
 
 it.effect.each([
-  { host: "github.com", resolved: "", envRepository: "", expected: "acme/web" },
+  { host: "github.com", resolved: "", envRepository: "", pinned: null, expected: "acme/web" },
   {
     host: "code.example.test",
     resolved: "remote.origin.gh-resolved base",
     envRepository: "",
+    pinned: null,
     expected: "me/web",
   },
   {
     host: "github.com",
     resolved: "remote.upstream.gh-resolved acme/other",
     envRepository: "",
+    pinned: null,
     expected: "acme/other",
   },
   {
     host: "code.example.test",
     resolved: "",
     envRepository: "chosen/repo",
+    pinned: null,
     expected: "chosen/repo",
   },
+  {
+    host: "github.com",
+    resolved: "remote.upstream.gh-resolved base",
+    envRepository: "chosen/repo",
+    pinned: "me/web",
+    expected: "me/web",
+  },
+  {
+    host: "github.com",
+    resolved: "remote.origin.gh-resolved base",
+    envRepository: "chosen/repo",
+    pinned: "acme/web",
+    expected: "acme/web",
+  },
 ])(
-  "preserves repository precedence on $host: $resolved $envRepository",
-  ({ host, resolved, envRepository, expected }) => {
+  "preserves repository precedence on $host: $resolved $envRepository $pinned",
+  ({ host, resolved, envRepository, pinned, expected }) => {
     const targets: string[] = [];
+    const heads: string[] = [];
     const { layer } = harness({
       remotes: remotesOutput(
         ["origin", `git@${host}:me/web.git`],
@@ -1252,6 +1271,9 @@ it.effect.each([
         rest: (input) =>
           Effect.sync(() => {
             targets.push(`${input.host}/${input.path}`);
+            if (input.body && typeof input.body === "object" && "head" in input.body) {
+              heads.push(String((input.body as { readonly head: unknown }).head));
+            }
             return restResponse({
               full_name: expected,
               html_url: `https://${host}/${expected}`,
@@ -1261,6 +1283,7 @@ it.effect.each([
           }),
       },
     });
+    const headSelector = expected === "me/web" ? "feature" : "me:feature";
     return Effect.gen(function* () {
       const provider = yield* GitHubSourceControlProvider.make;
       const fs = yield* FileSystem.FileSystem;
@@ -1282,7 +1305,7 @@ it.effect.each([
       yield* provider.createChangeRequest({
         ...input,
         baseRefName: "main",
-        headSelector: "me:feature",
+        headSelector,
         title: "PR",
         bodyFile,
       });
@@ -1290,6 +1313,7 @@ it.effect.each([
         `${host}/repos/${expected}`,
         `${host}/repos/${expected}/pulls`,
       ]);
+      assert.deepStrictEqual(heads, [headSelector]);
       assert.deepStrictEqual(
         yield* provider.createsChangeRequestsIn!({ ...input, repository: "me/web" }),
         expected === "me/web",
@@ -1297,6 +1321,7 @@ it.effect.each([
     }).pipe(
       Effect.provide(layer),
       Effect.provideService(HostProcess.Environment, { GH_REPO: envRepository }),
+      Effect.provideService(SourceControlProvider.ChangeRequestRepository, pinned),
     );
   },
 );

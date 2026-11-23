@@ -194,6 +194,7 @@ export class GitManager extends Context.Service<
       readonly body: string;
       readonly baseBranch?: string | undefined;
       readonly draft?: boolean | undefined;
+      readonly repository?: string | undefined;
     }) => Effect.Effect<GitCreatePullRequestResult, GitManagerServiceError>;
     readonly subscribePullRequestStateChanges: Effect.Effect<
       Stream.Stream<ThreadPullRequestKey>,
@@ -335,6 +336,14 @@ function resolvePullRequestWorktreeLocalBranchName(
       return candidate;
     }
   }
+}
+
+function isOwnerRepository(value: string): boolean {
+  const segments = value.split("/");
+  return (
+    segments.length === 2 &&
+    segments.every((segment) => /^[\w.-]+$/u.test(segment) && segment !== "." && segment !== "..")
+  );
 }
 
 export function parseRepositoryNameWithOwnerFromRemoteUrl(
@@ -2642,9 +2651,73 @@ export const make = Effect.gen(function* () {
         }),
     );
 
+  const resolveCreatePullRequestRepository = Effect.fn(
+    "GitManager.resolveCreatePullRequestRepository",
+  )(function* (cwd: string, requestedRepository: string | undefined) {
+    const provider = yield* sourceControlProvider(cwd);
+    const requested = requestedRepository?.trim();
+    if (provider.kind !== "github") {
+      if (requested !== undefined) {
+        return yield* new GitManagerError({
+          operation: "createPullRequest",
+          cwd,
+          detail: "Passing repository is only supported on GitHub.",
+        });
+      }
+      return null;
+    }
+    if (requested !== undefined) {
+      if (!isOwnerRepository(requested)) {
+        return yield* new GitManagerError({
+          operation: "createPullRequest",
+          cwd,
+          detail: "Repository must be named owner/name.",
+        });
+      }
+      return requested;
+    }
+    const originUrl = yield* readRemoteUrlNullable(cwd, "origin");
+    if (originUrl !== null) {
+      const originKind = sourceControlDefinitions.recognizeRemote(originUrl)?.kind;
+      if (originKind === "github" || originKind === "unknown") {
+        const originRepository = parseRepositoryNameWithOwnerFromRemoteUrl(originUrl, provider);
+        if (originRepository !== null && isOwnerRepository(originRepository)) {
+          return originRepository;
+        }
+      }
+      return null;
+    }
+    const remoteNames = yield* gitCore
+      .execute({
+        operation: "GitManager.createPullRequest.remotes",
+        cwd,
+        args: ["remote"],
+        timeoutMs: 5_000,
+      })
+      .pipe(
+        Effect.map((result) =>
+          result.stdout
+            .split("\n")
+            .map((name) => name.trim())
+            .filter((name) => name.length > 0),
+        ),
+        Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+      );
+    if (remoteNames.length > 1) {
+      return yield* new GitManagerError({
+        operation: "createPullRequest",
+        cwd,
+        detail:
+          "This checkout has several remotes and none is named origin. Pass repository (owner/name).",
+      });
+    }
+    return null;
+  });
+
   const createPullRequest: GitManager["Service"]["createPullRequest"] = Effect.fn(
     "GitManager.createPullRequest",
   )(function* (input) {
+    const repository = yield* resolveCreatePullRequestRepository(input.cwd, input.repository);
     const result = yield* openPrFromBranch(
       input.cwd,
       null,
@@ -2652,7 +2725,7 @@ export const make = Effect.gen(function* () {
       undefined,
       input.baseBranch,
       () => Effect.succeed({ title: input.title, body: input.body }),
-    );
+    ).pipe(Effect.provideService(SourceControlProvider.ChangeRequestRepository, repository));
     // The thread's branch PR comes from status, which may hold the lookup from before.
     if (result.status === "created") yield* invalidateStatus(input.cwd);
     if (input.draft === true && !(yield* draftOpened(input, result))) {

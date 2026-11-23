@@ -30,6 +30,7 @@ import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequest
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import { reviewPositionInPatch } from "../../../pullRequest/pullRequestReviewPosition.ts";
 import { pullRequestSyncKey } from "../../../pullRequest/pullRequestSyncKey.ts";
+import { projectChangeRequestHost } from "@t3tools/source-control-core/shared/definition";
 import { sourceControlDefinitions } from "../../../sourceControl/sourceControlDefinitions.ts";
 import {
   normalizeThreadPullRequestKey,
@@ -487,6 +488,27 @@ const make = Effect.gen(function* () {
     return comments.map((comment) => placed.get(comment)!);
   });
 
+  const defaultRepositoryFor = (
+    identity: OrchestrationProjectShell["repositoryIdentity"],
+  ): string | undefined => {
+    if (identity == null) return undefined;
+    const origin = identity.origin;
+    const originHost = projectChangeRequestHost(origin, undefined);
+    if (
+      origin !== undefined &&
+      originHost !== undefined &&
+      originHost === projectChangeRequestHost(identity, undefined)
+    ) {
+      const originPath = origin.displayName ?? origin.canonicalKey.split("/").slice(1).join("/");
+      const selector = sourceControlDefinitions.repositorySelector({
+        ...(identity.provider === undefined ? {} : { provider: identity.provider }),
+        ...(originPath.length > 0 ? { displayName: originPath } : {}),
+      });
+      if (selector !== null) return selector;
+    }
+    return sourceControlDefinitions.repositorySelector(identity) ?? undefined;
+  };
+
   /** The thread's checkout, its project, and the PR the input names (default: the branch's). */
   const locate = Effect.fn("PullRequestsToolkit.locate")(function* (input: ThreadPullRequestInput) {
     const thread = yield* requireThread(PullRequestForgeError, undefined);
@@ -505,10 +527,7 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     const branchPullRequest = thread.branchPullRequest ?? opened ?? null;
-    const branchRepository =
-      project.repositoryIdentity == null
-        ? undefined
-        : (sourceControlDefinitions.repositorySelector(project.repositoryIdentity) ?? undefined);
+    const branchRepository = defaultRepositoryFor(project.repositoryIdentity);
     const named =
       input.number !== undefined
         ? { number: input.number, repository: input.repository ?? branchRepository }
@@ -1025,6 +1044,7 @@ const make = Effect.gen(function* () {
             body: input.body,
             baseBranch: input.base,
             draft: input.draft,
+            repository: input.repository,
           })
           .pipe(Effect.mapError(forgeFailure));
         if (created.url === undefined) {
