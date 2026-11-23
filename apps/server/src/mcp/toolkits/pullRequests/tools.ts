@@ -663,7 +663,7 @@ const CreatePullRequestRepository = TrimmedNonEmptyString.check(
 
 const CreatePullRequestTool = Tool.make("pull_request_create", {
   description:
-    "Open or return pushed branch PR on origin and link it. Pass repository (owner/name) elsewhere.",
+    "Open or return this branch's PR on origin and link it. Pass repository (owner/name) to target another.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     title: TrimmedNonEmptyString,
