@@ -60,6 +60,7 @@ import type {
   SourceControlProvider,
   SourceControlRefSelector,
 } from "@t3tools/source-control-core/server/SourceControlProvider";
+import { ChangeRequestRepository } from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -4979,6 +4980,256 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         { baseRefName: "main", headSelector: "octocat:feature/fork-only" },
       ]);
     }),
+  );
+
+  it.effect(
+    "createPullRequest defaults to origin, pins a named repository, and refuses ambiguous remotes",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const forkDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", forkDir]);
+        yield* runGit(repoDir, [
+          "remote",
+          "add",
+          "upstream",
+          "git@github.com:pingdotgg/codething-mvp.git",
+        ]);
+        yield* runGit(repoDir, ["config", "remote.upstream.gh-resolved", "base"]);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/fork-only"]);
+        NodeFS.writeFileSync(NodePath.join(repoDir, "fork-only.txt"), "fork only\n");
+        yield* runGit(repoDir, ["add", "fork-only.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Fork-only commit"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "feature/fork-only"]);
+        yield* configureVisibleRemoteUrlWithLocalRewrite(
+          repoDir,
+          "origin",
+          "git@github.com:octocat/codething-mvp.git",
+          forkDir,
+        );
+
+        const pins: Array<string | null> = [];
+        const { service, calls } = createFakeSourceControlProvider({
+          prListOtherwise: [],
+        });
+        const { manager } = yield* makeManager({
+          sourceControlProvider: {
+            ...service,
+            createChangeRequest: (input) =>
+              ChangeRequestRepository.pipe(
+                Effect.tap((pinned) => Effect.sync(() => void pins.push(pinned))),
+                Effect.andThen(service.createChangeRequest(input)),
+              ),
+          },
+        });
+
+        // Default pins origin and uses a plain head.
+        yield* manager.createPullRequest({
+          cwd: repoDir,
+          projectId: ProjectId.make("project-1"),
+          title: "Fork PR",
+          body: "Body",
+        });
+        // Named repository pins upstream and sends forkOwner:branch.
+        yield* manager.createPullRequest({
+          cwd: repoDir,
+          projectId: ProjectId.make("project-1"),
+          title: "Upstream PR",
+          body: "Body",
+          repository: "pingdotgg/codething-mvp",
+        });
+
+        expect(pins).toEqual(["octocat/codething-mvp", "pingdotgg/codething-mvp"]);
+        expect(created(calls)).toEqual([
+          { baseRefName: "main", headSelector: "feature/fork-only" },
+          { baseRefName: "main", headSelector: "octocat:feature/fork-only" },
+        ]);
+
+        // Malformed repository fails before calling create.
+        const malformedError = yield* Effect.flip(
+          manager.createPullRequest({
+            cwd: repoDir,
+            projectId: ProjectId.make("project-1"),
+            title: "Malformed",
+            body: "Body",
+            repository: "not-a-repo",
+          }),
+        );
+        expect(malformedError.message).toContain("owner/name");
+        expect(created(calls)).toHaveLength(2);
+
+        // Bare local-path origin plus GitHub upstream refuses instead of falling back to upstream.
+        const bareOriginDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(bareOriginDir);
+        yield* runGit(bareOriginDir, ["remote", "add", "origin", forkDir]);
+        yield* runGit(bareOriginDir, [
+          "remote",
+          "add",
+          "upstream",
+          "git@github.com:pingdotgg/codething-mvp.git",
+        ]);
+        yield* runGit(bareOriginDir, ["checkout", "-b", "feature/bare-origin"]);
+        yield* runGit(bareOriginDir, ["push", "-u", "origin", "feature/bare-origin"]);
+        const bareOriginError = yield* Effect.flip(
+          manager.createPullRequest({
+            cwd: bareOriginDir,
+            projectId: ProjectId.make("project-1"),
+            title: "Bare origin",
+            body: "Body",
+          }),
+        );
+        expect(bareOriginError).toMatchObject({
+          _tag: "GitManagerError",
+          detail: expect.stringContaining("repository (owner/name)"),
+        });
+        expect(created(calls)).toHaveLength(2);
+
+        // insteadOf-rewritten origin still resolves and pins origin's repository.
+        const insteadOfDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(insteadOfDir);
+        yield* runGit(insteadOfDir, ["remote", "add", "origin", forkDir]);
+        yield* runGit(insteadOfDir, [
+          "remote",
+          "add",
+          "upstream",
+          "git@github.com:pingdotgg/codething-mvp.git",
+        ]);
+        yield* runGit(insteadOfDir, ["checkout", "-b", "feature/insteadof"]);
+        yield* runGit(insteadOfDir, ["push", "-u", "origin", "feature/insteadof"]);
+        yield* runGit(insteadOfDir, ["config", "remote.origin.url", "me:codething-mvp.git"]);
+        yield* runGit(insteadOfDir, ["config", "url.git@github.com:octocat/.insteadOf", "me:"]);
+        yield* manager.createPullRequest({
+          cwd: insteadOfDir,
+          projectId: ProjectId.make("project-1"),
+          title: "InsteadOf PR",
+          body: "Body",
+        });
+        expect(pins.at(-1)).toBe("octocat/codething-mvp");
+
+        // Without origin and with several remotes, refuse before calling create.
+        const ambiguousDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(ambiguousDir);
+        yield* runGit(ambiguousDir, ["remote", "add", "fork", forkDir]);
+        yield* runGit(ambiguousDir, [
+          "remote",
+          "add",
+          "upstream",
+          "git@github.com:pingdotgg/codething-mvp.git",
+        ]);
+        yield* runGit(ambiguousDir, ["checkout", "-b", "feature/ambiguous"]);
+        yield* runGit(ambiguousDir, ["push", "-u", "fork", "feature/ambiguous"]);
+        yield* configureVisibleRemoteUrlWithLocalRewrite(
+          ambiguousDir,
+          "fork",
+          "git@github.com:octocat/codething-mvp.git",
+          forkDir,
+        );
+        const ambiguousError = yield* Effect.flip(
+          manager.createPullRequest({
+            cwd: ambiguousDir,
+            projectId: ProjectId.make("project-1"),
+            title: "Ambiguous",
+            body: "Body",
+          }),
+        );
+        expect(ambiguousError).toMatchObject({
+          _tag: "GitManagerError",
+          detail: expect.stringContaining("repository (owner/name)"),
+        });
+        expect(created(calls)).toHaveLength(3);
+
+        // Passing the fork's repository on a branch tracking a non-origin remote creates a
+        // same-repository PR with a plain head, finds it, and returns it on retry.
+        const forkPr = {
+          number: 55,
+          title: "Fork same-repo PR",
+          url: "https://github.com/octocat/codething-mvp/pull/55",
+          baseRefName: "main",
+          headRefName: "feature/ambiguous",
+          isCrossRepository: false,
+          headRepositoryNameWithOwner: "octocat/codething-mvp",
+          headRepositoryOwnerLogin: "octocat",
+        };
+        const sameRepoPins: Array<string | null> = [];
+        const sameRepoProvider = createFakeSourceControlProvider({
+          prListSequence: [[], [forkPr], [forkPr]],
+        });
+        const sameRepo = yield* makeManager({
+          sourceControlProvider: {
+            ...sameRepoProvider.service,
+            createChangeRequest: (input) =>
+              ChangeRequestRepository.pipe(
+                Effect.tap((pinned) => Effect.sync(() => void sameRepoPins.push(pinned))),
+                Effect.andThen(sameRepoProvider.service.createChangeRequest(input)),
+              ),
+          },
+        });
+        const first = yield* sameRepo.manager.createPullRequest({
+          cwd: ambiguousDir,
+          projectId: ProjectId.make("project-1"),
+          title: "Fork same-repo PR",
+          body: "Body",
+          repository: "octocat/codething-mvp",
+        });
+        const retry = yield* sameRepo.manager.createPullRequest({
+          cwd: ambiguousDir,
+          projectId: ProjectId.make("project-1"),
+          title: "Fork same-repo PR",
+          body: "Body",
+          repository: "octocat/codething-mvp",
+        });
+        expect(sameRepoPins).toEqual(["octocat/codething-mvp"]);
+        expect(created(sameRepoProvider.calls)).toEqual([
+          { baseRefName: "main", headSelector: "feature/ambiguous" },
+        ]);
+        expect(first).toMatchObject({
+          status: "created",
+          number: 55,
+          url: "https://github.com/octocat/codething-mvp/pull/55",
+        });
+        expect(retry).toMatchObject({
+          status: "opened_existing",
+          number: 55,
+          url: "https://github.com/octocat/codething-mvp/pull/55",
+        });
+
+        // Without origin and with one sole remote, pin that sole remote's repository.
+        const soleDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(soleDir);
+        yield* runGit(soleDir, ["remote", "add", "upstream", forkDir]);
+        yield* runGit(soleDir, ["checkout", "-b", "feature/sole"]);
+        yield* runGit(soleDir, ["push", "-u", "upstream", "feature/sole"]);
+        yield* configureVisibleRemoteUrlWithLocalRewrite(
+          soleDir,
+          "upstream",
+          "git@github.com:pingdotgg/codething-mvp.git",
+          forkDir,
+        );
+        yield* manager.createPullRequest({
+          cwd: soleDir,
+          projectId: ProjectId.make("project-1"),
+          title: "Sole remote PR",
+          body: "Body",
+        });
+        expect(pins.at(-1)).toBe("pingdotgg/codething-mvp");
+
+        // Passing repository on a non-GitHub host fails before calling create.
+        const gitlab = yield* makeManager({
+          providerScenario: { kind: "gitlab", prListSequence: [[], []] },
+        });
+        const nonGithubError = yield* Effect.flip(
+          gitlab.manager.createPullRequest({
+            cwd: repoDir,
+            projectId: ProjectId.make("project-1"),
+            title: "GitLab PR",
+            body: "Body",
+            repository: "pingdotgg/codething-mvp",
+          }),
+        );
+        expect(nonGithubError.message).toContain("GitHub");
+        expect(created(gitlab.providerCalls)).toEqual([]);
+      }),
   );
 
   it.effect("commit_push_pr publishes the default branch to the push remote's fork", () =>

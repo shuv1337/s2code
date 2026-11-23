@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import * as TestClock from "effect/testing/TestClock";
+import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
 
 import type * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
@@ -1297,6 +1298,89 @@ it.effect.each([
     }).pipe(
       Effect.provide(layer),
       Effect.provideService(HostProcess.Environment, { GH_REPO: envRepository }),
+    );
+  },
+);
+
+it.effect.each([
+  {
+    resolved: "remote.upstream.gh-resolved base",
+    pinned: "me/web",
+    expected: "me/web",
+  },
+  {
+    resolved: "remote.origin.gh-resolved base",
+    pinned: "acme/web",
+    expected: "acme/web",
+  },
+])(
+  "pins ChangeRequestRepository ($pinned) ahead of GH_REPO and $resolved",
+  ({ resolved, pinned, expected }) => {
+    const targets: string[] = [];
+    const { layer } = harness({
+      remotes: remotesOutput(
+        ["origin", "git@github.com:me/web.git"],
+        ["upstream", "git@github.com:acme/web.git"],
+      ),
+      resolved,
+      api: {
+        rest: (input) =>
+          Effect.sync(() => {
+            targets.push(`${input.host}/${input.path}`);
+            if (input.path.includes("?")) return restResponse([]);
+            return restResponse({
+              full_name: expected,
+              html_url: `https://github.com/${expected}`,
+              ssh_url: `git@github.com:${expected}.git`,
+              default_branch: "main",
+            });
+          }),
+      },
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GitHubSourceControlProvider.make;
+      const fs = yield* FileSystem.FileSystem;
+      const bodyFile = yield* fs.makeTempFileScoped();
+      yield* fs.writeFileString(bodyFile, "Body");
+      const input = {
+        cwd: "/repo",
+        context: {
+          provider: {
+            kind: SourceControlProviderKind.make("github"),
+            name: "GitHub",
+            baseUrl: "https://github.com",
+          },
+          remoteName: "origin",
+          remoteUrl: "git@github.com:me/web.git",
+        },
+      };
+      yield* provider.getDefaultBranch(input);
+      yield* provider.listChangeRequests({
+        ...input,
+        headSelector: "me:feature",
+        state: "open",
+        limit: 1,
+      });
+      yield* provider.createChangeRequest({
+        ...input,
+        baseRefName: "main",
+        headSelector: expected === "me/web" ? "feature" : "me:feature",
+        title: "PR",
+        bodyFile,
+      });
+      assert.deepStrictEqual(targets, [
+        `github.com/repos/${expected}`,
+        `github.com/repos/${expected}/pulls?head=me%3Afeature&state=open&sort=created&direction=desc&per_page=100`,
+        `github.com/repos/${expected}/pulls`,
+      ]);
+      assert.deepStrictEqual(
+        yield* provider.createsChangeRequestsIn!({ ...input, repository: "me/web" }),
+        expected === "me/web",
+      );
+    }).pipe(
+      Effect.provide(layer),
+      Effect.provideService(HostProcess.Environment, { GH_REPO: "chosen/repo" }),
+      Effect.provideService(SourceControlProvider.ChangeRequestRepository, pinned),
     );
   },
 );

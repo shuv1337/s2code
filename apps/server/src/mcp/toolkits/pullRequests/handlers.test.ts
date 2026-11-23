@@ -24,6 +24,7 @@ import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type { Tool } from "effect/ai";
 
@@ -46,6 +47,9 @@ import { CHILD_PULL_REQUEST_REPORT_NEXT, PullRequestsToolkit } from "./tools.ts"
 
 const PROJECT_ID = ProjectId.make("project-1");
 const THREAD_ID = ThreadId.make("thread-1");
+const decodeCreatePullRequestParams = Schema.decodeUnknownEffect(
+  PullRequestsToolkit.tools.pull_request_create.parametersSchema,
+);
 
 const testCrypto = SecureRandom.make((size) => new Uint8Array(size).fill(7));
 
@@ -1145,6 +1149,112 @@ describe("source control tools", () => {
       expect(yield* Ref.get(harness.commands)).toMatchObject([
         { type: "thread.pull-request.link", number: 43, source: "created" },
       ]);
+    }),
+  );
+
+  it.effect("forwards repository on pull_request_create and rejects malformed values", () =>
+    Effect.gen(function* () {
+      const repositories: Array<string | undefined> = [];
+      const harness = yield* makeHarness({
+        thread: makeThread([]),
+        git: {
+          createPullRequest: (input) =>
+            Effect.sync(() => void repositories.push(input.repository)).pipe(
+              Effect.as({
+                status: "created" as const,
+                url: "https://github.com/pingdotgg/t3code/pull/44",
+                number: 44,
+                baseBranch: "main",
+                headBranch: "tools",
+                title: input.title,
+              }),
+            ),
+        },
+      });
+      const result = yield* harness.call("pull_request_create", {
+        title: "Add tools",
+        body: "Adds tools.",
+        repository: "pingdotgg/t3code",
+      });
+      expect(result).toMatchObject({ repository: "pingdotgg/t3code", number: 44, created: true });
+      expect(repositories).toEqual(["pingdotgg/t3code"]);
+      const invalidRepo = yield* decodeCreatePullRequestParams({
+        title: "Add tools",
+        body: "Adds tools.",
+        repository: "not-a-repo",
+      }).pipe(Effect.flip);
+      expect(invalidRepo.message).toContain("owner/name");
+    }),
+  );
+
+  it.effect("defaults numbered PR operations to origin when the identity tracks upstream", () =>
+    Effect.gen(function* () {
+      const updated: Array<string> = [];
+      const forkProject = makeProject({
+        canonicalKey: "github.com/pingdotgg/t3code",
+        locator: {
+          source: "git-remote",
+          remoteName: "upstream",
+          remoteUrl: "git@github.com:pingdotgg/t3code.git",
+        },
+        provider: SourceControlProviderKind.make("github"),
+        displayName: "pingdotgg/t3code",
+        owner: "pingdotgg",
+        name: "t3code",
+        origin: {
+          canonicalKey: "github.com/shuv1337/s2code",
+          remoteUrl: "git@github.com:shuv1337/s2code.git",
+          displayName: "shuv1337/s2code",
+        },
+      });
+      const harness = yield* makeHarness({
+        project: forkProject,
+        thread: branchThread,
+        pullRequests: {
+          update: (input) =>
+            Effect.sync(() => void updated.push(`${input.repository}#${input.number}`)),
+        },
+      });
+      const onOrigin = yield* harness.call("pull_request_update", { number: 42, title: "Origin" });
+      const onUpstream = yield* harness.call("pull_request_update", {
+        number: 42,
+        repository: "pingdotgg/t3code",
+        title: "Upstream",
+      });
+      expect(onOrigin.repository).toBe("shuv1337/s2code");
+      expect(onUpstream.repository).toBe("pingdotgg/t3code");
+      expect(updated).toEqual(["shuv1337/s2code#42", "pingdotgg/t3code#42"]);
+
+      // An origin on a different host falls back to the primary identity.
+      const crossHost = yield* makeHarness({
+        project: makeProject({
+          canonicalKey: "github.com/pingdotgg/t3code",
+          locator: {
+            source: "git-remote",
+            remoteName: "upstream",
+            remoteUrl: "git@github.com:pingdotgg/t3code.git",
+          },
+          provider: SourceControlProviderKind.make("github"),
+          displayName: "pingdotgg/t3code",
+          owner: "pingdotgg",
+          name: "t3code",
+          origin: {
+            canonicalKey: "gitlab.com/shuv1337/s2code",
+            remoteUrl: "git@gitlab.com:shuv1337/s2code.git",
+            displayName: "shuv1337/s2code",
+          },
+        }),
+        thread: branchThread,
+        pullRequests: {
+          update: (input) =>
+            Effect.sync(() => void updated.push(`${input.repository}#${input.number}`)),
+        },
+      });
+      const fallback = yield* crossHost.call("pull_request_update", {
+        number: 42,
+        title: "Cross-host",
+      });
+      expect(fallback.repository).toBe("pingdotgg/t3code");
     }),
   );
 
