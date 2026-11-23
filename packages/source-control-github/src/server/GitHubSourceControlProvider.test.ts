@@ -1220,47 +1220,29 @@ it.live.each([
 });
 
 it.effect.each([
-  { host: "github.com", resolved: "", envRepository: "", pinned: null, expected: "acme/web" },
+  { host: "github.com", resolved: "", envRepository: "", expected: "acme/web" },
   {
     host: "code.example.test",
     resolved: "remote.origin.gh-resolved base",
     envRepository: "",
-    pinned: null,
     expected: "me/web",
   },
   {
     host: "github.com",
     resolved: "remote.upstream.gh-resolved acme/other",
     envRepository: "",
-    pinned: null,
     expected: "acme/other",
   },
   {
     host: "code.example.test",
     resolved: "",
     envRepository: "chosen/repo",
-    pinned: null,
     expected: "chosen/repo",
   },
-  {
-    host: "github.com",
-    resolved: "remote.upstream.gh-resolved base",
-    envRepository: "chosen/repo",
-    pinned: "me/web",
-    expected: "me/web",
-  },
-  {
-    host: "github.com",
-    resolved: "remote.origin.gh-resolved base",
-    envRepository: "chosen/repo",
-    pinned: "acme/web",
-    expected: "acme/web",
-  },
 ])(
-  "preserves repository precedence on $host: $resolved $envRepository $pinned",
-  ({ host, resolved, envRepository, pinned, expected }) => {
+  "preserves repository precedence on $host: $resolved $envRepository",
+  ({ host, resolved, envRepository, expected }) => {
     const targets: string[] = [];
-    const heads: string[] = [];
     const { layer } = harness({
       remotes: remotesOutput(
         ["origin", `git@${host}:me/web.git`],
@@ -1271,9 +1253,6 @@ it.effect.each([
         rest: (input) =>
           Effect.sync(() => {
             targets.push(`${input.host}/${input.path}`);
-            if (input.body && typeof input.body === "object" && "head" in input.body) {
-              heads.push(String((input.body as { readonly head: unknown }).head));
-            }
             return restResponse({
               full_name: expected,
               html_url: `https://${host}/${expected}`,
@@ -1283,7 +1262,6 @@ it.effect.each([
           }),
       },
     });
-    const headSelector = expected === "me/web" ? "feature" : "me:feature";
     return Effect.gen(function* () {
       const provider = yield* GitHubSourceControlProvider.make;
       const fs = yield* FileSystem.FileSystem;
@@ -1305,7 +1283,7 @@ it.effect.each([
       yield* provider.createChangeRequest({
         ...input,
         baseRefName: "main",
-        headSelector,
+        headSelector: "me:feature",
         title: "PR",
         bodyFile,
       });
@@ -1313,7 +1291,6 @@ it.effect.each([
         `${host}/repos/${expected}`,
         `${host}/repos/${expected}/pulls`,
       ]);
-      assert.deepStrictEqual(heads, [headSelector]);
       assert.deepStrictEqual(
         yield* provider.createsChangeRequestsIn!({ ...input, repository: "me/web" }),
         expected === "me/web",
@@ -1321,6 +1298,88 @@ it.effect.each([
     }).pipe(
       Effect.provide(layer),
       Effect.provideService(HostProcess.Environment, { GH_REPO: envRepository }),
+    );
+  },
+);
+
+it.effect.each([
+  {
+    resolved: "remote.upstream.gh-resolved base",
+    pinned: "me/web",
+    expected: "me/web",
+  },
+  {
+    resolved: "remote.origin.gh-resolved base",
+    pinned: "acme/web",
+    expected: "acme/web",
+  },
+])(
+  "pins ChangeRequestRepository ($pinned) ahead of GH_REPO and $resolved",
+  ({ resolved, pinned, expected }) => {
+    const targets: string[] = [];
+    const { layer } = harness({
+      remotes: remotesOutput(
+        ["origin", "git@github.com:me/web.git"],
+        ["upstream", "git@github.com:acme/web.git"],
+      ),
+      resolved,
+      api: {
+        rest: (input) =>
+          Effect.sync(() => {
+            targets.push(`${input.host}/${input.path}`);
+            if (input.path.includes("?")) return restResponse([]);
+            return restResponse({
+              full_name: expected,
+              html_url: `https://github.com/${expected}`,
+              ssh_url: `git@github.com:${expected}.git`,
+              default_branch: "main",
+            });
+          }),
+      },
+    });
+    return Effect.gen(function* () {
+      const provider = yield* GitHubSourceControlProvider.make;
+      const fs = yield* FileSystem.FileSystem;
+      const bodyFile = yield* fs.makeTempFileScoped();
+      yield* fs.writeFileString(bodyFile, "Body");
+      const input = {
+        cwd: "/repo",
+        context: {
+          provider: {
+            kind: SourceControlProviderKind.make("github"),
+            name: "GitHub",
+            baseUrl: "https://github.com",
+          },
+          remoteName: "origin",
+          remoteUrl: "git@github.com:me/web.git",
+        },
+      };
+      yield* provider.getDefaultBranch(input);
+      yield* provider.listChangeRequests({
+        ...input,
+        headSelector: "me:feature",
+        state: "open",
+        limit: 1,
+      });
+      yield* provider.createChangeRequest({
+        ...input,
+        baseRefName: "main",
+        headSelector: expected === "me/web" ? "feature" : "me:feature",
+        title: "PR",
+        bodyFile,
+      });
+      assert.deepStrictEqual(targets, [
+        `github.com/repos/${expected}`,
+        `github.com/repos/${expected}/pulls?head=me%3Afeature&state=open&sort=created&direction=desc&per_page=100`,
+        `github.com/repos/${expected}/pulls`,
+      ]);
+      assert.deepStrictEqual(
+        yield* provider.createsChangeRequestsIn!({ ...input, repository: "me/web" }),
+        expected === "me/web",
+      );
+    }).pipe(
+      Effect.provide(layer),
+      Effect.provideService(HostProcess.Environment, { GH_REPO: "chosen/repo" }),
       Effect.provideService(SourceControlProvider.ChangeRequestRepository, pinned),
     );
   },

@@ -656,23 +656,14 @@ const ListPullRequestsTool = Tool.make("pull_request_list", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWithoutForge);
 
 const CreatePullRequestRepository = TrimmedNonEmptyString.check(
-  Schema.makeFilter((value) => {
-    const segments = value.split("/");
-    return (
-      (segments.length === 2 &&
-        segments.every(
-          (segment) => /^[\w.-]+$/u.test(segment) && segment !== "." && segment !== "..",
-        )) ||
-      "Repository must be named owner/name."
-    );
-  }),
-).annotate({
-  description: "Target repository (owner/name). Default: origin's repository.",
-});
+  Schema.makeFilter(
+    (value) => GitManager.isOwnerRepository(value) || "Repository must be named owner/name.",
+  ),
+);
 
 const CreatePullRequestTool = Tool.make("pull_request_create", {
   description:
-    "Open a PR from this thread's pushed branch on origin's repository and link it, or return its open PR. Pass repository to open it elsewhere, such as a fork's upstream.",
+    "Open or return pushed branch PR on origin and link it. Pass repository (owner/name) elsewhere.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     title: TrimmedNonEmptyString,

@@ -338,7 +338,7 @@ function resolvePullRequestWorktreeLocalBranchName(
   }
 }
 
-function isOwnerRepository(value: string): boolean {
+export function isOwnerRepository(value: string): boolean {
   const segments = value.split("/");
   return (
     segments.length === 2 &&
@@ -1729,17 +1729,23 @@ export const make = Effect.gen(function* () {
       (yield* targetsRemote(cwd, remoteName, remoteRepository));
     const isForeignRemote = remoteName !== null && remoteName !== "origin" && !isOnlyRemote;
 
+    const pinnedRepository = yield* SourceControlProvider.ChangeRequestRepository;
     const isCrossRepository =
-      (remoteRepository.repositoryNameWithOwner !== null &&
-      originRepository.repositoryNameWithOwner !== null
-        ? remoteRepository.repositoryNameWithOwner.toLowerCase() !==
-          originRepository.repositoryNameWithOwner.toLowerCase()
-        : isForeignRemote && remoteRepository.repositoryNameWithOwner !== null) ||
-      // A fork as origin, with the host targeting another remote such as upstream.
-      (remoteName !== null &&
-        !isOnlyRemote &&
-        remoteRepository.repositoryNameWithOwner !== null &&
-        !(yield* targetsRemote(cwd, remoteName, remoteRepository)));
+      pinnedRepository !== null
+        ? remoteRepository.repositoryNameWithOwner !== null &&
+          (remoteRepository.repositoryNameWithOwner.toLowerCase() !==
+            pinnedRepository.toLowerCase() ||
+            (remoteName !== null && !(yield* targetsRemote(cwd, remoteName, remoteRepository))))
+        : (remoteRepository.repositoryNameWithOwner !== null &&
+          originRepository.repositoryNameWithOwner !== null
+            ? remoteRepository.repositoryNameWithOwner.toLowerCase() !==
+              originRepository.repositoryNameWithOwner.toLowerCase()
+            : isForeignRemote && remoteRepository.repositoryNameWithOwner !== null) ||
+          // A fork as origin, with the host targeting another remote such as upstream.
+          (remoteName !== null &&
+            !isOnlyRemote &&
+            remoteRepository.repositoryNameWithOwner !== null &&
+            !(yield* targetsRemote(cwd, remoteName, remoteRepository)));
 
     const ownerHeadSelector =
       remoteRepository.ownerLogin && headBranch.length > 0
@@ -2651,6 +2657,40 @@ export const make = Effect.gen(function* () {
         }),
     );
 
+  const parseGitHubRemoteRepository = Effect.fn("GitManager.parseGitHubRemoteRepository")(
+    function* (
+      cwd: string,
+      remoteName: string,
+      provider: SourceControlProvider.SourceControlProvider["Service"],
+    ) {
+      const parseUrl = (url: string | null) => {
+        if (url === null) return null;
+        const kind = sourceControlDefinitions.recognizeRemote(url)?.kind;
+        if (kind !== "github" && kind !== "unknown") return null;
+        const parsed = parseRepositoryNameWithOwnerFromRemoteUrl(url, provider);
+        return parsed !== null && isOwnerRepository(parsed) ? parsed : null;
+      };
+      const rawUrl = yield* readRemoteUrlNullable(cwd, remoteName);
+      const fromRaw = parseUrl(rawUrl);
+      if (fromRaw !== null) return { repository: fromRaw, rawUrl, expandedUrl: null };
+      const expandedUrl = yield* gitCore
+        .execute({
+          operation: "GitManager.readExpandedRemoteUrl",
+          cwd,
+          args: ["remote", "get-url", remoteName],
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        })
+        .pipe(
+          Effect.map((result) =>
+            result.exitCode === 0 ? result.stdout.split("\n", 1)[0]?.trim() || null : null,
+          ),
+          Effect.orElseSucceed(() => null),
+        );
+      return { repository: parseUrl(expandedUrl), rawUrl, expandedUrl };
+    },
+  );
+
   const resolveCreatePullRequestRepository = Effect.fn(
     "GitManager.resolveCreatePullRequestRepository",
   )(function* (cwd: string, requestedRepository: string | undefined) {
@@ -2676,17 +2716,6 @@ export const make = Effect.gen(function* () {
       }
       return requested;
     }
-    const originUrl = yield* readRemoteUrlNullable(cwd, "origin");
-    if (originUrl !== null) {
-      const originKind = sourceControlDefinitions.recognizeRemote(originUrl)?.kind;
-      if (originKind === "github" || originKind === "unknown") {
-        const originRepository = parseRepositoryNameWithOwnerFromRemoteUrl(originUrl, provider);
-        if (originRepository !== null && isOwnerRepository(originRepository)) {
-          return originRepository;
-        }
-      }
-      return null;
-    }
     const remoteNames = yield* gitCore
       .execute({
         operation: "GitManager.createPullRequest.remotes",
@@ -2701,17 +2730,43 @@ export const make = Effect.gen(function* () {
             .map((name) => name.trim())
             .filter((name) => name.length > 0),
         ),
-        Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "createPullRequest",
+              cwd,
+              detail: "Could not read git remotes for this checkout. Pass repository (owner/name).",
+              cause,
+            }),
+        ),
       );
-    if (remoteNames.length > 1) {
-      return yield* new GitManagerError({
+    const missingOriginError = () =>
+      new GitManagerError({
         operation: "createPullRequest",
         cwd,
-        detail:
-          "This checkout has several remotes and none is named origin. Pass repository (owner/name).",
+        detail: "This checkout has no usable GitHub origin remote. Pass repository (owner/name).",
       });
+    if (remoteNames.includes("origin")) {
+      const origin = yield* parseGitHubRemoteRepository(cwd, "origin", provider);
+      if (origin.repository !== null) return origin.repository;
+      const isPlainLocalPath = (url: string | null) =>
+        url !== null &&
+        sourceControlDefinitions.recognizeRemote(url) === null &&
+        !/^[a-z][a-z0-9+.-]*:/iu.test(url);
+      if (
+        remoteNames.length === 1 &&
+        isPlainLocalPath(origin.rawUrl) &&
+        (origin.expandedUrl === null || isPlainLocalPath(origin.expandedUrl))
+      ) {
+        return null;
+      }
+      return yield* missingOriginError();
     }
-    return null;
+    if (remoteNames.length === 1) {
+      const sole = yield* parseGitHubRemoteRepository(cwd, remoteNames[0]!, provider);
+      if (sole.repository !== null) return sole.repository;
+    }
+    return yield* missingOriginError();
   });
 
   const createPullRequest: GitManager["Service"]["createPullRequest"] = Effect.fn(

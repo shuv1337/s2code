@@ -1119,11 +1119,7 @@ describe("source control tools", () => {
 
   it.effect("opens a PR from the thread's worktree and links it even if dismissed", () =>
     Effect.gen(function* () {
-      const opened: Array<{
-        readonly cwd: string;
-        readonly draft: boolean | undefined;
-        readonly repository: string | undefined;
-      }> = [];
+      const opened: Array<{ readonly cwd: string; readonly draft: boolean | undefined }> = [];
       const harness = yield* makeHarness({
         thread: {
           ...makeThread([makeLink(43, { source: "stack-dismissed" })]),
@@ -1131,13 +1127,7 @@ describe("source control tools", () => {
         },
         git: {
           createPullRequest: (input) =>
-            Effect.sync(() =>
-              opened.push({
-                cwd: input.cwd,
-                draft: input.draft,
-                repository: input.repository,
-              }),
-            ).pipe(
+            Effect.sync(() => opened.push({ cwd: input.cwd, draft: input.draft })).pipe(
               Effect.as({
                 status: "created" as const,
                 url: "https://github.com/t3tools/t3code/pull/43",
@@ -1153,15 +1143,41 @@ describe("source control tools", () => {
         title: "Add tools",
         body: "Adds tools.",
         draft: true,
-        repository: "pingdotgg/t3code",
       });
       expect(result).toMatchObject({ number: 43, created: true });
-      expect(opened).toEqual([
-        { cwd: "/workspace/worktree", draft: true, repository: "pingdotgg/t3code" },
-      ]);
+      expect(opened).toEqual([{ cwd: "/workspace/worktree", draft: true }]);
       expect(yield* Ref.get(harness.commands)).toMatchObject([
         { type: "thread.pull-request.link", number: 43, source: "created" },
       ]);
+    }),
+  );
+
+  it.effect("forwards repository on pull_request_create and rejects malformed values", () =>
+    Effect.gen(function* () {
+      const repositories: Array<string | undefined> = [];
+      const harness = yield* makeHarness({
+        thread: makeThread([]),
+        git: {
+          createPullRequest: (input) =>
+            Effect.sync(() => void repositories.push(input.repository)).pipe(
+              Effect.as({
+                status: "created" as const,
+                url: "https://github.com/pingdotgg/t3code/pull/44",
+                number: 44,
+                baseBranch: "main",
+                headBranch: "tools",
+                title: input.title,
+              }),
+            ),
+        },
+      });
+      const result = yield* harness.call("pull_request_create", {
+        title: "Add tools",
+        body: "Adds tools.",
+        repository: "pingdotgg/t3code",
+      });
+      expect(result).toMatchObject({ repository: "pingdotgg/t3code", number: 44, created: true });
+      expect(repositories).toEqual(["pingdotgg/t3code"]);
       const invalidRepo = yield* decodeCreatePullRequestParams({
         title: "Add tools",
         body: "Adds tools.",
