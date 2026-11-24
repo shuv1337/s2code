@@ -97,15 +97,19 @@ or send `/clear` when you need a fresh context.
 ### Skills and attachments
 
 Put project skills in `.agents/skills`. S2Code also reads `.gemini/skills` and the
-legacy `.agent/skills` directory. Among these project locations, the first copy
-wins in this order: `.gemini/skills`, `.agents/skills`, `.agent/skills`. See
+legacy `.agent/skills` directory, walking from the current workspace directory up
+to the `.git` repository root (closest directory first). Within each directory,
+the first copy wins in this order: `.gemini/skills`, `.agents/skills`,
+`.agent/skills`, followed by `.agents/skills.json` and `.agent/skills.json`
+manifests along the same ancestor chain. See
 [commands and skills](./composer.md#commands-and-skills) for invoking them.
 
 Skills for every project go in `~/.gemini/config/skills` or
-`~/.gemini/antigravity-cli/skills`. Antigravity does not read `~/.agents/skills`
-on its own; to share a folder like that one, list it in `~/.gemini/config/skills.json`
-(or a project's `.agents/skills.json`), and T3 Code shows the skills it declares,
-honoring `inherits`, `include_only`, and `exclude`.
+`~/.gemini/antigravity-cli/skills`, or are declared in `~/.gemini/config/skills.json`
+(honoring `inherits`, `include_only`, and `exclude`). S2Code also automatically
+discovers existing compatibility folders (`~/.gemini/antigravity/skills`,
+`~/.agents/skills`, and `~/.claude/skills`) and wires them into its isolated
+Antigravity profile without modifying `~/.gemini/`.
 
 Antigravity receives images and audio directly, and reads PDFs and text files as
 documents. Other attachments, including videos, are passed as a saved file path for
