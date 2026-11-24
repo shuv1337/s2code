@@ -13,7 +13,8 @@ if (process.env.FAKE_MCP_IGNORE_SIGTERM === "1") {
 let initialized = false;
 let early = 0;
 const serverRequests = new Map();
-const heldReplies = [];
+const heldById = new Map();
+const cancelledIds = [];
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 process.stderr.write(`fake server started pid=${process.pid}\n`);
 
@@ -43,6 +44,20 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
         id: message.id,
         error: { code: -32600, message: "HTTP 400: not initialized" },
       });
+    return;
+  }
+  if (message.method === "notifications/cancelled") {
+    const requestId = message.params?.requestId;
+    if (requestId !== undefined) {
+      cancelledIds.push(requestId);
+      if (heldById.delete(requestId)) {
+        send({
+          jsonrpc: "2.0",
+          id: requestId,
+          error: { code: -32800, message: "cancelled" },
+        });
+      }
+    }
     return;
   }
   if (message.id === undefined) return; // notification
@@ -80,7 +95,7 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
             result: { content: [{ type: "text", text: String(args?.text) }], early },
           });
         if (args?.hold === true) {
-          heldReplies.push(reply);
+          heldById.set(message.id, reply);
           return;
         }
         const delayMs = Number(args?.delayMs ?? 0);
@@ -92,29 +107,58 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
         return send({
           jsonrpc: "2.0",
           id: message.id,
-          result: { count: heldReplies.length },
+          result: { count: heldById.size },
+        });
+      }
+      if (name === "cancelled-ids") {
+        return send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { ids: [...cancelledIds] },
         });
       }
       if (name === "release-and-echo") {
-        for (const reply of heldReplies.splice(0)) reply();
+        const pending = [...heldById.values()];
+        heldById.clear();
+        for (const reply of pending) reply();
         return send({
           jsonrpc: "2.0",
           id: message.id,
           result: { content: [{ type: "text", text: String(args?.text) }], early },
         });
       }
+      if (name === "big-int") {
+        process.stdout.write(
+          `{"jsonrpc":"2.0","id":${JSON.stringify(message.id)},"result":{"big":9007199254740993,"nested":{"id":999}}}\n`,
+        );
+        return;
+      }
+      if (name === "dup-id") {
+        process.stdout.write(
+          `{"jsonrpc":"2.0","id":999,"id":${JSON.stringify(message.id)},"result":{"ok":true}}\n`,
+        );
+        return;
+      }
       if (name === "spawn-grandchild") {
-        // Stays in this launcher's process group and ignores SIGTERM so only process-group SIGKILL stops it.
+        // Install the SIGTERM handler and signal readiness before returning the PID so the test
+        // always exercises process-group SIGKILL rather than racing handler registration.
         const grandchild = NodeChildProcess.spawn(
           process.execPath,
-          ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 60000);"],
-          { stdio: "ignore" },
+          [
+            "-e",
+            "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 60000);",
+          ],
+          { stdio: ["ignore", "pipe", "ignore"] },
         );
-        return send({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { content: [{ type: "text", text: String(grandchild.pid) }] },
+        NodeReadline.createInterface({ input: grandchild.stdout }).once("line", () => {
+          grandchild.stdout.resume();
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { content: [{ type: "text", text: String(grandchild.pid) }] },
+          });
         });
+        return;
       }
       if (name === "env")
         return send({

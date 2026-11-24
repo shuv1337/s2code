@@ -525,6 +525,252 @@ describe("StdioMcpBridgeCore", () => {
     });
   });
 
+  it("translates notifications/cancelled requestId to wire IDs and drops unmapped IDs", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+
+    // Hold two concurrent calls with caller IDs "call-a" and "call-b".
+    const callA = post(sessionId, {
+      jsonrpc: "2.0",
+      id: "call-a",
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "alpha", hold: true } },
+    });
+    const callB = post(sessionId, {
+      jsonrpc: "2.0",
+      id: "call-b",
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "beta", hold: true } },
+    });
+    expect(
+      body(
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          id: 99,
+          method: "tools/call",
+          params: { name: "held-count" },
+        }),
+      ),
+    ).toMatchObject({ id: 99, result: { count: 2 } });
+
+    // An unmapped caller ID (even one colliding with call B's numeric wire ID 3) must be dropped.
+    expect(
+      (
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: 3, reason: "spurious" },
+        })
+      ).status,
+    ).toBe(202);
+
+    // Cancelling call A by its caller ID reaches call A's wire ID and cancels only call A.
+    expect(
+      (
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: "call-a", reason: "user cancelled" },
+        })
+      ).status,
+    ).toBe(202);
+    expect(body(await callA)).toMatchObject({
+      id: "call-a",
+      error: { code: -32800, message: "cancelled" },
+    });
+
+    // Release call B and verify it answers cleanly and only call A's wire ID (2) was cancelled.
+    const flushed = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: { name: "release-and-echo", arguments: { text: "done" } },
+    });
+    expect(body(flushed)).toMatchObject({ id: 100, result: { content: [{ text: "done" }] } });
+    expect(body(await callB)).toMatchObject({
+      id: "call-b",
+      result: { content: [{ text: "beta" }] },
+    });
+    const cancelled = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 101,
+      method: "tools/call",
+      params: { name: "cancelled-ids" },
+    });
+    expect(body(cancelled)).toMatchObject({ id: 101, result: { ids: [2] } });
+  });
+
+  it("invalidates a free-slot reservation across the await microtask gap on closeAll and reconcile", async () => {
+    for (const invalidate of ["closeAll", "reconcile"] as const) {
+      const marker = NodePath.join(
+        NodeOS.tmpdir(),
+        `s2code-sync-init-${invalidate}-${NodeCrypto.randomUUID()}`,
+      );
+      const core = makeCore({ maxSessions: 2 });
+      const tripwire: StdioBridgeRequest["server"] = {
+        command: process.execPath,
+        args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`],
+        env: {},
+      };
+      const pending = harness(core, tripwire, "t1", "b").initialize();
+      if (invalidate === "closeAll") core.closeAll("shutting down");
+      else core.reconcile({} as ServerSettings["mcpServers"]);
+      const result = await pending;
+      expect(result.sessionId).toBeUndefined();
+      expect(body(result.response)).toMatchObject({ id: 0, error: { code: -32000 } });
+      expect(core.sessionCount).toBe(0);
+      expect(NodeFS.existsSync(marker)).toBe(false);
+    }
+  });
+
+  it("restores top-level caller id without re-serializing unrelated payload values like 64-bit ints", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+
+    const response = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: "big-req",
+      method: "tools/call",
+      params: { name: "big-int" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toContain('"id":"big-req"');
+    expect(response.body).toContain('"big":9007199254740993');
+    expect(response.body).toContain('"nested":{"id":999}');
+
+    // Duplicate top-level "id" keys follow JSON.parse last-key-wins semantics.
+    const dup = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: "dup-req",
+      method: "tools/call",
+      params: { name: "dup-id" },
+    });
+    expect(dup.status).toBe(200);
+    expect(body(dup)).toEqual({ jsonrpc: "2.0", id: "dup-req", result: { ok: true } });
+  });
+
+  it("accepts safe integer ids across spellings and uniformly rejects/drops unsafe or non-integer ids", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+    const rawPost = (rawBody: string) =>
+      core.handle({
+        serverId: "exec",
+        server: server(),
+        owner: "thread-a",
+        method: "POST",
+        sessionId,
+        body: rawBody,
+      });
+
+    // Unsafe integers and non-integer floats are rejected with -32600 on requests.
+    for (const badRawId of [
+      "9007199254740992",
+      "9007199254740992.0",
+      "9007199254740993",
+      "1000000000000000128",
+      "1e20",
+      "1.5",
+      "9007199254740991.0000000000000001",
+    ]) {
+      const rejected = await rawPost(`{"jsonrpc":"2.0","id":${badRawId},"method":"tools/list"}`);
+      expect(body(rejected)).toMatchObject({ id: null, error: { code: -32600 } });
+    }
+
+    // Safe integer 9007199254740991 works as a request and preserves raw `"id":9007199254740991`.
+    const safeReply = await rawPost(
+      '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/call","params":{"name":"echo","arguments":{"text":"safe-ok"}}}',
+    );
+    expect(safeReply.status).toBe(200);
+    expect(safeReply.body).toContain('"id":9007199254740991');
+    expect(body(safeReply)).toMatchObject({
+      id: 9007199254740991,
+      result: { content: [{ text: "safe-ok" }] },
+    });
+
+    // Unsafe numeric cancellations are dropped and never cancel a pending call with id 9007199254740991.
+    const pendingSafe = rawPost(
+      '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/call","params":{"name":"echo","arguments":{"text":"still-alive","hold":true}}}',
+    );
+    expect(
+      body(
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          id: 99,
+          method: "tools/call",
+          params: { name: "held-count" },
+        }),
+      ),
+    ).toMatchObject({ id: 99, result: { count: 1 } });
+
+    for (const unsafeCancelId of [
+      "9007199254740992",
+      "9007199254740992.0",
+      "9007199254740993",
+      "1000000000000000128",
+      "9007199254740991.0000000000000001",
+    ]) {
+      expect(
+        (
+          await rawPost(
+            `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":${unsafeCancelId}}}`,
+          )
+        ).status,
+      ).toBe(202);
+    }
+
+    await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: { name: "release-and-echo", arguments: { text: "flushed" } },
+    });
+    expect(body(await pendingSafe)).toMatchObject({
+      id: 9007199254740991,
+      result: { content: [{ text: "still-alive" }] },
+    });
+    expect(
+      body(
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          id: 101,
+          method: "tools/call",
+          params: { name: "cancelled-ids" },
+        }),
+      ),
+    ).toMatchObject({ id: 101, result: { ids: [] } });
+
+    // Equivalent safe spellings (`9007199254740991.0` and `9.007199254740991e15`) DO cancel `9007199254740991`.
+    for (const equivalentCancelId of ["9007199254740991.0", "9.007199254740991e15"]) {
+      const held = rawPost(
+        '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/call","params":{"name":"echo","arguments":{"text":"cancel-me","hold":true}}}',
+      );
+      expect(
+        body(
+          await post(sessionId, {
+            jsonrpc: "2.0",
+            id: 102,
+            method: "tools/call",
+            params: { name: "held-count" },
+          }),
+        ),
+      ).toMatchObject({ id: 102, result: { count: 1 } });
+      expect(
+        (
+          await rawPost(
+            `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":${equivalentCancelId}}}`,
+          )
+        ).status,
+      ).toBe(202);
+      expect(body(await held)).toMatchObject({
+        id: 9007199254740991,
+        error: { code: -32800, message: "cancelled" },
+      });
+    }
+  });
+
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "sends process-group SIGKILL to surviving descendants after the launcher exits on SIGTERM",
     async () => {
