@@ -17,6 +17,7 @@ import {
   isSecretReference,
   secretSettingsFields,
   isHttpMcpServer,
+  isStdioMcpServer,
 } from "@t3tools/contracts";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
 import { cursorClient } from "@t3tools/provider-cursor/client";
@@ -62,6 +63,13 @@ const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url
 /** Keyed by URL too, so no race, echo, or hand edit can pair the token with another server. */
 export const mcpServerSecretName = (id: string, url: string, field = "bearerToken") =>
   `mcp-server-${encode(id)}-${encode(field)}-${NodeCrypto.createHash("sha256").update(url).digest("base64url").slice(0, 16)}`;
+
+/**
+ * A stdio server's env value, keyed by the command too, so a hand edit that points the entry at
+ * another program can't hand it this value.
+ */
+export const mcpServerStdioEnvSecretName = (id: string, command: string, variable: string) =>
+  `mcp-server-stdio-${encode(id)}-env-${encode(variable)}-${NodeCrypto.createHash("sha256").update(command).digest("base64url").slice(0, 16)}`;
 
 export interface SettingsSecret {
   readonly secretName: string;
@@ -224,16 +232,25 @@ function mapSecretFieldGroups(
   const mcpServers = Object.fromEntries(
     Object.entries(settings.mcpServers).map(([id, server]) => [
       id,
-      // TODO(#488): stdio env values are stored and sent to clients as written; give them secret slots.
-      !isHttpMcpServer(server)
-        ? server
-        : mapFields(
-            server,
-            mcpServerSecretFields,
-            (field, serverHost) =>
-              mcpServerSecretName(id, server.url, field) +
-              (serverHost === null ? "" : `-${encode(serverHost)}`),
-          ),
+      isStdioMcpServer(server)
+        ? {
+            ...server,
+            // Every env value is a secret: the entry can't say which ones are.
+            env: mapFields(server.env, Object.keys(server.env), (variable, serverHost) =>
+              serverHost === null
+                ? mcpServerStdioEnvSecretName(id, server.command, variable)
+                : `${mcpServerStdioEnvSecretName(id, server.command, variable)}-${encode(serverHost)}`,
+            ),
+          }
+        : !isHttpMcpServer(server)
+          ? server
+          : mapFields(
+              server,
+              mcpServerSecretFields,
+              (field, serverHost) =>
+                mcpServerSecretName(id, server.url, field) +
+                (serverHost === null ? "" : `-${encode(serverHost)}`),
+            ),
     ]),
   ) as ServerSettings["mcpServers"];
   const textGenerators = Object.fromEntries(

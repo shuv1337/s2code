@@ -1,18 +1,21 @@
 import { MCP_TOKEN_REDACTED } from "@t3tools/client-runtime/mcp-server-token";
-import { ProjectId, type McpServerConfig } from "@t3tools/contracts";
+import { ProjectId, type McpServerConfig, type McpServerEntry } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mcpServerDraft, mcpServerHost, parseMcpServerDraft } from "./mcp-servers";
 
-const saved: Record<string, McpServerConfig> = {
-  executor: {
-    label: "Executor",
-    url: "https://executor.example.com/mcp",
-    bearerToken: MCP_TOKEN_REDACTED,
-    enabled: true,
-    projectIds: [ProjectId.make("project-a")],
-    excludeSubagents: true,
-  },
+const executor: McpServerConfig = {
+  label: "Executor",
+  url: "https://executor.example.com/mcp",
+  bearerToken: MCP_TOKEN_REDACTED,
+  enabled: true,
+  projectIds: [ProjectId.make("project-a")],
+  excludeSubagents: true,
+};
+const saved: Record<string, McpServerEntry> = {
+  executor,
+  // Not listed on this screen, but its name is still taken.
+  local: { transport: "stdio", command: "executor", args: ["mcp"], env: {}, enabled: true },
 };
 
 describe("parseMcpServerDraft", () => {
@@ -23,6 +26,7 @@ describe("parseMcpServerDraft", () => {
     ["1password", "Use up to 24 lowercase letters, digits, or hyphens, starting with a letter."],
     ["a".repeat(25), "Use up to 24 lowercase letters, digits, or hyphens, starting with a letter."],
     ["executor", "A server named executor already exists."],
+    ["local", "A server named local already exists."],
   ])("rejects the new name %j", (id, error) => {
     const draft = { ...mcpServerDraft(id, undefined), url: "https://example.com" };
     expect(parseMcpServerDraft(draft, saved, true)).toEqual({ ok: false, error });
@@ -37,7 +41,7 @@ describe("parseMcpServerDraft", () => {
   });
 
   it("keeps a saved token by sending the redaction marker back, and keeps the binding", () => {
-    const draft = { ...mcpServerDraft("executor", saved.executor), label: "  Tools  " };
+    const draft = { ...mcpServerDraft("executor", executor), label: "  Tools  " };
     expect(parseMcpServerDraft(draft, saved, false)).toEqual({
       ok: true,
       value: {

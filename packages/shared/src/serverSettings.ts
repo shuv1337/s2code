@@ -325,6 +325,12 @@ function mergeMcpServersPatch(
       next.set(id, config); // A newer client's transport: kept exactly as sent.
       continue;
     }
+    // A client that predates other transports sends no `transport`; it can't see a stdio or newer
+    // entry, so its write to that name is a clash, not a replacement. Only an explicit
+    // `transport: "http"` turns another transport's entry into an HTTP one.
+    if (savedEntry !== undefined && !isHttpMcpServer(savedEntry) && config.transport !== "http") {
+      continue;
+    }
     // A saved token only carries over from an HTTP entry at the same binding.
     const saved = savedEntry !== undefined && isHttpMcpServer(savedEntry) ? savedEntry : undefined;
     const {
@@ -333,11 +339,13 @@ function mergeMcpServersPatch(
       excludeSubagents: patchedExclude,
       ...rest
     } = config;
-    const projectIds = patchedProjectIds ?? saved?.projectIds;
-    const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
+    const savedBinding =
+      savedEntry !== undefined && isKnownMcpServer(savedEntry) ? savedEntry : undefined;
+    const projectIds = patchedProjectIds ?? savedBinding?.projectIds;
+    const excludeSubagents = patchedExclude ?? savedBinding?.excludeSubagents;
     const merged = {
       ...rest,
-      enabled: rest.enabled ?? saved?.enabled ?? true,
+      enabled: rest.enabled ?? savedBinding?.enabled ?? true,
       ...(projectIds === undefined ? {} : { projectIds }),
       ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
     };

@@ -37,7 +37,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { sourceControlHostSecretName } from "./sourceControl/sourceControlHostSecrets.ts";
-import { mcpServerSecretName, SECRET_REDACTED } from "./settingsSecrets.ts";
+import {
+  mcpServerSecretName,
+  mcpServerStdioEnvSecretName,
+  SECRET_REDACTED,
+} from "./settingsSecrets.ts";
 import * as ServerConfig from "./config.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
@@ -1816,6 +1820,64 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         mcpServerBearerToken(loaded.mcpServers[McpServerId.make("docs")]),
         "docs-secret",
       );
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("keeps stdio MCP env values in the secret store, bound to the command", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const id = McpServerId.make("local");
+      const command = "/usr/local/bin/executor";
+      const entry = {
+        transport: "stdio" as const,
+        command,
+        args: ["mcp"],
+        env: { EXECUTOR_TOKEN: "stdio-env-secret", MODE: "quiet" },
+        enabled: true,
+      };
+      yield* service.updateSettings({ mcpServers: { [id]: entry } });
+
+      const loaded = yield* service.getSettings;
+      assert.deepEqual(loaded.mcpServers[id], entry);
+      const onDisk = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(onDisk, "stdio-env-secret");
+      assert.notInclude(onDisk, "quiet");
+      const tokenSlot = mcpServerStdioEnvSecretName(id, command, "EXECUTOR_TOKEN");
+      assert.isTrue(Option.isSome(yield* store.get(tokenSlot)));
+      const client = ServerSettingsModule.redactServerSettingsForClient(loaded, {
+        secretReferences: true,
+      });
+      assert.notInclude(JSON.stringify(client), "stdio-env-secret");
+      const echoed = client.mcpServers[id];
+      assert.deepInclude(echoed, {
+        env: { EXECUTOR_TOKEN: SECRET_REDACTED, MODE: SECRET_REDACTED },
+      });
+
+      // A client echo keeps the values; a new command drops them; a dropped variable is deleted.
+      yield* service.updateSettings({
+        mcpServers: { [id]: { ...echoed!, label: "Local" } } as never,
+      });
+      assert.deepInclude((yield* service.getSettings).mcpServers[id], {
+        label: "Local",
+        env: entry.env,
+      });
+      yield* service.updateSettings({
+        mcpServers: { [id]: { ...echoed!, env: { MODE: SECRET_REDACTED } } } as never,
+      });
+      assert.deepInclude((yield* service.getSettings).mcpServers[id], { env: { MODE: "quiet" } });
+      assert.isTrue(Option.isNone(yield* store.get(tokenSlot)));
+      yield* service.updateSettings({
+        mcpServers: {
+          [id]: { ...echoed!, command: "/tmp/other", env: { MODE: SECRET_REDACTED } },
+        } as never,
+      });
+      assert.deepInclude((yield* service.getSettings).mcpServers[id], {
+        command: "/tmp/other",
+        env: { MODE: "" },
+      });
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

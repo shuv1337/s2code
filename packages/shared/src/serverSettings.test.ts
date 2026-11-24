@@ -602,6 +602,43 @@ describe("serverSettings helpers", () => {
     });
   });
 
+  it("never lets an HTTP write from a client that predates stdio replace a stdio entry", () => {
+    const url = "https://executor.example/mcp";
+    const projectIds = [ProjectId.make("project-a")];
+    const local = { transport: "stdio", command: "executor", args: ["mcp"], env: { A: "1" } };
+    const withStdio = applyServerSettingsPatch(
+      DEFAULT_SERVER_SETTINGS,
+      decodeServerSettingsPatch({ mcpServers: { local: { ...local, projectIds } } }),
+    );
+    const saved = { ...local, enabled: true, projectIds };
+    expect(withStdio.mcpServers).toEqual({ local: saved });
+
+    const clash = applyServerSettingsPatch(
+      withStdio,
+      decodeServerSettingsPatch({ mcpServers: { local: { url, bearerToken: "t" } } }),
+    );
+    expect(clash.mcpServers).toEqual({ local: saved });
+
+    const switched = applyServerSettingsPatch(
+      withStdio,
+      decodeServerSettingsPatch({ mcpServers: { local: { transport: "http", url } } }),
+    );
+    expect(switched.mcpServers).toEqual({
+      local: { transport: "http", url, bearerToken: "", enabled: true, projectIds },
+    });
+
+    // A rewrite of the stdio entry keeps the binding it omits.
+    const rewritten = applyServerSettingsPatch(
+      withStdio,
+      decodeServerSettingsPatch({ mcpServers: { local: { ...local, args: [] } } }),
+    );
+    expect(rewritten.mcpServers).toEqual({ local: { ...saved, args: [] } });
+    expect(
+      applyServerSettingsPatch(withStdio, { mcpServers: { [McpServerId.make("local")]: null } })
+        .mcpServers,
+    ).toEqual({});
+  });
+
   it("keeps an MCP server's enabled flag and binding when a patch omits them", () => {
     const url = "https://mcp.example.com/mcp";
     const unbound = decodeServerSettings({ mcpServers: { executor: { url } } });

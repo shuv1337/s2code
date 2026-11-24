@@ -23,6 +23,7 @@ import {
   type SecretReference,
   withIdleCompaction,
   isHttpMcpServer,
+  isStdioMcpServer,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -1128,6 +1129,31 @@ const make = Effect.gen(function* () {
         const previous = Object.hasOwn(current.mcpServers, id)
           ? current.mcpServers[id as McpServerId]
           : undefined;
+        if (isStdioMcpServer(server)) {
+          // A kept env value needs the same variable, set, on the same command it was saved for.
+          const saved =
+            previous !== undefined &&
+            isStdioMcpServer(previous) &&
+            previous.command === server.command
+              ? previous.env
+              : {};
+          let envChanged = false;
+          const env = Object.fromEntries(
+            Object.entries(server.env).map(([variable, value]) => {
+              if (
+                value !== SECRET_REDACTED ||
+                (Object.hasOwn(saved, variable) && saved[variable] !== "")
+              ) {
+                return [variable, value];
+              }
+              envChanged = true;
+              return [variable, ""];
+            }),
+          );
+          if (!envChanged) return [id, server];
+          changed = true;
+          return [id, { ...server, env }];
+        }
         if (
           !isHttpMcpServer(server) ||
           server.bearerToken !== SECRET_REDACTED ||

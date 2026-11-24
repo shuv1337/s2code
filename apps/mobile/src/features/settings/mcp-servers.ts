@@ -1,7 +1,9 @@
 import { msg } from "gt-react-native";
 import { m } from "../../i18n/messages";
 import {
+  isHttpMcpServer,
   McpServerConfig,
+  type McpServerEntry,
   McpServerId,
   type McpServerTestInput,
   type McpServerTestResult,
@@ -60,9 +62,10 @@ type Parsed<A> =
   | { readonly ok: true; readonly value: A }
   | { readonly ok: false; readonly error: string };
 
+/** `existing` holds every saved entry, any transport, so a new name can't replace one. */
 export function parseMcpServerId(
   id: string,
-  existing: Readonly<Record<string, McpServerConfig>>,
+  existing: Readonly<Record<string, McpServerEntry>>,
   isNew: boolean,
 ): Parsed<McpServerId> {
   const trimmed = id.trim();
@@ -91,14 +94,22 @@ export function mcpSavedTokenKept(
   return sharedSavedTokenKept(tokenEdit(draft, saved));
 }
 
+const savedHttpServer = (
+  existing: Readonly<Record<string, McpServerEntry>>,
+  id: string,
+): McpServerConfig | undefined => {
+  const entry = Object.hasOwn(existing, id) ? existing[id] : undefined;
+  return entry !== undefined && isHttpMcpServer(entry) ? entry : undefined;
+};
+
 export function parseMcpServerDraft(
   draft: McpServerDraft,
-  existing: Readonly<Record<string, McpServerConfig>>,
+  existing: Readonly<Record<string, McpServerEntry>>,
   isNew: boolean,
 ): Parsed<{ readonly id: McpServerId; readonly config: McpServerConfig }> {
   const id = parseMcpServerId(draft.id, existing, isNew);
   if (!id.ok) return id;
-  const saved = isNew ? undefined : existing[id.value];
+  const saved = isNew ? undefined : savedHttpServer(existing, id.value);
   const label = draft.label.trim();
   const config = decodeConfig({
     ...(label ? { label } : {}),
@@ -115,13 +126,13 @@ export function parseMcpServerDraft(
 
 export function mcpServerTestInput(
   draft: McpServerDraft,
-  existing: Readonly<Record<string, McpServerConfig>>,
+  existing: Readonly<Record<string, McpServerEntry>>,
   isNew: boolean,
 ): Parsed<McpServerTestInput> {
   const parsed = parseMcpServerDraft(draft, existing, isNew);
   if (!parsed.ok) return parsed;
   const { id, config } = parsed.value;
-  const saved = isNew ? undefined : existing[id];
+  const saved = isNew ? undefined : savedHttpServer(existing, id);
   return { ok: true, value: sharedTestInput(id, config.url, tokenEdit(draft, saved)) };
 }
 

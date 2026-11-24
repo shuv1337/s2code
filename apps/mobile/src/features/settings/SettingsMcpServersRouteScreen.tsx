@@ -65,7 +65,7 @@ function useMcpServers(environmentId: EnvironmentId) {
           ),
     [saved],
   );
-  return { loaded: config !== null, servers, canManage };
+  return { loaded: config !== null, servers, allServers: saved ?? NO_SERVERS, canManage };
 }
 
 function useWriteMcpServers(environmentId: EnvironmentId) {
@@ -236,7 +236,7 @@ function McpServerEditor(props: {
   const isNew = serverId === null;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { loaded, servers, canManage } = useMcpServers(environmentId);
+  const { loaded, servers, allServers, canManage } = useMcpServers(environmentId);
   const saved = serverId === null ? undefined : servers[serverId];
   const write = useWriteMcpServers(environmentId);
   const testMcpServer = useAtomCommand(serverEnvironment.testMcpServer, {
@@ -258,7 +258,7 @@ function McpServerEditor(props: {
 
   const save = async () => {
     if (readOnly) return;
-    const parsed = parseMcpServerDraft(draft, servers, isNew);
+    const parsed = parseMcpServerDraft(draft, allServers, isNew);
     if (!parsed.ok) {
       setError(parsed.error);
       return;
@@ -271,7 +271,7 @@ function McpServerEditor(props: {
 
   const runTest = async () => {
     if (readOnly || !readEnvironmentScope(environmentId, AuthProvidersManageScope)) return;
-    const input = mcpServerTestInput(draft, servers, isNew);
+    const input = mcpServerTestInput(draft, allServers, isNew);
     if (!input.ok) {
       setError(input.error);
       return;

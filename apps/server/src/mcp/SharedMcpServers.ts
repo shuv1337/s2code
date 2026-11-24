@@ -166,6 +166,50 @@ const supervisedAnswer = (body: string, label: string) => {
   );
 };
 
+const decodeInitializeRequest = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      id: Schema.Union([Schema.String, Schema.Number]),
+      method: Schema.Literal("initialize"),
+      params: Schema.optional(Schema.Struct({ protocolVersion: Schema.optional(Schema.String) })),
+    }),
+  ),
+);
+
+/**
+ * A supervised thread can't use a stdio server's tools, so it never starts its process: T3 answers
+ * the handshake itself, with no session, and the rest as it does for an HTTP server.
+ */
+const supervisedStdioAnswer = (method: string, body: string, label: string) => {
+  // Closing a session from before the switch only stops its process.
+  if (method === "DELETE") return undefined;
+  if (method !== "POST") {
+    return HttpServerResponse.text("Method Not Allowed", { status: 405, headers: NO_STORE });
+  }
+  const initialize = decodeInitializeRequest(body);
+  if (Option.isSome(initialize)) {
+    return HttpServerResponse.jsonUnsafe(
+      {
+        jsonrpc: "2.0",
+        id: initialize.value.id,
+        result: {
+          protocolVersion: initialize.value.params?.protocolVersion ?? "2025-06-18",
+          capabilities: { tools: {} },
+          serverInfo: { name: label, version: "0" },
+        },
+      },
+      { headers: NO_STORE },
+    );
+  }
+  if (Option.getOrUndefined(decodeJsonRpcMethod(body))?.method.startsWith("notifications/")) {
+    return HttpServerResponse.empty({ status: 202, headers: NO_STORE });
+  }
+  return (
+    supervisedAnswer(body, label) ??
+    unavailable(body, 403, `${label} only works in threads with Full access.`)
+  );
+};
+
 /** A thread outside a server's binding never reaches it, not even to initialize. */
 const unboundAnswer = (body: string, label: string) =>
   emptyListing(body) ??
@@ -255,7 +299,9 @@ const proxy = Effect.gen(function* () {
     return unboundAnswer(body, displayName(name, server));
   }
   if (thread.runtimeMode !== "full-access") {
-    const answer = supervisedAnswer(body, displayName(name, server));
+    const answer = isStdioMcpServer(server)
+      ? supervisedStdioAnswer(request.method, body, displayName(name, server))
+      : supervisedAnswer(body, displayName(name, server));
     if (answer !== undefined) return answer;
   }
   if (isStdioMcpServer(server)) {

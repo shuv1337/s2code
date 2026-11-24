@@ -1,4 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - The fixture listens on a real port for upstream absolute URLs.
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as NodeHttp from "node:http";
@@ -148,6 +152,7 @@ const server = (url: string, overrides: Partial<McpServerConfig> = {}) => ({
 });
 
 const fixture = Effect.gen(function* () {
+  const spawnMarker = join(tmpdir(), `s2code-stdio-tripwire-${randomUUID()}`);
   const received: Array<Received> = [];
   let bearerTokenReads = 0;
   const hung = yield* Queue.unbounded<string>();
@@ -221,6 +226,15 @@ const fixture = Effect.gen(function* () {
         env: {},
         enabled: true,
       },
+      // Leaves a file behind if T3 ever starts it.
+      tripwire: {
+        transport: "stdio",
+        label: "Tripwire",
+        command: process.execPath,
+        args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(spawnMarker)}, "")`],
+        env: {},
+        enabled: true,
+      },
       future: { transport: "websocket", endpoint: "wss://example.invalid", enabled: true },
       bound: server(`${origin}/upstream/mcp`, {
         label: "Bound",
@@ -244,6 +258,7 @@ const fixture = Effect.gen(function* () {
     );
   return {
     origin,
+    spawned: () => existsSync(spawnMarker),
     received,
     bearerTokenReads: () => bearerTokenReads,
     hung,
@@ -699,6 +714,50 @@ it.effect("bridges a stdio server on the same route, with the same full-access g
     expect((yield* call("/mcp/servers/local", { body: echo, headers: session })).status).toBe(404);
     // Nothing went to the HTTP upstream.
     expect(received).toHaveLength(0);
+  }),
+);
+
+it.effect("never starts a stdio server's process for a thread without full access", () =>
+  Effect.gen(function* () {
+    const { call, runtimeMode, spawned } = yield* fixture;
+    yield* Ref.set(runtimeMode, "approval-required");
+    const send = (body: unknown) => call("/mcp/servers/tripwire", { body, headers: asAgent });
+    const initialize = yield* send({
+      jsonrpc: "2.0",
+      id: 0,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26" },
+    });
+    expect(initialize.headers["mcp-session-id"]).toBeUndefined();
+    expect(yield* initialize.json).toEqual({
+      jsonrpc: "2.0",
+      id: 0,
+      result: {
+        protocolVersion: "2025-03-26",
+        capabilities: { tools: {} },
+        serverInfo: { name: "Tripwire", version: "0" },
+      },
+    });
+    expect((yield* send({ jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
+    expect(yield* (yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).json).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [] },
+    });
+    expect(
+      yield* (yield* send({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "x" },
+      })).json,
+    ).toMatchObject({ id: 2, error: { message: expect.stringContaining("Full access") } });
+    expect(spawned()).toBe(false);
+
+    // The same request from a full-access thread does start it.
+    yield* Ref.set(runtimeMode, "full-access");
+    yield* send({ jsonrpc: "2.0", id: 3, method: "initialize", params: {} });
+    expect(spawned()).toBe(true);
   }),
 );
 
