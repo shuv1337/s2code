@@ -169,7 +169,7 @@ jobs:
     # "Wait for Linux CLI archive"), so it gets that wait on top of the usual 30.
     # This does not extend the hosted-runner queue. GitHub cancels an unassigned
     # macos-26 job at about 15 minutes.
-    # The shuvbot runner has no such queue limit; see docs/operations/release.md.
+    # The shuvbot runner has no such queue limit; see docs/operations/hosted-fork.md.
     timeout-minutes: ${{ inputs.platform == 'win' && 70 || 30 }}
     env:
       T3CODE_CLERK_PUBLISHABLE_KEY: ${{ inputs.clerk_publishable_key }}
@@ -259,7 +259,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: native/resource-monitor/target/${{ inputs.rust_target }}/release/t3-resource-monitor${{ inputs.platform == 'win' && '.exe' || '' }}
-          key: resource-monitor-${{ inputs.rust_target }}-${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
+          key: resource-monitor-${{ inputs.rust_target }}-${{ hashFiles('.cargo/config.toml', 'native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
 
       - name: Cache Linux capture helpers
         if: inputs.platform == 'linux'

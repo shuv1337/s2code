@@ -29,19 +29,48 @@ interface Attempt {
 function loadRetryLoop(format: "cjs" | "esm") {
   const require = NodeModule.createRequire(import.meta.url);
   const directory = NodePath.dirname(require.resolve("@cursor/sdk"));
-  const source = NodeFS.readFileSync(NodePath.join(directory, "..", format, "305.js"), "utf8");
+  const source = NodeFS.readFileSync(NodePath.join(directory, "..", format, "977.js"), "utf8");
   const marker = source.indexOf(
-    "checkpointHandler:r,runOptions:n,requestId:o,hooks:s,cancellation:i",
+    "checkpointHandler:r,runOptions:n,requestId:o,hooks:s,cancellation:",
   );
   const start = source.lastIndexOf("async function ", marker);
-  const end = source.indexOf("new Set([", marker);
+  let depth = 0;
+  let end = -1;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let escaped = false;
+  for (let i = source.indexOf("{", start); i < source.length; i++) {
+    const ch = source[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if ((inSingle || inDouble || inTemplate) && ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (!inDouble && !inTemplate && ch === "'") inSingle = !inSingle;
+    else if (!inSingle && !inTemplate && ch === '"') inDouble = !inDouble;
+    else if (!inSingle && !inDouble && ch === "`") inTemplate = !inTemplate;
+    else if (!inSingle && !inDouble && !inTemplate) {
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+  }
   const loop = source.slice(start, end);
-  const name = /^async function (\w+)/.exec(loop)![1]!;
-  const initialDelay = /let c=(\w+);/.exec(loop)![1]!;
-  const uuid = /y=\(0,(\w+)\.C\)\(\)/.exec(loop)![1]!;
-  const proto = /g=new (\w+)\.QFf/.exec(loop)![1]!;
-  const sameState = /(\w+)\(\(x=m\)\.turns/.exec(loop)![1]!;
-  const errorClass = /error:new (\w+)\("Agent turn stopped/.exec(loop)![1]!;
+  const name = /^async function ([\w$]+)/.exec(loop)![1]!;
+  const initialDelay = /let \w+=([\w$]+);/.exec(loop)![1]!;
+  const uuid = /=\(0,([\w$]+)\.C\)\(\)/.exec(loop)![1]!;
+  const proto = /new ([\w$]+)\.QFf/.exec(loop)![1]!;
+  const sameState = /([\w$]+)\(\(\w+=\w+\)\.turns/.exec(loop)![1]!;
+  const errorClass = /error:new ([\w$]+)\("Agent turn stopped/.exec(loop)![1]!;
   const guardPath = NodePath.join(directory, "..", "s2code-retry.cjs");
   const globals = {
     [initialDelay]: 0,

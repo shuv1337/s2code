@@ -100,8 +100,10 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         });
       }
       // A fork of delegated work stays delegated, so it gains nothing withheld from delegates.
+      // A fork is not a step of the workflow run its source was one of.
+      const { workflowRun: _workflowRun, ...inherited } = input.sourceProjection.thread;
       const targetThread: OrchestrationV2AppThread = {
-        ...input.sourceProjection.thread,
+        ...inherited,
         // PR context follows the conversation; watching remains the source thread's responsibility.
         pullRequests: input.sourceProjection.thread.pullRequests?.map(
           ({ watch: _watch, ...link }) => link,

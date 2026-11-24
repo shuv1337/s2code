@@ -32,6 +32,10 @@ export function getPublicDesktopSchemes(isDevelopment: boolean, version = ""): r
   ];
 }
 
+export function getDesktopOrigin(isDevelopment: boolean, version = ""): string {
+  return `${getDesktopScheme(isDevelopment, version)}://${DESKTOP_HOST}`;
+}
+
 /** A prompt link the desktop opens: a hosted web link, or one on this channel's own schemes. */
 export function isDesktopPromptLink(
   value: string,
@@ -43,10 +47,6 @@ export function isDesktopPromptLink(
   return (
     protocol === "http:" || protocol === "https:" || publicSchemes.includes(protocol.slice(0, -1))
   );
-}
-
-function getDesktopOrigin(isDevelopment: boolean, version: string): string {
-  return `${getDesktopScheme(isDevelopment, version)}://${DESKTOP_HOST}`;
 }
 
 export function getDesktopUrl(isDevelopment: boolean, version = ""): string {

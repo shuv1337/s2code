@@ -308,6 +308,36 @@ it.layer(NodeServices.layer)("host CLI commands", (it) => {
       );
     }),
   );
+
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "never picks up an unrelated PATH binary through relative or empty PATH entries",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const bin = yield* fs.makeTempDirectoryScoped();
+        yield* fs.writeFileString(path.join(bin, "s2code"), "#!/bin/sh\n", { mode: 0o755 });
+        const hostCommand = (searchPath: string) =>
+          resolveHostCliCommand("doctor").pipe(
+            Effect.provideService(HostProcess.ExecutablePath, "/usr/bin/node"),
+            Effect.provideService(HostProcess.Arguments, [
+              "/usr/bin/node",
+              "/opt/t3/lib/node_modules/t3/dist/bin.mjs",
+            ]),
+            Effect.provideService(HostProcess.IsExecutable, false),
+            Effect.provideService(HostProcess.Platform, "linux"),
+            Effect.provideService(HostProcess.Environment, { PATH: searchPath }),
+          );
+
+        const expected = {
+          command: "/usr/bin/node /opt/t3/lib/node_modules/t3/dist/bin.mjs doctor",
+          launcher: false,
+        };
+        expect(yield* hostCommand(path.relative(process.cwd(), bin))).toEqual(expected);
+        expect(yield* hostCommand(`:${bin}`)).toEqual(expected);
+        expect(yield* hostCommand(bin)).toEqual(expected);
+      }),
+  );
 });
 
 it.layer(NodeServices.layer)("source-install host commands", (it) => {

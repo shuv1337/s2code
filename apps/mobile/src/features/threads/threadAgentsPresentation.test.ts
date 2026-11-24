@@ -65,10 +65,15 @@ describe("resolveSubagentRowPresentation", () => {
 
   it("falls back to a trimmed prompt when the agent has no title", () => {
     const long = resolveSubagentRowPresentation({ ...base, prompt: "x".repeat(200) });
+    const emoji = resolveSubagentRowPresentation({
+      ...base,
+      prompt: `${"x".repeat(76)}😀 and more`,
+    });
     const titled = resolveSubagentRowPresentation({ ...base, title: "Subagent: /root/my_worker" });
 
     expect(long.title).toHaveLength(80);
     expect(long.title.endsWith("...")).toBe(true);
+    expect(emoji.title).toBe(`${"x".repeat(76)}...`);
     expect(titled.title).toBe("My Worker");
   });
 
@@ -79,7 +84,7 @@ describe("resolveSubagentRowPresentation", () => {
     );
   });
 
-  it("opens a task in a linked environment there, only when this app knows it", () => {
+  it("opens a task in a linked environment directly when connected, or read-only through the link", () => {
     const remote = {
       ...base,
       childThreadId: null,
@@ -93,12 +98,37 @@ describe("resolveSubagentRowPresentation", () => {
     expect(resolveSubagentRowPresentation(remote, false).canOpenThread).toBe(false);
     expect(resolveSubagentRowPresentation(remote, true).canOpenThread).toBe(true);
     const here = "environment-here" as never;
-    expect(subagentThreadTarget(remote, here, () => false)).toBeNull();
-    expect(subagentThreadTarget(remote, here, (id) => id === "environment-box")).toEqual({
+    expect(
+      subagentThreadTarget(
+        remote,
+        here,
+        () => undefined,
+        () => true,
+      ),
+    ).toEqual({
+      environmentId: "environment-box",
+      threadId: "thread-on-box",
+      linked: { viaEnvironmentId: here, label: "Box" },
+    });
+    expect(
+      subagentThreadTarget(
+        remote,
+        here,
+        (id) => (id === "environment-box" ? { connected: true } : undefined),
+        () => true,
+      ),
+    ).toEqual({
       environmentId: "environment-box",
       threadId: "thread-on-box",
     });
-    expect(subagentThreadTarget(base, here, () => false)).toEqual({
+    expect(
+      subagentThreadTarget(
+        base,
+        here,
+        () => undefined,
+        () => false,
+      ),
+    ).toEqual({
       environmentId: here,
       threadId: "thread-child",
     });

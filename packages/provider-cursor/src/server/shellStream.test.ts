@@ -15,7 +15,7 @@ type StreamHandler = new (
   serialize: (id: string, chunk: Chunk) => object,
 ) => { handle: (context: object, request: object) => AsyncGenerator<unknown> };
 
-it.each(["cjs/305.js", "esm/305.js", "bundled/index.js"])(
+it.each(["cjs/977.js", "esm/977.js", "bundled/index.js"])(
   "publishes native shell chunks before yielding them in %s",
   async (build) => {
     const require = NodeModule.createRequire(import.meta.url);

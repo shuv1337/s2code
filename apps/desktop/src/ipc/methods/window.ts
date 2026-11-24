@@ -17,17 +17,15 @@ import {
 } from "@t3tools/contracts";
 import { PROJECT_FAVICON_EXTENSIONS } from "@t3tools/shared/projectFavicon";
 import { resolveEditorCommand } from "@t3tools/shared/editor";
-import { withPathDirectoryListings } from "@t3tools/shared/shell";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { isRelayTracingEnabled } from "@t3tools/shared/otelEnvironment";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
-import * as Clock from "effect/Clock";
-import { currentDesktopBootstrapToken } from "@t3tools/shared/desktopBootstrapToken";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
@@ -155,6 +153,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
   result: Schema.Array(DesktopEnvironmentBootstrapSchema),
   handler: Effect.fn("desktop.ipc.window.getLocalEnvironmentBootstraps")(function* () {
     const pool = yield* DesktopBackendPool.DesktopBackendPool;
+    const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
     const instances = yield* pool.list;
     const bootstraps: DesktopEnvironmentBootstrap[] = [];
     for (const instance of instances) {
@@ -188,17 +187,15 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
         runningDistro,
         httpBaseUrl: httpBaseUrl.href,
         wsBaseUrl: toWebSocketBaseUrl(httpBaseUrl),
+        // The renderer uses this token with httpBaseUrl once the backend has reported ready.
         // Use the current window's derived token; the launch config's token may be stale.
-        ...(bootstrap.desktopBootstrapSecret
-          ? {
-              bootstrapToken: yield* currentDesktopBootstrapToken(
-                bootstrap.desktopBootstrapSecret,
-                yield* Clock.currentTimeMillis,
-              ),
-            }
-          : bootstrap.desktopBootstrapToken
-            ? { bootstrapToken: bootstrap.desktopBootstrapToken }
-            : {}),
+        ...(!snapshot.ready
+          ? {}
+          : bootstrap.desktopBootstrapSecret
+            ? { bootstrapToken: yield* configuration.currentBootstrapToken }
+            : bootstrap.desktopBootstrapToken
+              ? { bootstrapToken: bootstrap.desktopBootstrapToken }
+              : {}),
       });
     }
     return bootstraps;
@@ -451,7 +448,6 @@ export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
   result: Schema.Array(EditorId),
   handler: Effect.fn("desktop.ipc.window.probeRemoteEditors")(function* () {
     const env = yield* HostProcess.Environment;
-    // Shared listings stop each editor re-stating every PATH entry x PATHEXT candidate on Windows.
     const resolved = yield* Effect.forEach(
       REMOTE_CAPABLE_EDITOR_IDS,
       (editorId) => {
@@ -461,7 +457,7 @@ export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
           : Effect.succeed(false);
       },
       { concurrency: REMOTE_EDITOR_PROBE_CONCURRENCY },
-    ).pipe(withPathDirectoryListings);
+    );
     return REMOTE_CAPABLE_EDITOR_IDS.filter((_, index) => resolved[index]);
   }),
 });

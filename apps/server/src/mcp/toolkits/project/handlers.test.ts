@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - a directory junction needs no privilege on Windows.
+import * as NodeFSP from "node:fs/promises";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import { expect, it } from "@effect/vitest";
 import {
@@ -9,6 +11,7 @@ import {
   type ServerProvider,
   type Project as ProjectRecord,
   type ModelSelection,
+  type ProjectScript,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
   ThreadId,
@@ -60,6 +63,7 @@ const clientLaunchHarness = (input: {
   >["providerInstances"];
   /** Where Settings saves a project's model; the legacy project field stays null. */
   readonly overrideModel?: ModelSelection;
+  readonly overrideScripts?: readonly ProjectScript[];
   readonly launched: Array<ThreadLaunch.ThreadLaunchInput>;
   readonly workspaceRoot?: string;
   readonly checkWorktreeBase?: ThreadLaunch.ThreadLaunchService["Service"]["checkWorktreeBase"];
@@ -101,7 +105,12 @@ const clientLaunchHarness = (input: {
         : {
             projectSettingsFolded: true,
             projectSettingsOverrides: {
-              [projectId]: { defaultModelSelection: input.overrideModel },
+              [projectId]: {
+                defaultModelSelection: input.overrideModel,
+                ...(input.overrideScripts === undefined
+                  ? {}
+                  : { defaultProjectScripts: input.overrideScripts }),
+              },
             },
           }),
     }),
@@ -211,6 +220,7 @@ it.effect(
         defaultRuntimeMode: RuntimeMode,
         params: {
           readonly title: string;
+          readonly generateTitle?: boolean;
           readonly message?: string;
           readonly runtimeMode?: RuntimeMode;
           readonly targeted?: false;
@@ -260,6 +270,26 @@ it.effect(
       });
       expect(belowCeiling.launched[0]?.runtimeMode).toBe("approval-required");
       expect(belowCeiling.launched[0]?.initialMessage?.senderThreadId).toBeUndefined();
+      expect(belowCeiling.launched[0]?.generateTitle).toBeUndefined();
+      expect(belowCeiling.launched[0]?.titleRenamed).toBe(true);
+
+      const titled = yield* launchWith("full-access", "full-access", {
+        title: "Fix",
+        generateTitle: true,
+        message: "Fix the bug",
+      });
+      expect(titled.launched[0]).toMatchObject({ title: "Fix", generateTitle: true });
+      expect(titled.launched[0]?.titleRenamed).toBeUndefined();
+
+      for (const message of [undefined, "", " \n "]) {
+        const idleTitled = yield* launchWith("full-access", "full-access", {
+          title: "Fix",
+          generateTitle: true,
+          ...(message === undefined ? {} : { message }),
+        });
+        expect(idleTitled.result).toMatchObject({ code: "invalid_request" });
+        expect(idleTitled.launched).toHaveLength(0);
+      }
 
       const aboveCeiling = yield* launchWith("auto-accept-edits", "full-access", {
         title: "Fix",
@@ -817,10 +847,14 @@ it.effect("a launch binds only an existing checkout that is one of the project's
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-launch-worktree-" });
+    // Git registers resolved paths, and a launch keeps the registered one.
+    const root = yield* fileSystem.realPath(
+      yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-launch-worktree-" }),
+    );
     const repo = path.join(root, "repo");
     const worktree = path.join(root, "feature");
     const outside = path.join(root, "outside");
+    const alias = path.join(root, "alias");
     yield* fileSystem.makeDirectory(repo);
     yield* fileSystem.makeDirectory(outside);
 
@@ -865,9 +899,13 @@ it.effect("a launch binds only an existing checkout that is one of the project's
         code: "invalid_request",
       });
     }
+    // The thread keeps the registered worktree path when launched through a link to it.
+    yield* Effect.promise(() => NodeFSP.symlink(worktree, alias, "junction"));
+    expect((yield* launchInto(alias)).at(-1)?.result).toMatchObject({ projectId });
     expect(launched.map((launch) => launch.workspaceStrategy)).toEqual([
       { type: "existing_worktree", worktreePath: worktree },
       { type: "existing_worktree", worktreePath: repo },
+      { type: "existing_worktree", worktreePath: worktree },
     ]);
 
     yield* fileSystem.remove(worktree, { recursive: true });
@@ -1445,15 +1483,19 @@ it.effect("an agent cannot delete the built-in scratch project, even with force"
   }),
 );
 
-it.effect("reading a project shows the default model saved in Settings", () =>
+it.effect("reading a project shows the default model and actions saved in Settings", () =>
   Effect.gen(function* () {
     const overrideModel = {
       instanceId: ProviderInstanceId.make("claudeAgent"),
       model: "claude-sonnet",
     };
+    const overrideScripts = [
+      { id: "test", name: "Test", command: "pnpm test", icon: "test", runOnWorktreeCreate: false },
+    ] satisfies ProjectScript[];
     const harness = clientLaunchHarness({
       runtimeModeCeiling: "full-access",
       overrideModel,
+      overrideScripts,
       launched: [],
     });
     const dependencies = Layer.merge(
@@ -1465,7 +1507,15 @@ it.effect("reading a project shows the default model saved in Settings", () =>
             title: "Client target",
             workspaceRoot: "/projects/client-target",
             defaultModelSelection: null,
-            scripts: [],
+            scripts: [
+              {
+                id: "stale",
+                name: "Stale",
+                command: "true",
+                icon: "play",
+                runOnWorktreeCreate: false,
+              },
+            ],
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
             deletedAt: null,
@@ -1482,11 +1532,14 @@ it.effect("reading a project shows the default model saved in Settings", () =>
       .handle("t3_project_read", { projectId: harness.projectId })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
-    expect(read.at(-1)?.result).toMatchObject({ defaultModelSelection: overrideModel });
+    expect(read.at(-1)?.result).toMatchObject({
+      defaultModelSelection: overrideModel,
+      scripts: overrideScripts,
+    });
   }),
 );
 
-it.effect("an update the project refuses tells the agent why", () =>
+it.effect("a project update or create that is refused tells the agent why", () =>
   Effect.gen(function* () {
     const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched: [] });
     const detail = "Project monograms must contain at most two characters.";
@@ -1511,5 +1564,14 @@ it.effect("an update the project refuses tells the agent why", () =>
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
 
     expect(refused.at(-1)?.result).toMatchObject({ code: "invalid_request", message: detail });
+
+    // A project started from its title has no folder yet for tracked folders to be checked against.
+    const dropped = yield* toolkit
+      .handle("t3_project_create", {
+        title: "Wrapper",
+        trackedFolders: [{ path: "/repos/api", name: "api" }],
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    expect(dropped.at(-1)?.result).toMatchObject({ code: "invalid_request" });
   }),
 );

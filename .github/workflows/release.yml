@@ -271,7 +271,7 @@ jobs:
       hosted_app_url: ${{ needs.preflight.outputs.hosted_app_url }}
 
   # macOS arm64 builds once on the self-hosted shuvbot runner (owned by Fleet
-  # Ops; see docs/operations/release.md). If shuvbot never picks it up, the queue
+  # Ops; see docs/operations/hosted-fork.md). If shuvbot never picks it up, the queue
   # watch below starts one hosted macos-26 build instead. GitHub cancels a hosted
   # job that gets no runner after ~15 minutes (runner_id 0); timeout-minutes does
   # not extend that, and nothing retries it. To revert to hosted runners, set
@@ -555,7 +555,7 @@ jobs:
         run: bash .github/scripts/announce-npm-promotion.sh "v${RELEASE_VERSION}"
 
   # Promote-only: once npm shows a version an earlier run left pending review, move
-  # its dist-tags. Nothing is built, uploaded or published (docs/operations/release.md).
+  # its dist-tags. Nothing is built, uploaded or published (docs/operations/hosted-fork.md).
   promote:
     name: Promote npm dist-tags
     if: >-
