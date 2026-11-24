@@ -580,3 +580,48 @@ describe("server model preferences", () => {
     expect(decodeServerSettingsPatch(input)).toEqual(input);
   });
 });
+
+describe("mcpServers transports", () => {
+  const decode = Schema.decodeUnknownSync(ServerSettings);
+  const encode = Schema.encodeSync(ServerSettings);
+  const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+  it("reads saved http entries with no transport, and fills stdio defaults", () => {
+    const settings = decode({
+      mcpServers: {
+        remote: { url: "https://executor.example/mcp", bearerToken: "" },
+        local: { transport: "stdio", command: " executor " },
+      },
+    });
+    expect((settings.mcpServers as Record<string, unknown>).remote).toEqual({
+      url: "https://executor.example/mcp",
+      bearerToken: "",
+      enabled: true,
+    });
+    expect((settings.mcpServers as Record<string, unknown>).local).toEqual({
+      transport: "stdio",
+      command: "executor",
+      args: [],
+      env: {},
+      enabled: true,
+    });
+  });
+
+  it("keeps a transport from a newer version exactly as saved", () => {
+    const future = { transport: "websocket", endpoint: "wss://x.invalid", nested: { a: [1] } };
+    const settings = decode({ mcpServers: { future } });
+    expect((settings.mcpServers as Record<string, unknown>).future).toEqual(future);
+    expect((encode(settings) as { mcpServers: unknown }).mcpServers).toEqual({ future });
+    expect(decodePatch({ mcpServers: { future } }).mcpServers).toEqual({ future });
+  });
+
+  it("rejects a stdio entry without a command or with non-string env", () => {
+    expect(() => decode({ mcpServers: { local: { transport: "stdio" } } })).toThrow();
+    expect(() =>
+      decode({ mcpServers: { local: { transport: "stdio", command: "x", env: { A: 1 } } } }),
+    ).toThrow();
+    expect(() =>
+      decode({ mcpServers: { local: { transport: "stdio", command: "  " } } }),
+    ).toThrow();
+  });
+});

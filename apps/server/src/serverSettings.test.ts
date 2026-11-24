@@ -19,6 +19,7 @@ import {
   UsageLimitSourceId,
   type SimlockDeviceHostConfig,
 } from "@t3tools/contracts";
+import { mcpServerBearerToken } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -1681,7 +1682,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         const withoutToken = yield* service.updateSettings(
           yield* decodeServerSettingsPatch({ mcpServers: { [id]: { url, enabled: false } } }),
         );
-        assert.equal(withoutToken.mcpServers[id]?.bearerToken, "mcp-secret");
+        assert.equal(mcpServerBearerToken(withoutToken.mcpServers[id]), "mcp-secret");
         assert.isFalse(withoutToken.mcpServers[id]?.enabled);
 
         const cleared = yield* service.updateSettings(
@@ -1689,7 +1690,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
             mcpServers: { [id]: { url, label: "Renamed", bearerToken: "" } },
           }),
         );
-        assert.equal(cleared.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(cleared.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
 
         if (state === "removed") yield* service.updateSettings({ mcpServers: { [id]: null } });
@@ -1697,7 +1698,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         const echoed = yield* service.updateSettings({
           mcpServers: { [id]: { url, bearerToken: SECRET_REDACTED } },
         });
-        assert.equal(echoed.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(echoed.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
@@ -1762,24 +1763,24 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           label: "Renamed",
           ...sameAudience,
         });
-        assert.equal(relabeled.mcpServers[id]?.bearerToken, "mcp-secret");
+        assert.equal(mcpServerBearerToken(relabeled.mcpServers[id]), "mcp-secret");
 
         const moved = yield* echo(changes);
         assert.deepInclude(moved.mcpServers[id], changes);
-        assert.equal(moved.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(moved.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
 
         const replaced = yield* service.updateSettings({
           mcpServers: { [id]: { ...original, bearerToken: "new-secret" } },
         });
-        assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
+        assert.equal(mcpServerBearerToken(replaced.mcpServers[id]), "new-secret");
 
         const movedWithoutToken = yield* service.updateSettings(
           yield* decodeServerSettingsPatch({
             mcpServers: { [id]: { url: original.url, ...changes } },
           }),
         );
-        assert.equal(movedWithoutToken.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(movedWithoutToken.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
@@ -1810,8 +1811,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
 
       const loaded = yield* serverSettings.getSettings;
 
-      assert.equal(loaded.mcpServers[McpServerId.make("executor")]?.bearerToken, "");
-      assert.equal(loaded.mcpServers[McpServerId.make("docs")]?.bearerToken, "docs-secret");
+      assert.equal(mcpServerBearerToken(loaded.mcpServers[McpServerId.make("executor")]), "");
+      assert.equal(
+        mcpServerBearerToken(loaded.mcpServers[McpServerId.make("docs")]),
+        "docs-secret",
+      );
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

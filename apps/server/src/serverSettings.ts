@@ -22,6 +22,7 @@ import {
   isSecretReference,
   type SecretReference,
   withIdleCompaction,
+  isHttpMcpServer,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -1128,8 +1129,10 @@ const make = Effect.gen(function* () {
           ? current.mcpServers[id as McpServerId]
           : undefined;
         if (
+          !isHttpMcpServer(server) ||
           server.bearerToken !== SECRET_REDACTED ||
           (previous !== undefined &&
+            isHttpMcpServer(previous) &&
             previous.bearerToken !== "" &&
             sameMcpServerBinding(previous, server))
         ) {

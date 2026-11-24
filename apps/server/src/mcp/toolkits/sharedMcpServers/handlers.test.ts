@@ -11,6 +11,7 @@ import {
   ThreadId,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
+import { mcpServerBearerToken } from "@t3tools/contracts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -115,6 +116,11 @@ const fixture = Effect.gen(function* () {
           tested = true;
           return { _tag: "Connected" as const, serverName: "Fixture", tools: ["lookup"] };
         }),
+      testStdioConnection: (server) =>
+        Effect.sync(() => {
+          tested = true;
+          return { _tag: "Connected" as const, serverName: server.command, tools: ["local"] };
+        }),
     }),
   );
   const layer = McpToolAccess.HandlersLayer.layer(Handlers.layer).pipe(
@@ -153,7 +159,7 @@ it.effect(
             "Added or re-enabled servers reach new sessions only; other changes apply immediately.",
         });
         expect(harness.stored.has(secretKey)).toBe(false);
-        expect((yield* settings.getSettings).mcpServers[id]?.bearerToken).toBe(token);
+        expect(mcpServerBearerToken((yield* settings.getSettings).mcpServers[id])).toBe(token);
         const listed = yield* call("t3_mcp_server_list", {});
         expect(listed).toMatchObject({
           servers: [{ id, hasToken: true, harnessName: "shared-catalog" }],
@@ -178,7 +184,7 @@ it.effect(
         yield* call("t3_mcp_server_set", { id, label: null });
         expect((yield* settings.getSettings).mcpServers[id]?.label).toBeUndefined();
         yield* call("t3_mcp_server_set", { id, clearBearerToken: true });
-        expect((yield* settings.getSettings).mcpServers[id]?.bearerToken).toBe("");
+        expect(mcpServerBearerToken((yield* settings.getSettings).mcpServers[id])).toBe("");
         expect(yield* call("t3_mcp_server_remove", { id })).toMatchObject({ id });
         expect((yield* settings.getSettings).mcpServers).toEqual({});
         const management = yield* Management.SharedMcpServerManagement;
@@ -471,7 +477,7 @@ it.effect("creates a tokenless server without adopting a token left in the store
       });
       yield* call("t3_mcp_server_set", { id, label: "Catalog" });
       const settings = yield* Settings.ServerSettingsService;
-      expect((yield* settings.getSettings).mcpServers[id]?.bearerToken).toBe("");
+      expect(mcpServerBearerToken((yield* settings.getSettings).mcpServers[id])).toBe("");
     }).pipe(Effect.provide(harness.layer));
   }),
 );
@@ -592,6 +598,78 @@ it.effect(
           _tag: "Connected",
         });
         expect(yield* owner(call("t3_mcp_server_remove", { id }))).toMatchObject({ id });
+      }).pipe(Effect.provide(harness.layer));
+    }),
+);
+
+it.effect(
+  "never lets an agent change or read a local-process server, and keeps unknown transports",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* fixture;
+      const local = McpServerId.make("local");
+      const future = McpServerId.make("future");
+      const stdio = {
+        transport: "stdio" as const,
+        label: "Local",
+        command: "/usr/local/bin/executor",
+        args: ["mcp", "--host", "https://executor.example"],
+        env: { EXECUTOR_NO_UPDATE_CHECK: "1", EXECUTOR_TOKEN: "env-secret" },
+        enabled: true,
+      };
+      const futureEntry = { transport: "websocket", endpoint: "wss://example.invalid", extra: [1] };
+      yield* Effect.gen(function* () {
+        const settings = yield* Settings.ServerSettingsService;
+        yield* settings.updateSettings({ mcpServers: { [local]: stdio, [future]: futureEntry } });
+        expect((yield* settings.getSettings).mcpServers[local]).toEqual(stdio);
+        expect((yield* settings.getSettings).mcpServers[future]).toEqual(futureEntry);
+
+        const listed = yield* call("t3_mcp_server_list", {});
+        expect(listed).toMatchObject({
+          servers: [
+            {
+              id: local,
+              label: "Local",
+              enabled: true,
+              transport: "stdio",
+              harnessName: "shared-local",
+            },
+          ],
+        });
+        expect(JSON.stringify(listed)).not.toMatch(
+          /executor\.example|env-secret|usr\/local|future/,
+        );
+
+        const localProcess = {
+          code: "invalid_request",
+          message: new Management.SharedMcpServerManagementError({ reason: "local_process" })
+            .message,
+        };
+        for (const input of [
+          { id: local, url },
+          { id: local, enabled: false },
+          { id: local, label: "Renamed" },
+          { id: future, url },
+        ]) {
+          expect(yield* call("t3_mcp_server_set", input)).toMatchObject(localProcess);
+        }
+        expect((yield* settings.getSettings).mcpServers[local]).toEqual(stdio);
+        expect((yield* settings.getSettings).mcpServers[future]).toEqual(futureEntry);
+
+        expect(yield* call("t3_mcp_server_test", { id: local })).toEqual({
+          _tag: "Connected",
+          serverName: "/usr/local/bin/executor",
+          tools: ["local"],
+        });
+        expect(harness.wasTested()).toBe(true);
+        // Writing an unrelated server keeps both entries exactly as saved.
+        yield* call("t3_mcp_server_set", { id, url });
+        expect((yield* settings.getSettings).mcpServers[local]).toEqual(stdio);
+        expect((yield* settings.getSettings).mcpServers[future]).toEqual(futureEntry);
+        expect(yield* call("t3_mcp_server_remove", { id: local })).toMatchObject({ id: local });
+        expect(Object.keys((yield* settings.getSettings).mcpServers).toSorted()).toEqual(
+          [id, future].toSorted(),
+        );
       }).pipe(Effect.provide(harness.layer));
     }),
 );

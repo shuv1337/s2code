@@ -16,6 +16,7 @@ import {
   UsageLimitSourceConfig,
   isSecretReference,
   secretSettingsFields,
+  isHttpMcpServer,
 } from "@t3tools/contracts";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
 import { cursorClient } from "@t3tools/provider-cursor/client";
@@ -223,13 +224,16 @@ function mapSecretFieldGroups(
   const mcpServers = Object.fromEntries(
     Object.entries(settings.mcpServers).map(([id, server]) => [
       id,
-      mapFields(
-        server,
-        mcpServerSecretFields,
-        (field, serverHost) =>
-          mcpServerSecretName(id, server.url, field) +
-          (serverHost === null ? "" : `-${encode(serverHost)}`),
-      ),
+      // TODO(#488): stdio env values are stored and sent to clients as written; give them secret slots.
+      !isHttpMcpServer(server)
+        ? server
+        : mapFields(
+            server,
+            mcpServerSecretFields,
+            (field, serverHost) =>
+              mcpServerSecretName(id, server.url, field) +
+              (serverHost === null ? "" : `-${encode(serverHost)}`),
+          ),
     ]),
   ) as ServerSettings["mcpServers"];
   const textGenerators = Object.fromEntries(

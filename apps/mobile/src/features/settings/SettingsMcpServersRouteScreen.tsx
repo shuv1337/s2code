@@ -4,6 +4,7 @@ import { useNavigation, type StaticScreenProps } from "@react-navigation/native"
 import {
   AuthProvidersManageScope,
   type EnvironmentId,
+  isHttpMcpServer,
   type McpServerConfig,
   type ProjectId,
   type ServerSettingsPatch,
@@ -14,7 +15,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, TextInput as RNTextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -51,8 +52,19 @@ const NO_SERVERS: Readonly<Record<string, McpServerConfig>> = {};
 function useMcpServers(environmentId: EnvironmentId) {
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const canManage = useAtomValue(serverEnvironment.testMcpServer.permissionAtom(environmentId));
-  const servers: Readonly<Record<string, McpServerConfig>> =
-    config?.settings.mcpServers ?? NO_SERVERS;
+  const saved = config?.settings.mcpServers;
+  // TODO(#488): show stdio entries. This screen covers http servers only.
+  const servers = useMemo<Readonly<Record<string, McpServerConfig>>>(
+    () =>
+      saved === undefined
+        ? NO_SERVERS
+        : Object.fromEntries(
+            Object.entries(saved).filter((entry): entry is [string, McpServerConfig] =>
+              isHttpMcpServer(entry[1]),
+            ),
+          ),
+    [saved],
+  );
   return { loaded: config !== null, servers, canManage };
 }
 

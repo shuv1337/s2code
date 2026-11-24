@@ -1,4 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - The fixture listens on a real port for upstream absolute URLs.
+import { fileURLToPath } from "node:url";
+
 import * as NodeHttp from "node:http";
 
 import { expect, it } from "@effect/vitest";
@@ -211,6 +213,15 @@ const fixture = Effect.gen(function* () {
       offline: server("http://127.0.0.1:1/mcp", { label: "Offline" }),
       paused: server(`${origin}/upstream/mcp`, { enabled: false }),
       hang: server(`${origin}/upstream/hang`, { label: "Hang" }),
+      local: {
+        transport: "stdio",
+        label: "Local",
+        command: process.execPath,
+        args: [fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url))],
+        env: {},
+        enabled: true,
+      },
+      future: { transport: "websocket", endpoint: "wss://example.invalid", enabled: true },
       bound: server(`${origin}/upstream/mcp`, {
         label: "Bound",
         projectIds: [ProjectId.make("project:mcp-test")],
@@ -635,5 +646,72 @@ it.effect("gives a hung server a deadline only where harnesses wait to start", (
     yield* TestClock.adjust("10 minutes");
     expect(toolCall.pollUnsafe()).toBeUndefined();
     yield* Fiber.interrupt(toolCall);
+  }),
+);
+
+it.effect("bridges a stdio server on the same route, with the same full-access gate", () =>
+  Effect.gen(function* () {
+    const { call, received, runtimeMode } = yield* fixture;
+    const initialize = yield* call("/mcp/servers/local", {
+      body: { jsonrpc: "2.0", id: 0, method: "initialize", params: {} },
+      headers: asAgent,
+    });
+    expect(initialize.status).toBe(200);
+    expect(initialize.headers["cache-control"]).toBe("no-store, no-transform");
+    const sessionId = initialize.headers["mcp-session-id"];
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(yield* initialize.json).toMatchObject({
+      result: { serverInfo: { name: "fake-stdio" } },
+    });
+    const session = { ...asAgent, "mcp-session-id": sessionId! };
+    const send = (body: unknown) =>
+      call("/mcp/servers/local", { body, headers: session }).pipe(
+        Effect.flatMap((response) => response.json),
+      );
+    expect(yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toMatchObject({
+      result: { tools: [{ name: "echo" }, { name: "env" }, { name: "crash" }, { name: "ask" }] },
+    });
+    const echo = {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "hi" } },
+    };
+    expect(yield* send(echo)).toMatchObject({ id: 2, result: { content: [{ text: "hi" }] } });
+
+    yield* Ref.set(runtimeMode, "approval-required");
+    expect(yield* send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [] },
+    });
+    expect(yield* send(echo)).toMatchObject({
+      error: { message: expect.stringContaining("Local only works in threads with Full access") },
+    });
+    yield* Ref.set(runtimeMode, "full-access");
+
+    expect((yield* call("/mcp/servers/local", { method: "GET", headers: session })).status).toBe(
+      405,
+    );
+    expect((yield* call("/mcp/servers/local", { method: "DELETE", headers: session })).status).toBe(
+      200,
+    );
+    expect((yield* call("/mcp/servers/local", { body: echo, headers: session })).status).toBe(404);
+    // Nothing went to the HTTP upstream.
+    expect(received).toHaveLength(0);
+  }),
+);
+
+it.effect("treats a transport from a newer version as turned off", () =>
+  Effect.gen(function* () {
+    const { call } = yield* fixture;
+    const response = yield* call("/mcp/servers/future", {
+      body: { jsonrpc: "2.0", id: 0, method: "initialize", params: {} },
+      headers: asAgent,
+    });
+    expect(yield* response.json).toMatchObject({
+      id: 0,
+      error: { code: -32000, message: 'MCP server "future" is turned off or removed in Settings.' },
+    });
   }),
 );

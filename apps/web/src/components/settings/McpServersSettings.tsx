@@ -1,8 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { mcpServerAudience } from "@t3tools/client-runtime/mcp-server-audience";
 import {
+  isHttpMcpServer,
   sharedMcpServerHarnessName,
   type McpServerConfig,
+  type McpServerEntry,
   type McpServerId,
   type ProjectId,
 } from "@t3tools/contracts";
@@ -87,8 +89,14 @@ function EnvironmentMcpServers({
     null | { readonly mode: "add" } | { readonly mode: "edit"; readonly id: McpServerId }
   >(null);
   const [tests, setTests] = useState<Partial<Record<string, McpServerTestState>>>({});
-  const entries = Object.entries(servers) as Array<[McpServerId, McpServerConfig]>;
-  const editingConfig = dialog?.mode === "edit" ? servers[dialog.id] : undefined;
+  // TODO(#488): show stdio entries. Until then this list covers http servers only; stdio and
+  // newer transports stay in settings untouched.
+  const entries = (Object.entries(servers) as Array<[McpServerId, McpServerEntry]>).filter(
+    (entry): entry is [McpServerId, McpServerConfig] => isHttpMcpServer(entry[1]),
+  );
+  const editingEntry = dialog?.mode === "edit" ? servers[dialog.id] : undefined;
+  const editingConfig =
+    editingEntry !== undefined && isHttpMcpServer(editingEntry) ? editingEntry : undefined;
   const editing =
     dialog?.mode === "edit" && editingConfig !== undefined
       ? { id: dialog.id, config: editingConfig }

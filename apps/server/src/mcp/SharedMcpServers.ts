@@ -1,6 +1,10 @@
 import {
   isDelegatedAppThread,
+  isEnabledMcpServer,
+  isHttpMcpServer,
+  isStdioMcpServer,
   type McpServerConfig,
+  type McpServerStdioConfig,
   type McpServerTestInput,
   type McpServerTestResult,
   type OrchestrationV2ThreadShell,
@@ -27,6 +31,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import * as StdioMcpBridge from "./StdioMcpBridge.ts";
 
 const ROUTE_PREFIX = "/mcp/servers";
 
@@ -61,7 +66,7 @@ export const enabledSharedMcpServerNames = (
   thread === undefined
     ? []
     : Object.entries(settings.mcpServers)
-        .filter(([, server]) => server.enabled && sharedMcpServerAdmits(server, thread))
+        .filter(([, server]) => isEnabledMcpServer(server) && sharedMcpServerAdmits(server, thread))
         .map(([name]) => name)
         .toSorted();
 
@@ -181,7 +186,8 @@ const invalidCredential = HttpServerResponse.jsonUnsafe(
   },
 );
 
-const displayName = (name: string, server: McpServerConfig) => server.label ?? name;
+const displayName = (name: string, server: McpServerConfig | McpServerStdioConfig) =>
+  server.label ?? name;
 
 const upstreamHeaders = (server: McpServerConfig): Record<string, string> =>
   server.bearerToken.length > 0 ? { authorization: `Bearer ${server.bearerToken}` } : {};
@@ -225,7 +231,7 @@ const proxy = Effect.gen(function* () {
       ? settings.value.mcpServers[name as keyof ServerSettings["mcpServers"]]
       : undefined
     : undefined;
-  if (server === undefined || !server.enabled) {
+  if (server === undefined || !isEnabledMcpServer(server)) {
     return unavailable(body, 404, `MCP server "${name}" is turned off or removed in Settings.`);
   }
   // Read per request: narrowing a running thread's mode or a server's binding takes effect on its next call.
@@ -251,6 +257,38 @@ const proxy = Effect.gen(function* () {
   if (thread.runtimeMode !== "full-access") {
     const answer = supervisedAnswer(body, displayName(name, server));
     if (answer !== undefined) return answer;
+  }
+  if (isStdioMcpServer(server)) {
+    const bridge = yield* StdioMcpBridge.StdioMcpBridge;
+    const answer = bridge.handle({
+      serverId: name,
+      server,
+      owner: caller.thread.threadId,
+      method: request.method,
+      sessionId: request.headers["mcp-session-id"],
+      body,
+    });
+    // initialize spawns the process and has the bridge's own longer limit.
+    const prompt =
+      answersPromptly(request.method, body) &&
+      Option.getOrUndefined(decodeJsonRpcMethod(body))?.method !== "initialize";
+    const bridged = yield* prompt
+      ? Effect.timeoutOption(answer, PROMPT_TIMEOUT)
+      : Effect.asSome(answer);
+    if (Option.isNone(bridged)) {
+      return unavailable(
+        body,
+        504,
+        `${displayName(name, server)} did not answer within ${PROMPT_TIMEOUT}.`,
+      );
+    }
+    return HttpServerResponse.text(bridged.value.body, {
+      status: bridged.value.status,
+      headers: { ...NO_STORE, ...bridged.value.headers },
+      ...(bridged.value.headers["content-type"] === undefined
+        ? {}
+        : { contentType: bridged.value.headers["content-type"] }),
+    });
   }
   const headers: Record<string, string> = {};
   for (const header of FORWARDED_REQUEST_HEADERS) {
@@ -310,7 +348,16 @@ const proxy = Effect.gen(function* () {
   });
 }).pipe(Effect.withSpan("SharedMcpServers.proxy"));
 
-export const layerProxyRoute = HttpRouter.add("*", `${ROUTE_PREFIX}/*`, proxy);
+export const layerProxyRoute = Layer.unwrap(
+  Effect.gen(function* () {
+    const bridge = yield* StdioMcpBridge.StdioMcpBridge;
+    return HttpRouter.add(
+      "*",
+      `${ROUTE_PREFIX}/*`,
+      proxy.pipe(Effect.provideService(StdioMcpBridge.StdioMcpBridge, bridge)),
+    );
+  }),
+).pipe(Layer.provide(StdioMcpBridge.layer));
 
 const PROTOCOL_VERSION = "2025-06-18";
 const TEST_TIMEOUT = "10 seconds";
@@ -351,6 +398,9 @@ export class SharedMcpServers extends Context.Service<
     readonly test: (input: McpServerTestInput) => Effect.Effect<McpServerTestResult>;
     readonly testConnection: (
       server: Pick<McpServerConfig, "url" | "bearerToken">,
+    ) => Effect.Effect<McpServerTestResult>;
+    readonly testStdioConnection: (
+      server: Pick<McpServerStdioConfig, "command" | "args" | "env">,
     ) => Effect.Effect<McpServerTestResult>;
   }
 >()("t3/mcp/SharedMcpServers") {}
@@ -458,11 +508,20 @@ const make = Effect.gen(function* () {
     // A saved token only goes to the URL it was saved for.
     return yield* testConnection({
       url: input.url,
-      bearerToken: saved?.url === input.url ? saved.bearerToken : "",
+      bearerToken:
+        saved !== undefined && isHttpMcpServer(saved) && saved.url === input.url
+          ? saved.bearerToken
+          : "",
     });
   });
 
-  return SharedMcpServers.of({ test, testConnection });
+  const testStdioConnection = (server: Pick<McpServerStdioConfig, "command" | "args" | "env">) =>
+    Effect.promise(() => StdioMcpBridge.testStdioServer(server)).pipe(
+      Effect.map((result): McpServerTestResult => result),
+      Effect.withSpan("SharedMcpServers.testStdioConnection"),
+    );
+
+  return SharedMcpServers.of({ test, testConnection, testStdioConnection });
 });
 
 export const layer = Layer.effect(SharedMcpServers, make);

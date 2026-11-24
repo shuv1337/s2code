@@ -41,6 +41,8 @@ export const SharedMcpServerSummary = Schema.Struct({
   excludeSubagents: McpServerConfig.fields.excludeSubagents,
   hasToken: Schema.optionalKey(Schema.Boolean),
   harnessName: Schema.optionalKey(Schema.String),
+  /** Set for a local-process server, which only Settings can change; it never has a url. */
+  transport: Schema.optionalKey(Schema.Literal("stdio")),
 });
 export type SharedMcpServerSummary = typeof SharedMcpServerSummary.Type;
 
