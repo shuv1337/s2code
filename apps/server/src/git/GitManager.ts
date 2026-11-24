@@ -3184,6 +3184,7 @@ export const make = Effect.gen(function* () {
   const pushAndOpenPullRequest = Effect.fn("GitManager.pushAndOpenPullRequest")(function* (
     input: Parameters<GitManager["Service"]["createPullRequest"]>[0],
   ) {
+    const repository = yield* resolveCreatePullRequestRepository(input.cwd, input.repository);
     const status = yield* gitCore.statusDetails(input.cwd);
     const needsPush = yield* createPrNeedsPush(input.cwd, status);
     if (needsPush && status.branch) {
@@ -3191,9 +3192,8 @@ export const make = Effect.gen(function* () {
         input.cwd,
         { ...status, branch: status.branch },
         (yield* changeRequestTermsFor(input.cwd)).shortLabelWithArticle,
-      );
+      ).pipe(Effect.provideService(SourceControlProvider.ChangeRequestRepository, repository));
     }
-    const repository = yield* resolveCreatePullRequestRepository(input.cwd, input.repository);
     const push = needsPush
       ? yield* pushCurrentBranch(input.cwd, status.branch).pipe(
           Effect.mapError(

@@ -1912,9 +1912,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   // Commands decide as if the latest run were still `waiting` until its turn-end capture commits:
   // the capture keeps the thread's effect lane, and steers and queued turns must line up behind it.
-  const holdRunAwaitingCapture = Effect.fn("Orchestrator.holdRunAwaitingCapture")(function* (
-    projection: OrchestrationV2ThreadProjection,
-  ) {
+  const holdRunAwaitingCapture = Effect.fn("Orchestrator.holdRunAwaitingCapture")(function* <
+    P extends { readonly runs: ReadonlyArray<OrchestrationV2Run> },
+  >(projection: P): Effect.fn.Return<P> {
     const latest = latestStartedRun(projection.runs);
     if (latest === undefined || !(yield* awaitsCheckpointCapture(latest))) return projection;
     return {
@@ -16642,7 +16642,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         if (DateTime.toEpochMillis(admission.notAfter) < DateTime.toEpochMillis(now)) {
           return yield* new DispatchAdmissionRejectedError({ code: "expired" });
         }
-        const projection = yield* loadProjectionForCommand(command, ["runs", "providerThreads"]);
+        const projection = yield* loadProjectionForCommand(command, [
+          "runs",
+          "providerThreads",
+        ]).pipe(Effect.flatMap(holdRunAwaitingCapture));
         if (
           admission.expectedProviderInstanceId !== undefined &&
           admission.expectedProviderInstanceId !== projection.thread.providerInstanceId

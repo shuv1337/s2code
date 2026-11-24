@@ -67,11 +67,16 @@ interface RegistryState {
   readonly changes: PubSub.PubSub<void>;
 }
 
-const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean => {
-  const { disableOnUsageLimit: _aPolicy, usageLimitDisabled: _aDisabled, ...aRuntime } = a;
-  const { disableOnUsageLimit: _bPolicy, usageLimitDisabled: _bDisabled, ...bRuntime } = b;
-  return Equal.equals(aRuntime, bRuntime);
-};
+const withoutUsageLimitPolicy = <
+  T extends Pick<ProviderInstanceConfig, "disableOnUsageLimit" | "usageLimitDisabled">,
+>({
+  disableOnUsageLimit: _policy,
+  usageLimitDisabled: _disabled,
+  ...rest
+}: T) => rest;
+
+const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
+  Equal.equals(withoutUsageLimitPolicy(a), withoutUsageLimitPolicy(b));
 
 const withoutPresentation = ({
   displayName: _displayName,
@@ -79,9 +84,12 @@ const withoutPresentation = ({
   ...runtime
 }: ProviderInstanceConfig) => runtime;
 
-// Display name and accent colour are only labels; changing them must not stop the instance's sessions.
+// Display name, accent colour, and usage-limit policy do not change the live runtime; editing them must not stop active sessions.
 const runtimeEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boolean =>
-  Equal.equals(withoutPresentation(a), withoutPresentation(b));
+  Equal.equals(
+    withoutUsageLimitPolicy(withoutPresentation(a)),
+    withoutUsageLimitPolicy(withoutPresentation(b)),
+  );
 
 // Drivers stamp the presentation they were created with into every snapshot, so a renamed
 // instance kept live restamps what it reports.

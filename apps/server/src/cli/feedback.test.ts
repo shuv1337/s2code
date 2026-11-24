@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { AuthSessionId } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
+import { PRODUCT_HOME_MARKER, PRODUCT_ID } from "@t3tools/shared/productIdentity";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -86,6 +87,7 @@ it.effect("points to Labs only when the server hides the feedback tool", () =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-feedback-cli-" });
+    yield* fs.writeFileString(path.join(baseDir, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
     const runtimeStatePath = path.join(baseDir, "userdata", "server-runtime.json");
     const runtimeState = yield* makePersistedServerRuntimeState({
       config: { host: "127.0.0.1", devUrl: undefined },
@@ -113,9 +115,9 @@ it.effect("points to Labs only when the server hides the feedback tool", () =>
           Effect.fail(
             new McpBridge.AcpMcpBridgeError({ message: "fetch failed: connection refused" }),
           ),
-        stderr: `Could not reach the T3 Code server at ${runtimeState.origin}.`,
+        stderr: `Could not reach the S2Code server at ${runtimeState.origin}.`,
       },
-      { args: submit, running: false, stderr: "No running T3 Code server uses" },
+      { args: submit, running: false, stderr: "No running S2Code server uses" },
     ];
     for (const { args, running, call, stderr } of cases) {
       yield* running === false
@@ -148,6 +150,7 @@ it.effect("points to Labs only when the server hides the feedback tool", () =>
 
     // A file the server rejects reads as the defaults, so Off, as the server would read it.
     const rejected = yield* fs.makeTempDirectoryScoped({ prefix: "t3-feedback-cli-" });
+    yield* fs.writeFileString(path.join(rejected, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
     yield* fs.makeDirectory(path.join(rejected, "userdata"), { recursive: true });
     yield* fs.writeFileString(
       path.join(rejected, "userdata", "settings.json"),
@@ -157,6 +160,7 @@ it.effect("points to Labs only when the server hides the feedback tool", () =>
 
     // On, a damaged database is one line too.
     const damaged = yield* fs.makeTempDirectoryScoped({ prefix: "t3-feedback-cli-" });
+    yield* fs.writeFileString(path.join(damaged, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
     yield* fs.makeDirectory(path.join(damaged, "userdata"), { recursive: true });
     yield* turnOn(damaged);
     yield* fs.writeFileString(path.join(damaged, "userdata", "statev2.sqlite"), "not a database");
@@ -164,6 +168,7 @@ it.effect("points to Labs only when the server hides the feedback tool", () =>
 
     // A database from before agent feedback, with no table for it, lists nothing.
     const older = yield* fs.makeTempDirectoryScoped({ prefix: "t3-feedback-cli-" });
+    yield* fs.writeFileString(path.join(older, PRODUCT_HOME_MARKER), `${PRODUCT_ID}\n`);
     yield* fs.makeDirectory(path.join(older, "userdata"), { recursive: true });
     yield* turnOn(older);
     const olderDatabase = new NodeSqlite.DatabaseSync(

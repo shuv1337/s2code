@@ -572,7 +572,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       const root = yield* fs.makeTempDirectoryScoped();
       const baseDir = path.join(root, "home");
       const runtimeDir = path.join(baseDir, "runtime");
-      const launcher = path.join(root, "custom bin", "t3.cmd");
+      const launcher = path.join(root, "custom bin", "s2code.cmd");
       const launchedAs = path.join(runtimeDir, "versions", "1.0.0", "t3.exe");
       const targetEntryPath = path.join(runtimeDir, "versions", "2.0.0", "t3.exe");
       yield* fs.makeDirectory(runtimeDir, { recursive: true });

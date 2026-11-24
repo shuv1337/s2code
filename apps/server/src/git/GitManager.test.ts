@@ -5528,6 +5528,12 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["remote", "add", "origin", originDir]);
       yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
       yield* runGit(repoDir, ["remote", "add", "fork", forkDir]);
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        repoDir,
+        "origin",
+        "git@github.com:pingdotgg/codething-mvp.git",
+        originDir,
+      );
       const readOrigin = (branch: string) =>
         runGit(repoDir, ["ls-remote", "origin", `refs/heads/${branch}`]).pipe(
           Effect.map((result) => result.stdout),
@@ -6156,6 +6162,86 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           detail: expect.stringContaining("repository (owner/name)"),
         });
         expect(created(calls)).toHaveLength(2);
+
+        // No usable origin on an unpushed branch fails before auto-pushing anything.
+        yield* runGit(bareOriginDir, ["checkout", "-b", "feature/unpushed-bare-origin"]);
+        NodeFS.writeFileSync(NodePath.join(bareOriginDir, "unpushed.txt"), "unpushed\n");
+        yield* runGit(bareOriginDir, ["add", "unpushed.txt"]);
+        yield* runGit(bareOriginDir, ["commit", "-m", "Unpushed bare-origin commit"]);
+        const unpushedBareOriginError = yield* Effect.flip(
+          manager.createPullRequest({
+            cwd: bareOriginDir,
+            projectId: ProjectId.make("project-1"),
+            title: "Unpushed bare origin",
+            body: "Body",
+          }),
+        );
+        expect(unpushedBareOriginError).toMatchObject({
+          _tag: "GitManagerError",
+          detail: expect.stringContaining("repository (owner/name)"),
+        });
+        const pushedRef = yield* runGit(bareOriginDir, [
+          "ls-remote",
+          "origin",
+          "refs/heads/feature/unpushed-bare-origin",
+        ]);
+        expect(pushedRef.stdout.trim()).toBe("");
+        expect(created(calls)).toHaveLength(2);
+
+        // Base-branch protection runs under the pinned origin repository even when upstream has gh-resolved=base.
+        const baseCheckDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(baseCheckDir);
+        const baseForkDir = yield* createBareRemote();
+        yield* runGit(baseCheckDir, ["remote", "add", "origin", baseForkDir]);
+        yield* runGit(baseCheckDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(baseCheckDir, [
+          "remote",
+          "add",
+          "upstream",
+          "git@github.com:pingdotgg/codething-mvp.git",
+        ]);
+        yield* runGit(baseCheckDir, ["config", "remote.upstream.gh-resolved", "base"]);
+        yield* configureVisibleRemoteUrlWithLocalRewrite(
+          baseCheckDir,
+          "origin",
+          "git@github.com:octocat/codething-mvp.git",
+          baseForkDir,
+        );
+        NodeFS.writeFileSync(NodePath.join(baseCheckDir, "on-main.txt"), "on main\n");
+        yield* runGit(baseCheckDir, ["add", "on-main.txt"]);
+        yield* runGit(baseCheckDir, ["commit", "-m", "Commit on main"]);
+        const baseOriginMain = (yield* runGit(baseCheckDir, [
+          "ls-remote",
+          "origin",
+          "refs/heads/main",
+        ])).stdout;
+        const baseCheckPins: Array<string | null> = [];
+        const baseCheckProvider = createFakeSourceControlProvider({ prListOtherwise: [] });
+        const { manager: baseCheckManager } = yield* makeManager({
+          sourceControlProvider: {
+            ...baseCheckProvider.service,
+            listChangeRequests: (input) =>
+              ChangeRequestRepository.pipe(
+                Effect.tap((pinned) => Effect.sync(() => void baseCheckPins.push(pinned))),
+                Effect.andThen(baseCheckProvider.service.listChangeRequests(input)),
+              ),
+          },
+        });
+        const baseCheckError = yield* Effect.flip(
+          baseCheckManager.createPullRequest({
+            cwd: baseCheckDir,
+            projectId: ProjectId.make("project-1"),
+            title: "Main PR",
+            body: "Body",
+          }),
+        );
+        expect(baseCheckError.message).toContain("main is the base branch");
+        expect(baseCheckPins).toContain("octocat/codething-mvp");
+        expect(baseCheckPins).not.toContain(null);
+        expect(
+          (yield* runGit(baseCheckDir, ["ls-remote", "origin", "refs/heads/main"])).stdout,
+        ).toBe(baseOriginMain);
+        expect(created(baseCheckProvider.calls)).toEqual([]);
 
         // insteadOf-rewritten origin still resolves and pins origin's repository.
         const insteadOfDir = yield* makeTempDir("t3code-git-manager-");

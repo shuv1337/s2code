@@ -33,12 +33,12 @@ The review read the following files at the pinned commit, not just current defau
 | `apps/server/src/orchestration-v2/CommandPolicy.ts`       | Current command is `message.dispatch`; dispatch modes include `start_immediately`, `steer_active`, `restart_active`, and `queue_after_active`. Intent resolution uses serialized thread state.                                  |
 | `apps/server/src/orchestration-v2/Orchestrator.ts`        | Integrates command policy, receipts, projection storage, event sink, and thread command execution. Provider-native subagent threads can reject direct messages.                                                                 |
 | `apps/server/src/orchestration-v2/CommandReceiptStore.ts` | Persisted accepted/rejected receipts include command ID, thread ID, command type, result sequence, and error.                                                                                                                   |
-| `docs/internals/overview.md`                              | Describes V2’s transactional intent/events/projection/receipt/outbox boundary, and distinguishes command acknowledgment from provider completion.                                                                               |
-| `docs/internals/environment-auth.md`                      | Existing sessions have scoped authority; cookie, bearer, and DPoP mechanisms share that authority. MCP credentials have a separate audience restriction. Ordinary pairing does not imply permission to mint more pairing links. |
+| `docs/internals/01_architecture.md`                       | Describes V2’s transactional intent/events/projection/receipt/outbox boundary, and distinguishes command acknowledgment from provider completion.                                                                               |
+| `docs/internals/04_environment-auth.md`                   | Existing sessions have scoped authority; cookie, bearer, and DPoP mechanisms share that authority. MCP credentials have a separate audience restriction. Ordinary pairing does not imply permission to mint more pairing links. |
 
 Sources: [S4–S10].
 
-Important: docs/orchestration-v2/feature-lifecycles.md explicitly describes target behavior. Do not copy its illustrative thread.message.send shape as the current wire API; use current contracts and message.dispatch in the implementation. [S7, S11]
+Important: docs/internals/01_architecture.md supersedes the removed `docs/orchestration-v2/feature-lifecycles.md` target-behavior notes. Do not copy illustrative `thread.message.send` shapes as the current wire API; use current contracts and `message.dispatch` in the implementation. [S7, S11]
 
 The earlier investigation found a closed, unmerged PR concerning Apple Watch Smart Stack Live Activities, not a confirmed standalone Watch client. This RFC does not depend on that PR and does not claim an exhaustive renewed audit of every active upstream branch. [S12]
 
@@ -309,13 +309,13 @@ All repository source links below are pinned unless a live release/issue is the 
 • S2 — Resolved baseline tag: https://api.github.com/repos/pingdotgg/t3code/git/ref/tags/v0.0.46-nightly.20261010.2948
 • S3 — Official V1-to-V2 migration announcement: https://github.com/pingdotgg/t3code/issues/14871
 • S4 — Mobile package: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/mobile/package.json
-• S5 — Architecture: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/docs/internals/overview.md
+• S5 — Architecture: https://github.com/pingdotgg/t3code/blob/main/docs/internals/01_architecture.md
 • S6 — V2 contracts: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/packages/contracts/src/orchestrationV2.ts
 • S7 — Actual dispatch policy: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/server/src/orchestration-v2/CommandPolicy.ts
 • S8 — Orchestrator integration: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/server/src/orchestration-v2/Orchestrator.ts
 • S9 — Existing command receipts: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/server/src/orchestration-v2/CommandReceiptStore.ts
-• S10 — Environment authentication: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/docs/internals/environment-auth.md
-• S11 — Lifecycle design document, explicitly target behavior: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/docs/orchestration-v2/feature-lifecycles.md
+• S10 — Environment authentication: https://github.com/pingdotgg/t3code/blob/main/docs/internals/04_environment-auth.md
+• S11 — Architecture (supersedes removed feature-lifecycles.md): https://github.com/pingdotgg/t3code/blob/main/docs/internals/01_architecture.md
 • S12 — Earlier Live Activities PR, closed unmerged: https://github.com/pingdotgg/t3code/pull/4978
 • S13 — Apple system Watch text input: https://developer.apple.com/documentation/watchkit/wkinterfacecontroller/presenttextinputcontroller(withsuggestions:allowedinputmode:completion:)
 • S14 — SwiftUI text input: https://developer.apple.com/documentation/swiftui/text-input-and-output

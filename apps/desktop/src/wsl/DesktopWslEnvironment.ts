@@ -487,15 +487,6 @@ export const buildWslRuntimePruneScript = (
   ].join("\n");
 };
 
-// Invalidate trees that pass install checks but fail launch probes, or each launch reuses the broken cache.
-export const buildWslRuntimeInvalidateScript = (runtimeId: string, version = ""): string => {
-  const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
-  return [
-    "set -eu",
-    buildWslHomeSelectionScript(version),
-    `rm -f "$channel_home/wsl-runtime/${safeRuntimeId}/${WSL_RUNTIME_READY_MARKER}"`,
-  ].join("\n");
-};
 const parseAbsolutePathField = (stdout: string, field: string): string | null => {
   const prefix = `${field}:`;
   const line = stdout.split("\n").find((candidate) => candidate.startsWith(prefix));

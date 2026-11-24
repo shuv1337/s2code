@@ -22,7 +22,6 @@ import {
   DesktopWslEnvironment,
   layer as layerDesktopWslEnvironment,
   buildWslRuntimeInstallScript,
-  buildWslRuntimeInvalidateScript,
   makeIsAvailable,
   buildWslRuntimePruneScript,
   buildWslRuntimeProbeScript,
@@ -95,22 +94,18 @@ const readField = (stdout: string, field: string) => {
 const SERVER_ENTRY_SOURCE = '#!/bin/sh\necho "t3code wsl runtime test server 0.0.0"\n';
 
 describe("WSL runtime cache", () => {
-  it.each(["nightly", "preview"])(
-    "never prunes or invalidates another channel's WSL cache from %s",
-    (channel) => {
-      const version = `1.2.3-${channel}.20261014.1`;
-      const scripts = [
-        buildWslRuntimeInstallScript("/runtime.tar.gz", "digest", "b".repeat(64), null, version),
-        buildWslRuntimePruneScript("digest", null, version),
-        buildWslRuntimeInvalidateScript("digest", version),
-      ];
-      for (const script of scripts) {
-        expect(script).toContain(`channel_home="$HOME/.s2code-v2-${channel}"`);
-        expect(script).toContain(`legacy_home="$HOME/.shuv2code-v2-${channel}"`);
-        expect(script).not.toContain("$HOME/.shuv2code-v2/wsl-runtime");
-      }
-    },
-  );
+  it.each(["nightly", "preview"])("never prunes another channel's WSL cache from %s", (channel) => {
+    const version = `1.2.3-${channel}.20261014.1`;
+    const scripts = [
+      buildWslRuntimeInstallScript("/runtime.tar.gz", "digest", "b".repeat(64), null, version),
+      buildWslRuntimePruneScript("digest", null, version),
+    ];
+    for (const script of scripts) {
+      expect(script).toContain(`channel_home="$HOME/.s2code-v2-${channel}"`);
+      expect(script).toContain(`legacy_home="$HOME/.shuv2code-v2-${channel}"`);
+      expect(script).not.toContain("$HOME/.shuv2code-v2/wsl-runtime");
+    }
+  });
   it.each([
     [
       "install",

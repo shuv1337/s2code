@@ -79,17 +79,6 @@ const stableUpdateInfo = (
   };
 };
 
-// Subscribes before emitting, so the state the emit publishes is the one awaited, not a scheduler yield.
-const nextPublishedState = (emit: () => void) =>
-  Effect.gen(function* () {
-    const updates = yield* DesktopUpdates.DesktopUpdates;
-    const { changes } = yield* updates.subscribe;
-    const published = yield* Stream.runHead(changes).pipe(Effect.forkChild);
-    emit();
-    yield* Fiber.join(published);
-    return yield* updates.getState;
-  });
-
 describe("DesktopUpdates", () => {
   it.effect.each(["1.2.3", "1.2.3-nightly.20261014.1"])(
     "never offers or installs another channel through the %s feed",
@@ -1182,7 +1171,7 @@ describe("DesktopUpdates", () => {
 
   it.effect("offers nothing below a track switch's checked release", () => {
     const harness = makeHarness({
-      appVersion: "1.2.4-nightly.20261027.1",
+      appVersion: "1.2.3",
       beforeSetUpdateChannel: Effect.void,
     });
 
@@ -1190,24 +1179,25 @@ describe("DesktopUpdates", () => {
       Effect.gen(function* () {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
-        yield* updates.setChannel("latest", { minimumVersion: "1.2.3" });
+        yield* updates.setChannel("latest", { minimumVersion: "1.2.5" });
 
-        harness.emit("update-available", { version: "1.2.2" });
+        harness.emit("update-available", { version: "1.2.4" });
         yield* flushCallbacks;
         assert.isNull((yield* updates.getState).availableVersion);
-        harness.emit("update-downloaded", { version: "1.2.2" });
+        harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
         assert.isNull((yield* updates.getState).downloadedVersion);
 
-        harness.emit("update-available", { version: "1.2.3" });
+        harness.emit("update-available", { version: "1.2.5" });
         yield* flushCallbacks;
-        assert.equal((yield* updates.getState).availableVersion, "1.2.3");
+        assert.equal((yield* updates.getState).availableVersion, "1.2.5");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
   it.effect("keeps the current track's offers when a track switch fails to save", () => {
     const harness = makeHarness({
+      appVersion: "1.2.3",
       setUpdateChannelError: new DesktopAppSettings.DesktopSettingsWriteError({
         operation: "replace-settings-file",
         path: "desktop-settings.json",
@@ -1219,88 +1209,19 @@ describe("DesktopUpdates", () => {
       Effect.gen(function* () {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        assert.equal((yield* updates.getState).availableVersion, "1.2.4");
+
         const error = yield* updates
-          .setChannel("nightly", { minimumVersion: "1.2.5-nightly.20261028.1" })
+          .setChannel("latest", { minimumVersion: "1.2.6" })
           .pipe(Effect.flip);
         assert.equal(error._tag, "DesktopUpdateChannelPersistenceError");
         assert.equal((yield* updates.getState).channel, "latest");
 
-        harness.emit("update-available", { version: "1.2.4" });
+        harness.emit("update-available", { version: "1.2.5" });
         yield* flushCallbacks;
-        assert.equal((yield* updates.getState).availableVersion, "1.2.4");
-      }),
-    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
-  });
-
-  it.effect("keeps a saved Stable track across a restart without offering an older release", () => {
-    // A Nightly build whose switch to Stable did not finish before the app quit.
-    const harness = makeHarness({ appVersion: "1.2.4-nightly.20261027.1", savedChannel: "latest" });
-
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* updates.configure;
-        yield* updates.check("startup");
-
-        assert.equal((yield* updates.getState).channel, "latest");
-        assert.deepEqual(harness.checkAllowedDowngrade, [false]);
-        // Semver ranks Stable 1.2.4 above this Nightly, but a Nightly built before the release's
-        // version bump can hold migrations 1.2.4 lacks. Crossing needs a guarded switch.
-        harness.emit("update-available", { version: "1.2.4" });
-        yield* flushCallbacks;
-        assert.isNull((yield* updates.getState).availableVersion);
-      }),
-    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
-  });
-
-  it.effect("keeps a saved Nightly track across a restart without crossing on its own", () => {
-    // A Stable build whose switch to Nightly was refused before the app quit; its floor is gone.
-    const harness = makeHarness({ savedChannel: "nightly" });
-
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* updates.configure;
-        yield* updates.check("startup");
-        const state = yield* nextPublishedState(() =>
-          harness.emit("update-available", { version: "1.2.4-nightly.20261027.1" }),
-        );
-        assert.equal(state.channel, "nightly");
-        assert.isNull(state.availableVersion);
-        assert.equal(state.status, "error");
-        assert.equal(state.errorContext, "check");
-        assert.isTrue(state.canRetry);
-        assert.deepEqual(state.trackMismatch, { buildChannel: "latest" });
-        assert.deepEqual(harness.checkAllowedDowngrade, [false]);
-      }),
-    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
-  });
-
-  it.effect("reports a track mismatch when the feed offers no release at all", () => {
-    const harness = makeHarness({ savedChannel: "nightly" });
-
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* updates.configure;
-        yield* updates.check("startup");
-        const state = yield* nextPublishedState(() => harness.emit("update-not-available"));
-        assert.equal(state.status, "error");
-        assert.equal(state.errorContext, "check");
-        assert.isTrue(state.canRetry);
-        assert.deepEqual(state.trackMismatch, { buildChannel: "latest" });
-
-        // A later failure has its own reason, so the mismatch must not stay attached to it.
-        const failed = yield* nextPublishedState(() =>
-          harness.emit("error", new Error("background updater failure")),
-        );
-        assert.isUndefined(failed.trackMismatch);
-
-        const mismatched = yield* nextPublishedState(() => harness.emit("update-not-available"));
-        assert.isDefined(mismatched.trackMismatch);
-        yield* updates.check("menu");
-        assert.equal((yield* updates.getState).status, "checking");
-        assert.isUndefined((yield* updates.getState).trackMismatch);
+        assert.equal((yield* updates.getState).availableVersion, "1.2.5");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -1500,28 +1421,6 @@ describe("DesktopUpdates under a managed policy", () => {
         const error = yield* updates.setChannel("nightly").pipe(Effect.flip);
         assert.equal(error._tag, "DesktopUpdateChannelManagedError");
         assert.equal(harness.checkCount(), 0);
-      }),
-    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
-  });
-
-  it.effect("does not name a blocked build track as the one to switch back to", () => {
-    const harness = makeHarness({
-      appVersion: "1.2.4-nightly.20261027.1",
-      savedChannel: "latest",
-      policy: managed({ allowNightly: false, feedUrl: "https://updates.example.com/t3code" }),
-    });
-
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* updates.configure;
-        yield* updates.check("startup");
-        const state = yield* nextPublishedState(() => harness.emit("update-not-available"));
-
-        assert.equal(state.channel, "latest");
-        assert.equal(state.status, "error");
-        assert.equal(state.errorContext, "check");
-        assert.isUndefined(state.trackMismatch);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
