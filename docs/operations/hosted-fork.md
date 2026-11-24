@@ -5,8 +5,9 @@ fork-owned accounts. The fork's primary deployment shape is **Cloudflare Workers
 plus one self-hosted VM (such as an exe.dev box) running Postgres**, reached by
 Cloudflare Hyperdrive through an outbound `cloudflared` Cloudflare Tunnel
 protected by a Cloudflare Access service token (`AccessOrigin`), with **no
-PlanetScale or Axiom accounts required**. Upstream's PlanetScale and Axiom
-paths remain intact and selectable by config.
+PlanetScale or Axiom accounts required**. Upstream's PlanetScale database path
+remains selectable by config; Axiom observability and mobile telemetry
+forwarding are disabled in this fork.
 
 With no variables configured, behavior stays unchanged: Connect is disabled,
 nightly builds ship cloudless, direct and Tailscale pairing stay untouched, and
@@ -26,12 +27,14 @@ device-authorization flow. Upstream hosted origins (`t3.codes`, `t3coderelay.com
   job is gated on `github.repository == 'shuv1337/s2code' && vars.RELAY_PREVIEWS_ENABLED == 'true'`.
   External Postgres mode only supports the `prod` stage (previews require PlanetScale branching).
 - **Mobile push, mobile telemetry, and store builds:** `APNS_ENABLED` defaults
-  to `false`; no APNs or FCM secrets are required. When `AXIOM_TOKEN` is unset,
-  no Axiom datasets/tokens or R2 source-map buckets are created, mobile observe
-  endpoints answer `503 mobile_telemetry_not_configured`, and client builds stay
-  free of tracing tokens.
+  to `false`; no APNs or FCM secrets are required. Axiom observability and
+  mobile telemetry forwarding are disabled in this fork regardless of
+  `AXIOM_TOKEN`: no Axiom datasets/tokens or R2 source-map buckets are created,
+  `/v1/mobile/observe` always answers `503 mobile_telemetry_not_configured`, and
+  relay deploys never publish client tracing tokens.
 - **T3 Chat account linking and Axiom paging monitors:** Left unset (`T3CHAT_LINK_SECRET`,
-  `RELAY_ALERT_NOTIFIER_ID`, `RELAY_WARNING_NOTIFIER_ID`).
+  `RELAY_ALERT_NOTIFIER_ID`, `RELAY_WARNING_NOTIFIER_ID`); Axiom monitors are
+  never provisioned.
 
 ## Deployment durability: mint key and Postgres backups
 
@@ -116,7 +119,7 @@ Self-hosted Postgres mode (recommended for this fork; selected whenever `RELAY_D
   `RELAY_DB_ACCESS_CLIENT_SECRET` (set both for Cloudflare Tunnel + Access
   `AccessOrigin`, or leave both unset for `PublicOrigin`; setting only one fails)
 
-Optional self-hosted Worker OTLP traces (used when `AXIOM_TOKEN` is unset):
+Optional self-hosted Worker OTLP traces:
 
 - Variable: `RELAY_OTLP_TRACES_URL` (fork-owned HTTPS OTLP/HTTP traces endpoint)
 - Secret: `RELAY_OTLP_TRACES_TOKEN` _(optional bearer token)_
@@ -132,13 +135,12 @@ reports always persist in Postgres `agent_feedback`):
   Read and write` on `FEEDBACK_GITHUB_REPO`; bound only in the `production` deploy step, never
   exposed to summaries or client builds)_
 
-Optional upstream-compatible PlanetScale + Axiom mode (leave unset on the self-hosted stack):
+Optional upstream-compatible PlanetScale mode (leave unset on the self-hosted stack):
 
 - PlanetScale variables: `PLANETSCALE_ORGANIZATION`, optional
   `RELAY_DB_CLUSTER_SIZE` (default `PS_5`), optional `RELAY_DB_REPLICAS` (default `0`),
   optional `RELAY_DB_CONNECTION_LIMIT` (default `40`)
 - PlanetScale secrets: `PLANETSCALE_API_TOKEN_ID`, `PLANETSCALE_API_TOKEN`
-- Axiom variable/secret: `AXIOM_ORG_ID` (variable), `AXIOM_TOKEN` (secret)
 
 ### Repository variables (public release build config)
 
@@ -193,17 +195,14 @@ Expo build inputs.
   `T3CODE_CLERK_PASSKEY_RP_DOMAINS` is set.
 - Web build: `VITE_T3CODE_RELAY_URL`, `VITE_CLERK_PUBLISHABLE_KEY`,
   `VITE_CLERK_JWT_TEMPLATE`, optional `VITE_HOSTED_APP_URL`,
-  `VITE_HOSTED_APP_CHANNEL`. Optional relay tracing:
-  `VITE_RELAY_OTLP_TRACES_URL`, `VITE_RELAY_OTLP_TRACES_DATASET`,
-  `VITE_RELAY_OTLP_TRACES_TOKEN`.
+  `VITE_HOSTED_APP_CHANNEL`.
 - Mobile build: `MOBILE_AUTH_ENABLED=1`, `MOBILE_RELAY_URL`,
   `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` (or `T3CODE_CLERK_PUBLISHABLE_KEY`),
   `EXPO_PUBLIC_CLERK_JWT_TEMPLATE` (or `T3CODE_CLERK_JWT_TEMPLATE`). Add the
   app's custom-scheme callback (for example
   `dev.shuv.shuv2code.nightly://callback`) to the Clerk mobile SSO redirect
-  allowlist. Optional tracing: `EXPO_PUBLIC_OTLP_TRACES_URL`,
-  `EXPO_PUBLIC_OTLP_TRACES_DATASET`, `EXPO_PUBLIC_OTLP_TRACES_TOKEN`. Mobile
-  delivery/feature flags remain governed by the mobile release runbook.
+  allowlist. Mobile delivery/feature flags remain governed by the mobile release
+  runbook.
 
 No credentials belong in public configuration except service-scoped public
 client keys/tokens intended for distribution.

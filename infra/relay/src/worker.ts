@@ -32,7 +32,6 @@ import {
 import * as CloudMintSigner from "./auth/CloudMintSigner.ts";
 import * as RelayHttpApi from "./http/Api.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
-import { OptionalRelayObservability } from "./observability.ts";
 import * as Observability from "./observability.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
 import * as AgentActivityRows from "./agentActivity/AgentActivityRows.ts";
@@ -149,7 +148,6 @@ export const layer = Api.make(
     const relayApiZone = yield* RelayApiZone;
     const managedEndpointZone = yield* ManagedEndpointZone;
     const randomApnsDeliveryJobSigningSecret = yield* ApnsDeliveryJobSigningSecret;
-    const observability = yield* OptionalRelayObservability;
 
     const apnsEnabled = yield* Config.Boolean("APNS_ENABLED").pipe(Config.withDefault(true));
     const apnsCredentials = apnsEnabled
@@ -383,7 +381,7 @@ export const layer = Api.make(
       Layer.provideMerge(layerWebcrypto),
     );
 
-    // Fails open: a limiter outage must not drop webhooks or app telemetry.
+    // Fails open: a limiter outage must not drop webhooks.
     const allowWith =
       (
         limiter: typeof hookRateLimit,
@@ -405,74 +403,8 @@ export const layer = Api.make(
       allowEndpoint: allowWith(hookEndpointRateLimit),
     });
 
-    const layerMobileTelemetry = yield* Effect.gen(function* () {
-      if (observability === undefined) return MobileTelemetry.layerDisabled;
-      const mobileTelemetryRateLimit = yield* Cloudflare.RateLimit("MOBILE_TELEMETRY_RATE_LIMIT", {
-        namespaceId: 1003,
-        simple: {
-          limit: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.limit,
-          period: MobileTelemetry.MOBILE_TELEMETRY_RATE_LIMIT.periodSeconds,
-        },
-      });
-      const mobileSourceMaps = yield* Cloudflare.R2.ReadBucket(observability.mobileSourceMaps);
-      const mobileTelemetryToken = yield* observability.mobileTelemetryIngestToken.token;
-      const mobileTracesUrl = yield* observability.traces.otelTracesEndpoint;
-      const mobileTracesDataset = yield* observability.traces.name;
-      const mobileLogsUrl = yield* observability.mobileLogs.otelLogsEndpoint;
-      const mobileLogsDataset = yield* observability.mobileLogs.name;
-      const mobileMetricsUrl = yield* observability.mobileMetrics.otelMetricsEndpoint;
-      const mobileMetricsDataset = yield* observability.mobileMetrics.name;
-      // `fetch` rebuilds its layers per request; the source map cache must outlive one.
-      const mobileSourceMapLookups = yield* MobileTelemetry.SourceMaps.pipe(
-        Effect.provide(MobileTelemetry.layerSourceMaps),
-        Effect.provideService(MobileTelemetry.SourceMapObjects, {
-          get: (key) =>
-            mobileSourceMaps.get(key).pipe(
-              Effect.map((object) =>
-                object === null
-                  ? undefined
-                  : {
-                      size: object.size,
-                      text: object.text().pipe(
-                        Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
-                        Effect.mapError(
-                          (cause) => new MobileTelemetry.SourceMapObjectError({ key, cause }),
-                        ),
-                      ),
-                    },
-              ),
-              Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
-              Effect.mapError((cause) => new MobileTelemetry.SourceMapObjectError({ key, cause })),
-            ),
-        }),
-      );
-      return MobileTelemetry.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.effect(
-              MobileTelemetry.MobileTelemetrySettings,
-              Effect.gen(function* () {
-                return MobileTelemetry.MobileTelemetrySettings.of({
-                  axiomToken: yield* mobileTelemetryToken,
-                  destinations: {
-                    traces: { url: yield* mobileTracesUrl, dataset: yield* mobileTracesDataset },
-                    logs: { url: yield* mobileLogsUrl, dataset: yield* mobileLogsDataset },
-                    metrics: { url: yield* mobileMetricsUrl, dataset: yield* mobileMetricsDataset },
-                  },
-                });
-              }),
-            ),
-            Layer.succeed(MobileTelemetry.MobileTelemetryRateLimiter, {
-              allow: allowWith(
-                mobileTelemetryRateLimit,
-                "relay.mobile_telemetry.rate_limiter_failed_open",
-              ),
-            }),
-            Layer.succeed(MobileTelemetry.SourceMaps, mobileSourceMapLookups),
-          ),
-        ),
-      );
-    });
+    // Mobile telemetry forwarding is disabled in this fork; /v1/mobile/observe returns 503.
+    const layerMobileTelemetry = MobileTelemetry.layerDisabled;
 
     const layerApp = Layer.mergeAll(
       layerRelayApi,
@@ -622,7 +554,6 @@ export const layer = Api.make(
         Layer.provideMerge(Cloudflare.Tunnel.ReadWriteTunnelBinding),
         Layer.provideMerge(Cloudflare.DNS.ReadWriteDnsHttp),
         Layer.provideMerge(Cloudflare.Workers.RateLimitBinding),
-        Layer.provideMerge(Cloudflare.R2.ReadBucketBinding),
         Layer.provideMerge(HookInboxObject.layer),
         // Disable the duplicate runtime span; ours applies route/header/token redaction and rejects sender traceparent.
         Layer.provideMerge(

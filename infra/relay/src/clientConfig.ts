@@ -1,6 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - one sha256 over two strings; Effect.Crypto is async and the digest feeds a synchronous Output.map.
-import * as NodeCrypto from "node:crypto";
-
 import * as Alchemy from "alchemy";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
@@ -8,20 +5,11 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
 export interface RelayClientConfig {
   readonly url: string | undefined;
   readonly cloudMintPublicKey: string;
-  readonly mobileTracingUrl?: string | undefined;
-  readonly mobileTracingDataset?: string | undefined;
-  readonly mobileTracingToken?: Redacted.Redacted<string> | undefined;
-  readonly clientTracingUrl?: string | undefined;
-  readonly clientTracingDataset?: string | undefined;
-  readonly clientTracingToken?: Redacted.Redacted<string> | undefined;
-  /** Alchemy hashes JSON inputs; Redacted hides token rotation, so hash the tokens without persisting secrets. */
-  readonly tokenDigest?: string | undefined;
 }
 
 export class RelayUrlUnavailableError extends Schema.TaggedError<RelayUrlUnavailableError>()(
@@ -41,24 +29,6 @@ const relayClientConfigEnv = (
     .trim()
     .replaceAll("\r\n", "\n")
     .replaceAll("\n", "\\n"),
-  ...(config.mobileTracingUrl !== undefined
-    ? { T3CODE_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl }
-    : {}),
-  ...(config.mobileTracingDataset !== undefined
-    ? { T3CODE_MOBILE_OTLP_TRACES_DATASET: config.mobileTracingDataset }
-    : {}),
-  ...(config.mobileTracingToken !== undefined
-    ? { T3CODE_MOBILE_OTLP_TRACES_TOKEN: Redacted.value(config.mobileTracingToken) }
-    : {}),
-  ...(config.clientTracingUrl !== undefined
-    ? { T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl }
-    : {}),
-  ...(config.clientTracingDataset !== undefined
-    ? { T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset }
-    : {}),
-  ...(config.clientTracingToken !== undefined
-    ? { T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: Redacted.value(config.clientTracingToken) }
-    : {}),
 });
 
 export class EnvValueNotSingleLineError extends Schema.TaggedError<EnvValueNotSingleLineError>()(
@@ -110,9 +80,6 @@ export function reconcileEnvFile(
 
 const closesQuote = (value: string, quote: string): boolean =>
   value.length > 1 && value.slice(1).includes(quote);
-
-export const tokenDigest = (tokens: ReadonlyArray<Redacted.Redacted<string>>): string =>
-  NodeCrypto.createHash("sha256").update(tokens.map(Redacted.value).join("\n")).digest("hex");
 
 export const PublishClientConfig = Alchemy.Action(
   "PublishClientConfig",

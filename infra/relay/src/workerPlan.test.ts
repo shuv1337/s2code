@@ -157,7 +157,7 @@ describe("RelayWorker plan and runtime isolation", () => {
   );
 
   test.provider(
-    "plan phase with AXIOM_TOKEN matches upstream scoped ingest bindings and never leaks AXIOM_TOKEN or RELAY_DB_*",
+    "plan phase keeps Axiom and mobile telemetry disabled even when AXIOM_TOKEN is set",
     () =>
       Effect.gen(function* () {
         const { envKeys, resourceIds, resourceTypes } = yield* planWorker({
@@ -170,17 +170,19 @@ describe("RelayWorker plan and runtime isolation", () => {
         for (const forbidden of DEPLOY_ONLY_FORBIDDEN_KEYS) {
           assert.notInclude(envKeys, forbidden);
         }
-        assert.include(envKeys, "ALCHEMY_OTEL_EXPORTERS");
-        assert.include(envKeys, "MobileTelemetryAxiomIngestToken_token");
-        assert.include(resourceIds, "RelayTracesDataset");
-        assert.include(resourceIds, "MobileSourceMapsBucket");
+        assert.notInclude(envKeys, "ALCHEMY_OTEL_EXPORTERS");
+        assert.notInclude(envKeys, "MobileTelemetryAxiomIngestToken_token");
+        assert.notInclude(envKeys, "MOBILE_TELEMETRY_RATE_LIMIT");
+        assert.notInclude(resourceIds, "RelayTracesDataset");
+        assert.notInclude(resourceIds, "MobileSourceMapsBucket");
         assert.include(resourceIds, "RelayPostgresDatabase");
-        assert.isTrue(resourceTypes.includes("Cloudflare.R2.Bucket"));
+        assert.isFalse(resourceTypes.some((type) => type.startsWith("Axiom.")));
+        assert.isFalse(resourceTypes.includes("Cloudflare.R2.Bucket"));
       }),
   );
 
   test.provider(
-    "runtime phase resolves Hyperdrive by LogicalId and detects mobile telemetry from WorkerEnvironment without deploy config",
+    "runtime phase resolves Hyperdrive by LogicalId and keeps OptionalRelayObservability disabled without deploy config",
     () =>
       Effect.gen(function* () {
         const stack: Omit<Alchemy.StackSpec, "output"> = {
@@ -206,11 +208,11 @@ describe("RelayWorker plan and runtime isolation", () => {
         );
         assert.isUndefined(disabledObs);
 
-        const enabledObs = yield* OptionalRelayObservability.pipe(
+        const stillDisabledObs = yield* OptionalRelayObservability.pipe(
           Effect.provide(baseRuntime),
           Effect.provideService(Cloudflare.WorkerEnvironment, { MobileSourceMapsBucket: {} }),
         );
-        assert.isDefined(enabledObs);
+        assert.isUndefined(stillDisabledObs);
       }),
   );
 
