@@ -1,25 +1,17 @@
 <!--
-Read CONTRIBUTING.md before opening a PR. Review capacity is limited, and meeting
-the requirements does not guarantee review or merging. Solve one underlying problem.
-The same requirements apply to drafts. Draft status does not defer triage or closure.
+Read CONTRIBUTING.md before opening a PR. Solve one underlying problem per PR.
 Use a conventional commit title in plain language, such as "fix(web): new threads no longer spike CPU".
 -->
 
 ## Problem
 
-<!-- Explain the problem in a sentence or two. Include expected behavior and
-reproduction steps or environment where relevant. -->
+<!-- Explain the problem or goal in a sentence or two. Link any related issue and include
+expected behavior or reproduction steps where relevant. -->
 
 ## Change
 
-<!-- Explain how this fixes the problem. If it spans components or clients,
-explain why those changes are needed for the same fix. Split independent fixes. -->
-
-## Scope
-
-<!-- We accept bug fixes, not features. Link the issue that shows the bug. For a
-small fix of an obvious bug, say why it needs no issue. If a maintainer asked for
-this PR, link the request. -->
+<!-- Explain what this changes and why. If it spans components or clients,
+explain why those changes belong together. -->
 
 ## Verification
 

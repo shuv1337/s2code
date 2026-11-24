@@ -1,8 +1,8 @@
-# T3 Code docs
+# S2Code docs
 
-## Using T3 Code
+## Using S2Code
 
-- [Install T3 Code](./user/install.md)
+- [Install S2Code](./user/install.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
 - [Permission modes](./user/permission-modes.md)
@@ -17,27 +17,28 @@
 - [SnapShots](./user/snap-shot.md)
 - [Visual replies](./user/html-renders.md)
 - [Import browser sessions](./user/browser-import.md)
-- [Use T3 Code as your default browser](./user/default-browser.md)
+- [Use S2Code as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)
+- [Apple Watch](./user/apple-watch.md)
 - [Usage and limits](./user/usage.md)
 - [Secrets](./user/secrets.md)
-- [Product usage data](./user/telemetry.md)
+- [Telemetry and data flows](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Guest links](./user/guest-links.md)
-- [T3 Connect troubleshooting](./user/t3-connect-troubleshooting.md)
+- [S2 Connect troubleshooting](./user/t3-connect-troubleshooting.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
 - [MCP servers for every agent](./user/mcp-servers.md)
 - [Running in the background](./user/background-service.md)
-- [Updating T3 Code](./user/updating.md)
+- [Updating S2Code](./user/updating.md)
 - [Triage an issue](./user/triage.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md) · [Kiro](./user/providers-kiro.md) · [Pi](./user/providers-pi.md) · [Muse Code](./user/providers-muse.md) · [fx](./user/providers-fx.md)
 
 ---
 
-## Working on T3 Code
+## Working on S2Code
 
 Start with the [development runbook](./operations/00_development.md) and
-[contribution policy](../CONTRIBUTING.md).
+[contributing guide](../CONTRIBUTING.md).
 
 Internal docs preserve architectural decisions, trust boundaries, conventions, and cross-cutting
 traps that the source alone does not explain. Most code changes do not need an internal

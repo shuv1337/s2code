@@ -37,7 +37,7 @@ window stops its local server. Saving your sign-in alone does not start a server
 or make the machine reachable.
 
 On your other device, sign in to the same S2 Connect account and choose the
-environment. On the app.t3.codes home page with no computer added yet, signing
+environment. On a configured fork web host's home page with no computer added yet, signing
 in adds compatible computers linked to your account. Over SSH, the CLI prints a
 browser link and a short code. Open the link on any device, confirm the code
 matches, and approve. The CLI continues on its own, so you do not need to forward
@@ -85,18 +85,6 @@ the defaults. Without a terminal:
 
 `s2code status --json` prints the settings. `s2code up --help` lists every flag with
 examples.
-
-### More machines with T3 Chat
-
-Each S2 Connect account can link up to 3 machines. Phones and browsers do not
-count. A paid T3 Chat plan raises the limit to 10 machines with Pro, or 100 with
-Premier.
-
-To link T3 Chat, open your account menu on the web or desktop app, go to
-**T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat in the window that
-opens and approve. The new limit applies the next time you add a machine. If you
-cancel or downgrade T3 Chat, machines you already linked stay linked, but you
-cannot add more until you are under the limit again.
 
 ## Pair over a LAN or private network
 
