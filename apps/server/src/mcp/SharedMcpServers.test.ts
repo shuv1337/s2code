@@ -153,139 +153,158 @@ const server = (url: string, overrides: Partial<McpServerConfig> = {}) => ({
   ...overrides,
 });
 
-const fixture = Effect.gen(function* () {
-  const spawnMarker = NodePath.join(
-    NodeOS.tmpdir(),
-    `s2code-stdio-tripwire-${NodeCrypto.randomUUID()}`,
-  );
-  const received: Array<Received> = [];
-  let bearerTokenReads = 0;
-  const hung = yield* Queue.unbounded<string>();
-  const settings = yield* Ref.make<ServerSettings>(DEFAULT_SERVER_SETTINGS);
-  const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
-  const settingsLayer = Layer.mock(ServerSettingsService.ServerSettingsService)({
-    getSettings: Ref.get(settings),
-    streamChanges: Stream.fromPubSub(settingsChanges),
-  });
-  /** Saves settings the way the real service does: the new value, then a change event. */
-  const saveMcpServers = (
-    update: (current: ServerSettings["mcpServers"]) => ServerSettings["mcpServers"],
-  ) =>
-    Ref.updateAndGet(settings, (current) => ({
-      ...current,
-      mcpServers: update(current.mcpServers),
-    })).pipe(Effect.flatMap((next) => PubSub.publish(settingsChanges, next)));
-  /** The calling thread's current mode, or null for a thread that can't be read. */
-  const runtimeMode = yield* Ref.make<RuntimeMode | null>("full-access");
-  const threadPlacement = yield* Ref.make<
-    Partial<Pick<OrchestrationV2ThreadShell, "projectId" | "lineage" | "delegatedFrom">>
-  >({});
-  const projectionsLayer = Layer.mock(ProjectionStore.ProjectionStoreV2)({
-    getThreadShell: (threadId) =>
-      Effect.all([Ref.get(runtimeMode), Ref.get(threadPlacement)]).pipe(
-        Effect.map(([mode, placement]) =>
-          mode === null
-            ? null
-            : { ...liveThreadShell(threadId, { runtimeMode: mode }), ...placement },
+/** `brokenSettingsStream`: the first subscription to settings changes dies, as a crashed watcher would. */
+const makeFixture = (options: { readonly brokenSettingsStream?: boolean } = {}) =>
+  Effect.gen(function* () {
+    const spawnMarker = NodePath.join(
+      NodeOS.tmpdir(),
+      `s2code-stdio-tripwire-${NodeCrypto.randomUUID()}`,
+    );
+    const received: Array<Received> = [];
+    let bearerTokenReads = 0;
+    const hung = yield* Queue.unbounded<string>();
+    const settings = yield* Ref.make<ServerSettings>(DEFAULT_SERVER_SETTINGS);
+    const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
+    let streamSubscriptions = 0;
+    const settingsLayer = Layer.mock(ServerSettingsService.ServerSettingsService)({
+      getSettings: Ref.get(settings),
+      streamChanges: Stream.unwrap(
+        Effect.sync(() => streamSubscriptions++).pipe(
+          Effect.map((count) =>
+            options.brokenSettingsStream === true && count === 0
+              ? Stream.die(new Error("settings stream broke"))
+              : Stream.fromPubSub(settingsChanges),
+          ),
         ),
       ),
-  });
-  const services = yield* Layer.build(
-    Layer.mergeAll(
-      HttpRouter.serve(
-        Layer.mergeAll(
-          SharedMcpServers.layerProxyRoute,
-          upstream(received, hung),
-          HttpRouter.add("*", "/mcp", HttpServerResponse.text("orchestration")),
+    });
+    /** Saves settings the way the real service does: the new value, then a change event. */
+    const saveMcpServers = (
+      update: (current: ServerSettings["mcpServers"]) => ServerSettings["mcpServers"],
+    ) =>
+      Ref.updateAndGet(settings, (current) => ({
+        ...current,
+        mcpServers: update(current.mcpServers),
+      })).pipe(Effect.flatMap((next) => PubSub.publish(settingsChanges, next)));
+    /** The calling thread's current mode, or null for a thread that can't be read. */
+    const runtimeMode = yield* Ref.make<RuntimeMode | null>("full-access");
+    const threadPlacement = yield* Ref.make<
+      Partial<Pick<OrchestrationV2ThreadShell, "projectId" | "lineage" | "delegatedFrom">>
+    >({});
+    const projectionsLayer = Layer.mock(ProjectionStore.ProjectionStoreV2)({
+      getThreadShell: (threadId) =>
+        Effect.all([Ref.get(runtimeMode), Ref.get(threadPlacement)]).pipe(
+          Effect.map(([mode, placement]) =>
+            mode === null
+              ? null
+              : { ...liveThreadShell(threadId, { runtimeMode: mode }), ...placement },
+          ),
         ),
-        { disableListenLog: true },
+    });
+    const services = yield* Layer.build(
+      Layer.mergeAll(
+        HttpRouter.serve(
+          Layer.mergeAll(
+            SharedMcpServers.layerProxyRoute,
+            upstream(received, hung),
+            HttpRouter.add("*", "/mcp", HttpServerResponse.text("orchestration")),
+          ),
+          { disableListenLog: true },
+        ).pipe(
+          Layer.provideMerge(
+            NodeHttpServer.layer(NodeHttp.createServer, { port: 0, host: "127.0.0.1" }),
+          ),
+        ),
+        SharedMcpServers.layer,
       ).pipe(
-        Layer.provideMerge(
-          NodeHttpServer.layer(NodeHttp.createServer, { port: 0, host: "127.0.0.1" }),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (token) => Effect.succeed(token === AGENT_TOKEN ? invocation : undefined),
+          }),
         ),
-      ),
-      SharedMcpServers.layer,
-    ).pipe(
-      Layer.provide(
-        Layer.mock(McpSessionRegistry.McpSessionRegistry)({
-          resolve: (token) => Effect.succeed(token === AGENT_TOKEN ? invocation : undefined),
-        }),
-      ),
-      Layer.provide(settingsLayer),
-      Layer.provide(projectionsLayer),
-      Layer.provideMerge(FetchHttpClient.layer),
-    ),
-  );
-  const origin = HttpServer.formatAddress(Context.get(services, HttpServer.HttpServer).address);
-  yield* Ref.update(settings, (current) => ({
-    ...current,
-    mcpServers: {
-      executor: {
-        ...server(`${origin}/upstream/mcp`, { label: "Executor" }),
-        get bearerToken() {
-          bearerTokenReads += 1;
-          return UPSTREAM_TOKEN;
-        },
-      },
-      denied: server(`${origin}/upstream/mcp`, { bearerToken: "stale" }),
-      broken: server(`${origin}/upstream/broken`),
-      moved: server(`${origin}/upstream/moved`),
-      offline: server("http://127.0.0.1:1/mcp", { label: "Offline" }),
-      paused: server(`${origin}/upstream/mcp`, { enabled: false }),
-      hang: server(`${origin}/upstream/hang`, { label: "Hang" }),
-      local: {
-        transport: "stdio",
-        label: "Local",
-        command: process.execPath,
-        args: [
-          NodeURL.fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url)),
-        ],
-        env: {},
-        enabled: true,
-      },
-      // Leaves a file behind if T3 ever starts it.
-      tripwire: {
-        transport: "stdio",
-        label: "Tripwire",
-        command: process.execPath,
-        args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(spawnMarker)}, "")`],
-        env: {},
-        enabled: true,
-      },
-      future: { transport: "websocket", endpoint: "wss://example.invalid", enabled: true },
-      bound: server(`${origin}/upstream/mcp`, {
-        label: "Bound",
-        projectIds: [ProjectId.make("project:mcp-test")],
-        excludeSubagents: true,
-      }),
-    } as ServerSettings["mcpServers"],
-  }));
-  const httpClient = Context.get(services, HttpClient.HttpClient);
-  const call = (
-    path: string,
-    init: { body?: unknown; headers?: Record<string, string>; method?: "POST" | "GET" | "DELETE" },
-  ) =>
-    httpClient.execute(
-      HttpClientRequest.make(init.method ?? "POST")(`${origin}${path}`).pipe(
-        HttpClientRequest.setHeaders(init.headers ?? {}),
-        init.body === undefined
-          ? (request) => request
-          : HttpClientRequest.setBody(HttpBody.text(JSON.stringify(init.body), "application/json")),
+        Layer.provide(settingsLayer),
+        Layer.provide(projectionsLayer),
+        Layer.provideMerge(FetchHttpClient.layer),
       ),
     );
-  return {
-    origin,
-    spawned: () => NodeFS.existsSync(spawnMarker),
-    received,
-    bearerTokenReads: () => bearerTokenReads,
-    hung,
-    runtimeMode,
-    threadPlacement,
-    saveMcpServers,
-    call,
-    shared: Context.get(services, SharedMcpServers.SharedMcpServers),
-  };
-});
+    const origin = HttpServer.formatAddress(Context.get(services, HttpServer.HttpServer).address);
+    yield* Ref.update(settings, (current) => ({
+      ...current,
+      mcpServers: {
+        executor: {
+          ...server(`${origin}/upstream/mcp`, { label: "Executor" }),
+          get bearerToken() {
+            bearerTokenReads += 1;
+            return UPSTREAM_TOKEN;
+          },
+        },
+        denied: server(`${origin}/upstream/mcp`, { bearerToken: "stale" }),
+        broken: server(`${origin}/upstream/broken`),
+        moved: server(`${origin}/upstream/moved`),
+        offline: server("http://127.0.0.1:1/mcp", { label: "Offline" }),
+        paused: server(`${origin}/upstream/mcp`, { enabled: false }),
+        hang: server(`${origin}/upstream/hang`, { label: "Hang" }),
+        local: {
+          transport: "stdio",
+          label: "Local",
+          command: process.execPath,
+          args: [
+            NodeURL.fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url)),
+          ],
+          env: {},
+          enabled: true,
+        },
+        // Leaves a file behind if T3 ever starts it.
+        tripwire: {
+          transport: "stdio",
+          label: "Tripwire",
+          command: process.execPath,
+          args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(spawnMarker)}, "")`],
+          env: {},
+          enabled: true,
+        },
+        future: { transport: "websocket", endpoint: "wss://example.invalid", enabled: true },
+        bound: server(`${origin}/upstream/mcp`, {
+          label: "Bound",
+          projectIds: [ProjectId.make("project:mcp-test")],
+          excludeSubagents: true,
+        }),
+      } as ServerSettings["mcpServers"],
+    }));
+    const httpClient = Context.get(services, HttpClient.HttpClient);
+    const call = (
+      path: string,
+      init: {
+        body?: unknown;
+        headers?: Record<string, string>;
+        method?: "POST" | "GET" | "DELETE";
+      },
+    ) =>
+      httpClient.execute(
+        HttpClientRequest.make(init.method ?? "POST")(`${origin}${path}`).pipe(
+          HttpClientRequest.setHeaders(init.headers ?? {}),
+          init.body === undefined
+            ? (request) => request
+            : HttpClientRequest.setBody(
+                HttpBody.text(JSON.stringify(init.body), "application/json"),
+              ),
+        ),
+      );
+    return {
+      origin,
+      spawned: () => NodeFS.existsSync(spawnMarker),
+      received,
+      bearerTokenReads: () => bearerTokenReads,
+      hung,
+      runtimeMode,
+      threadPlacement,
+      saveMcpServers,
+      streamSubscriptions: () => streamSubscriptions,
+      call,
+      shared: Context.get(services, SharedMcpServers.SharedMcpServers),
+    };
+  });
+const fixture = makeFixture();
 
 const asAgent = { authorization: `Bearer ${AGENT_TOKEN}` };
 
@@ -811,56 +830,75 @@ const staleStdioEdits: ReadonlyArray<readonly [string, StdioEntryEdit]> = [
   ["given new args", (entry) => ({ ...entry, args: [...(entry.args as Array<string>), "--v2"] })],
 ];
 
+/** Opens two sessions on `local`, edits its entry, and expects both processes gone without a call. */
+const expectEditStopsProcesses = (
+  { call, saveMcpServers }: Effect.Success<ReturnType<typeof makeFixture>>,
+  edit: StdioEntryEdit,
+) =>
+  Effect.gen(function* () {
+    const local = McpServerId.make("local");
+    const paused = McpServerId.make("paused");
+    const askPid = (session: Record<string, string>) =>
+      call("/mcp/servers/local", {
+        body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "pid" } },
+        headers: session,
+      }).pipe(
+        Effect.flatMap((response) => response.json),
+        Effect.map((answer) =>
+          Number(
+            (answer as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
+          ),
+        ),
+      );
+    const open = Effect.gen(function* () {
+      const initialize = yield* call("/mcp/servers/local", {
+        body: { jsonrpc: "2.0", id: 0, method: "initialize", params: {} },
+        headers: asAgent,
+      });
+      const session = { ...asAgent, "mcp-session-id": initialize.headers["mcp-session-id"]! };
+      return { session, pid: yield* askPid(session) };
+    });
+    const first = yield* open;
+    const second = yield* open;
+    const pids = [first.pid, second.pid];
+
+    // Editing another entry leaves them running: the same process still answers.
+    yield* saveMcpServers((servers) => ({
+      ...servers,
+      [paused]: { ...servers[paused]!, label: "Paused" },
+    }));
+    expect(yield* askPid(first.session)).toBe(first.pid);
+    expect(pids.every(alive)).toBe(true);
+
+    yield* saveMcpServers((servers) => {
+      const next = { ...servers };
+      const entry = edit(next[local] as unknown as Record<string, unknown>);
+      if (entry === undefined) delete next[local];
+      else next[local] = entry as unknown as (typeof servers)[typeof local];
+      return next;
+    });
+    yield* Effect.promise(() =>
+      expect.poll(() => pids.some(alive), { timeout: 3000, interval: 20 }).toBe(false),
+    );
+  });
+
 it.effect.each(staleStdioEdits)(
   "stops a stdio server's processes as soon as its entry is %s, without waiting for a call",
-  ([, edit]) =>
-    Effect.gen(function* () {
-      const { call, saveMcpServers } = yield* fixture;
-      const local = McpServerId.make("local");
-      const paused = McpServerId.make("paused");
-      const askPid = (session: Record<string, string>) =>
-        call("/mcp/servers/local", {
-          body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "pid" } },
-          headers: session,
-        }).pipe(
-          Effect.flatMap((response) => response.json),
-          Effect.map((answer) =>
-            Number(
-              (answer as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
-            ),
-          ),
-        );
-      const open = Effect.gen(function* () {
-        const initialize = yield* call("/mcp/servers/local", {
-          body: { jsonrpc: "2.0", id: 0, method: "initialize", params: {} },
-          headers: asAgent,
-        });
-        const session = { ...asAgent, "mcp-session-id": initialize.headers["mcp-session-id"]! };
-        return { session, pid: yield* askPid(session) };
-      });
-      const first = yield* open;
-      const second = yield* open;
-      const pids = [first.pid, second.pid];
+  ([, edit]) => fixture.pipe(Effect.flatMap((harness) => expectEditStopsProcesses(harness, edit))),
+);
 
-      // Editing another entry leaves them running: the same process still answers.
-      yield* saveMcpServers((servers) => ({
-        ...servers,
-        [paused]: { ...servers[paused]!, label: "Paused" },
-      }));
-      expect(yield* askPid(first.session)).toBe(first.pid);
-      expect(pids.every(alive)).toBe(true);
-
-      yield* saveMcpServers((servers) => {
-        const next = { ...servers };
-        const entry = edit(next[local] as unknown as Record<string, unknown>);
-        if (entry === undefined) delete next[local];
-        else next[local] = entry as unknown as (typeof servers)[typeof local];
-        return next;
-      });
-      yield* Effect.promise(() =>
-        expect.poll(() => pids.some(alive), { timeout: 3000, interval: 20 }).toBe(false),
-      );
-    }),
+it.effect("restarts the settings watcher when its stream fails", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeFixture({ brokenSettingsStream: true });
+    yield* Effect.promise(() =>
+      expect.poll(harness.streamSubscriptions, { timeout: 3000, interval: 10 }).toBe(1),
+    );
+    yield* TestClock.adjust("1 second");
+    yield* Effect.promise(() =>
+      expect.poll(harness.streamSubscriptions, { timeout: 3000, interval: 10 }).toBe(2),
+    );
+    yield* expectEditStopsProcesses(harness, () => undefined);
+  }),
 );
 
 it.effect("treats a transport from a newer version as turned off", () =>

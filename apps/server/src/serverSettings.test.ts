@@ -1924,6 +1924,43 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
+  it.effect("refuses an HTTP write without a transport to an id a stdio entry already has", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const local = {
+        transport: "stdio",
+        command: "executor",
+        args: ["mcp"],
+        env: {},
+        enabled: true,
+      };
+      yield* service.updateSettings({ mcpServers: { local } } as never);
+      const error = yield* service
+        .updateSettings({
+          mcpServers: { local: { url: "https://docs.example/mcp", enabled: true } },
+        } as never)
+        .pipe(Effect.flip);
+      assert.strictEqual(error.operation, "write-mcp-server");
+      assert.include(
+        error.message,
+        'An MCP server named "local" already exists on this host as a local process',
+      );
+      assert.deepInclude((yield* service.getSettings).mcpServers[McpServerId.make("local")], local);
+      // An explicit switch to HTTP is still allowed, and a brand-new id is unaffected.
+      yield* service.updateSettings({
+        mcpServers: { docs: { url: "https://docs.example/mcp", enabled: true } },
+      } as never);
+      yield* service.updateSettings({
+        mcpServers: {
+          local: { transport: "http", url: "https://docs.example/mcp", enabled: true },
+        },
+      } as never);
+      assert.deepInclude((yield* service.getSettings).mcpServers[McpServerId.make("local")], {
+        url: "https://docs.example/mcp",
+      });
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
   it.effect("hides stdio MCP entries from clients that can't decode them", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;

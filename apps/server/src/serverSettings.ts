@@ -280,6 +280,30 @@ function ensureSecretProviderWritesAllowed(
   return Effect.void;
 }
 
+/**
+ * A client that predates other transports writes HTTP entries with no `transport`. It can't see a
+ * stdio (or newer) entry, so a write to that id would be dropped by the merge; say so instead.
+ */
+function ensureMcpServerWritesAllowed(
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+  settingsPath: string,
+): Effect.Effect<void, ServerSettingsError> {
+  for (const [id, entry] of Object.entries(patch.mcpServers ?? {})) {
+    if (entry === null || (entry as { readonly transport?: unknown }).transport !== undefined)
+      continue;
+    const saved = Object.hasOwn(current.mcpServers, id)
+      ? current.mcpServers[id as keyof ServerSettings["mcpServers"]]
+      : undefined;
+    if (saved !== undefined && !isHttpMcpServer(saved)) {
+      return Effect.fail(
+        new ServerSettingsError({ settingsPath, operation: "write-mcp-server", mcpServerId: id }),
+      );
+    }
+  }
+  return Effect.void;
+}
+
 function ensureProviderInstanceMutationAllowed(
   settings: ServerSettings,
   mutation: ProviderInstanceMutation,
@@ -1485,6 +1509,7 @@ const make = Effect.gen(function* () {
         const current = yield* readForUpdate;
         const patch = yield* build(yield* getMaterializedSettings);
         yield* ensureSecretProviderWritesAllowed(patch, settingsPath);
+        yield* ensureMcpServerWritesAllowed(current, patch, settingsPath);
         return yield* persistUpdate(current, applyServerSettingsPatch(current, patch), patch);
       }),
     );
@@ -1638,6 +1663,7 @@ const make = Effect.gen(function* () {
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
+          Effect.andThen(ensureMcpServerWritesAllowed(current, patch, settingsPath)),
           Effect.as(applyServerSettingsPatch(current, patch)),
         ),
       ),
@@ -1646,6 +1672,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* ensureSecretProviderWritesAllowed(patch, settingsPath);
           yield* ensureProviderInstanceMutationAllowed(current, mutation, settingsPath);
+          yield* ensureMcpServerWritesAllowed(current, patch, settingsPath);
           const patched = applyServerSettingsPatch(current, patch);
           return applyProviderInstanceMutation(patched, mutation);
         }),

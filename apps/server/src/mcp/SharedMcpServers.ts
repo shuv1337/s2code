@@ -11,8 +11,10 @@ import {
   type ProjectId,
   type ServerSettings,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -414,6 +416,8 @@ const staleStdioReason = (
     : undefined;
 };
 
+const RETIRE_WATCHER_RESTART_DELAY = "1 second";
+
 /** Stops a removed, disabled or edited stdio entry's processes now, not at their next call or idle. */
 const layerRetireStaleStdioSessions = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -423,7 +427,7 @@ const layerRetireStaleStdioSessions = Layer.effectDiscard(
       onNone: (): ServerSettings["mcpServers"] => ({}),
       onSome: (current) => current.mcpServers,
     });
-    yield* settings.streamChanges.pipe(
+    const watch = settings.streamChanges.pipe(
       Stream.runForEach((next) =>
         Effect.gen(function* () {
           for (const [id, before] of Object.entries(previous)) {
@@ -437,6 +441,21 @@ const layerRetireStaleStdioSessions = Layer.effectDiscard(
           previous = next.mcpServers;
         }),
       ),
+    );
+    // A stopped watcher would leave edited entries' processes (and their old env) running until
+    // their next call or idle timeout, so it logs and starts again. `previous` survives the restart,
+    // so the first change after it still compares against what was running.
+    yield* watch.pipe(
+      Effect.exit,
+      Effect.flatMap((exit) =>
+        Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+          ? Effect.interrupt
+          : Effect.logWarning("shared MCP stdio settings watcher stopped; restarting", {
+              cause: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "settings stream ended",
+            }),
+      ),
+      Effect.andThen(Effect.sleep(RETIRE_WATCHER_RESTART_DELAY)),
+      Effect.forever,
       Effect.forkScoped,
     );
   }),

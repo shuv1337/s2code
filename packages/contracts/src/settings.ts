@@ -1869,6 +1869,7 @@ export const ServerSettingsOperation = Schema.Literals([
   "prepare-directory",
   "write-managed-setting",
   "use-disallowed-provider",
+  "write-mcp-server",
 ]);
 export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
 
@@ -1888,12 +1889,17 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
     managedBy: Schema.optional(Schema.String),
     /** For `use-disallowed-provider`: the provider's name as users know it. */
     providerLabel: Schema.optional(Schema.String),
+    /** For `write-mcp-server`: the saved entry's id. */
+    mcpServerId: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     if (this.operation === "write-managed-setting") {
       return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
+    }
+    if (this.operation === "write-mcp-server") {
+      return `An MCP server named "${this.mcpServerId ?? ""}" already exists on this host as a local process, and this version of the app can't change it. Pick another name, or update the app.`;
     }
     if (this.operation === "use-disallowed-provider") {
       return disallowedProviderMessage(
