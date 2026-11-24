@@ -185,11 +185,14 @@ Expo build inputs.
   `VITE_HOSTED_APP_CHANNEL`. Optional relay tracing:
   `VITE_RELAY_OTLP_TRACES_URL`, `VITE_RELAY_OTLP_TRACES_DATASET`,
   `VITE_RELAY_OTLP_TRACES_TOKEN`.
-- Mobile build: `T3CODE_RELAY_URL`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`,
-  `EXPO_PUBLIC_CLERK_JWT_TEMPLATE`. Optional tracing:
-  `EXPO_PUBLIC_OTLP_TRACES_URL`, `EXPO_PUBLIC_OTLP_TRACES_DATASET`,
-  `EXPO_PUBLIC_OTLP_TRACES_TOKEN`. Mobile delivery/feature flags remain governed
-  by the mobile release runbook.
+- Mobile build: `MOBILE_AUTH_ENABLED=1`, `MOBILE_RELAY_URL`,
+  `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` (or `T3CODE_CLERK_PUBLISHABLE_KEY`),
+  `EXPO_PUBLIC_CLERK_JWT_TEMPLATE` (or `T3CODE_CLERK_JWT_TEMPLATE`). Add the
+  app's custom-scheme callback (for example
+  `dev.shuv.shuv2code.nightly://callback`) to the Clerk mobile SSO redirect
+  allowlist. Optional tracing: `EXPO_PUBLIC_OTLP_TRACES_URL`,
+  `EXPO_PUBLIC_OTLP_TRACES_DATASET`, `EXPO_PUBLIC_OTLP_TRACES_TOKEN`. Mobile
+  delivery/feature flags remain governed by the mobile release runbook.
 
 No credentials belong in public configuration except service-scoped public
 client keys/tokens intended for distribution.

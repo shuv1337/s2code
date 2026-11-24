@@ -2,6 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 
 import type { AntigravityAuthMethod, ProviderInstanceId } from "@t3tools/contracts";
+import { isWindowsRenameLock } from "@t3tools/shared/atomicWrite";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Digest from "effect/crypto/Digest";
@@ -11,6 +12,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as PlatformError from "effect/PlatformError";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
@@ -20,7 +22,9 @@ import * as AcpErrors from "effect-acp/errors";
 import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
+  antigravityCompatibilityUserSkillDirectories,
   antigravityUserSkillDirectories,
+  collectDeclaredAntigravitySkillRoots,
   resolveAntigravityUserHome,
 } from "./Drivers/AntigravitySkills.ts";
 
@@ -253,11 +257,10 @@ class AntigravitySkillLinkError extends Schema.TaggedError<AntigravitySkillLinkE
   }
 }
 
-const antigravityUserConfigFiles = [
-  ["AGENTS.md"],
-  ["GEMINI.md"],
-  ["config", "skills.json"],
-] as const;
+const antigravityUserConfigFiles = [["AGENTS.md"], ["GEMINI.md"]] as const;
+
+const WINDOWS_SKILLS_RENAME_RETRIES = 20;
+const WINDOWS_SKILLS_RENAME_RETRY_DELAY = "100 millis";
 
 /** Private GEMINI_HOME isolates credentials/hooks/MCP; link global skills and rules from the real ~/.gemini. */
 const linkAntigravityUserConfig = Effect.fn("linkAntigravityUserConfig")(function* (input: {
@@ -336,6 +339,17 @@ const RuleCopiesJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema
 const decodeRuleCopies = Schema.decodeUnknownOption(RuleCopiesJson);
 const encodeRuleCopies = Schema.encodeSync(RuleCopiesJson);
 
+const SynthesizedSkillsConfigEntry = Schema.Struct({
+  path: Schema.String,
+});
+const SynthesizedSkillsConfigFile = Schema.Struct({
+  inherits: Schema.optional(Schema.Array(SynthesizedSkillsConfigEntry)),
+  entries: Schema.optional(Schema.Array(SynthesizedSkillsConfigEntry)),
+});
+const encodeSynthesizedSkillsConfig = Schema.encodeSync(
+  Schema.fromJsonString(SynthesizedSkillsConfigFile, { space: 2 }),
+);
+
 /** Copies refresh each launch; the recorded copy keeps a file the profile owns or edited untouched. */
 const copyAntigravityUserConfigFiles = Effect.fn("copyAntigravityUserConfigFiles")(
   function* (input: {
@@ -351,6 +365,7 @@ const copyAntigravityUserConfigFiles = Effect.fn("copyAntigravityUserConfigFiles
     const copies: Record<string, string> = {
       ...Option.getOrElse(decodeRuleCopies(manifestText), () => ({})),
     };
+    delete copies["config/skills.json"];
     for (const segments of antigravityUserConfigFiles) {
       const key = segments.join("/");
       const link = path.join(input.profileDirectory, ...segments);
@@ -389,6 +404,177 @@ const copyAntigravityUserConfigFiles = Effect.fn("copyAntigravityUserConfigFiles
       );
   },
 );
+
+function normalizeSkillsConfigKey(path: Path.Path, targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  return path.sep === "\\" ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * Synthesizes `<profile>/config/skills.json` from `~/.gemini/config/skills.json` and existing
+ * compatibility skill directories without mutating `~/.gemini/` or following profile symlinks.
+ */
+const syncAntigravitySkillsConfig = Effect.fn("syncAntigravitySkillsConfig")(function* (input: {
+  readonly profileDirectory: string;
+  readonly userHome: string;
+  readonly platform: NodeJS.Platform;
+}): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const userGeminiConfig = path.join(input.userHome, ".gemini", "config");
+  const userSkillsJson = path.join(userGeminiConfig, "skills.json");
+  const profileConfigDir = path.join(input.profileDirectory, "config");
+  const profileSkillsJson = path.join(profileConfigDir, "skills.json");
+
+  yield* Effect.gen(function* () {
+    let inherits: Array<{ readonly path: string }> = [];
+    let declaredPaths: ReadonlySet<string> = new Set();
+
+    const userSkillsStat = yield* fs.stat(userSkillsJson).pipe(
+      Effect.map((info) => ({ found: true as const, info })),
+      Effect.catchReason("PlatformError", "NotFound", () =>
+        Effect.succeed({ found: false as const }),
+      ),
+      Effect.catch((error) =>
+        Effect.logWarning("Could not inspect Antigravity user skills.json.", {
+          path: userSkillsJson,
+          error,
+        }).pipe(Effect.as({ found: false as const })),
+      ),
+    );
+    if (userSkillsStat.found) {
+      if (userSkillsStat.info.type === "File") {
+        const collected = yield* collectDeclaredAntigravitySkillRoots({
+          configPath: userSkillsJson,
+          baseDir: userGeminiConfig,
+        });
+        if (collected.valid) {
+          inherits = [{ path: userSkillsJson }];
+          declaredPaths = collected.declaredPaths;
+        } else {
+          yield* Effect.logWarning("Ignoring invalid Antigravity user skills.json.", {
+            path: userSkillsJson,
+          });
+        }
+      } else {
+        yield* Effect.logWarning("Ignoring non-file Antigravity user skills.json.", {
+          path: userSkillsJson,
+        });
+      }
+    }
+
+    const entries: Array<{ readonly path: string }> = [];
+    const seenCompatRealPaths = new Set<string>();
+    for (const compatDir of antigravityCompatibilityUserSkillDirectories(path, input.userHome)) {
+      const info = yield* fs.stat(compatDir).pipe(Effect.orElseSucceed(() => undefined));
+      if (info?.type !== "Directory") continue;
+      const lexicalKey = normalizeSkillsConfigKey(path, compatDir);
+      const canonicalPath = yield* fs
+        .realPath(compatDir)
+        .pipe(Effect.orElseSucceed(() => compatDir));
+      const canonicalKey = normalizeSkillsConfigKey(path, canonicalPath);
+      if (
+        declaredPaths.has(lexicalKey) ||
+        declaredPaths.has(canonicalKey) ||
+        seenCompatRealPaths.has(canonicalKey)
+      ) {
+        continue;
+      }
+      seenCompatRealPaths.add(canonicalKey);
+      entries.push({ path: compatDir });
+    }
+
+    const existing = yield* fs
+      .lstat(profileSkillsJson)
+      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.undefined));
+
+    if (inherits.length === 0 && entries.length === 0) {
+      if (
+        existing !== undefined &&
+        (existing.type === "File" || existing.type === "SymbolicLink")
+      ) {
+        yield* fs
+          .remove(profileSkillsJson)
+          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.void));
+      }
+      return;
+    }
+
+    const contents = `${encodeSynthesizedSkillsConfig({
+      ...(inherits.length > 0 ? { inherits } : {}),
+      ...(entries.length > 0 ? { entries } : {}),
+    })}\n`;
+
+    if (existing?.type === "File") {
+      const current = yield* fs
+        .readFileString(profileSkillsJson)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      if (current === contents) return;
+    }
+
+    yield* fs.makeDirectory(profileConfigDir, {
+      recursive: true,
+      ...(input.platform === "win32" ? {} : { mode: 0o700 }),
+    });
+
+    // Replace `<profile>/config/skills.json` directly without following symlinks so a legacy
+    // symlink to `~/.gemini/config/skills.json` is never dereferenced or mutated.
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const tempDirectory = yield* Effect.acquireRelease(
+          fs.makeTempDirectory({ directory: profileConfigDir, prefix: "t3-skills-" }),
+          (directory) =>
+            fs.remove(directory, { recursive: true }).pipe(Effect.ignore({ log: true })),
+        );
+        const tempPath = path.join(tempDirectory, "skills.json.tmp");
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const file = yield* fs.open(tempPath, { flag: "w" });
+            yield* file.writeAll(new TextEncoder().encode(contents));
+            if (input.platform !== "win32") {
+              yield* fs.chmod(tempPath, 0o600);
+            }
+            yield* file.sync;
+          }),
+        );
+        if (input.platform !== "win32") {
+          yield* fs.rename(tempPath, profileSkillsJson);
+          return;
+        }
+        const currentEntry = yield* fs
+          .lstat(profileSkillsJson)
+          .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.undefined));
+        if (currentEntry?.type === "SymbolicLink") {
+          yield* fs
+            .remove(profileSkillsJson)
+            .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.void));
+        }
+        const firstAttempt = yield* Effect.result(fs.rename(tempPath, profileSkillsJson));
+        if (Result.isSuccess(firstAttempt)) return;
+        const lockError = firstAttempt.failure;
+        if (!isWindowsRenameLock(lockError)) {
+          return yield* lockError;
+        }
+        let lastError = lockError;
+        for (let retry = 0; retry < WINDOWS_SKILLS_RENAME_RETRIES; retry += 1) {
+          yield* Effect.sleep(WINDOWS_SKILLS_RENAME_RETRY_DELAY);
+          const attempt = yield* Effect.result(fs.rename(tempPath, profileSkillsJson));
+          if (Result.isSuccess(attempt)) return;
+          lastError = attempt.failure;
+          if (!isWindowsRenameLock(lastError)) return yield* lastError;
+        }
+        return yield* lastError;
+      }),
+    );
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Antigravity profile skills.json could not be synchronized.", {
+        path: profileSkillsJson,
+        error,
+      }),
+    ),
+  );
+});
 
 export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(function* (input: {
   readonly profileDirectory: string;
@@ -540,6 +726,7 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
   if (platform === "win32") {
     yield* copyAntigravityUserConfigFiles({ profileDirectory: geminiHome, userHome });
   }
+  yield* syncAntigravitySkillsConfig({ profileDirectory: geminiHome, userHome, platform });
   return profile;
 });
 

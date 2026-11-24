@@ -690,7 +690,7 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
   );
 
   it.effect.skipIf(!symlinksSupported)(
-    "links the user's global rule files and never replaces the profile's own",
+    "links the user's global rule files, synthesizes skills.json, and never replaces the profile's own rules",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -699,11 +699,13 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         const userHome = path.join(temporaryDirectory, "home");
         const profileDirectory = path.join(temporaryDirectory, "profile");
         const userGemini = path.join(userHome, ".gemini");
+        const userSkillsJson = path.join(userGemini, "config", "skills.json");
+        const profileSkillsJson = path.join(profileDirectory, "config", "skills.json");
         yield* fs.makeDirectory(path.join(userGemini, "config"), { recursive: true });
         yield* fs.writeFileString(path.join(userGemini, "AGENTS.md"), "global agents rule");
         yield* fs.writeFileString(path.join(userGemini, "GEMINI.md"), "global gemini rule");
         yield* fs.writeFileString(
-          path.join(userGemini, "config", "skills.json"),
+          userSkillsJson,
           JSON.stringify({ entries: [{ path: "/tmp/shared-skills" }] }),
         );
 
@@ -714,24 +716,25 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         expect(yield* fs.readLink(path.join(profileDirectory, "GEMINI.md"))).toBe(
           path.join(userGemini, "GEMINI.md"),
         );
-        expect(yield* fs.readLink(path.join(profileDirectory, "config", "skills.json"))).toBe(
-          path.join(userGemini, "config", "skills.json"),
-        );
+        expect((yield* fs.lstat(profileSkillsJson)).type).toBe("File");
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          inherits: [{ path: userSkillsJson }],
+        });
 
         yield* fs.remove(path.join(userGemini, "AGENTS.md"));
-        yield* fs.remove(path.join(userGemini, "config", "skills.json"));
+        yield* fs.remove(userSkillsJson);
         yield* fs.remove(path.join(profileDirectory, "GEMINI.md"));
         yield* fs.writeFileString(path.join(profileDirectory, "GEMINI.md"), "profile's own rule");
         yield* prepareAntigravityProfile({ profileDirectory, userHome });
         expect(yield* fs.exists(path.join(profileDirectory, "AGENTS.md"))).toBe(false);
-        expect(yield* fs.exists(path.join(profileDirectory, "config", "skills.json"))).toBe(false);
+        expect(yield* fs.exists(profileSkillsJson)).toBe(false);
         expect(yield* fs.readFileString(path.join(profileDirectory, "GEMINI.md"))).toBe(
           "profile's own rule",
         );
       }),
   );
 
-  it.effect("copies the user's global rule files on Windows and keeps the profile's own", () =>
+  it.effect("copies the user's global rule files on Windows and synthesizes skills.json", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -744,7 +747,15 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
       const profileGemini = path.join(profileDirectory, "GEMINI.md");
       const profileSkillsJson = path.join(profileDirectory, "config", "skills.json");
       const userSkillsJson = path.join(userGemini, "config", "skills.json");
+      const ruleCopiesManifest = path.join(profileDirectory, ".t3-rule-copies.json");
+      const agentsCompatDir = path.join(userHome, ".agents", "skills");
       yield* fs.makeDirectory(path.join(userGemini, "config"), { recursive: true });
+      yield* fs.makeDirectory(agentsCompatDir, { recursive: true });
+      yield* fs.makeDirectory(profileDirectory, { recursive: true });
+      yield* fs.writeFileString(
+        ruleCopiesManifest,
+        JSON.stringify({ "config/skills.json": '{"entries":[]}' }),
+      );
       yield* fs.writeFileString(path.join(userGemini, "AGENTS.md"), "global agents rule");
       yield* fs.writeFileString(path.join(userGemini, "GEMINI.md"), "global gemini rule");
       yield* fs.writeFileString(userSkillsJson, '{"entries":[]}');
@@ -752,23 +763,166 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
       yield* prepare;
       expect(yield* fs.readFileString(profileAgents)).toBe("global agents rule");
       expect(yield* fs.readFileString(profileGemini)).toBe("global gemini rule");
-      expect(yield* fs.readFileString(profileSkillsJson)).toBe('{"entries":[]}');
+      expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+        inherits: [{ path: userSkillsJson }],
+        entries: [{ path: agentsCompatDir }],
+      });
+      expect(decodeJson(yield* fs.readFileString(ruleCopiesManifest))).toEqual({
+        "AGENTS.md": "global agents rule",
+        "GEMINI.md": "global gemini rule",
+      });
 
       yield* fs.writeFileString(path.join(userGemini, "AGENTS.md"), "edited agents rule");
       yield* fs.remove(path.join(userGemini, "GEMINI.md"));
-      yield* fs.writeFileString(userSkillsJson, '{"entries":[{"path":"/skills"}]}');
+      yield* fs.writeFileString(
+        userSkillsJson,
+        JSON.stringify({ entries: [{ path: agentsCompatDir }] }),
+      );
       yield* prepare;
       expect(yield* fs.readFileString(profileAgents)).toBe("edited agents rule");
       expect(yield* fs.exists(profileGemini)).toBe(false);
-      expect(yield* fs.readFileString(profileSkillsJson)).toBe('{"entries":[{"path":"/skills"}]}');
+      expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+        inherits: [{ path: userSkillsJson }],
+      });
 
       yield* fs.writeFileString(profileGemini, "profile's own rule");
       yield* fs.writeFileString(path.join(userGemini, "GEMINI.md"), "global gemini rule");
       yield* fs.remove(userSkillsJson);
+      yield* fs.remove(agentsCompatDir, { recursive: true });
       yield* prepare;
       expect(yield* fs.readFileString(profileGemini)).toBe("profile's own rule");
       expect(yield* fs.exists(profileSkillsJson)).toBe(false);
     }),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "replaces live and dangling legacy profile skills.json symlinks without mutating ~/.gemini",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const temporaryDirectory = yield* fs.makeTempDirectoryScoped();
+        const userHome = path.join(temporaryDirectory, "home");
+        const profileDirectory = path.join(temporaryDirectory, "profile");
+        const userSkillsJson = path.join(userHome, ".gemini", "config", "skills.json");
+        const profileSkillsJson = path.join(profileDirectory, "config", "skills.json");
+        const agentsCompatDir = path.join(userHome, ".agents", "skills");
+        const originalUserSkills = '{"entries":[{"path":"/custom/skills"}]}\n';
+
+        yield* fs.makeDirectory(path.dirname(userSkillsJson), { recursive: true });
+        yield* fs.makeDirectory(path.dirname(profileSkillsJson), { recursive: true });
+        yield* fs.makeDirectory(agentsCompatDir, { recursive: true });
+        yield* fs.writeFileString(userSkillsJson, originalUserSkills);
+        yield* fs.symlink(userSkillsJson, profileSkillsJson);
+
+        yield* prepareAntigravityProfile({ profileDirectory, userHome });
+        expect((yield* fs.lstat(profileSkillsJson)).type).toBe("File");
+        expect(yield* fs.readFileString(userSkillsJson)).toBe(originalUserSkills);
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          inherits: [{ path: userSkillsJson }],
+          entries: [{ path: agentsCompatDir }],
+        });
+
+        // Dangling legacy symlink is replaced cleanly when compat dirs exist, and removed when empty.
+        yield* fs.remove(profileSkillsJson);
+        yield* fs.symlink(path.join(temporaryDirectory, "missing-skills.json"), profileSkillsJson);
+        yield* fs.remove(userSkillsJson);
+        yield* prepareAntigravityProfile({ profileDirectory, userHome });
+        expect((yield* fs.lstat(profileSkillsJson)).type).toBe("File");
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          entries: [{ path: agentsCompatDir }],
+        });
+
+        yield* fs.remove(profileSkillsJson);
+        yield* fs.symlink(path.join(temporaryDirectory, "missing-skills.json"), profileSkillsJson);
+        yield* fs.remove(agentsCompatDir, { recursive: true });
+        yield* prepareAntigravityProfile({ profileDirectory, userHome });
+        const afterMissing = yield* fs.lstat(profileSkillsJson).pipe(Effect.result);
+        expect(Result.isFailure(afterMissing)).toBe(true);
+      }),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "omits already-declared or symlink-duplicate compat roots, skips malformed user skills.json, and avoids rewriting unchanged files",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const temporaryDirectory = yield* fs.makeTempDirectoryScoped();
+        const userHome = path.join(temporaryDirectory, "home");
+        const profileDirectory = path.join(temporaryDirectory, "profile");
+        const userSkillsJson = path.join(userHome, ".gemini", "config", "skills.json");
+        const inheritedJson = path.join(userHome, "inherited-skills.json");
+        const profileSkillsJson = path.join(profileDirectory, "config", "skills.json");
+        const antigravityCompatDir = path.join(userHome, ".gemini", "antigravity", "skills");
+        const agentsCompatDir = path.join(userHome, ".agents", "skills");
+        const claudeCompatDir = path.join(userHome, ".claude", "skills");
+
+        yield* fs.makeDirectory(path.dirname(userSkillsJson), { recursive: true });
+        yield* fs.makeDirectory(antigravityCompatDir, { recursive: true });
+        yield* fs.makeDirectory(agentsCompatDir, { recursive: true });
+        yield* fs.makeDirectory(path.dirname(claudeCompatDir), { recursive: true });
+        yield* fs.symlink(agentsCompatDir, claudeCompatDir);
+        yield* fs.writeFileString(
+          inheritedJson,
+          JSON.stringify({ entries: [{ path: antigravityCompatDir, exclude: ["secret"] }] }),
+        );
+        yield* fs.writeFileString(
+          userSkillsJson,
+          JSON.stringify({ inherits: [{ path: inheritedJson }] }),
+        );
+
+        yield* prepareAntigravityProfile({ profileDirectory, userHome });
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          inherits: [{ path: userSkillsJson }],
+          entries: [{ path: agentsCompatDir }],
+        });
+        const firstStat = yield* fs.lstat(profileSkillsJson);
+
+        // Unchanged regular file is not rewritten (inode stays identical).
+        yield* prepareAntigravityProfile({ profileDirectory, userHome });
+        const secondStat = yield* fs.lstat(profileSkillsJson);
+        expect(secondStat.ino).toEqual(firstStat.ino);
+
+        // Malformed ~/.gemini/config/skills.json is omitted from inherits so compat roots still load.
+        const malformed = "{ not valid json";
+        yield* fs.writeFileString(userSkillsJson, malformed);
+        yield* prepareAntigravityProfile({ profileDirectory, userHome });
+        expect(yield* fs.readFileString(userSkillsJson)).toBe(malformed);
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          entries: [{ path: antigravityCompatDir }, { path: agentsCompatDir }],
+        });
+      }),
+  );
+
+  it.effect(
+    "handles concurrent profile preparations cleanly without leaving temp directories",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const temporaryDirectory = yield* fs.makeTempDirectoryScoped();
+        const userHome = path.join(temporaryDirectory, "home");
+        const profileDirectory = path.join(temporaryDirectory, "profile");
+        const agentsCompatDir = path.join(userHome, ".agents", "skills");
+        yield* fs.makeDirectory(agentsCompatDir, { recursive: true });
+
+        yield* Effect.all(
+          [
+            prepareAntigravityProfile({ profileDirectory, userHome }),
+            prepareAntigravityProfile({ profileDirectory, userHome }),
+            prepareAntigravityProfile({ profileDirectory, userHome }),
+          ],
+          { concurrency: "unbounded" },
+        );
+
+        const profileSkillsJson = path.join(profileDirectory, "config", "skills.json");
+        expect(decodeJson(yield* fs.readFileString(profileSkillsJson))).toEqual({
+          entries: [{ path: agentsCompatDir }],
+        });
+        const configEntries = yield* fs.readDirectory(path.join(profileDirectory, "config"));
+        expect(configEntries.filter((entry) => entry.startsWith("t3-skills-"))).toEqual([]);
+      }),
   );
 
   it.effect("rewrites the GCP block on every launch and never stores the API key", () =>

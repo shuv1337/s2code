@@ -607,6 +607,10 @@ export const AntigravityDriver: ProviderDriver<
         Effect.provideService(Path.Path, path),
         Effect.orElseSucceed(() => false),
       ),
+      discoverUserSkills: discoverAntigravitySkills({ userHome, profileDirectory }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      ),
     }).pipe(
       Effect.mapError(
         (cause) =>

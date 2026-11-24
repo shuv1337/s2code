@@ -134,9 +134,10 @@ Preview and production variants use Expo fingerprinting so OTA updates only reac
 
 The development variant uses `appVersion` to avoid recalculating the native fingerprint for each Metro launch manifest. `MOBILE_VERSION_POLICY` can override either default. If you distribute a custom Release build with the development identity and publish OTA updates to it, set `MOBILE_VERSION_POLICY=fingerprint` for both its build and updates. Changing the runtime policy requires a native rebuild for OTA matching; an existing dev client can still load local Metro bundles.
 
-For preview or production EAS environments, set `T3CODE_CLERK_PUBLISHABLE_KEY`,
-`T3CODE_CLERK_JWT_TEMPLATE`, and `T3CODE_RELAY_URL`
-as EAS environment variables. Expo config maps the canonical values into the mobile build.
+For preview or production EAS environments with hosted auth enabled, set `MOBILE_AUTH_ENABLED=1`,
+`MOBILE_RELAY_URL`, `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` (or `T3CODE_CLERK_PUBLISHABLE_KEY`),
+and `EXPO_PUBLIC_CLERK_JWT_TEMPLATE` (or `T3CODE_CLERK_JWT_TEMPLATE`) as EAS environment
+variables (`T3CODE_RELAY_URL` is not mapped to mobile). Expo config maps the Clerk values into the mobile build.
 
 Create a PR preview dev-client build manually:
 

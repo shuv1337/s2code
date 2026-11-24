@@ -29,6 +29,7 @@ const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const expoIdentity = resolveExpoIdentity(repoEnv);
 const pushEnabled = repoEnv.MOBILE_PUSH_ENABLED === "1";
 const authEnabled = repoEnv.MOBILE_AUTH_ENABLED === "1";
+const appleSignInEnabled = authEnabled && repoEnv.MOBILE_APPLE_SIGN_IN_ENABLED === "1";
 assertMobileHostedDestinations(repoEnv);
 const releasePlatform = repoEnv.EAS_BUILD_PLATFORM ?? repoEnv.MOBILE_RELEASE_PLATFORM ?? "all";
 if (repoEnv.MOBILE_RELEASE_INTENT === "1") assertEnabledMobileFeatures(repoEnv, releasePlatform);
@@ -402,10 +403,11 @@ const config: ExpoConfig = {
           ] as NonNullable<ExpoConfig["plugins"]>[number],
         ]
       : []),
-    // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
+    // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement,
+    // and Apple Sign-In requires the capability on the App ID and provisioning profile.
     [
       "@clerk/expo",
-      { theme: "./clerk-theme.json", appleSignIn: authEnabled && !isIosPersonalTeamBuild },
+      { theme: "./clerk-theme.json", appleSignIn: appleSignInEnabled && !isIosPersonalTeamBuild },
     ],
     "expo-web-browser",
     [
@@ -530,7 +532,7 @@ const config: ExpoConfig = {
       publishableKey: authEnabled
         ? forkClerkPublishableKey(repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY)
         : null,
-      jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
+      jwtTemplate: authEnabled ? (repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null) : null,
     },
     // Clerk reads these exact names at prebuild. Omit unset values: manifest null becomes truthy {}.
     EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: authEnabled

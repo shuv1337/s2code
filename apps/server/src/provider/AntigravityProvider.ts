@@ -7,6 +7,7 @@ import {
   type RuntimeMode,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerProviderSkill,
   type ServerProviderSlashCommand,
   type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
@@ -43,6 +44,7 @@ import {
 import { resolveUsageLimitsAfterProbe } from "@t3tools/provider-core/server/usageLimits";
 
 import { antigravityThinkingConfig } from "./acp/AntigravityAcpSupport.ts";
+import type { AntigravitySkillsProbeError } from "./Drivers/AntigravitySkills.ts";
 
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
 const MAX_WORKSPACE_SNAPSHOTS = 32;
@@ -164,6 +166,10 @@ interface AntigravityProviderOptions {
     EffectAcpErrors.AcpError | ProviderSetupError
   >;
   readonly supportsTextGeneration: Effect.Effect<boolean>;
+  readonly discoverUserSkills?: Effect.Effect<
+    ReadonlyArray<ServerProviderSkill>,
+    AntigravitySkillsProbeError
+  >;
   readonly probeUsage?: Effect.Effect<ServerProviderUsageLimits>;
   readonly clearUsage?: Effect.Effect<void>;
   readonly maintenanceCapabilities?: ProviderMaintenanceCapabilities;
@@ -256,6 +262,18 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   const getSnapshot = SubscriptionRef.get(metadata).pipe(
     Effect.flatMap((state) => options.stampIdentity(state.draft)),
   );
+  const readUserSkills = Effect.fn("AntigravityProvider.readUserSkills")(function* (
+    fallback: ReadonlyArray<ServerProviderSkill>,
+  ) {
+    if (!options.discoverUserSkills) return fallback;
+    return yield* options.discoverUserSkills.pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not read Antigravity user skills.", { error }).pipe(
+          Effect.as(fallback),
+        ),
+      ),
+    );
+  });
 
   // The quota read can take 30 seconds, so it never blocks readiness or a session start.
   // One read runs at a time; sign-in and sign-out interrupt it so a stale account never lands.
@@ -324,6 +342,13 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
               : `Antigravity did not respond to its local health check within ${timeoutMs / 1_000} seconds.`;
     const supportsTextGeneration =
       initialized !== undefined ? yield* options.supportsTextGeneration : false;
+    const publishingUsage = yield* PublishingUsage;
+    const userSkills =
+      initialized !== undefined &&
+      before.draft.auth.status !== "unauthenticated" &&
+      !publishingUsage
+        ? yield* readUserSkills(before.draft.skills)
+        : undefined;
     const updatedAt = DateTime.formatIso(yield* DateTime.now);
     const applyCheck = (state: AntigravityProviderState) => {
       if (state.authRevision !== before.authRevision) return state;
@@ -361,6 +386,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
                   supportsTextGeneration && draft.auth.status !== "unauthenticated",
               }
             : {}),
+          ...(userSkills !== undefined ? { skills: userSkills } : {}),
           ...(message ? { message } : {}),
         },
       } satisfies AntigravityProviderState;
@@ -406,6 +432,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     observeThinkingLevels(started.sessionSetupResult.configOptions);
     const before = yield* SubscriptionRef.get(metadata);
     const supportsTextGeneration = yield* options.supportsTextGeneration;
+    const userSkills = yield* readUserSkills(before.draft.skills);
     const updatedAt = DateTime.formatIso(yield* DateTime.now);
     const supportedRuntimeModes = antigravityRuntimeModes(started.sessionSetupResult);
     const previousModes = yield* SubscriptionRef.modify(metadata, (state) => {
@@ -432,6 +459,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
           },
           checkedAt: updatedAt,
           models: buildAntigravityModelsFromSession(started.sessionSetupResult, thinkingLevels),
+          skills: userSkills,
           supportedRuntimeModes,
           supportsTextGeneration,
           ...(cwd
@@ -442,7 +470,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
                     cwd,
                     checkedAt: updatedAt,
                     slashCommands: workspace?.slashCommands ?? draft.slashCommands,
-                    skills: workspace?.skills ?? discoveredSkills.get(cwd) ?? [],
+                    skills: workspace?.skills ?? discoveredSkills.get(cwd) ?? userSkills,
                   },
                 ].slice(-MAX_WORKSPACE_SNAPSHOTS),
               }
@@ -491,7 +519,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
                     skills:
                       state.draft.workspaceSnapshots?.find((entry) => entry.cwd === cwd)?.skills ??
                       discoveredSkills.get(cwd) ??
-                      [],
+                      state.draft.skills,
                   },
                 ].slice(-MAX_WORKSPACE_SNAPSHOTS),
               }
@@ -555,7 +583,8 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     }
     const snapshot = yield* getSnapshot;
     const workspace = snapshot.workspaceSnapshots?.find((entry) => entry.cwd === cwd);
-    const resolvedSkills = skills ?? workspace?.skills ?? discoveredSkills.get(cwd) ?? [];
+    const resolvedSkills =
+      skills ?? workspace?.skills ?? discoveredSkills.get(cwd) ?? snapshot.skills;
     return workspace
       ? { ...snapshot, slashCommands: workspace.slashCommands, skills: resolvedSkills }
       : { ...snapshot, skills: resolvedSkills };

@@ -264,6 +264,87 @@ describe("fork mobile release preflight", () => {
       contents: "2",
     });
   });
+  it("gates Apple Sign-In and push off by default when enabling preview S2 Connect auth", () => {
+    const cwd = NodeURL.fileURLToPath(new URL("../apps/mobile", import.meta.url));
+    const clerkKey = `pk_test_${btoa("fork-preview.clerk.accounts.dev$")}`;
+    const evaluate = (overrides: Record<string, string>) =>
+      JSON.parse(
+        NodeChildProcess.execFileSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            'import config from "./app.config.ts"; console.log(JSON.stringify(config));',
+          ],
+          {
+            cwd,
+            encoding: "utf8",
+            env: {
+              PATH: process.env.PATH,
+              APP_VARIANT: "preview",
+              EXPO_OWNER: "",
+              EXPO_PROJECT_ID: "",
+              MOBILE_AUTH_ENABLED: "1",
+              MOBILE_AUTH_DOMAIN: "",
+              MOBILE_PUSH_ENABLED: "0",
+              MOBILE_UPDATES_ENABLED: "0",
+              MOBILE_APPLE_SIGN_IN_ENABLED: "",
+              MOBILE_RELAY_URL: "https://relay.fork.example",
+              ...overrides,
+            },
+          },
+        ),
+      );
+    const clerkPluginOptions = (app: { plugins: unknown[] }) => {
+      const entry = app.plugins.find(
+        (plugin): plugin is [string, { appleSignIn?: boolean }] =>
+          Array.isArray(plugin) && plugin[0] === "@clerk/expo",
+      );
+      return entry?.[1];
+    };
+    const hasNotificationsPlugin = (app: { plugins: unknown[] }) =>
+      app.plugins.some(
+        (plugin) =>
+          plugin === "expo-notifications" ||
+          (Array.isArray(plugin) && plugin[0] === "expo-notifications"),
+      );
+
+    const app = evaluate({
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkKey,
+      EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "t3-relay",
+    });
+    expect(app.extra.relay.url).toBe("https://relay.fork.example");
+    expect(app.extra.clerk.publishableKey).toBe(clerkKey);
+    expect(app.extra.clerk.jwtTemplate).toBe("t3-relay");
+    expect(app.extra.pushEnabled).toBe(false);
+    expect(app.extra.eas).toBeUndefined();
+    expect(app.ios.associatedDomains).toEqual([]);
+    expect(hasNotificationsPlugin(app)).toBe(false);
+    expect(clerkPluginOptions(app)?.appleSignIn).toBe(false);
+
+    const withAppleSignIn = evaluate({
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkKey,
+      EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "t3-relay",
+      MOBILE_APPLE_SIGN_IN_ENABLED: "1",
+    });
+    expect(clerkPluginOptions(withAppleSignIn)?.appleSignIn).toBe(true);
+
+    const viaAliases = evaluate({
+      T3CODE_CLERK_PUBLISHABLE_KEY: clerkKey,
+      T3CODE_CLERK_JWT_TEMPLATE: "t3-relay",
+    });
+    expect(viaAliases.extra.clerk.publishableKey).toBe(clerkKey);
+    expect(viaAliases.extra.clerk.jwtTemplate).toBe("t3-relay");
+    expect(clerkPluginOptions(viaAliases)?.appleSignIn).toBe(false);
+
+    const authDisabled = evaluate({
+      MOBILE_AUTH_ENABLED: "0",
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: clerkKey,
+      EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "t3-relay",
+    });
+    expect(authDisabled.extra.clerk.publishableKey).toBeNull();
+    expect(authDisabled.extra.clerk.jwtTemplate).toBeNull();
+  });
   it("points Observe at the fork relay and keeps it linked when an Expo project is configured", () => {
     const cwd = NodeURL.fileURLToPath(new URL("../apps/mobile", import.meta.url));
     const evaluate = (relay: Record<string, string>) =>
