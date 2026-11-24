@@ -214,28 +214,60 @@ const skipValue = (s: string, i: number): number => {
   return i;
 };
 
-/** Replaces only the top-level `"id"` value span so unrelated payload values (e.g. 64-bit ints) stay verbatim. */
-const replaceTopLevelJsonId = (line: string, callerId: JsonRpcId, fallback: Envelope): string => {
-  let i = skipWs(line, 0);
-  if (line.charCodeAt(i) !== 0x7b) return JSON.stringify({ ...fallback, id: callerId });
-  i = skipWs(line, i + 1);
-  while (i < line.length && line.charCodeAt(i) !== 0x7d) {
-    if (line.charCodeAt(i) !== 0x22) break;
+/** Returns the `[start, end)` span of the last top-level property matching `keyName` in a JSON object string. */
+const findLastObjectKeySpan = (
+  source: string,
+  keyName: string,
+): readonly [number, number] | undefined => {
+  const literalKey = JSON.stringify(keyName);
+  let i = skipWs(source, 0);
+  if (source.charCodeAt(i) !== 0x7b) return undefined;
+  i = skipWs(source, i + 1);
+  let match: readonly [number, number] | undefined;
+  while (i < source.length && source.charCodeAt(i) !== 0x7d) {
+    if (source.charCodeAt(i) !== 0x22) break;
     const keyStart = i;
-    const keyEnd = skipString(line, i);
-    i = skipWs(line, keyEnd);
-    if (line.charCodeAt(i) !== 0x3a) break;
-    const valueStart = skipWs(line, i + 1);
-    const valueEnd = skipValue(line, valueStart);
-    const rawKey = line.slice(keyStart, keyEnd);
-    if (rawKey === '"id"' || (rawKey.includes("\\") && JSON.parse(rawKey) === "id")) {
-      return line.slice(0, valueStart) + JSON.stringify(callerId) + line.slice(valueEnd);
+    const keyEnd = skipString(source, i);
+    i = skipWs(source, keyEnd);
+    if (source.charCodeAt(i) !== 0x3a) break;
+    const valueStart = skipWs(source, i + 1);
+    const valueEnd = skipValue(source, valueStart);
+    const rawKey = source.slice(keyStart, keyEnd);
+    if (rawKey === literalKey || (rawKey.includes("\\") && JSON.parse(rawKey) === keyName)) {
+      match = [valueStart, valueEnd];
     }
-    i = skipWs(line, valueEnd);
-    if (line.charCodeAt(i) === 0x2c) i = skipWs(line, i + 1);
+    i = skipWs(source, valueEnd);
+    if (source.charCodeAt(i) === 0x2c) i = skipWs(source, i + 1);
     else break;
   }
-  return JSON.stringify({ ...fallback, id: callerId });
+  return match;
+};
+
+/** Replaces only the last top-level `"id"` value span so unrelated payload values (e.g. 64-bit ints) stay verbatim. */
+const replaceTopLevelJsonId = (line: string, callerId: JsonRpcId, fallback: Envelope): string => {
+  const span = findLastObjectKeySpan(line, "id");
+  return span === undefined
+    ? JSON.stringify({ ...fallback, id: callerId })
+    : line.slice(0, span[0]) + JSON.stringify(callerId) + line.slice(span[1]);
+};
+
+const isLosslessJsonNumber = (rawToken: string, parsed: number): boolean => {
+  if (!Number.isFinite(parsed)) return false;
+  if (/^-?\d+$/.test(rawToken)) {
+    try {
+      return BigInt(rawToken) === BigInt(parsed);
+    } catch {
+      return false;
+    }
+  }
+  return Math.abs(parsed) <= Number.MAX_SAFE_INTEGER;
+};
+
+const hasLossyNumericKey = (source: string, keyName: string, parsedValue: unknown): boolean => {
+  if (typeof parsedValue !== "number") return false;
+  const span = findLastObjectKeySpan(source, keyName);
+  if (span === undefined) return false;
+  return !isLosslessJsonNumber(source.slice(span[0], span[1]), parsedValue);
 };
 
 interface Pending {
@@ -530,19 +562,20 @@ class StdioSession {
   }
 
   async notify(message: unknown, signal?: AbortSignal): Promise<void> {
-    await this.ready();
-    if (signal?.aborted) return;
+    let outbound = message;
     if (isRecord(message) && message.method === "notifications/cancelled") {
       if (!isRecord(message.params) || !isId(message.params.requestId)) return;
+      // Resolve the wire ID synchronously before awaiting readiness so a reused caller ID cannot be targeted later.
       const callerKey = idKey(message.params.requestId);
       const wireId =
         this.callerToWireId.get(callerKey) ?? this.abortedCallerToWireId.get(callerKey);
       // Never forward an unmapped caller ID that could match a different concurrent wire ID.
       if (wireId === undefined) return;
-      this.write({ ...message, params: { ...message.params, requestId: wireId } });
-      return;
+      outbound = { ...message, params: { ...message.params, requestId: wireId } };
     }
-    this.write(message);
+    await this.ready();
+    if (signal?.aborted) return;
+    this.write(outbound);
   }
 
   terminate() {
@@ -727,18 +760,41 @@ export class StdioMcpBridgeCore {
     if (!isRecord(message)) return rpcError(null, "Invalid request.", -32600);
 
     if (message.method === "initialize") {
-      if (!isId(message.id)) return rpcError(null, "initialize needs an id.", -32600);
+      if (!isId(message.id) || hasLossyNumericKey(request.body, "id", message.id)) {
+        return rpcError(null, "initialize needs an id.", -32600);
+      }
       if (request.sessionId !== undefined) live?.close("the harness initialized again");
       return this.initialize(request, fingerprint, message.id, message, signal);
     }
     // Spec: a request for an unknown or ended session gets 404 and the client initializes again.
     if (live === undefined) return empty(request.sessionId === undefined ? 400 : 404);
-    if (Object.hasOwn(message, "id") && message.id !== undefined && !isId(message.id)) {
+    if (
+      Object.hasOwn(message, "id") &&
+      message.id !== undefined &&
+      (!isId(message.id) || hasLossyNumericKey(request.body, "id", message.id))
+    ) {
       return rpcError(null, "Invalid Request.", -32600);
     }
     live.touch();
     if (typeof message.method === "string" && isId(message.id)) {
       return live.request(message.id, message, true, signal);
+    }
+    if (
+      message.method === "notifications/cancelled" &&
+      isRecord(message.params) &&
+      typeof message.params.requestId === "number"
+    ) {
+      const paramsSpan = findLastObjectKeySpan(request.body, "params");
+      if (
+        paramsSpan !== undefined &&
+        hasLossyNumericKey(
+          request.body.slice(paramsSpan[0], paramsSpan[1]),
+          "requestId",
+          message.params.requestId,
+        )
+      ) {
+        return empty(202);
+      }
     }
     // Notifications and the client's answers to server requests.
     await live.notify(message, signal);

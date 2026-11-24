@@ -639,6 +639,85 @@ describe("StdioMcpBridgeCore", () => {
     expect(response.body).toContain('"id":"big-req"');
     expect(response.body).toContain('"big":9007199254740993');
     expect(response.body).toContain('"nested":{"id":999}');
+
+    // Duplicate top-level "id" keys follow JSON.parse last-key-wins semantics.
+    const dup = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: "dup-req",
+      method: "tools/call",
+      params: { name: "dup-id" },
+    });
+    expect(dup.status).toBe(200);
+    expect(body(dup)).toEqual({ jsonrpc: "2.0", id: "dup-req", result: { ok: true } });
+  });
+
+  it("rejects lossy >2^53 numeric request ids and drops lossy cancellations without colliding", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+
+    // Lossy numeric request ID 9007199254740993 is rejected with -32600 instead of collapsing to 9007199254740992.
+    const lossyRequest = await core.handle({
+      serverId: "exec",
+      server: server(),
+      owner: "thread-a",
+      method: "POST",
+      sessionId,
+      body: '{"jsonrpc":"2.0","id":9007199254740993,"method":"tools/list"}',
+    });
+    expect(body(lossyRequest)).toMatchObject({ id: null, error: { code: -32600 } });
+
+    // Hold a call with exact numeric id 9007199254740992 (2^53).
+    const pending = core.handle({
+      serverId: "exec",
+      server: server(),
+      owner: "thread-a",
+      method: "POST",
+      sessionId,
+      body: '{"jsonrpc":"2.0","id":9007199254740992,"method":"tools/call","params":{"name":"echo","arguments":{"text":"safe","hold":true}}}',
+    });
+    expect(
+      body(
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          id: 99,
+          method: "tools/call",
+          params: { name: "held-count" },
+        }),
+      ),
+    ).toMatchObject({ id: 99, result: { count: 1 } });
+
+    // A lossy cancellation for 9007199254740993 must be dropped and MUST NOT cancel 9007199254740992.
+    const lossyCancel = await core.handle({
+      serverId: "exec",
+      server: server(),
+      owner: "thread-a",
+      method: "POST",
+      sessionId,
+      body: '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9007199254740993}}',
+    });
+    expect(lossyCancel.status).toBe(202);
+
+    await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: { name: "release-and-echo", arguments: { text: "flushed" } },
+    });
+    expect(body(await pending)).toMatchObject({
+      id: 9007199254740992,
+      result: { content: [{ text: "safe" }] },
+    });
+    expect(
+      body(
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          id: 101,
+          method: "tools/call",
+          params: { name: "cancelled-ids" },
+        }),
+      ),
+    ).toMatchObject({ id: 101, result: { ids: [] } });
   });
 
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(

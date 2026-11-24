@@ -133,6 +133,12 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
         );
         return;
       }
+      if (name === "dup-id") {
+        process.stdout.write(
+          `{"jsonrpc":"2.0","id":999,"id":${JSON.stringify(message.id)},"result":{"ok":true}}\n`,
+        );
+        return;
+      }
       if (name === "spawn-grandchild") {
         // Install the SIGTERM handler and signal readiness before returning the PID so the test
         // always exercises process-group SIGKILL rather than racing handler registration.
