@@ -52,4 +52,4 @@ Open pull requests against `shuv1337/s2code`. Do not open pull requests against 
 
 ## Reporting security issues
 
-Report security vulnerabilities privately rather than opening a public issue. See [SECURITY.md](SECURITY.md) for reporting instructions and our threat model.
+Report security vulnerabilities privately rather than posting exploit details in a public issue. See [SECURITY.md](SECURITY.md) for private advisory reporting (and the fallback contact flow if advisories are not yet enabled) plus our threat model.

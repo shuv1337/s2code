@@ -10,10 +10,6 @@ S2Code forks [T3 Code](https://github.com/pingdotgg/t3code) and keeps its fast s
 
 ## See it in action
 
-![S2Code workspace with the demo-api project on workstation, a completed turn showing a TypeScript snippet and tool-run table, the composer input, and the branch status sidebar](./docs/images/s2code-workspace.webp)
-
-_Main workspace: manage projects, inspect streamed code and tool output, and run git actions across local or remote machines._
-
 ![Settings About panel showing S2Code version 0.1.11, the public iOS TestFlight beta link, and the Privacy and telemetry row stating that S2Code sends no background usage data](./docs/images/s2code-settings-about.webp)
 
 _Settings > About: confirms zero background usage data and links to the public iOS TestFlight beta._
@@ -30,18 +26,18 @@ The screenshots above show the web and desktop interface. The iOS companion app 
 
 ## Zero telemetry
 
-Every background telemetry, fingerprinting, and crash-reporting path is removed from the codebase and guarded by automated tests.
+Background telemetry, fingerprinting, and crash reporting are removed from every client and server path and guarded by automated tests.
 
-| Mechanism                                       | Status in S2Code                                                                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Product usage analytics (PostHog)               | Removed; cannot be enabled (`AnalyticsService` is a zero-requirement no-op)                                                           |
-| Install, account, and device fingerprinting     | Removed; cannot be enabled (no `anonymous-id`, no `t3code:analytics-device-id`, no `clientOwner` or `clientDevice` socket parameters) |
-| Relay client tracing (Axiom / OTLP)             | Removed across server, desktop, web, and mobile; cannot be enabled                                                                    |
-| Mobile crash reporting (`expo-observe`)         | Removed from dependencies and Expo config; cannot be enabled                                                                          |
-| Agent feedback (`Settings > Labs`)              | Off by default; sends only when enabled and approved (also blocked by `S2CODE_TELEMETRY_ENABLED=false` or managed policy)             |
-| OpenTelemetry export (`Settings > Diagnostics`) | Off by default; exports only to an OTLP HTTP receiver that you configure                                                              |
-| Resource Monitor                                | Local only; CPU, memory, and process metrics never leave the machine                                                                  |
-| Mobile startup crash log                        | Local only; 7-day `expo-updates` startup logs stay on-device unless you copy and paste them manually                                  |
+| Mechanism                                       | Status in S2Code                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product usage analytics (PostHog)               | Removed; cannot be enabled (`AnalyticsService` is a zero-requirement no-op)                                                                                                                                                                                                                                                            |
+| Install, account, and device fingerprinting     | Removed; cannot be enabled (no `anonymous-id`, no `t3code:analytics-device-id`, no `clientOwner` or `clientDevice` socket parameters)                                                                                                                                                                                                  |
+| Relay client tracing (Axiom / OTLP)             | Removed across server, desktop, web, and mobile; cannot be enabled                                                                                                                                                                                                                                                                     |
+| Mobile crash reporting (`expo-observe`)         | Removed from dependencies and Expo config; cannot be enabled                                                                                                                                                                                                                                                                           |
+| Agent feedback (`Settings > Labs`)              | Off by default. **When I ask** sends only reports you approve; **Automatic** also sends scrubbed text-free reports without asking. Delivery requires an S2 Connect-linked host, and submitted reports file a scrubbed public issue on `shuv1337/s2code`. Both modes are blocked by `S2CODE_TELEMETRY_ENABLED=false` or managed policy. |
+| OpenTelemetry export (`Settings > Diagnostics`) | Off by default; exports only to an OTLP HTTP receiver that you configure                                                                                                                                                                                                                                                               |
+| Resource Monitor                                | Local only; CPU, memory, and process metrics never leave the machine                                                                                                                                                                                                                                                                   |
+| Mobile startup crash log                        | Local only; 7-day `expo-updates` startup logs stay on-device unless you copy and paste them manually                                                                                                                                                                                                                                   |
 
 **Normal operational network calls:** S2Code still makes the network connections required to operate:
 
@@ -66,10 +62,10 @@ flowchart LR
   Web & Desktop & Mobile -->|"LAN, Tailscale, or S2 Connect tunnel"| Server
   Watch -->|"Direct or via iPhone"| Server
   Server --> Providers
-  Server -. "Link & tunnel setup only" .-> Relay
+  Server -.->|"Link, tunnel setup, and opt-in relay features"| Relay
 ```
 
-_Clients connect to the S2Code server over authenticated RPC; the optional S2 Connect relay handles link and tunnel setup only and never proxies session traffic._
+_Clients connect to the S2Code server over authenticated RPC; the optional S2 Connect relay handles link and tunnel setup plus opt-in agent activity for mobile notifications and opt-in Agent feedback, and never proxies HTTP or WebSocket session traffic._
 
 ## Install
 

@@ -1,7 +1,10 @@
 # Security
 
 Report vulnerabilities privately through [GitHub Security Advisories](https://github.com/shuv1337/s2code/security/advisories/new).
-The [security policy](.github/SECURITY.md) covers coordinated disclosure.
+If private security advisories are not yet enabled on the repository, open a minimal
+[GitHub issue](https://github.com/shuv1337/s2code/issues) requesting a private contact channel
+without posting exploit details or sensitive information. The [security policy](.github/SECURITY.md)
+covers coordinated disclosure.
 
 The rest of this file is for agents and maintainers auditing T3 Code or triaging
 a report. It says who is trusted with what, which boundaries a real finding
