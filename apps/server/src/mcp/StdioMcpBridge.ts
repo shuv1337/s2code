@@ -252,15 +252,29 @@ const replaceTopLevelJsonId = (line: string, callerId: JsonRpcId, fallback: Enve
 };
 
 const isLosslessJsonNumber = (rawToken: string, parsed: number): boolean => {
-  if (!Number.isFinite(parsed)) return false;
-  if (/^-?\d+$/.test(rawToken)) {
-    try {
-      return BigInt(rawToken) === BigInt(parsed);
-    } catch {
-      return false;
-    }
+  if (!Number.isSafeInteger(parsed)) return false;
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(rawToken);
+  if (match === null) return false;
+  const sign = match[1] ?? "";
+  const intPart = match[2] ?? "";
+  const fracPart = match[3] ?? "";
+  const expPart = match[4];
+  const digits = (intPart + fracPart).replace(/^0+/, "");
+  if (digits.length === 0) return parsed === 0;
+  const exp = expPart === undefined ? 0 : Number(expPart);
+  if (!Number.isSafeInteger(exp)) return false;
+  const scale = exp - fracPart.length;
+  if (scale >= 0) {
+    // Safe integers have at most 16 decimal digits; reject huge exponents before repeating zeros.
+    if (digits.length + scale > 16) return false;
+    return BigInt(`${sign}${digits}${"0".repeat(scale)}`) === BigInt(parsed);
   }
-  return Math.abs(parsed) <= Number.MAX_SAFE_INTEGER;
+  const split = digits.length + scale;
+  if (split <= 0) return false;
+  const intHead = digits.slice(0, split);
+  const fracTail = digits.slice(split);
+  if (/[^0]/.test(fracTail)) return false;
+  return BigInt(`${sign}${intHead}`) === BigInt(parsed);
 };
 
 const hasLossyNumericKey = (source: string, keyName: string, parsedValue: unknown): boolean => {

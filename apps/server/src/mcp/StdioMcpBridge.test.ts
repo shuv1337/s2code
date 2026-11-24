@@ -651,31 +651,49 @@ describe("StdioMcpBridgeCore", () => {
     expect(body(dup)).toEqual({ jsonrpc: "2.0", id: "dup-req", result: { ok: true } });
   });
 
-  it("rejects lossy >2^53 numeric request ids and drops lossy cancellations without colliding", async () => {
+  it("accepts safe integer ids across spellings and uniformly rejects/drops unsafe or non-integer ids", async () => {
     const core = makeCore();
     const { post, initialize } = harness(core, server());
     const { sessionId } = await initialize();
+    const rawPost = (rawBody: string) =>
+      core.handle({
+        serverId: "exec",
+        server: server(),
+        owner: "thread-a",
+        method: "POST",
+        sessionId,
+        body: rawBody,
+      });
 
-    // Lossy numeric request ID 9007199254740993 is rejected with -32600 instead of collapsing to 9007199254740992.
-    const lossyRequest = await core.handle({
-      serverId: "exec",
-      server: server(),
-      owner: "thread-a",
-      method: "POST",
-      sessionId,
-      body: '{"jsonrpc":"2.0","id":9007199254740993,"method":"tools/list"}',
-    });
-    expect(body(lossyRequest)).toMatchObject({ id: null, error: { code: -32600 } });
+    // Unsafe integers and non-integer floats are rejected with -32600 on requests.
+    for (const badRawId of [
+      "9007199254740992",
+      "9007199254740992.0",
+      "9007199254740993",
+      "1000000000000000128",
+      "1e20",
+      "1.5",
+      "9007199254740991.0000000000000001",
+    ]) {
+      const rejected = await rawPost(`{"jsonrpc":"2.0","id":${badRawId},"method":"tools/list"}`);
+      expect(body(rejected)).toMatchObject({ id: null, error: { code: -32600 } });
+    }
 
-    // Hold a call with exact numeric id 9007199254740992 (2^53).
-    const pending = core.handle({
-      serverId: "exec",
-      server: server(),
-      owner: "thread-a",
-      method: "POST",
-      sessionId,
-      body: '{"jsonrpc":"2.0","id":9007199254740992,"method":"tools/call","params":{"name":"echo","arguments":{"text":"safe","hold":true}}}',
+    // Safe integer 9007199254740991 works as a request and preserves raw `"id":9007199254740991`.
+    const safeReply = await rawPost(
+      '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/call","params":{"name":"echo","arguments":{"text":"safe-ok"}}}',
+    );
+    expect(safeReply.status).toBe(200);
+    expect(safeReply.body).toContain('"id":9007199254740991');
+    expect(body(safeReply)).toMatchObject({
+      id: 9007199254740991,
+      result: { content: [{ text: "safe-ok" }] },
     });
+
+    // Unsafe numeric cancellations are dropped and never cancel a pending call with id 9007199254740991.
+    const pendingSafe = rawPost(
+      '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/call","params":{"name":"echo","arguments":{"text":"still-alive","hold":true}}}',
+    );
     expect(
       body(
         await post(sessionId, {
@@ -687,16 +705,21 @@ describe("StdioMcpBridgeCore", () => {
       ),
     ).toMatchObject({ id: 99, result: { count: 1 } });
 
-    // A lossy cancellation for 9007199254740993 must be dropped and MUST NOT cancel 9007199254740992.
-    const lossyCancel = await core.handle({
-      serverId: "exec",
-      server: server(),
-      owner: "thread-a",
-      method: "POST",
-      sessionId,
-      body: '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9007199254740993}}',
-    });
-    expect(lossyCancel.status).toBe(202);
+    for (const unsafeCancelId of [
+      "9007199254740992",
+      "9007199254740992.0",
+      "9007199254740993",
+      "1000000000000000128",
+      "9007199254740991.0000000000000001",
+    ]) {
+      expect(
+        (
+          await rawPost(
+            `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":${unsafeCancelId}}}`,
+          )
+        ).status,
+      ).toBe(202);
+    }
 
     await post(sessionId, {
       jsonrpc: "2.0",
@@ -704,9 +727,9 @@ describe("StdioMcpBridgeCore", () => {
       method: "tools/call",
       params: { name: "release-and-echo", arguments: { text: "flushed" } },
     });
-    expect(body(await pending)).toMatchObject({
-      id: 9007199254740992,
-      result: { content: [{ text: "safe" }] },
+    expect(body(await pendingSafe)).toMatchObject({
+      id: 9007199254740991,
+      result: { content: [{ text: "still-alive" }] },
     });
     expect(
       body(
@@ -718,6 +741,34 @@ describe("StdioMcpBridgeCore", () => {
         }),
       ),
     ).toMatchObject({ id: 101, result: { ids: [] } });
+
+    // Equivalent safe spellings (`9007199254740991.0` and `9.007199254740991e15`) DO cancel `9007199254740991`.
+    for (const equivalentCancelId of ["9007199254740991.0", "9.007199254740991e15"]) {
+      const held = rawPost(
+        '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/call","params":{"name":"echo","arguments":{"text":"cancel-me","hold":true}}}',
+      );
+      expect(
+        body(
+          await post(sessionId, {
+            jsonrpc: "2.0",
+            id: 102,
+            method: "tools/call",
+            params: { name: "held-count" },
+          }),
+        ),
+      ).toMatchObject({ id: 102, result: { count: 1 } });
+      expect(
+        (
+          await rawPost(
+            `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":${equivalentCancelId}}}`,
+          )
+        ).status,
+      ).toBe(202);
+      expect(body(await held)).toMatchObject({
+        id: 9007199254740991,
+        error: { code: -32800, message: "cancelled" },
+      });
+    }
   });
 
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
