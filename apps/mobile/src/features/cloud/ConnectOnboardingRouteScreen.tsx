@@ -62,7 +62,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
       <AppBar
-        title={gt("Set up {product}", { product: "T3 Connect" })}
+        title={gt("Set up {product}", { product: "S2 Connect" })}
         onClose={handleClose}
         refresh={{
           accessibilityLabel: gt("Refresh environments"),
@@ -94,7 +94,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
         ) : (
           <View collapsable={false} className="rounded-[24px] bg-grouped-card p-5">
             <Text className="text-sm leading-normal text-foreground-muted">
-              {gt("Sign in to your T3 account to set up {product}.", { product: "T3 Connect" })}
+              {gt("Sign in to your S2 account to set up {product}.", { product: "S2 Connect" })}
             </Text>
           </View>
         )}

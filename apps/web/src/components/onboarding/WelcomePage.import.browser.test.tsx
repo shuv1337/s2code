@@ -763,12 +763,12 @@ it("says the phone is set up only once this computer is shared with the signed-i
       session([AuthOrchestrationOperateScope, AuthRelayReadScope, AuthRelayWriteScope]),
     ),
   );
-  state.linkError = "Could not read T3 Connect link state.";
+  state.linkError = "Could not read S2 Connect link state.";
   await using _screen = await mountWelcome();
   await click("Set up");
   // A failed read says so instead of asking to share the computer again.
-  await vi.waitFor(() => expect(pageText()).toContain("Could not check T3 Connect."));
-  expect(pageText()).not.toContain("Set up T3 Connect");
+  await vi.waitFor(() => expect(pageText()).toContain("Could not check S2 Connect."));
+  expect(pageText()).not.toContain("Set up S2 Connect");
 
   state.linkError = null;
   await act(async () =>
@@ -781,7 +781,7 @@ it("says the phone is set up only once this computer is shared with the signed-i
     }),
   );
   // Signed in, but "Not now" on the share step left this computer unreachable.
-  await vi.waitFor(() => expect(pageText()).toContain("Set up T3 Connect"));
+  await vi.waitFor(() => expect(pageText()).toContain("Set up S2 Connect"));
 
   const share = (reachability: EnvironmentCloudLinkStateResult["reachability"]) =>
     act(async () =>
@@ -805,12 +805,12 @@ it("says the phone is set up only once this computer is shared with the signed-i
     cause: "connector_not_running",
     reason: "The tunnel is not running.",
     hint: null,
-    fix: "Turn T3 Connect off and on.",
+    fix: "Turn S2 Connect off and on.",
   });
-  await vi.waitFor(() => expect(pageText()).toContain("Check T3 Connect"));
+  await vi.waitFor(() => expect(pageText()).toContain("Check S2 Connect"));
   expect(pageText()).not.toContain("Your phone can reach this computer.");
 
   await share({ status: "reachable", checkedAt, readyConnections: 4, protocol: "quic" });
   await vi.waitFor(() => expect(pageText()).toContain("Your phone can reach this computer."));
-  expect(pageText()).not.toContain("Check T3 Connect");
+  expect(pageText()).not.toContain("Check S2 Connect");
 });

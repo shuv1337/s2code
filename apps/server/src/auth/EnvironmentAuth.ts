@@ -366,7 +366,7 @@ export class ServerAuthConnectDevicesError extends Schema.TaggedError<ServerAuth
   },
 ) {
   override get message(): string {
-    return "Failed to update T3 Connect devices.";
+    return "Failed to update S2 Connect devices.";
   }
 }
 
@@ -471,7 +471,7 @@ export class ServerAuthConnectApprovalPendingError extends Schema.TaggedError<Se
   {},
 ) {
   override get message(): string {
-    return "This T3 Connect device is waiting for approval.";
+    return "This S2 Connect device is waiting for approval.";
   }
 }
 
@@ -1301,7 +1301,7 @@ export const make = Effect.gen(function* () {
       subject: CLOUD_CONNECT_SUBJECT,
       // Long enough for someone to notice the request and approve it.
       ttl: mustWait ? Duration.minutes(10) : Duration.minutes(2),
-      label: "T3 Connect",
+      label: "S2 Connect",
       proofKeyThumbprint,
       ...(mustWait ? { requiresConnectApproval: true } : {}),
     });
