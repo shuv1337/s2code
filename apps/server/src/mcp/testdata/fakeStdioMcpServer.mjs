@@ -1,6 +1,6 @@
 // A stdio MCP server for StdioMcpBridge tests. Like `executor mcp`, it answers 400-style errors to
 // anything sent before it has replied to initialize. Behaviour knobs come from FAKE_MCP_* env vars.
-import { createInterface } from "node:readline";
+import * as NodeReadline from "node:readline";
 
 const initDelay = Number(process.env.FAKE_MCP_INIT_DELAY_MS ?? "50");
 const neverInit = process.env.FAKE_MCP_NEVER_INIT === "1";
@@ -9,7 +9,7 @@ let early = 0;
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 process.stderr.write(`fake server started pid=${process.pid}\n`);
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
     if (neverInit) return;
@@ -93,7 +93,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             send({ jsonrpc: "2.0", id: message.id, result: { refused: m.error?.code ?? null } });
           }
         };
-        createInterface({ input: process.stdin }).once("line", wait);
+        NodeReadline.createInterface({ input: process.stdin }).once("line", wait);
         return;
       }
       return send({

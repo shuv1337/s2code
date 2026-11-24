@@ -1,8 +1,8 @@
 // Relays JSON-RPC verbatim between the shared-server proxy and local processes; schema decoding would reject foreign payloads.
 // A process-lifecycle core in plain Node, wrapped by a small Effect service at the end.
 // @effect-diagnostics globalJsonInEffect:off nodeBuiltinImport:off globalDate:off globalTimers:off effectFnOpportunity:off runEffectInsideEffect:off
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 
 import type { McpServerStdioConfig } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -73,7 +73,7 @@ const empty = (status: number): StdioBridgeResponse => ({ status, headers: {}, b
 
 /** The binding a session was spawned for; a settings edit retires sessions that no longer match it. */
 export const stdioServerFingerprint = (server: StdioBridgeRequest["server"]) =>
-  createHash("sha256")
+  NodeCrypto.createHash("sha256")
     .update(
       JSON.stringify([
         server.command,
@@ -88,7 +88,7 @@ interface Pending {
 }
 
 class StdioSession {
-  readonly id = randomUUID();
+  readonly id = NodeCrypto.randomUUID();
   private readonly pending = new Map<string, Pending>();
   private buffered = "";
   private stderr = "";
@@ -101,7 +101,7 @@ class StdioSession {
   readonly serverId: string;
   readonly owner: string;
   readonly fingerprint: string;
-  readonly child: ChildProcessWithoutNullStreams;
+  readonly child: NodeChildProcess.ChildProcessWithoutNullStreams;
   private readonly options: Required<StdioMcpBridgeOptions>;
   private readonly onClose: (session: StdioSession, reason: string) => void;
 
@@ -109,7 +109,7 @@ class StdioSession {
     serverId: string,
     owner: string,
     fingerprint: string,
-    child: ChildProcessWithoutNullStreams,
+    child: NodeChildProcess.ChildProcessWithoutNullStreams,
     options: Required<StdioMcpBridgeOptions>,
     onClose: (session: StdioSession, reason: string) => void,
   ) {
@@ -283,12 +283,12 @@ export class StdioMcpBridgeCore {
   }
 
   closeAll(reason = "T3 Code stopped") {
-    for (const session of [...this.sessions.values()]) session.close(reason);
+    for (const session of this.sessions.values()) session.close(reason);
   }
 
   /** Stops every session of a server, e.g. after it is removed or disabled. */
   closeServer(serverId: string, reason: string) {
-    for (const session of [...this.sessions.values()]) {
+    for (const session of this.sessions.values()) {
       if (session.serverId === serverId) session.close(reason);
     }
   }
@@ -347,9 +347,9 @@ export class StdioMcpBridgeCore {
       const value = process.env[name];
       if (value !== undefined) inherited[name] = value;
     }
-    let child: ChildProcessWithoutNullStreams;
+    let child: NodeChildProcess.ChildProcessWithoutNullStreams;
     try {
-      child = spawn(request.server.command, [...request.server.args], {
+      child = NodeChildProcess.spawn(request.server.command, [...request.server.args], {
         env: { ...inherited, ...request.server.env },
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -416,17 +416,16 @@ export class StdioMcpBridge extends Context.Service<
   }
 >()("t3/mcp/StdioMcpBridge") {}
 
-export const make = (options?: StdioMcpBridgeOptions) =>
-  Effect.gen(function* () {
-    const core = new StdioMcpBridgeCore(options, (message, details) => {
-      Effect.runFork(Effect.logInfo(message, details));
-    });
-    yield* Effect.addFinalizer(() => Effect.sync(() => core.closeAll()));
-    return StdioMcpBridge.of({
-      handle: (request) => Effect.promise(() => core.handle(request)),
-      closeServer: (serverId, reason) => Effect.sync(() => core.closeServer(serverId, reason)),
-    });
+export const make = Effect.fn("StdioMcpBridge.make")(function* (options?: StdioMcpBridgeOptions) {
+  const core = new StdioMcpBridgeCore(options, (message, details) => {
+    Effect.runFork(Effect.logInfo(message, details));
   });
+  yield* Effect.addFinalizer(() => Effect.sync(() => core.closeAll()));
+  return StdioMcpBridge.of({
+    handle: (request) => Effect.promise(() => core.handle(request)),
+    closeServer: (serverId, reason) => Effect.sync(() => core.closeServer(serverId, reason)),
+  });
+});
 
 export const layer = Layer.effect(StdioMcpBridge, make());
 

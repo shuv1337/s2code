@@ -1,11 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalJsonInEffect:off globalDate:off
-import { fileURLToPath } from "node:url";
+import * as NodeURL from "node:url";
 
 import { afterEach, describe, expect, it } from "@effect/vitest";
 
 import { StdioMcpBridgeCore, type StdioBridgeRequest, testStdioServer } from "./StdioMcpBridge.ts";
 
-const FAKE = fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url));
+const FAKE = NodeURL.fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url));
 const server = (env: Record<string, string> = {}): StdioBridgeRequest["server"] => ({
   command: process.execPath,
   args: [FAKE],
@@ -20,13 +20,8 @@ const alive = (pid: number) => {
     return false;
   }
 };
-const until = async (check: () => boolean, ms = 3000) => {
-  const deadline = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error("timed out waiting");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
+const until = (check: () => boolean, timeout = 3000) =>
+  expect.poll(check, { timeout, interval: 20 }).toBe(true);
 
 const cores: StdioMcpBridgeCore[] = [];
 const makeCore = (options?: ConstructorParameters<typeof StdioMcpBridgeCore>[0]) => {

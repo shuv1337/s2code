@@ -1,9 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - The fixture listens on a real port for upstream absolute URLs.
-import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import * as NodeHttp from "node:http";
 
@@ -152,7 +152,10 @@ const server = (url: string, overrides: Partial<McpServerConfig> = {}) => ({
 });
 
 const fixture = Effect.gen(function* () {
-  const spawnMarker = join(tmpdir(), `s2code-stdio-tripwire-${randomUUID()}`);
+  const spawnMarker = NodePath.join(
+    NodeOS.tmpdir(),
+    `s2code-stdio-tripwire-${NodeCrypto.randomUUID()}`,
+  );
   const received: Array<Received> = [];
   let bearerTokenReads = 0;
   const hung = yield* Queue.unbounded<string>();
@@ -222,7 +225,9 @@ const fixture = Effect.gen(function* () {
         transport: "stdio",
         label: "Local",
         command: process.execPath,
-        args: [fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url))],
+        args: [
+          NodeURL.fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url)),
+        ],
         env: {},
         enabled: true,
       },
@@ -258,7 +263,7 @@ const fixture = Effect.gen(function* () {
     );
   return {
     origin,
-    spawned: () => existsSync(spawnMarker),
+    spawned: () => NodeFS.existsSync(spawnMarker),
     received,
     bearerTokenReads: () => bearerTokenReads,
     hung,
