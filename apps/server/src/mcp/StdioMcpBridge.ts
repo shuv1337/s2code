@@ -27,7 +27,11 @@ export interface StdioBridgeRequest {
 }
 
 export interface StdioMcpBridgeOptions {
+  /** Children across every server; each costs ~100+ MB. */
+  readonly maxSessions?: number;
   readonly maxSessionsPerServer?: number;
+  /** A stdout line longer than this closes the session instead of growing the buffer. */
+  readonly maxMessageChars?: number;
   readonly idleTimeoutMs?: number;
   readonly initializeTimeoutMs?: number;
   readonly stderrBytes?: number;
@@ -144,7 +148,13 @@ class StdioSession {
     this.idleTimer.unref?.();
   }
 
+  /** A request is waiting on it, initialize included, so evicting it would cut a call short. */
+  get busy() {
+    return this.pending.size > 0;
+  }
+
   private read(chunk: string) {
+    if (this.closed) return;
     this.buffered += chunk;
     let newline = this.buffered.indexOf("\n");
     while (newline >= 0) {
@@ -152,6 +162,10 @@ class StdioSession {
       this.buffered = this.buffered.slice(newline + 1);
       if (line.length > 0) this.receive(line);
       newline = this.buffered.indexOf("\n");
+    }
+    if (this.buffered.length > this.options.maxMessageChars) {
+      this.buffered = "";
+      this.close(`it sent a message over ${this.options.maxMessageChars} characters`);
     }
   }
 
@@ -262,7 +276,9 @@ export class StdioMcpBridgeCore {
   ) {
     this.log = log;
     this.options = {
-      maxSessionsPerServer: options.maxSessionsPerServer ?? 16,
+      maxSessions: options.maxSessions ?? 6,
+      maxSessionsPerServer: options.maxSessionsPerServer ?? 4,
+      maxMessageChars: options.maxMessageChars ?? 8 * 1024 * 1024,
       idleTimeoutMs: options.idleTimeoutMs ?? 10 * 60_000,
       initializeTimeoutMs: options.initializeTimeoutMs ?? 10_000,
       stderrBytes: options.stderrBytes ?? 16 * 1024,
@@ -341,7 +357,12 @@ export class StdioMcpBridgeCore {
     id: JsonRpcId,
     message: unknown,
   ): Promise<StdioBridgeResponse> {
-    this.reap(request.serverId);
+    if (!this.makeRoom(request.serverId)) {
+      return rpcError(
+        id,
+        "Too many MCP server processes are busy right now. Try again when a running call finishes.",
+      );
+    }
     const inherited: Record<string, string> = {};
     for (const name of this.options.inheritEnv) {
       const value = process.env[name];
@@ -394,17 +415,29 @@ export class StdioMcpBridgeCore {
     return { ...answered, headers: { ...answered.headers, "mcp-session-id": session.id } };
   }
 
-  /** Keeps a runaway harness from spawning without bound: the least recently used session goes first. */
-  private reap(serverId: string) {
-    const own = [...this.sessions.values()]
-      .filter((session) => session.serverId === serverId)
-      .toSorted((a, b) => a.lastUsed - b.lastUsed);
-    for (const session of own.slice(
-      0,
-      Math.max(0, own.length - this.options.maxSessionsPerServer + 1),
-    )) {
+  /**
+   * Keeps a runaway harness from spawning without bound: idle sessions go, least recently used
+   * first; a session with a call in flight is never cut. False when no idle session can make room.
+   */
+  private makeRoom(serverId: string): boolean {
+    const forServer = () =>
+      [...this.sessions.values()].filter((session) => session.serverId === serverId).length;
+    const idle = (onlyThisServer: boolean) =>
+      [...this.sessions.values()]
+        .filter((session) => !session.busy && (!onlyThisServer || session.serverId === serverId))
+        .toSorted((a, b) => a.lastUsed - b.lastUsed);
+    for (const session of idle(true)) {
+      if (forServer() < this.options.maxSessionsPerServer) break;
       session.close("too many sessions were open for this server");
     }
+    for (const session of idle(false)) {
+      if (this.sessions.size < this.options.maxSessions) break;
+      session.close("too many MCP server processes were open");
+    }
+    return (
+      forServer() < this.options.maxSessionsPerServer &&
+      this.sessions.size < this.options.maxSessions
+    );
   }
 }
 

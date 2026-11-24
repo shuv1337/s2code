@@ -19,6 +19,8 @@ export const ORCHESTRATION_PROTOCOL_HEADER = "x-t3-orchestration-protocol";
 export const CLIENT_CAPABILITIES_QUERY_PARAM = "clientCapabilities";
 /** Secret fields may hold a secret provider reference instead of a string. */
 export const SETTINGS_SECRET_REFERENCES_CAPABILITY = "settingsSecretReferences";
+/** mcpServers may hold `transport: "stdio"` entries; older clients fail to decode the whole settings. */
+export const STDIO_MCP_SERVERS_CAPABILITY = "stdioMcpServers";
 
 export const ExecutionEnvironmentPlatformOs = Schema.Literals([
   "darwin",

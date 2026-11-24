@@ -1845,10 +1845,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       const onDisk = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.notInclude(onDisk, "stdio-env-secret");
       assert.notInclude(onDisk, "quiet");
-      const tokenSlot = mcpServerStdioEnvSecretName(id, command, "EXECUTOR_TOKEN");
+      const tokenSlot = mcpServerStdioEnvSecretName(id, command, ["mcp"], "EXECUTOR_TOKEN");
       assert.isTrue(Option.isSome(yield* store.get(tokenSlot)));
       const client = ServerSettingsModule.redactServerSettingsForClient(loaded, {
         secretReferences: true,
+        stdioMcpServers: true,
       });
       assert.notInclude(JSON.stringify(client), "stdio-env-secret");
       const echoed = client.mcpServers[id];
@@ -1878,6 +1879,74 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         command: "/tmp/other",
         env: { MODE: "" },
       });
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect(
+    "drops echoed stdio env values when the args change or the entry reaches more threads",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        const id = McpServerId.make("local");
+        const entry = {
+          transport: "stdio" as const,
+          command: "/usr/local/bin/executor",
+          args: ["mcp"],
+          env: { EXECUTOR_TOKEN: "stdio-env-secret" },
+          enabled: true,
+          projectIds: [ProjectId.make("p1")],
+          excludeSubagents: true,
+        };
+        const save = (next: Record<string, unknown>) =>
+          service.updateSettings({ mcpServers: { [id]: { ...entry, ...next } } } as never);
+        const env = Effect.map(
+          service.getSettings,
+          (now) => (now.mcpServers[id] as typeof entry).env,
+        );
+        const echo = { env: { EXECUTOR_TOKEN: SECRET_REDACTED } };
+
+        yield* save({});
+        yield* save({ ...echo, projectIds: [] }); // Every project now.
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "" });
+        yield* save({});
+        yield* save({ ...echo, excludeSubagents: false });
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "" });
+        yield* save({});
+        yield* save({ ...echo, args: ["mcp", "--host", "https://elsewhere.example"] });
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "" });
+        // Narrowing keeps it.
+        yield* save({
+          projectIds: [ProjectId.make("p1"), ProjectId.make("p2")],
+          excludeSubagents: false,
+        });
+        yield* save({ ...echo, projectIds: [ProjectId.make("p1")], excludeSubagents: true });
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "stdio-env-secret" });
+      }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("hides stdio MCP entries from clients that can't decode them", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const saved = yield* service.updateSettings({
+        mcpServers: {
+          local: { transport: "stdio", command: "executor", args: ["mcp"], env: {}, enabled: true },
+          docs: { url: "https://docs.example/mcp", enabled: true },
+        },
+      } as never);
+      const old = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+      });
+      assert.deepEqual(Object.keys(old.mcpServers), ["docs"]);
+      const current = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+        stdioMcpServers: true,
+      });
+      assert.sameMembers(Object.keys(current.mcpServers), ["docs", "local"]);
+      // The old client's write patches its own entry and leaves the hidden one saved.
+      yield* service.updateSettings({
+        mcpServers: { docs: { ...old.mcpServers[McpServerId.make("docs")]!, label: "Docs" } },
+      } as never);
+      assert.property((yield* service.getSettings).mcpServers, "local");
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

@@ -140,6 +140,20 @@ const clearUsageLimitNotesOfEnabledInstances = (settings: ServerSettings): Serve
   return { ...settings, providerInstances };
 };
 
+type McpServerReach = {
+  readonly projectIds?: ReadonlyArray<string>;
+  readonly excludeSubagents?: boolean;
+};
+
+/** True when `next` reaches a thread `previous` did not: more projects, or subagents let back in. */
+export function widensMcpServerBinding(previous: McpServerReach, next: McpServerReach): boolean {
+  if ((previous.excludeSubagents ?? false) && !(next.excludeSubagents ?? false)) return true;
+  const before = previous.projectIds ?? [];
+  if (before.length === 0) return false; // Already every project.
+  const after = next.projectIds ?? [];
+  return after.length === 0 || after.some((id) => !before.includes(id));
+}
+
 const normalizeServerSettings = (
   settings: ServerSettings,
 ): Effect.Effect<ServerSettings, ServerSettingsError> =>
@@ -159,9 +173,15 @@ const normalizeServerSettings = (
     ),
   );
 
+/** What a connected client can decode, from its clientCapabilities. */
+export interface SettingsClient {
+  readonly secretReferences: boolean;
+  readonly stdioMcpServers?: boolean;
+}
+
 export function redactServerSettingsForClient(
   settings: ServerSettings,
-  client: { readonly secretReferences: boolean },
+  client: SettingsClient,
 ): ServerSettings {
   const redacted = mapSettingsSecrets(settings, (secret) =>
     secret.sensitive
@@ -174,7 +194,17 @@ export function redactServerSettingsForClient(
     : mapSettingsSecretValues(redacted, (value) =>
         isSecretReference(value) ? SECRET_REDACTED : value,
       );
-  return { ...shaped, secretProviders: withoutUnknownSecretProviderConfigs(shaped) };
+  return {
+    ...shaped,
+    // Older clients decode every entry as HTTP and reject the whole settings on one stdio entry.
+    // Their writes patch per entry, so a hidden entry stays saved.
+    mcpServers: client.stdioMcpServers
+      ? shaped.mcpServers
+      : (Object.fromEntries(
+          Object.entries(shaped.mcpServers).filter(([, server]) => isHttpMcpServer(server)),
+        ) as ServerSettings["mcpServers"]),
+    secretProviders: withoutUnknownSecretProviderConfigs(shaped),
+  };
 }
 
 /** A client shown a reference as a saved secret sends that marker back; it keeps the reference. */
@@ -1118,6 +1148,9 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  const sameArgs = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
+    left.length === right.length && left.every((arg, index) => arg === right[index]);
+
   // A marker may keep an existing token, not claim an orphaned slot.
   const clearUnboundMcpServerTokenMarkers = (
     current: ServerSettings,
@@ -1130,11 +1163,14 @@ const make = Effect.gen(function* () {
           ? current.mcpServers[id as McpServerId]
           : undefined;
         if (isStdioMcpServer(server)) {
-          // A kept env value needs the same variable, set, on the same command it was saved for.
+          // A kept env value needs the same variable, set, on the same command line it was saved
+          // for, reaching no more threads than before.
           const saved =
             previous !== undefined &&
             isStdioMcpServer(previous) &&
-            previous.command === server.command
+            previous.command === server.command &&
+            sameArgs(previous.args, server.args) &&
+            !widensMcpServerBinding(previous, server)
               ? previous.env
               : {};
           let envChanged = false;

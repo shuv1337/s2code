@@ -726,14 +726,19 @@ it.effect("never starts a stdio server's process for a thread without full acces
   Effect.gen(function* () {
     const { call, runtimeMode, spawned } = yield* fixture;
     yield* Ref.set(runtimeMode, "approval-required");
-    const send = (body: unknown) => call("/mcp/servers/tripwire", { body, headers: asAgent });
+    const send = (body: unknown, sessionId?: string) =>
+      call("/mcp/servers/tripwire", {
+        body,
+        headers: sessionId === undefined ? asAgent : { ...asAgent, "mcp-session-id": sessionId },
+      });
     const initialize = yield* send({
       jsonrpc: "2.0",
       id: 0,
       method: "initialize",
       params: { protocolVersion: "2025-03-26" },
     });
-    expect(initialize.headers["mcp-session-id"]).toBeUndefined();
+    const sessionId = initialize.headers["mcp-session-id"];
+    expect(sessionId).toBe("supervised");
     expect(yield* initialize.json).toEqual({
       jsonrpc: "2.0",
       id: 0,
@@ -756,12 +761,22 @@ it.effect("never starts a stdio server's process for a thread without full acces
         method: "tools/call",
         params: { name: "x" },
       })).json,
-    ).toMatchObject({ id: 2, error: { message: expect.stringContaining("Full access") } });
+    ).toMatchObject({
+      id: 2,
+      error: {
+        message:
+          "Tripwire only works in threads with Full access. Switch this thread to Full access, then use Restart agent.",
+      },
+    });
     expect(spawned()).toBe(false);
 
-    // The same request from a full-access thread does start it.
+    // After the switch, the handshake's session is unknown: 404 tells the harness to initialize again.
     yield* Ref.set(runtimeMode, "full-access");
-    yield* send({ jsonrpc: "2.0", id: 3, method: "initialize", params: {} });
+    expect((yield* send({ jsonrpc: "2.0", id: 3, method: "tools/list" }, sessionId)).status).toBe(
+      404,
+    );
+    expect(spawned()).toBe(false);
+    yield* send({ jsonrpc: "2.0", id: 4, method: "initialize", params: {} }, sessionId);
     expect(spawned()).toBe(true);
   }),
 );

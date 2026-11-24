@@ -249,7 +249,14 @@ const make = Effect.gen(function* () {
     yield* settings
       .modifySettings((now) =>
         Effect.gen(function* () {
-          if ((yield* reachable(now.mcpServers, id, caller)) === undefined)
+          const reached = yield* reachable(now.mcpServers, id, caller);
+          // Like set: a local process, or a transport this version doesn't know, is the owner's to remove.
+          if (
+            (reached !== undefined && !isHttpMcpServer(reached)) ||
+            (reached === undefined && Object.hasOwn(now.mcpServers, id))
+          )
+            return yield* new SharedMcpServerManagementError({ reason: "local_process" });
+          if (reached === undefined)
             return yield* new SharedMcpServerManagementError({ reason: "not_found" });
           return { mcpServers: { [id]: null } };
         }),

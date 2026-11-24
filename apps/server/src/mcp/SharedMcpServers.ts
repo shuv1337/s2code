@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import {
   FetchHttpClient,
   HttpBody,
@@ -153,18 +154,21 @@ const emptyListing = (body: string) => {
     : undefined;
 };
 
+const fullAccessOnly = (body: string, label: string) =>
+  unavailable(
+    body,
+    403,
+    `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
+  );
+
 /** What a supervised thread gets instead of the upstream response, or undefined to forward it. */
 const supervisedAnswer = (body: string, label: string) => {
   if (Option.getOrUndefined(decodeJsonRpcMethod(body))?.method === "initialize") return undefined;
-  return (
-    emptyListing(body) ??
-    unavailable(
-      body,
-      403,
-      `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
-    )
-  );
+  return emptyListing(body) ?? fullAccessOnly(body, label);
 };
+
+/** No bridge session has this id, so after a switch to Full access the next call gets 404 and re-initializes. */
+const SUPERVISED_STDIO_SESSION = "supervised";
 
 const decodeInitializeRequest = Schema.decodeUnknownOption(
   Schema.fromJsonString(
@@ -198,16 +202,18 @@ const supervisedStdioAnswer = (method: string, body: string, label: string) => {
           serverInfo: { name: label, version: "0" },
         },
       },
-      { headers: NO_STORE },
+      {
+        headers: {
+          ...NO_STORE,
+          "mcp-session-id": SUPERVISED_STDIO_SESSION,
+        },
+      },
     );
   }
   if (Option.getOrUndefined(decodeJsonRpcMethod(body))?.method.startsWith("notifications/")) {
     return HttpServerResponse.empty({ status: 202, headers: NO_STORE });
   }
-  return (
-    supervisedAnswer(body, label) ??
-    unavailable(body, 403, `${label} only works in threads with Full access.`)
-  );
+  return supervisedAnswer(body, label) ?? fullAccessOnly(body, label);
 };
 
 /** A thread outside a server's binding never reaches it, not even to initialize. */
@@ -394,15 +400,60 @@ const proxy = Effect.gen(function* () {
   });
 }).pipe(Effect.withSpan("SharedMcpServers.proxy"));
 
-export const layerProxyRoute = Layer.unwrap(
+/** Why a stdio entry's running processes should stop after a settings change, if they should. */
+const staleStdioReason = (
+  before: McpServerStdioConfig,
+  after: ServerSettings["mcpServers"][keyof ServerSettings["mcpServers"]] | undefined,
+) => {
+  if (after === undefined) return "it was removed in Settings";
+  if (!isStdioMcpServer(after)) return "it is no longer a local process in Settings";
+  if (!after.enabled) return "it was turned off in Settings";
+  return StdioMcpBridge.stdioServerFingerprint(after) !==
+    StdioMcpBridge.stdioServerFingerprint(before)
+    ? "its settings changed"
+    : undefined;
+};
+
+/** Stops a removed, disabled or edited stdio entry's processes now, not at their next call or idle. */
+const layerRetireStaleStdioSessions = Layer.effectDiscard(
   Effect.gen(function* () {
     const bridge = yield* StdioMcpBridge.StdioMcpBridge;
-    return HttpRouter.add(
-      "*",
-      `${ROUTE_PREFIX}/*`,
-      proxy.pipe(Effect.provideService(StdioMcpBridge.StdioMcpBridge, bridge)),
+    const settings = yield* ServerSettingsService.ServerSettingsService;
+    let previous = Option.match(yield* Effect.option(settings.getSettings), {
+      onNone: (): ServerSettings["mcpServers"] => ({}),
+      onSome: (current) => current.mcpServers,
+    });
+    yield* settings.streamChanges.pipe(
+      Stream.runForEach((next) =>
+        Effect.gen(function* () {
+          for (const [id, before] of Object.entries(previous)) {
+            if (!isStdioMcpServer(before)) continue;
+            const after = Object.hasOwn(next.mcpServers, id)
+              ? next.mcpServers[id as keyof ServerSettings["mcpServers"]]
+              : undefined;
+            const reason = staleStdioReason(before, after);
+            if (reason !== undefined) yield* bridge.closeServer(id, reason);
+          }
+          previous = next.mcpServers;
+        }),
+      ),
+      Effect.forkScoped,
     );
   }),
+);
+
+export const layerProxyRoute = Layer.merge(
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const bridge = yield* StdioMcpBridge.StdioMcpBridge;
+      return HttpRouter.add(
+        "*",
+        `${ROUTE_PREFIX}/*`,
+        proxy.pipe(Effect.provideService(StdioMcpBridge.StdioMcpBridge, bridge)),
+      );
+    }),
+  ),
+  layerRetireStaleStdioSessions,
 ).pipe(Layer.provide(StdioMcpBridge.layer));
 
 const PROTOCOL_VERSION = "2025-06-18";

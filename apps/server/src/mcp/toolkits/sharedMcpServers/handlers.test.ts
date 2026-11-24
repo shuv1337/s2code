@@ -666,9 +666,11 @@ it.effect(
         yield* call("t3_mcp_server_set", { id, url });
         expect((yield* settings.getSettings).mcpServers[local]).toEqual(stdio);
         expect((yield* settings.getSettings).mcpServers[future]).toEqual(futureEntry);
-        expect(yield* call("t3_mcp_server_remove", { id: local })).toMatchObject({ id: local });
+        for (const target of [local, future]) {
+          expect(yield* call("t3_mcp_server_remove", { id: target })).toMatchObject(localProcess);
+        }
         expect(Object.keys((yield* settings.getSettings).mcpServers).toSorted()).toEqual(
-          [id, future].toSorted(),
+          [id, local, future].toSorted(),
         );
       }).pipe(Effect.provide(harness.layer));
     }),

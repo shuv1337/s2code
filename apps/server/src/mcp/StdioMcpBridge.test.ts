@@ -204,6 +204,57 @@ describe("StdioMcpBridgeCore", () => {
     ).toBe(404);
   });
 
+  it("caps processes across servers and never stops one with a call in flight", async () => {
+    const core = makeCore({ maxSessions: 2 });
+    const busy = await harness(core, server(), "t1", "a").initialize();
+    await harness(core, server(), "t2", "b").initialize();
+    const [busyPid, idlePid] = core.pids();
+    const call = harness(core, server(), "t1", "a").post(busy.sessionId, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "hang" },
+    });
+
+    const third = await harness(core, server(), "t3", "c").initialize();
+    expect(third.response.status).toBe(200);
+    expect(core.sessionCount).toBe(2);
+    await until(() => !alive(idlePid!));
+    expect(alive(busyPid!)).toBe(true);
+
+    // Every remaining session is busy or newest; with the busy one alone left over, a fourth waits.
+    const hung = harness(core, server(), "t3", "c").post(third.sessionId, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "hang" },
+    });
+    const refused = await harness(core, server(), "t4", "d").initialize();
+    expect(refused.sessionId).toBeUndefined();
+    expect(body(refused.response).error.message).toMatch(/Too many MCP server processes/);
+    expect(core.sessionCount).toBe(2);
+
+    core.closeAll();
+    expect(body(await call).error.message).toMatch(/stopped before answering/);
+    expect(body(await hung).error.message).toMatch(/stopped before answering/);
+  });
+
+  it("closes a session whose server writes an oversized message", async () => {
+    const core = makeCore({ maxMessageChars: 1024 });
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+    const [pid] = core.pids();
+    const flooded = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "flood", arguments: { chars: 4096 } },
+    });
+    expect(body(flooded).error.message).toMatch(/over 1024 characters/);
+    await until(() => !alive(pid!));
+    expect(core.sessionCount).toBe(0);
+  });
+
   it("retires a session whose command, args or env changed in Settings", async () => {
     const core = makeCore();
     const { sessionId } = await harness(core, server({ A: "1" })).initialize();

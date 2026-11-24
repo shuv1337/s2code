@@ -80,6 +80,12 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
             ],
           },
         });
+      if (name === "hang") return; // Keeps the call in flight.
+      if (name === "flood") {
+        // One unterminated line past the bridge's cap.
+        process.stdout.write("x".repeat(Number(args?.chars ?? 4096)));
+        return;
+      }
       if (name === "crash") {
         process.stderr.write("crashing on purpose\n");
         process.exit(3);
