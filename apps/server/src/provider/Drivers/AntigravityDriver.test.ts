@@ -703,4 +703,49 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
         expect(yield* fs.exists(legacyRoot)).toBe(false);
       }),
   );
+
+  it.effect.skipIf(windowsHost)(
+    "exposes machine-level user skills on initial snapshot and walks nested cwd ancestors",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const tempRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ag-driver-skills-" });
+        const fakeHome = path.join(tempRoot, "home");
+        const repoRoot = path.join(tempRoot, "repo");
+        const nestedCwd = path.join(repoRoot, "apps", "web");
+
+        const userSkillDir = path.join(fakeHome, ".agents", "skills", "global-helper");
+        const repoSkillDir = path.join(repoRoot, ".agents", "skills", "repo-helper");
+        yield* fs.makeDirectory(userSkillDir, { recursive: true });
+        yield* fs.makeDirectory(path.join(repoRoot, ".git"), { recursive: true });
+        yield* fs.makeDirectory(repoSkillDir, { recursive: true });
+        yield* fs.makeDirectory(nestedCwd, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(userSkillDir, "SKILL.md"),
+          "---\nname: global-helper\ndescription: User compat skill.\n---\n",
+        );
+        yield* fs.writeFileString(
+          path.join(repoSkillDir, "SKILL.md"),
+          "---\nname: repo-helper\ndescription: Repo root skill.\n---\n",
+        );
+
+        const h = yield* makeHarness({
+          environment: [{ name: "HOME", value: fakeHome }],
+        });
+        const initial = yield* h.instance.snapshot.refresh;
+        expect(initial.skills.map((skill) => [skill.name, skill.scope])).toEqual([
+          ["global-helper", "user"],
+        ]);
+
+        const snapshotForCwd = h.instance.snapshotForCwd;
+        if (!snapshotForCwd)
+          return yield* Effect.die("Antigravity does not expose snapshotForCwd.");
+        const forNested = yield* snapshotForCwd(nestedCwd);
+        expect(forNested.skills.map((skill) => [skill.name, skill.scope])).toEqual([
+          ["global-helper", "user"],
+          ["repo-helper", "project"],
+        ]);
+      }),
+  );
 });

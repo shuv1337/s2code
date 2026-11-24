@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   ProviderSetupError,
   type RuntimeMode,
+  type ServerProviderSkill,
   type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -32,6 +33,7 @@ import {
   buildAntigravityModelsFromSession,
   makeAntigravityProvider,
 } from "./AntigravityProvider.ts";
+import { AntigravitySkillsProbeError } from "./Drivers/AntigravitySkills.ts";
 import { mergeProviderSnapshot } from "./ProviderRegistry.ts";
 
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
@@ -139,6 +141,10 @@ const makeHarness = Effect.fn("makeAntigravityProviderHarness")(function* (
     readonly auth?: { readonly type: string; readonly label: string };
     readonly enabled?: boolean;
     readonly safe?: boolean;
+    readonly discoverUserSkills?: Effect.Effect<
+      ReadonlyArray<ServerProviderSkill>,
+      AntigravitySkillsProbeError
+    >;
     readonly probeUsage?: Effect.Effect<ServerProviderUsageLimits>;
     readonly rememberedRuntimeModes?: ReadonlyArray<RuntimeMode>;
   } = {},
@@ -156,6 +162,7 @@ const makeHarness = Effect.fn("makeAntigravityProviderHarness")(function* (
     {
       stampIdentity: (snapshot) => Effect.succeed({ ...snapshot, instanceId, driver }),
       ...(options.auth ? { auth: options.auth } : {}),
+      ...(options.discoverUserSkills ? { discoverUserSkills: options.discoverUserSkills } : {}),
       ...(options.probeUsage ? { probeUsage: options.probeUsage } : {}),
       ...(options.rememberedRuntimeModes
         ? { rememberedRuntimeModes: options.rememberedRuntimeModes }
@@ -948,6 +955,93 @@ it.layer(layerTest)("Antigravity provider snapshots", (it) => {
       yield* harness.provider.onSessionStarted(started);
       expect((yield* republished)?.usageLimits).toEqual(failed);
     }),
+  );
+
+  it.effect(
+    "populates machine-level user skills, preserves them on transient failure, clears on sign-out/missing install, and avoids workspace shadowing or usage-republish rescans",
+    () =>
+      Effect.gen(function* () {
+        const userSkill: ServerProviderSkill = {
+          name: "user-skill",
+          description: "Global skill",
+          path: "/home/.agents/skills/user-skill/SKILL.md",
+          scope: "user",
+          enabled: true,
+        };
+        const refreshedUserSkill: ServerProviderSkill = {
+          name: "refreshed-user-skill",
+          path: "/home/.gemini/config/skills/refreshed-user-skill/SKILL.md",
+          scope: "user",
+          enabled: true,
+        };
+        const skillCalls = yield* Ref.make(0);
+        const skillProbe = yield* Ref.make<
+          Effect.Effect<ReadonlyArray<ServerProviderSkill>, AntigravitySkillsProbeError>
+        >(Effect.succeed([userSkill]));
+        const usageLimits: ServerProviderUsageLimits = {
+          checkedAt: "2026-10-09T12:00:00.000Z",
+          windows: [{ id: "gemini-5h", kind: "session", label: "Gemini", usedPercent: 10 }],
+        };
+        const harness = yield* makeHarness({
+          discoverUserSkills: Ref.update(skillCalls, (count) => count + 1).pipe(
+            Effect.andThen(Ref.get(skillProbe)),
+            Effect.flatten,
+          ),
+          probeUsage: Effect.succeed(usageLimits),
+        });
+        const usagePublished = yield* harness.nextPublish((snapshot) => !!snapshot.usageLimits);
+        yield* harness.initialize;
+        expect((yield* usagePublished)?.usageLimits).toEqual(usageLimits);
+        expect((yield* harness.provider.snapshot.getSnapshot).skills).toEqual([userSkill]);
+        // PublishingUsage republish must not re-run discoverUserSkills.
+        expect(yield* Ref.get(skillCalls)).toBe(1);
+
+        // Unscanned workspaces inherit machine-level skills instead of shadowing them with [].
+        expect((yield* harness.provider.snapshotForCwd("/unscanned")).skills).toEqual([userSkill]);
+        yield* harness.provider.onAvailableCommands(commands, "/commands-only");
+        expect((yield* harness.provider.snapshotForCwd("/commands-only")).skills).toEqual([
+          userSkill,
+        ]);
+
+        // Transient user-skill discovery failure preserves previously discovered skills.
+        yield* Ref.set(harness.probe, Effect.succeed(initializeResult));
+        yield* Ref.set(
+          skillProbe,
+          Effect.fail(
+            new AntigravitySkillsProbeError({
+              reason: "filesystem-error",
+              path: "/home/.agents/skills",
+            }),
+          ),
+        );
+        yield* harness.provider.snapshot.refresh;
+        expect((yield* harness.provider.snapshot.getSnapshot).skills).toEqual([userSkill]);
+
+        // Missing installation clears machine-level skills.
+        yield* Ref.set(
+          harness.probe,
+          Effect.fail(new EffectAcpErrors.AcpSpawnError({ cause: { code: "ENOENT" } })),
+        );
+        expect((yield* harness.provider.snapshot.refresh).skills).toEqual([]);
+
+        // Sign-out clears skills and keeps them cleared across refreshes until a new session starts.
+        yield* Ref.set(harness.probe, Effect.succeed(initializeResult));
+        yield* Ref.set(skillProbe, Effect.succeed([refreshedUserSkill]));
+        yield* harness.provider.snapshot.refresh;
+        expect((yield* harness.provider.snapshot.getSnapshot).skills).toEqual([refreshedUserSkill]);
+        yield* harness.provider.onSignedOut;
+        expect((yield* harness.provider.snapshot.getSnapshot).skills).toEqual([]);
+        const callsBeforeUnauthRefresh = yield* Ref.get(skillCalls);
+        expect((yield* harness.provider.snapshot.refresh).skills).toEqual([]);
+        expect(yield* Ref.get(skillCalls)).toBe(callsBeforeUnauthRefresh);
+
+        // Starting a session repopulates machine-level skills and seeds the workspace snapshot.
+        yield* harness.provider.onSessionStarted(started, "/fresh-workspace");
+        expect((yield* harness.provider.snapshot.getSnapshot).skills).toEqual([refreshedUserSkill]);
+        expect((yield* harness.provider.snapshotForCwd("/fresh-workspace")).skills).toEqual([
+          refreshedUserSkill,
+        ]);
+      }),
   );
 });
 

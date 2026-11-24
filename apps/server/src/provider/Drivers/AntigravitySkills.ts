@@ -23,7 +23,7 @@ export function resolveAntigravityUserHome(
   return environment.HOME || home;
 }
 
-/** Link private GEMINI_HOME skills to ~/.gemini; ~/.agents/skills is ignored because .agents/skills is project-only. */
+/** Native GEMINI_HOME user skill directories linked from ~/.gemini into the private profile. */
 export function antigravityUserSkillDirectories(
   path: Path.Path,
   geminiHome: string,
@@ -34,10 +34,23 @@ export function antigravityUserSkillDirectories(
   ];
 }
 
+/** Shared user skill folders synthesized into the isolated profile's config/skills.json. */
+export function antigravityCompatibilityUserSkillDirectories(
+  path: Path.Path,
+  userHome: string,
+): readonly [antigravitySkills: string, agentsSkills: string, claudeSkills: string] {
+  return [
+    path.resolve(userHome, ".gemini", "antigravity", "skills"),
+    path.resolve(userHome, ".agents", "skills"),
+    path.resolve(userHome, ".claude", "skills"),
+  ];
+}
+
 const MAX_SKILL_BYTES = 1_000_000;
 const MAX_SCAN_BYTES = 8_000_000;
 const MAX_SCAN_ENTRIES = 10_000;
 const MAX_INHERIT_DEPTH = 10;
+const MAX_ANCESTOR_DEPTH = 256;
 // Typical frontmatter fits in one chunk, so most skills cost about this much of the scan budget.
 const SKILL_READ_CHUNK_BYTES = 1024;
 
@@ -51,14 +64,11 @@ const SkillConfigEntry = Schema.Struct({
   include_only: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
   exclude: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
 });
-const decodeSkillsConfig = Schema.decodeUnknownOption(
-  Schema.fromJsonString(
-    Schema.Struct({
-      inherits: Schema.optional(Schema.NullOr(Schema.Array(SkillConfigEntry))),
-      entries: Schema.optional(Schema.NullOr(Schema.Array(SkillConfigEntry))),
-    }),
-  ),
-);
+const SkillsConfig = Schema.Struct({
+  inherits: Schema.optional(Schema.NullOr(Schema.Array(SkillConfigEntry))),
+  entries: Schema.optional(Schema.NullOr(Schema.Array(SkillConfigEntry))),
+});
+const decodeSkillsConfig = Schema.decodeUnknownOption(Schema.fromJsonString(SkillsConfig));
 const decodePluginPreferences = Schema.decodeUnknownOption(
   Schema.fromJsonString(
     Schema.Struct({
@@ -222,9 +232,144 @@ function resolveSkillsConfigPath(path: Path.Path, rawPath: string, baseDir: stri
   return path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(baseDir, rawPath);
 }
 
+function normalizeSkillPathKey(path: Path.Path, targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  return path.sep === "\\" ? resolved.toLowerCase() : resolved;
+}
+
+// Untraced: path canonicalization runs for every config entry and skill root inside discovery spans.
+const canonicalSkillPathKey = Effect.fnUntraced(function* (
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  targetPath: string,
+) {
+  const resolved = path.resolve(targetPath);
+  const canonical = yield* fileSystem.realPath(resolved).pipe(Effect.orElseSucceed(() => resolved));
+  return normalizeSkillPathKey(path, canonical);
+});
+
+// Untraced: helper recording lexical and canonical keys under an enclosing discovery or sync span.
+const recordNormalizedPathKeys = Effect.fnUntraced(function* (
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  targetPath: string,
+  targetSet: Set<string>,
+) {
+  const resolved = path.resolve(targetPath);
+  targetSet.add(normalizeSkillPathKey(path, resolved));
+  const canonical = yield* fileSystem
+    .realPath(resolved)
+    .pipe(Effect.orElseSucceed(() => undefined));
+  if (canonical !== undefined) {
+    targetSet.add(normalizeSkillPathKey(path, canonical));
+  }
+});
+
+/** Collects lexical and canonical skill roots declared by a skills.json manifest and its inherits. */
+export const collectDeclaredAntigravitySkillRoots = Effect.fn(
+  "collectDeclaredAntigravitySkillRoots",
+)(function* (input: {
+  readonly configPath: string;
+  readonly baseDir: string;
+}): Effect.fn.Return<
+  { readonly valid: boolean; readonly declaredPaths: ReadonlySet<string> },
+  never,
+  FileSystem.FileSystem | Path.Path
+> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const declaredPaths = new Set<string>();
+
+  // Untraced: bounded recursive manifest reads belong to the enclosing collectDeclaredAntigravitySkillRoots span.
+  const readConfig = Effect.fnUntraced(function* (configPath: string) {
+    const resolvedConfigPath = path.resolve(configPath);
+    const info = yield* fileSystem
+      .stat(resolvedConfigPath)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (info?.type !== "File" || info.size > BigInt(MAX_SKILL_BYTES)) return undefined;
+    const raw = yield* fileSystem
+      .readFileString(resolvedConfigPath)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (raw === undefined || Buffer.byteLength(raw, "utf8") > MAX_SKILL_BYTES) return undefined;
+    const parsed = decodeSkillsConfig(raw);
+    if (parsed._tag === "None") return undefined;
+    return { resolvedConfigPath, config: parsed.value };
+  });
+
+  const root = yield* readConfig(input.configPath);
+  if (root === undefined) {
+    return { valid: false, declaredPaths };
+  }
+
+  // Untraced: recursive inheritance walk covered by collectDeclaredAntigravitySkillRoots span.
+  const visit = Effect.fnUntraced(function* (
+    resolvedConfigPath: string,
+    config: typeof SkillsConfig.Type,
+    baseDir: string,
+    visitedConfigs: ReadonlySet<string>,
+    depth: number,
+  ): Effect.fn.Return<void, never, FileSystem.FileSystem | Path.Path> {
+    if (depth > MAX_INHERIT_DEPTH) return;
+    const configKey = yield* canonicalSkillPathKey(fileSystem, path, resolvedConfigPath);
+    if (visitedConfigs.has(configKey)) return;
+    const nextVisited = new Set(visitedConfigs);
+    nextVisited.add(configKey);
+
+    for (const inherited of config.inherits ?? []) {
+      const inheritedPath = resolveSkillsConfigPath(path, inherited.path, baseDir);
+      const child = yield* readConfig(inheritedPath);
+      if (child === undefined) continue;
+      yield* visit(
+        child.resolvedConfigPath,
+        child.config,
+        path.dirname(child.resolvedConfigPath),
+        nextVisited,
+        depth + 1,
+      );
+    }
+    for (const entry of config.entries ?? []) {
+      const entryPath = resolveSkillsConfigPath(path, entry.path, baseDir);
+      yield* recordNormalizedPathKeys(fileSystem, path, entryPath, declaredPaths);
+    }
+  });
+
+  yield* visit(root.resolvedConfigPath, root.config, input.baseDir, new Set(), 0);
+  return { valid: true, declaredPaths };
+});
+
+// Untraced: lexical ancestor probe runs once per workspace scan inside discoverAntigravitySkills.
+const resolveWorkspaceAncestors = Effect.fnUntraced(function* (
+  cwd: string,
+): Effect.fn.Return<
+  { readonly ancestors: ReadonlyArray<string>; readonly repositoryRoot: string | undefined },
+  never,
+  FileSystem.FileSystem | Path.Path
+> {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const resolvedCwd = path.resolve(cwd);
+  const walked: string[] = [];
+  let current = resolvedCwd;
+  for (let depth = 0; depth < MAX_ANCESTOR_DEPTH; depth += 1) {
+    walked.push(current);
+    const gitInfo = yield* fileSystem
+      .stat(path.join(current, ".git"))
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (gitInfo?.type === "Directory" || gitInfo?.type === "File") {
+      return { ancestors: walked, repositoryRoot: current };
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return { ancestors: [resolvedCwd], repositoryRoot: undefined };
+});
+
 /** Keep read errors typed so workspace snapshots cannot cache partial results. */
 export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(function* (input: {
-  readonly cwd: string;
+  readonly cwd?: string;
   readonly userHome: string;
   /** The instance's GEMINI_HOME, where agy loads plugins from. */
   readonly profileDirectory: string;
@@ -239,18 +384,12 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
     path,
     path.join(input.userHome, ".gemini"),
   );
-  const roots = [
-    { directory: configSkills, scope: "user" },
-    { directory: path.resolve(input.cwd, ".gemini", "skills"), scope: "project" },
-    { directory: cliSkills, scope: "user" },
-    { directory: path.resolve(input.cwd, ".agents", "skills"), scope: "project" },
-    { directory: path.resolve(input.cwd, ".agent", "skills"), scope: "project" },
-  ];
   const budget: ScanBudget = {
     remainingBytes: MAX_SCAN_BYTES,
     remainingEntries: MAX_SCAN_ENTRIES,
   };
   const skillsByName = new Map<string, ServerProviderSkill>();
+  const scannedUnfilteredDirs = new Set<string>();
 
   const addSkillFile = Effect.fn("addAntigravitySkillFile")(function* (
     skillPath: string,
@@ -292,6 +431,13 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
       return;
     }
     if (info?.type !== "Directory") return;
+    const isUnfilteredRoot =
+      scanChildren && filter.includeGroups.length === 0 && filter.excludeNames.length === 0;
+    if (isUnfilteredRoot) {
+      const canonicalDirKey = yield* canonicalSkillPathKey(fileSystem, path, directory);
+      if (scannedUnfilteredDirs.has(canonicalDirKey)) return;
+      scannedUnfilteredDirs.add(canonicalDirKey);
+    }
     const entries = yield* readIfPresent(fileSystem.readDirectory(directory), directory);
     if (entries === undefined) return;
     if (entries.length > budget.remainingEntries) {
@@ -328,10 +474,13 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
     filter: SkillEntryFilter,
     visitedConfigs: ReadonlySet<string>,
     depth: number,
+    fallbackBaseDir?: string,
+    declaredPaths?: Set<string>,
   ): Effect.fn.Return<void, AntigravitySkillsProbeError, FileSystem.FileSystem> {
     if (depth > MAX_INHERIT_DEPTH) return;
     const resolvedConfigPath = path.resolve(configPath);
-    if (visitedConfigs.has(resolvedConfigPath)) return;
+    const configKey = yield* canonicalSkillPathKey(fileSystem, path, resolvedConfigPath);
+    if (visitedConfigs.has(configKey)) return;
     const configInfo = yield* readIfPresent(
       fileSystem.stat(resolvedConfigPath),
       resolvedConfigPath,
@@ -354,9 +503,26 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
     if (parsed._tag === "None") return;
 
     const nextVisited = new Set(visitedConfigs);
-    nextVisited.add(resolvedConfigPath);
+    nextVisited.add(configKey);
+
+    // Untraced: relative fallback lookup runs per entry inside scanAntigravitySkillsConfig.
+    const resolveConfigTarget = Effect.fnUntraced(function* (rawPath: string) {
+      const primary = resolveSkillsConfigPath(path, rawPath, baseDir);
+      if (
+        path.isAbsolute(rawPath) ||
+        fallbackBaseDir === undefined ||
+        fallbackBaseDir === baseDir
+      ) {
+        return primary;
+      }
+      const primaryInfo = yield* readIfPresent(fileSystem.stat(primary), primary);
+      return primaryInfo !== undefined
+        ? primary
+        : resolveSkillsConfigPath(path, rawPath, fallbackBaseDir);
+    });
+
     for (const inherited of parsed.value.inherits ?? []) {
-      const inheritedPath = resolveSkillsConfigPath(path, inherited.path, baseDir);
+      const inheritedPath = yield* resolveConfigTarget(inherited.path);
       yield* scanSkillsConfig(
         inheritedPath,
         path.dirname(inheritedPath),
@@ -364,43 +530,70 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
         narrowSkillFilter(filter, inherited),
         nextVisited,
         depth + 1,
+        fallbackBaseDir,
+        declaredPaths,
       );
     }
     for (const entry of parsed.value.entries ?? []) {
-      const entryDirectory = resolveSkillsConfigPath(path, entry.path, baseDir);
+      const entryDirectory = yield* resolveConfigTarget(entry.path);
+      if (declaredPaths !== undefined) {
+        yield* recordNormalizedPathKeys(fileSystem, path, entryDirectory, declaredPaths);
+      }
       yield* scanDirectory(entryDirectory, scope, true, narrowSkillFilter(filter, entry), true);
     }
   });
 
-  for (const root of roots) {
-    yield* scanDirectory(root.directory, root.scope, true);
+  if (input.cwd !== undefined) {
+    const { ancestors, repositoryRoot } = yield* resolveWorkspaceAncestors(input.cwd);
+    for (const ancestor of ancestors) {
+      yield* scanDirectory(path.resolve(ancestor, ".gemini", "skills"), "project", true);
+      yield* scanDirectory(path.resolve(ancestor, ".agents", "skills"), "project", true);
+      yield* scanDirectory(path.resolve(ancestor, ".agent", "skills"), "project", true);
+    }
+    for (const ancestor of ancestors) {
+      yield* scanSkillsConfig(
+        path.resolve(ancestor, ".agents", "skills.json"),
+        ancestor,
+        "project",
+        EMPTY_SKILL_FILTER,
+        new Set(),
+        0,
+        repositoryRoot,
+      );
+      yield* scanSkillsConfig(
+        path.resolve(ancestor, ".agent", "skills.json"),
+        ancestor,
+        "project",
+        EMPTY_SKILL_FILTER,
+        new Set(),
+        0,
+        repositoryRoot,
+      );
+    }
   }
 
-  for (const config of [
-    {
-      configPath: path.resolve(input.cwd, ".agents", "skills.json"),
-      baseDir: input.cwd,
-      scope: "project",
-    },
-    {
-      configPath: path.resolve(input.cwd, ".agent", "skills.json"),
-      baseDir: input.cwd,
-      scope: "project",
-    },
-    {
-      configPath: path.join(input.userHome, ".gemini", "config", "skills.json"),
-      baseDir: path.join(input.userHome, ".gemini", "config"),
-      scope: "user",
-    },
-  ]) {
-    yield* scanSkillsConfig(
-      config.configPath,
-      config.baseDir,
-      config.scope,
-      EMPTY_SKILL_FILTER,
-      new Set(),
-      0,
-    );
+  yield* scanDirectory(configSkills, "user", true);
+  yield* scanDirectory(cliSkills, "user", true);
+
+  const declaredUserSkillPaths = new Set<string>();
+  const userGeminiConfig = path.join(input.userHome, ".gemini", "config");
+  yield* scanSkillsConfig(
+    path.join(userGeminiConfig, "skills.json"),
+    userGeminiConfig,
+    "user",
+    EMPTY_SKILL_FILTER,
+    new Set(),
+    0,
+    undefined,
+    declaredUserSkillPaths,
+  );
+  for (const compatDir of antigravityCompatibilityUserSkillDirectories(path, input.userHome)) {
+    const lexicalKey = normalizeSkillPathKey(path, compatDir);
+    const canonicalKey = yield* canonicalSkillPathKey(fileSystem, path, compatDir);
+    if (declaredUserSkillPaths.has(lexicalKey) || declaredUserSkillPaths.has(canonicalKey)) {
+      continue;
+    }
+    yield* scanDirectory(compatDir, "user", true);
   }
 
   const pluginsDirectory = path.join(input.profileDirectory, "config", "plugins");
