@@ -18,9 +18,8 @@ const PRODUCT_RELEASES_URL = `https://github.com/${PRODUCT_RELEASE_REPOSITORY}/r
 export const isProductIdentity = (value: string) =>
   value.trim() === PRODUCT_ID || value.trim() === LEGACY_PRODUCT_ID;
 
-/** The fork's mobile apps are a private, invite-only TestFlight beta; there is no public join link. */
-export const PRODUCT_TESTFLIGHT_URL = "https://testflight.apple.com";
-export const PRODUCT_BETA_ACCESS_EMAIL = "shuv@shuv.dev";
+/** The fork's iOS app is a public TestFlight beta (S2Code Nightly, External Testers). */
+export const PRODUCT_TESTFLIGHT_URL = "https://testflight.apple.com/join/vhmETHSn";
 
 export type ProductDownloadPlatform = "desktop" | "ios" | "android";
 
@@ -30,7 +29,7 @@ export const resolveProductDownload = (platform: ProductDownloadPlatform) => {
     case "ios":
       return {
         url: PRODUCT_TESTFLIGHT_URL,
-        label: `Private TestFlight beta: email ${PRODUCT_BETA_ACCESS_EMAIL} for access`,
+        label: "Join the TestFlight beta",
       };
     case "android":
       return { url: null, label: "The fork Android app is not available yet." };

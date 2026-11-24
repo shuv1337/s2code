@@ -244,9 +244,9 @@ folder paths, so in the web app use **Add project** instead.
 
 ## Mobile app
 
-The mobile apps are in a private [TestFlight](https://testflight.apple.com) beta.
-There is no public join link: email [shuv@shuv.dev](mailto:shuv@shuv.dev) for access,
-then install from the TestFlight app. Settings → About → Mobile app says the same.
+The iOS app is in a public [TestFlight beta](https://testflight.apple.com/join/vhmETHSn).
+Open that link on your iPhone or iPad and install from the TestFlight app.
+Settings → About → Mobile app links to it too.
 There is no fork App Store or Google Play listing, and upstream store/beta apps are
 not a substitute for the fork; on Android, use the connected web client.
 

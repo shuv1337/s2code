@@ -1,7 +1,7 @@
 # Apple Watch
 
-The fork's iPhone app is a private TestFlight beta; email
-[shuv@shuv.dev](mailto:shuv@shuv.dev) for access. There is no separate Watch
+The fork's iPhone app is a public
+[TestFlight beta](https://testflight.apple.com/join/vhmETHSn). There is no separate Watch
 distribution. These steps need a fork iPhone companion that includes T3 Watch;
 do not install an upstream app as a substitute.
 
