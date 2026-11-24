@@ -12,9 +12,13 @@ const SCANNED_PATHSPECS = [
   "apps/web/src",
   "apps/desktop/src",
   "apps/mobile/src",
+  "apps/mobile/index.ts",
   "packages",
   "apps/mobile/app.config.ts",
   "apps/mobile/package.json",
+  "apps/server/package.json",
+  "apps/web/package.json",
+  "apps/desktop/package.json",
   "apps/server/vite.config.ts",
   "apps/web/vite.config.ts",
   "scripts/lib/public-config.ts",
@@ -56,10 +60,32 @@ const FORBIDDEN_PATTERNS: ReadonlyArray<ForbiddenPattern> = [
   },
   {
     label: 'searchParams.set("clientOwner"',
-    pattern: /searchParams\.set\(\s*["']clientOwner["']|clientOwner=/iu,
+    pattern: /searchParams\.set\(\s*["']clientOwner["']|\bclientOwner=/iu,
+  },
+  {
+    label: 'searchParams.set("clientDevice"',
+    pattern: /searchParams\.set\(\s*["']clientDevice["']|\bclientDevice=/iu,
   },
   { label: "t3.codes/privacy-policy", pattern: /t3\.codes\/privacy-policy/iu },
+  {
+    label: "t3.codes/(legal|install|download|mobile)",
+    pattern: /t3\.codes\/(?:legal|install|download|mobile)/iu,
+  },
 ];
+
+function scanContent(filePath: string, content: string): Array<string> {
+  const violations: Array<string> = [];
+  const lines = content.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    for (const rule of FORBIDDEN_PATTERNS) {
+      if (rule.pattern.test(line) && !rule.allowLine?.(filePath, line)) {
+        violations.push(`${filePath}:${index + 1} matched ${rule.label}`);
+      }
+    }
+  }
+  return violations;
+}
 
 function listTrackedRuntimeFiles(): ReadonlyArray<string> {
   const output = NodeChildProcess.execFileSync("git", ["ls-files", "--", ...SCANNED_PATHSPECS], {
@@ -87,17 +113,38 @@ describe("zero-telemetry guard", () => {
     for (const filePath of files) {
       const fullPath = NodePath.join(REPO_ROOT, filePath);
       if (!NodeFS.existsSync(fullPath)) continue;
-      const lines = NodeFS.readFileSync(fullPath, "utf8").split("\n");
-      for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index] ?? "";
-        for (const rule of FORBIDDEN_PATTERNS) {
-          if (rule.pattern.test(line) && !rule.allowLine?.(filePath, line)) {
-            violations.push(`${filePath}:${index + 1} matched ${rule.label}`);
-          }
-        }
-      }
+      violations.push(...scanContent(filePath, NodeFS.readFileSync(fullPath, "utf8")));
     }
 
     expect(violations).toEqual([]);
+  });
+
+  it("flags planted telemetry, fingerprinting, and upstream link regressions", () => {
+    const planted = [
+      'url.searchParams.set("clientOwner", hash);',
+      'url.searchParams.set("clientDevice", hash);',
+      'const ws = "wss://host/ws?clientDevice=abc&clientDeviceType=desktop&clientDeviceModel=iPhone";',
+      'const tracesUrl = "https://api.axiom.co/v1/traces";',
+      'const id = window.localStorage.getItem("t3code:analytics-device-id");',
+      'const privacy = "https://t3.codes/privacy-policy";',
+      'const install = "https://t3.codes/install.sh";',
+    ].join("\n");
+
+    expect(scanContent("apps/web/src/connection/platform.ts", planted)).toEqual([
+      'apps/web/src/connection/platform.ts:1 matched searchParams.set("clientOwner"',
+      'apps/web/src/connection/platform.ts:2 matched searchParams.set("clientDevice"',
+      'apps/web/src/connection/platform.ts:3 matched searchParams.set("clientDevice"',
+      "apps/web/src/connection/platform.ts:4 matched api.axiom.co",
+      "apps/web/src/connection/platform.ts:5 matched analytics-device-id",
+      "apps/web/src/connection/platform.ts:6 matched t3.codes/privacy-policy",
+      "apps/web/src/connection/platform.ts:7 matched t3.codes/(legal|install|download|mobile)",
+    ]);
+
+    expect(
+      scanContent(
+        "apps/web/src/connection/platform.ts",
+        'window.localStorage.removeItem("t3code:analytics-device-id");\nconst q = "clientDeviceType=desktop&clientDeviceModel=iPhone";',
+      ),
+    ).toEqual([]);
   });
 });
