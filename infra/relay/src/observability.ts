@@ -120,10 +120,8 @@ export const RelayObservability = Effect.gen(function* () {
   } as const;
 });
 
-export const isAxiomObservabilityEnabled = Config.String("AXIOM_TOKEN").pipe(
-  Config.option,
-  Config.map((value) => Option.getOrElse(value, () => "").trim().length > 0),
-);
+// Axiom observability is disabled in this fork; self-hosted RELAY_OTLP_TRACES_URL stays available below.
+export const isAxiomObservabilityEnabled = Effect.succeed(false);
 
 const validateOtlpTracesUrl = Effect.fn("RelayObservability.validateOtlpTracesUrl")(function* (
   value: string | undefined,
@@ -165,6 +163,9 @@ export const relayOtlpTracesConfig = Config.all({
 }).pipe(Config.map(({ url, token }) => (url === undefined ? undefined : { url, token })));
 
 export const OptionalRelayObservability = Effect.gen(function* () {
+  if (!(yield* isAxiomObservabilityEnabled.pipe(withoutWorkerConfigCapture))) {
+    return undefined;
+  }
   const phase = yield* Alchemy.ALCHEMY_PHASE.pipe(withoutWorkerConfigCapture);
   if (phase === "runtime") {
     // At runtime, MobileSourceMapsBucket is bound onto WorkerEnvironment iff Axiom mode was planned.
@@ -175,9 +176,6 @@ export const OptionalRelayObservability = Effect.gen(function* () {
       workerEnv.value !== null &&
       "MobileSourceMapsBucket" in workerEnv.value;
     return hasMobileTelemetryBinding ? yield* RelayObservability : undefined;
-  }
-  if (!(yield* isAxiomObservabilityEnabled.pipe(withoutWorkerConfigCapture))) {
-    return undefined;
   }
   return yield* RelayObservability;
 });

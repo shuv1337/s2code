@@ -11,11 +11,13 @@ import { isAxiomObservabilityEnabled, relayOtlpTracesConfig } from "./observabil
 const provideEnv = (env: Readonly<Record<string, string>>) =>
   Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })));
 
-it.effect("enables Axiom only when AXIOM_TOKEN is non-empty", () =>
+it.effect("keeps Axiom disabled even when AXIOM_TOKEN is set", () =>
   Effect.gen(function* () {
     assert.isFalse(yield* isAxiomObservabilityEnabled.pipe(provideEnv({})));
     assert.isFalse(yield* isAxiomObservabilityEnabled.pipe(provideEnv({ AXIOM_TOKEN: "   " })));
-    assert.isTrue(yield* isAxiomObservabilityEnabled.pipe(provideEnv({ AXIOM_TOKEN: "xaat-123" })));
+    assert.isFalse(
+      yield* isAxiomObservabilityEnabled.pipe(provideEnv({ AXIOM_TOKEN: "xaat-123" })),
+    );
   }),
 );
 

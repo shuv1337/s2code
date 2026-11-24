@@ -60,7 +60,7 @@ describe("assertForkRelayDeploymentEnv", () => {
     ).toMatchObject({
       relayDomain: "relay.s2code.dev",
       databaseBackend: "external",
-      observabilityBackend: "axiom",
+      observabilityBackend: "none",
     });
   });
 
@@ -213,6 +213,8 @@ describe("assertForkRelayDeploymentEnv", () => {
     expect(source).toContain("forkRelayDeploymentConfig");
     expect(source).toContain("Cloudflare.state({ accountId: forkRelayEnv.cloudflareAccountId })");
     expect(source).toContain("cloudMintPublicKey: cloudMintKeyPair.publicKey");
+    expect(source).not.toContain("mobileTracing");
+    expect(source).not.toContain("clientTracing");
   });
 });
 

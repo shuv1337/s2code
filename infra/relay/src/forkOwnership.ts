@@ -28,7 +28,7 @@ export interface ForkRelayDeploymentEnv {
   readonly relayDomain: string | undefined;
   readonly clerkPublishableKey: string;
   readonly databaseBackend: "planetscale" | "external";
-  readonly observabilityBackend: "axiom" | "none";
+  readonly observabilityBackend: "none";
 }
 
 /**
@@ -179,7 +179,7 @@ export function assertForkRelayDeploymentEnv(
     assertForkOtlpTracesUrl(rawOtlpTracesUrl);
   }
   assertForkFeedbackGithubRepo(env.FEEDBACK_GITHUB_REPO);
-  const observabilityBackend = env.AXIOM_TOKEN?.trim() ? "axiom" : "none";
+  const observabilityBackend = "none" as const;
 
   return {
     cloudflareAccountId,
@@ -232,5 +232,4 @@ export const forkRelayDeploymentConfig: Config.Config<ForkRelayDeploymentEnv> = 
   PLANETSCALE_ORGANIZATION: optionalConfigString("PLANETSCALE_ORGANIZATION"),
   RELAY_OTLP_TRACES_URL: optionalConfigString("RELAY_OTLP_TRACES_URL"),
   FEEDBACK_GITHUB_REPO: optionalConfigString("FEEDBACK_GITHUB_REPO"),
-  AXIOM_TOKEN: optionalConfigString("AXIOM_TOKEN"),
 }).pipe(Config.mapEffect(validateForkRelayConfig));

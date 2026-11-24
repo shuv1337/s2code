@@ -22,7 +22,7 @@ The relay currently owns:
 - Listing linked environments and registered mobile devices for an account.
 - Registering mobile notification preferences and APNs or FCM tokens.
 - Receiving published agent activity and delivering notifications or Live Activity updates.
-- Persisting relay state and exposing relay-specific traces for diagnostics.
+- Persisting relay state and optionally exporting operator-configured Worker traces for diagnostics.
 
 The environment server and relay have separate credentials and trust boundaries. Read
 [Environment Authentication Profile](../../docs/internals/04_environment-auth.md) before changing token,
@@ -84,7 +84,9 @@ vp run --filter t3code-relay deploy
 ```
 
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
-connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
+connectivity, and optional self-hosted Worker OTLP tracing (`RELAY_OTLP_TRACES_URL`). Axiom
+observability, R2 source-map buckets, and mobile telemetry forwarding are disabled in this fork
+(`/v1/mobile/observe` returns `503 mobile_telemetry_not_configured`). Copy [`infra/relay/.env.example`](./.env.example) to
 `infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
 file from the relay directory. Runtime secrets include Clerk, APNs, and optional FCM credentials. Set
 `APNS_ENABLED=false` for an Android-only development deployment without Apple credentials. Production adopts
@@ -111,9 +113,10 @@ DNS-safe sanitization as Alchemy physical resource names, so `prod` uses
 domain override.
 
 The stack's `PublishClientConfig` action ([`src/clientConfig.ts`](./src/clientConfig.ts)) writes the
-deployed relay URL and tracing configuration into the repository-root `.env`, so subsequent source
-builds point at the relay that was just deployed without copying values manually. It runs only when
-one of those outputs changed, and `T3CODE_RELAY_CLIENT_CONFIG_ENV` redirects it to another file.
+deployed relay URL and `CloudMintKeyPair` public key into the repository-root `.env` (it never
+emits client tracing tokens), so subsequent source builds point at the relay that was just deployed
+without copying values manually. It runs only when one of those outputs changed, and
+`T3CODE_RELAY_CLIENT_CONFIG_ENV` redirects it to another file.
 
 ### Deployment CI
 
@@ -125,50 +128,48 @@ stage, and the cleanup workflow tears it down; see
 [`relay-preview.yml`](../../.github/workflows/relay-preview.yml). Developers can
 deploy personal non-production stages locally with any stage name other than `prod`.
 
-The repository must define these Actions variables shared by relay deployments:
+The repository must define these Actions variables shared by relay deployments (for the fork's
+self-hosted Postgres layout and `production` environment variables, see
+[Fork-owned Connect relay](../../docs/operations/hosted-fork.md)):
 
 - `CLOUDFLARE_ACCOUNT_ID`
-- `PLANETSCALE_ORGANIZATION`
-- `AXIOM_ORG_ID`
+- `PLANETSCALE_ORGANIZATION` (only in PlanetScale mode; leave unset in external Postgres mode)
 
 The repository must define these Actions secrets shared by relay deployments:
 
 - `CLOUDFLARE_API_TOKEN`
-- `PLANETSCALE_API_TOKEN_ID`
-- `PLANETSCALE_API_TOKEN`
-- `AXIOM_TOKEN`
+- `PLANETSCALE_API_TOKEN_ID` (PlanetScale mode only)
+- `PLANETSCALE_API_TOKEN` (PlanetScale mode only)
 
 The `production` GitHub environment must define these Actions variables:
 
 - `RELAY_API_ZONE_NAME`
 - `RELAY_TUNNEL_ZONE_NAME`
 - `RELAY_DOMAIN` if overriding the derived production relay domain
-- `RELAY_ALERT_NOTIFIER_ID`, the Axiom notifier that relay alerts page. Without it the deployment
-  creates no monitors or health dashboard. See
-  [Relay alerts](../../docs/operations/05_relay-observability.md#alerts).
-- `RELAY_WARNING_NOTIFIER_ID`, optional, the Axiom notifier for relay warnings
+- `RELAY_OTLP_TRACES_URL`, optional fork-owned HTTPS OTLP/HTTP endpoint for Worker spans
 - `CLERK_PUBLISHABLE_KEY`
 - `CLERK_JWT_AUDIENCE`
 - `CLERK_JWT_TEMPLATE`
-- `APNS_ENVIRONMENT`
-- `APNS_TEAM_ID`
-- `APNS_KEY_ID`
-- `APNS_BUNDLE_ID`
+- `APNS_ENVIRONMENT` (only when `APNS_ENABLED=true`)
+- `APNS_TEAM_ID` (only when `APNS_ENABLED=true`)
+- `APNS_KEY_ID` (only when `APNS_ENABLED=true`)
+- `APNS_BUNDLE_ID` (only when `APNS_ENABLED=true`)
 
 The `production` GitHub environment must define these Actions secrets:
 
 - `CLERK_SECRET_KEY`
-- `APNS_PRIVATE_KEY`
+- `RELAY_OTLP_TRACES_TOKEN`, optional bearer token for `RELAY_OTLP_TRACES_URL`
+- `APNS_PRIVATE_KEY` (only when `APNS_ENABLED=true`)
 - `FCM_SERVICE_ACCOUNT` when Android push is enabled
 - `T3CHAT_LINK_SECRET`, optional, shared with T3 Chat's `T3CODE_LINK_SECRET`. Without it the
   T3 Chat account link is off. Local and preview stages can set `T3CHAT_URL` to point
   at another T3 Chat deployment; production uses `https://t3.chat`.
 
 The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
-are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
-so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The release workflow reads the production relay's
-derived public URL and Clerk publishable key from the same environment for downstream desktop, CLI,
-and hosted web builds.
+are not bound into the relay Worker. Axiom observability and mobile telemetry forwarding are disabled
+in this fork; `AXIOM_TOKEN` and `AXIOM_ORG_ID` are unused. The release workflow reads the production
+relay's derived public URL and Clerk publishable key from the same environment for downstream desktop,
+CLI, and hosted web builds.
 
 See:
 
