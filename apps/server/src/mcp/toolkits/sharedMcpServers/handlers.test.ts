@@ -656,12 +656,10 @@ it.effect(
         expect((yield* settings.getSettings).mcpServers[local]).toEqual(stdio);
         expect((yield* settings.getSettings).mcpServers[future]).toEqual(futureEntry);
 
-        expect(yield* call("t3_mcp_server_test", { id: local })).toEqual({
-          _tag: "Connected",
-          serverName: "/usr/local/bin/executor",
-          tools: ["local"],
-        });
-        expect(harness.wasTested()).toBe(true);
+        for (const target of [local, future]) {
+          expect(yield* call("t3_mcp_server_test", { id: target })).toMatchObject(localProcess);
+        }
+        expect(harness.wasTested()).toBe(false);
         // Writing an unrelated server keeps both entries exactly as saved.
         yield* call("t3_mcp_server_set", { id, url });
         expect((yield* settings.getSettings).mcpServers[local]).toEqual(stdio);

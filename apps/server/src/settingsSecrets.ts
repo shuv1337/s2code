@@ -64,21 +64,24 @@ const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url
 export const mcpServerSecretName = (id: string, url: string, field = "bearerToken") =>
   `mcp-server-${encode(id)}-${encode(field)}-${NodeCrypto.createHash("sha256").update(url).digest("base64url").slice(0, 16)}`;
 
-/**
- * A stdio server's env value, keyed by the command too, so a hand edit that points the entry at
- * another program can't hand it this value.
- */
-/** A slot belongs to one command line: changing the command or its args never reuses a saved value. */
+/** A slot belongs to one command line and audience: widening reach or changing argv never reuses a saved value. */
 export const mcpServerStdioEnvSecretName = (
   id: string,
   command: string,
   args: ReadonlyArray<string>,
   variable: string,
-) =>
-  `mcp-server-stdio-${encode(id)}-env-${encode(variable)}-${NodeCrypto.createHash("sha256")
-    .update(JSON.stringify([command, args]))
+  audience?: {
+    readonly projectIds?: ReadonlyArray<string>;
+    readonly excludeSubagents?: boolean;
+  },
+) => {
+  const projectIds = [...new Set(audience?.projectIds ?? [])].toSorted();
+  const excludeSubagents = Boolean(audience?.excludeSubagents);
+  return `mcp-server-stdio-${encode(id)}-env-${encode(variable)}-${NodeCrypto.createHash("sha256")
+    .update(JSON.stringify([command, args, projectIds, excludeSubagents]))
     .digest("base64url")
     .slice(0, 16)}`;
+};
 
 export interface SettingsSecret {
   readonly secretName: string;
@@ -245,11 +248,16 @@ function mapSecretFieldGroups(
         ? {
             ...server,
             // Every env value is a secret: the entry can't say which ones are.
-            env: mapFields(server.env, Object.keys(server.env), (variable, serverHost) =>
-              serverHost === null
-                ? mcpServerStdioEnvSecretName(id, server.command, server.args, variable)
-                : `${mcpServerStdioEnvSecretName(id, server.command, server.args, variable)}-${encode(serverHost)}`,
-            ),
+            env: mapFields(server.env, Object.keys(server.env), (variable, serverHost) => {
+              const base = mcpServerStdioEnvSecretName(
+                id,
+                server.command,
+                server.args,
+                variable,
+                server,
+              );
+              return serverHost === null ? base : `${base}-${encode(serverHost)}`;
+            }),
           }
         : !isHttpMcpServer(server)
           ? server

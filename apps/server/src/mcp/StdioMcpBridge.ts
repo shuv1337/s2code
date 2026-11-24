@@ -4,7 +4,12 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 
-import type { McpServerStdioConfig } from "@t3tools/contracts";
+import {
+  isStdioMcpServer,
+  type McpServerStdioConfig,
+  type ServerSettings,
+} from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,14 +35,14 @@ export interface StdioMcpBridgeOptions {
   /** Children across every server; each costs ~100+ MB. */
   readonly maxSessions?: number;
   readonly maxSessionsPerServer?: number;
-  /** A stdout line longer than this closes the session instead of growing the buffer. */
-  readonly maxMessageChars?: number;
+  /** A stdout line longer than this in UTF-8 bytes closes the session instead of growing the buffer. */
+  readonly maxMessageBytes?: number;
   readonly idleTimeoutMs?: number;
   readonly initializeTimeoutMs?: number;
-  readonly stderrBytes?: number;
   readonly killGraceMs?: number;
   /** Variables the child inherits from this server; everything else comes from the entry's env. */
   readonly inheritEnv?: ReadonlyArray<string>;
+  readonly platform?: NodeJS.Platform;
 }
 
 const DEFAULT_INHERITED_ENV = [
@@ -60,6 +65,12 @@ interface Envelope {
   readonly error?: unknown;
 }
 
+interface CloseDetails {
+  readonly exitCode?: number;
+  readonly signal?: NodeJS.Signals;
+  readonly errorCode?: string;
+}
+
 const isRecord = (value: unknown): value is Envelope =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is JsonRpcId =>
@@ -75,8 +86,37 @@ const rpcError = (id: JsonRpcId | null, message: string, code = -32000) =>
   json(200, { jsonrpc: "2.0", id, error: { code, message } });
 const empty = (status: number): StdioBridgeResponse => ({ status, headers: {}, body: "" });
 
+const errnoCode = (error: unknown): string | undefined =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code
+    : undefined;
+
+const signalProcessTree = (
+  child: NodeChildProcess.ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals,
+  platform: NodeJS.Platform,
+) => {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Process group may already be gone; fall back to the direct child handle.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // Already exited.
+  }
+};
+
 /** The binding a session was spawned for; a settings edit retires sessions that no longer match it. */
-export const stdioServerFingerprint = (server: StdioBridgeRequest["server"]) =>
+const stdioServerFingerprint = (server: StdioBridgeRequest["server"]) =>
   NodeCrypto.createHash("sha256")
     .update(
       JSON.stringify([
@@ -94,20 +134,26 @@ interface Pending {
 class StdioSession {
   readonly id = NodeCrypto.randomUUID();
   private readonly pending = new Map<string, Pending>();
-  private buffered = "";
-  private stderr = "";
+  private frameChunks: Buffer[] = [];
+  private frameBytes = 0;
   private initialized = false;
   private readonly waiting: Array<() => void> = [];
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  private resolveProcessEnd!: () => void;
+  readonly processExited: Promise<void>;
+  processEnded = false;
   lastUsed = Date.now();
   closed = false;
+  closeReason: string | undefined;
 
   readonly serverId: string;
   readonly owner: string;
   readonly fingerprint: string;
   readonly child: NodeChildProcess.ChildProcessWithoutNullStreams;
   private readonly options: Required<StdioMcpBridgeOptions>;
-  private readonly onClose: (session: StdioSession, reason: string) => void;
+  private readonly onClose: (session: StdioSession, reason: string, details?: CloseDetails) => void;
+  private readonly onProcessEnd: (session: StdioSession) => void;
 
   constructor(
     serverId: string,
@@ -115,7 +161,8 @@ class StdioSession {
     fingerprint: string,
     child: NodeChildProcess.ChildProcessWithoutNullStreams,
     options: Required<StdioMcpBridgeOptions>,
-    onClose: (session: StdioSession, reason: string) => void,
+    onClose: (session: StdioSession, reason: string, details?: CloseDetails) => void,
+    onProcessEnd: (session: StdioSession) => void,
   ) {
     this.serverId = serverId;
     this.owner = owner;
@@ -123,28 +170,48 @@ class StdioSession {
     this.child = child;
     this.options = options;
     this.onClose = onClose;
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.read(chunk));
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      this.stderr = (this.stderr + chunk).slice(-options.stderrBytes);
+    this.onProcessEnd = onProcessEnd;
+    this.processExited = new Promise<void>((resolve) => {
+      this.resolveProcessEnd = resolve;
     });
-    child.stdin.on("error", () => this.close("its stdin closed"));
-    child.on("error", (error) => this.close(`it could not start (${error.message})`));
-    child.on("exit", (code, signal) =>
-      this.close(`it exited (${signal ?? `code ${code ?? "unknown"}`})`),
+    child.stdout.on("data", (chunk: Buffer | string) =>
+      this.read(typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk),
     );
+    // Drain stderr without retaining it so a noisy child never fills its pipe buffer or leaks secrets to logs.
+    child.stderr.resume();
+    child.stdin.on("error", () => this.close("its stdin closed"));
+    child.on("error", (error) => {
+      this.markProcessEnded();
+      const errorCode = errnoCode(error);
+      this.close("it could not start", errorCode !== undefined ? { errorCode } : undefined);
+    });
+    child.on("exit", (code, signal) => {
+      this.markProcessEnded();
+      this.close(`it exited (${signal ?? `code ${code ?? "unknown"}`})`, {
+        ...(code !== null ? { exitCode: code } : {}),
+        ...(signal !== null ? { signal } : {}),
+      });
+    });
     this.touch();
   }
 
-  get stderrTail() {
-    return this.stderr;
+  private markProcessEnded() {
+    if (this.processEnded) return;
+    this.processEnded = true;
+    clearTimeout(this.forceKillTimer);
+    this.forceKillTimer = undefined;
+    this.onProcessEnd(this);
+    this.resolveProcessEnd();
   }
 
   touch() {
+    if (this.closed) return;
     this.lastUsed = Date.now();
     clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.close("it was idle"), this.options.idleTimeoutMs);
+    this.idleTimer = setTimeout(
+      () => (this.busy ? this.touch() : this.close("it was idle")),
+      this.options.idleTimeoutMs,
+    );
     this.idleTimer.unref?.();
   }
 
@@ -153,19 +220,43 @@ class StdioSession {
     return this.pending.size > 0;
   }
 
-  private read(chunk: string) {
-    if (this.closed) return;
-    this.buffered += chunk;
-    let newline = this.buffered.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.buffered.slice(0, newline).trim();
-      this.buffered = this.buffered.slice(newline + 1);
-      if (line.length > 0) this.receive(line);
-      newline = this.buffered.indexOf("\n");
-    }
-    if (this.buffered.length > this.options.maxMessageChars) {
-      this.buffered = "";
-      this.close(`it sent a message over ${this.options.maxMessageChars} characters`);
+  private read(chunk: Buffer) {
+    if (this.closed || chunk.length === 0) return;
+    let start = 0;
+    while (start < chunk.length) {
+      const newline = chunk.indexOf(0x0a, start);
+      if (newline === -1) {
+        const part = start === 0 ? chunk : chunk.subarray(start);
+        this.frameBytes += part.length;
+        if (this.frameBytes > this.options.maxMessageBytes) {
+          this.frameChunks = [];
+          this.frameBytes = 0;
+          this.close(`it sent a message over ${this.options.maxMessageBytes} bytes`);
+          return;
+        }
+        this.frameChunks.push(part);
+        return;
+      }
+      const part = chunk.subarray(start, newline);
+      const totalBytes = this.frameBytes + part.length;
+      if (totalBytes > this.options.maxMessageBytes) {
+        this.frameChunks = [];
+        this.frameBytes = 0;
+        this.close(`it sent a message over ${this.options.maxMessageBytes} bytes`);
+        return;
+      }
+      const lineBuffer =
+        this.frameChunks.length === 0
+          ? part
+          : Buffer.concat([...this.frameChunks, part], totalBytes);
+      this.frameChunks = [];
+      this.frameBytes = 0;
+      start = newline + 1;
+      const line = lineBuffer.toString("utf8").trim();
+      if (line.length > 0) {
+        this.receive(line);
+        if (this.closed) return;
+      }
     }
   }
 
@@ -178,20 +269,26 @@ class StdioSession {
     }
     if (!isRecord(message)) return;
     if (typeof message.method === "string") {
-      // No GET stream, so server-initiated requests (sampling, elicitation, roots) can't reach the harness.
       if (isId(message.id)) {
-        this.write({
-          jsonrpc: "2.0",
-          id: message.id,
-          error: { code: -32601, message: "Not supported through T3 Code's shared MCP bridge." },
-        });
+        if (message.method === "ping") {
+          this.write({ jsonrpc: "2.0", id: message.id, result: {} });
+        } else {
+          // No GET stream, so server-initiated requests (sampling, elicitation, roots) can't reach the harness.
+          this.write({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "Not supported through T3 Code's shared MCP bridge." },
+          });
+        }
       }
       return;
     }
     if (!isId(message.id)) return;
-    const pending = this.pending.get(idKey(message.id));
+    const key = idKey(message.id);
+    const pending = this.pending.get(key);
     if (pending === undefined) return;
-    this.pending.delete(idKey(message.id));
+    this.pending.delete(key);
+    this.touch();
     pending.resolve({ status: 200, headers: { "content-type": "application/json" }, body: line });
   }
 
@@ -213,14 +310,31 @@ class StdioSession {
     for (const resume of this.waiting.splice(0)) resume();
   }
 
-  request(id: JsonRpcId, message: unknown, gated: boolean): Promise<StdioBridgeResponse> {
+  request(
+    id: JsonRpcId,
+    message: unknown,
+    gated: boolean,
+    signal?: AbortSignal,
+  ): Promise<StdioBridgeResponse> {
+    if (this.closed) return Promise.resolve(rpcError(id, "The MCP server process is closed."));
+    if (signal?.aborted) return Promise.resolve(rpcError(id, "The request was cancelled."));
     const key = idKey(id);
     if (this.pending.has(key))
       return Promise.resolve(rpcError(id, "Duplicate request id.", -32600));
     return new Promise((resolve) => {
-      this.pending.set(key, { resolve });
+      const onAbort = () => {
+        if (!this.pending.delete(key)) return;
+        if (!this.closed && !this.busy) this.touch();
+        settle(rpcError(id, "The request was cancelled."));
+      };
+      const settle = (response: StdioBridgeResponse) => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(response);
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      this.pending.set(key, { resolve: settle });
       const send = () => {
-        if (this.closed) return; // close() already answered it.
+        if (this.closed || signal?.aborted || !this.pending.has(key)) return;
         this.write(message);
       };
       if (gated) void this.ready().then(send);
@@ -228,15 +342,24 @@ class StdioSession {
     });
   }
 
-  async notify(message: unknown): Promise<void> {
+  async notify(message: unknown, signal?: AbortSignal): Promise<void> {
     await this.ready();
+    if (signal?.aborted) return;
     this.write(message);
   }
 
-  close(reason: string) {
+  terminate() {
+    if (this.processEnded) return;
+    signalProcessTree(this.child, "SIGTERM", this.options.platform);
+  }
+
+  close(reason: string, details?: CloseDetails) {
     if (this.closed) return;
     this.closed = true;
+    this.closeReason = reason;
     clearTimeout(this.idleTimer);
+    this.frameChunks = [];
+    this.frameBytes = 0;
     for (const resume of this.waiting.splice(0)) resume();
     for (const [key, pending] of this.pending) {
       pending.resolve(
@@ -247,15 +370,20 @@ class StdioSession {
       );
     }
     this.pending.clear();
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      this.child.kill("SIGTERM");
-      const force = setTimeout(() => {
-        if (this.child.exitCode === null && this.child.signalCode === null)
-          this.child.kill("SIGKILL");
+    this.onClose(this, reason, details);
+    if (!this.processEnded && this.child.exitCode === null && this.child.signalCode === null) {
+      try {
+        this.child.stdin.end();
+      } catch {
+        // Stdin may already be ended or broken.
+      }
+      signalProcessTree(this.child, "SIGTERM", this.options.platform);
+      this.forceKillTimer = setTimeout(() => {
+        this.forceKillTimer = undefined;
+        signalProcessTree(this.child, "SIGKILL", this.options.platform);
       }, this.options.killGraceMs);
-      force.unref?.();
+      this.forceKillTimer.unref?.();
     }
-    this.onClose(this, reason);
   }
 }
 
@@ -266,6 +394,8 @@ class StdioSession {
  */
 export class StdioMcpBridgeCore {
   private readonly sessions = new Map<string, StdioSession>();
+  private readonly retiring = new Set<StdioSession>();
+  private readonly reserving: string[] = [];
   private readonly options: Required<StdioMcpBridgeOptions>;
 
   private readonly log: (message: string, details: Record<string, unknown>) => void;
@@ -278,17 +408,21 @@ export class StdioMcpBridgeCore {
     this.options = {
       maxSessions: options.maxSessions ?? 6,
       maxSessionsPerServer: options.maxSessionsPerServer ?? 4,
-      maxMessageChars: options.maxMessageChars ?? 8 * 1024 * 1024,
+      maxMessageBytes: options.maxMessageBytes ?? 8 * 1024 * 1024,
       idleTimeoutMs: options.idleTimeoutMs ?? 10 * 60_000,
       initializeTimeoutMs: options.initializeTimeoutMs ?? 10_000,
-      stderrBytes: options.stderrBytes ?? 16 * 1024,
       killGraceMs: options.killGraceMs ?? 2_000,
       inheritEnv: options.inheritEnv ?? DEFAULT_INHERITED_ENV,
+      platform: options.platform ?? HostProcess.Platform.defaultValue(),
     };
   }
 
   get sessionCount() {
     return this.sessions.size;
+  }
+
+  get retiringCount() {
+    return this.retiring.size;
   }
 
   /** Live child pids, for tests and diagnostics. */
@@ -300,6 +434,7 @@ export class StdioMcpBridgeCore {
 
   closeAll(reason = "T3 Code stopped") {
     for (const session of this.sessions.values()) session.close(reason);
+    for (const session of this.retiring) session.terminate();
   }
 
   /** Stops every session of a server, e.g. after it is removed or disabled. */
@@ -309,7 +444,24 @@ export class StdioMcpBridgeCore {
     }
   }
 
-  async handle(request: StdioBridgeRequest): Promise<StdioBridgeResponse> {
+  /** Stops only active sessions whose server was removed, disabled, non-stdio, or changed fingerprint. */
+  reconcile(mcpServers: ServerSettings["mcpServers"], reason?: string) {
+    for (const session of this.sessions.values()) {
+      const entry = Object.hasOwn(mcpServers, session.serverId)
+        ? mcpServers[session.serverId as keyof ServerSettings["mcpServers"]]
+        : undefined;
+      let staleReason: string | undefined;
+      if (entry === undefined) staleReason = reason ?? "it was removed in Settings";
+      else if (!isStdioMcpServer(entry))
+        staleReason = reason ?? "it is no longer a local process in Settings";
+      else if (!entry.enabled) staleReason = reason ?? "it was turned off in Settings";
+      else if (stdioServerFingerprint(entry) !== session.fingerprint)
+        staleReason = reason ?? "its settings changed";
+      if (staleReason !== undefined) session.close(staleReason);
+    }
+  }
+
+  async handle(request: StdioBridgeRequest, signal?: AbortSignal): Promise<StdioBridgeResponse> {
     if (request.method === "GET") return empty(405); // No server-to-client stream; the spec allows 405.
     const fingerprint = stdioServerFingerprint(request.server);
     const session =
@@ -338,16 +490,19 @@ export class StdioMcpBridgeCore {
     if (message.method === "initialize") {
       if (!isId(message.id)) return rpcError(null, "initialize needs an id.", -32600);
       if (request.sessionId !== undefined) live?.close("the harness initialized again");
-      return this.initialize(request, fingerprint, message.id, message);
+      return this.initialize(request, fingerprint, message.id, message, signal);
     }
     // Spec: a request for an unknown or ended session gets 404 and the client initializes again.
     if (live === undefined) return empty(request.sessionId === undefined ? 400 : 404);
+    if (Object.hasOwn(message, "id") && message.id !== undefined && !isId(message.id)) {
+      return rpcError(null, "Invalid Request.", -32600);
+    }
     live.touch();
     if (typeof message.method === "string" && isId(message.id)) {
-      return live.request(message.id, message, true);
+      return live.request(message.id, message, true, signal);
     }
     // Notifications and the client's answers to server requests.
-    await live.notify(message);
+    await live.notify(message, signal);
     return empty(202);
   }
 
@@ -356,48 +511,78 @@ export class StdioMcpBridgeCore {
     fingerprint: string,
     id: JsonRpcId,
     message: unknown,
+    signal?: AbortSignal,
   ): Promise<StdioBridgeResponse> {
-    if (!this.makeRoom(request.serverId)) {
+    if (signal?.aborted) return rpcError(id, "The request was cancelled.");
+    const deadline = Date.now() + this.options.initializeTimeoutMs;
+    const room = await this.reserveRoom(request.serverId, deadline, signal);
+    if (room === "aborted") return rpcError(id, "The request was cancelled.");
+    if (room === "timeout") {
+      return rpcError(
+        id,
+        `The MCP server did not answer initialize within ${this.options.initializeTimeoutMs / 1000}s.`,
+      );
+    }
+    if (room === "busy") {
       return rpcError(
         id,
         "Too many MCP server processes are busy right now. Try again when a running call finishes.",
       );
     }
-    const inherited: Record<string, string> = {};
-    for (const name of this.options.inheritEnv) {
-      const value = process.env[name];
-      if (value !== undefined) inherited[name] = value;
-    }
-    let child: NodeChildProcess.ChildProcessWithoutNullStreams;
+    let session: StdioSession;
     try {
-      child = NodeChildProcess.spawn(request.server.command, [...request.server.args], {
-        env: { ...inherited, ...request.server.env },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch (error) {
-      return rpcError(id, `Could not start the MCP server: ${String(error)}`);
-    }
-    const session = new StdioSession(
-      request.serverId,
-      request.owner,
-      fingerprint,
-      child,
-      this.options,
-      (closed, reason) => {
-        this.sessions.delete(closed.id);
-        this.log("stdio MCP session closed", {
-          serverId: closed.serverId,
-          reason,
-          ...(closed.stderrTail.length > 0 ? { stderrTail: closed.stderrTail.slice(-2048) } : {}),
+      const inherited: Record<string, string> = {};
+      for (const name of this.options.inheritEnv) {
+        const value = process.env[name];
+        if (value !== undefined) inherited[name] = value;
+      }
+      let child: NodeChildProcess.ChildProcessWithoutNullStreams;
+      try {
+        child = NodeChildProcess.spawn(request.server.command, [...request.server.args], {
+          env: { ...inherited, ...request.server.env },
+          stdio: ["pipe", "pipe", "pipe"],
+          ...(this.options.platform !== "win32" ? { detached: true } : {}),
         });
-      },
-    );
-    this.sessions.set(session.id, session);
+      } catch (error) {
+        const errorCode = errnoCode(error);
+        this.log("stdio MCP server failed to start", {
+          serverId: request.serverId,
+          ...(errorCode !== undefined ? { errorCode } : {}),
+        });
+        return rpcError(id, "The MCP server process could not start.");
+      }
+      session = new StdioSession(
+        request.serverId,
+        request.owner,
+        fingerprint,
+        child,
+        this.options,
+        (closed, reason, details) => {
+          this.sessions.delete(closed.id);
+          if (!closed.processEnded) this.retiring.add(closed);
+          this.log("stdio MCP session closed", {
+            serverId: closed.serverId,
+            reason,
+            ...(details?.exitCode !== undefined ? { exitCode: details.exitCode } : {}),
+            ...(details?.signal !== undefined ? { signal: details.signal } : {}),
+            ...(details?.errorCode !== undefined ? { errorCode: details.errorCode } : {}),
+          });
+        },
+        (ended) => {
+          this.retiring.delete(ended);
+        },
+      );
+      this.sessions.set(session.id, session);
+    } finally {
+      const index = this.reserving.indexOf(request.serverId);
+      if (index !== -1) this.reserving.splice(index, 1);
+    }
+    const remainingMs = Math.max(0, deadline - Date.now());
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), this.options.initializeTimeoutMs);
+      timer = setTimeout(() => resolve("timeout"), remainingMs);
     });
-    const answered = await Promise.race([session.request(id, message, false), timedOut]);
+    const answered = await Promise.race([session.request(id, message, false, signal), timedOut]);
     clearTimeout(timer);
     if (answered === "timeout") {
       session.close("it did not answer initialize in time");
@@ -406,38 +591,113 @@ export class StdioMcpBridgeCore {
         `The MCP server did not answer initialize within ${this.options.initializeTimeoutMs / 1000}s.`,
       );
     }
+    if (signal?.aborted) {
+      session.close("the request was cancelled");
+      return rpcError(id, "The request was cancelled.");
+    }
     const parsed = JSON.parse(answered.body) as Envelope;
     if (parsed.error !== undefined || session.closed) {
       session.close("initialize failed");
-      return answered;
+      return parsed.error !== undefined
+        ? answered
+        : rpcError(
+            id,
+            `The MCP server process stopped before answering: ${session.closeReason ?? "initialize failed"}.`,
+          );
     }
     session.markInitialized();
     return { ...answered, headers: { ...answered.headers, "mcp-session-id": session.id } };
   }
 
+  private countForServer(serverId: string) {
+    let count = 0;
+    for (const session of this.sessions.values()) if (session.serverId === serverId) count++;
+    for (const session of this.retiring) if (session.serverId === serverId) count++;
+    for (const id of this.reserving) if (id === serverId) count++;
+    return count;
+  }
+
+  private countTotal() {
+    return this.sessions.size + this.retiring.size + this.reserving.length;
+  }
+
+  private waitForAnyExit(
+    sessions: ReadonlyArray<StdioSession>,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<"exited" | "timeout" | "aborted"> {
+    if (signal?.aborted) return Promise.resolve("aborted");
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return Promise.resolve("timeout");
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (result: "exited" | "timeout" | "aborted") => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(result);
+      };
+      const onAbort = () => done("aborted");
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const timer = setTimeout(() => done("timeout"), remainingMs);
+      timer.unref?.();
+      for (const session of sessions) {
+        void session.processExited.then(() => done("exited"));
+      }
+    });
+  }
+
   /**
    * Keeps a runaway harness from spawning without bound: idle sessions go, least recently used
-   * first; a session with a call in flight is never cut. False when no idle session can make room.
+   * first; a session with a call in flight is never cut; retiring children count until they exit.
    */
-  private makeRoom(serverId: string): boolean {
-    const forServer = () =>
-      [...this.sessions.values()].filter((session) => session.serverId === serverId).length;
-    const idle = (onlyThisServer: boolean) =>
-      [...this.sessions.values()]
-        .filter((session) => !session.busy && (!onlyThisServer || session.serverId === serverId))
-        .toSorted((a, b) => a.lastUsed - b.lastUsed);
-    for (const session of idle(true)) {
-      if (forServer() < this.options.maxSessionsPerServer) break;
-      session.close("too many sessions were open for this server");
+  private async reserveRoom(
+    serverId: string,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<"reserved" | "busy" | "timeout" | "aborted"> {
+    while (true) {
+      if (signal?.aborted) return "aborted";
+      const forServer = this.countForServer(serverId);
+      const total = this.countTotal();
+      if (forServer < this.options.maxSessionsPerServer && total < this.options.maxSessions) {
+        this.reserving.push(serverId);
+        return "reserved";
+      }
+      const idle = (onlyThisServer: boolean) =>
+        [...this.sessions.values()]
+          .filter((session) => !session.busy && (!onlyThisServer || session.serverId === serverId))
+          .toSorted((a, b) => a.lastUsed - b.lastUsed);
+      let evicted = false;
+      if (forServer >= this.options.maxSessionsPerServer) {
+        const candidate = idle(true)[0];
+        if (candidate !== undefined) {
+          candidate.close("too many sessions were open for this server");
+          evicted = true;
+        }
+      }
+      if (!evicted && total >= this.options.maxSessions) {
+        const candidate = idle(false)[0];
+        if (candidate !== undefined) {
+          candidate.close("too many MCP server processes were open");
+          evicted = true;
+        }
+      }
+      if (
+        this.countForServer(serverId) < this.options.maxSessionsPerServer &&
+        this.countTotal() < this.options.maxSessions
+      ) {
+        continue;
+      }
+      const relevantRetiring =
+        this.countForServer(serverId) >= this.options.maxSessionsPerServer
+          ? [...this.retiring].filter((session) => session.serverId === serverId)
+          : [...this.retiring];
+      if (relevantRetiring.length === 0) return "busy";
+      const waited = await this.waitForAnyExit(relevantRetiring, deadline, signal);
+      if (waited !== "exited") return waited;
     }
-    for (const session of idle(false)) {
-      if (this.sessions.size < this.options.maxSessions) break;
-      session.close("too many MCP server processes were open");
-    }
-    return (
-      forServer() < this.options.maxSessionsPerServer &&
-      this.sessions.size < this.options.maxSessions
-    );
   }
 }
 
@@ -446,17 +706,25 @@ export class StdioMcpBridge extends Context.Service<
   {
     readonly handle: (request: StdioBridgeRequest) => Effect.Effect<StdioBridgeResponse>;
     readonly closeServer: (serverId: string, reason: string) => Effect.Effect<void>;
+    readonly reconcile: (
+      mcpServers: ServerSettings["mcpServers"],
+      reason?: string,
+    ) => Effect.Effect<void>;
   }
 >()("t3/mcp/StdioMcpBridge") {}
 
 export const make = Effect.fn("StdioMcpBridge.make")(function* (options?: StdioMcpBridgeOptions) {
-  const core = new StdioMcpBridgeCore(options, (message, details) => {
-    Effect.runFork(Effect.logInfo(message, details));
+  const platform = yield* HostProcess.Platform;
+  const services = yield* Effect.context<never>();
+  const runFork = Effect.runForkWith(services);
+  const core = new StdioMcpBridgeCore({ platform, ...options }, (message, details) => {
+    runFork(Effect.logInfo(message, details));
   });
   yield* Effect.addFinalizer(() => Effect.sync(() => core.closeAll()));
   return StdioMcpBridge.of({
-    handle: (request) => Effect.promise(() => core.handle(request)),
+    handle: (request) => Effect.promise((signal) => core.handle(request, signal)),
     closeServer: (serverId, reason) => Effect.sync(() => core.closeServer(serverId, reason)),
+    reconcile: (mcpServers, reason) => Effect.sync(() => core.reconcile(mcpServers, reason)),
   });
 });
 

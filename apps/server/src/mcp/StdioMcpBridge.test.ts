@@ -2,8 +2,16 @@
 import * as NodeURL from "node:url";
 
 import { afterEach, describe, expect, it } from "@effect/vitest";
+import { McpServerId, type ServerSettings } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Logger from "effect/Logger";
 
-import { StdioMcpBridgeCore, type StdioBridgeRequest, testStdioServer } from "./StdioMcpBridge.ts";
+import {
+  make as makeStdioMcpBridge,
+  StdioMcpBridgeCore,
+  type StdioBridgeRequest,
+  testStdioServer,
+} from "./StdioMcpBridge.ts";
 
 const FAKE = NodeURL.fileURLToPath(new URL("./testdata/fakeStdioMcpServer.mjs", import.meta.url));
 const server = (env: Record<string, string> = {}): StdioBridgeRequest["server"] => ({
@@ -39,26 +47,33 @@ const harness = (
   owner = "thread-a",
   serverId = "exec",
 ) => {
-  const post = (sessionId: string | undefined, message: unknown) =>
-    core.handle({
-      serverId,
-      server: config,
-      owner,
-      method: "POST",
-      sessionId,
-      body: JSON.stringify(message),
-    });
-  const initialize = async () => {
-    const response = await post(undefined, {
-      jsonrpc: "2.0",
-      id: 0,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "t", version: "1" },
+  const post = (sessionId: string | undefined, message: unknown, signal?: AbortSignal) =>
+    core.handle(
+      {
+        serverId,
+        server: config,
+        owner,
+        method: "POST",
+        sessionId,
+        body: JSON.stringify(message),
       },
-    });
+      signal,
+    );
+  const initialize = async (signal?: AbortSignal) => {
+    const response = await post(
+      undefined,
+      {
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "t", version: "1" },
+        },
+      },
+      signal,
+    );
     return { response, sessionId: response.headers["mcp-session-id"] };
   };
   return { post, initialize };
@@ -239,21 +254,269 @@ describe("StdioMcpBridgeCore", () => {
     expect(body(await hung).error.message).toMatch(/stopped before answering/);
   });
 
-  it("closes a session whose server writes an oversized message", async () => {
-    const core = makeCore({ maxMessageChars: 1024 });
+  it("closes a session whose server writes an oversized message (unterminated, terminated, or multibyte UTF-8)", async () => {
+    // Unterminated frame past byte limit.
+    {
+      const core = makeCore({ maxMessageBytes: 1024 });
+      const { post, initialize } = harness(core, server());
+      const { sessionId } = await initialize();
+      const [pid] = core.pids();
+      const flooded = await post(sessionId, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "flood", arguments: { chars: 4096 } },
+      });
+      expect(body(flooded).error.message).toMatch(/over 1024 bytes/);
+      await until(() => !alive(pid!));
+      expect(core.sessionCount).toBe(0);
+    }
+
+    // Complete newline-terminated frame exceeding limit in its final chunk: must close and NOT parse.
+    {
+      const core = makeCore({ maxMessageBytes: 1024 });
+      const { post, initialize } = harness(core, server());
+      const { sessionId } = await initialize();
+      const [pid] = core.pids();
+      const flooded = await post(sessionId, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "flood", arguments: { chars: 1200, terminated: true } },
+      });
+      expect(body(flooded)).toMatchObject({ id: 2, error: { code: -32000 } });
+      expect(body(flooded).error.message).toMatch(/over 1024 bytes/);
+      await until(() => !alive(pid!));
+      expect(core.sessionCount).toBe(0);
+    }
+
+    // Multibyte UTF-8 frame: 500 CJK chars (UTF-16 length < 1024) = 1500 UTF-8 bytes > 1024.
+    {
+      const core = makeCore({ maxMessageBytes: 1024 });
+      const { post, initialize } = harness(core, server());
+      const { sessionId } = await initialize();
+      const [pid] = core.pids();
+      const flooded = await post(sessionId, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "flood", arguments: { chars: 500, char: "中", terminated: true } },
+      });
+      expect(body(flooded)).toMatchObject({ id: 3, error: { code: -32000 } });
+      expect(body(flooded).error.message).toMatch(/over 1024 bytes/);
+      await until(() => !alive(pid!));
+      expect(core.sessionCount).toBe(0);
+    }
+  });
+
+  it("keeps a session alive past idleTimeoutMs while a call is in flight, then closes once idle", async () => {
+    const core = makeCore({ idleTimeoutMs: 120 });
     const { post, initialize } = harness(core, server());
     const { sessionId } = await initialize();
     const [pid] = core.pids();
-    const flooded = await post(sessionId, {
+    const slow = await post(sessionId, {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "flood", arguments: { chars: 4096 } },
+      params: { name: "echo", arguments: { text: "after-idle-window", delayMs: 280 } },
     });
-    expect(body(flooded).error.message).toMatch(/over 1024 characters/);
-    await until(() => !alive(pid!));
+    expect(body(slow)).toMatchObject({
+      id: 1,
+      result: { content: [{ text: "after-idle-window" }] },
+    });
+    expect(core.sessionCount).toBe(1);
+    await until(() => core.sessionCount === 0 && !alive(pid!));
+  });
+
+  it("clears pending state when a request is aborted and closes aborted initializations", async () => {
+    const core = makeCore({ maxSessions: 1, idleTimeoutMs: 150 });
+    const first = harness(core, server(), "t1", "a");
+    const { sessionId } = await first.initialize();
+    const [firstPid] = core.pids();
+
+    // Abort a hung call: busy clears, duplicate-id is freed, and LRU/idle can reclaim the session.
+    const callAbort = new AbortController();
+    const hung = first.post(
+      sessionId,
+      { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "hang" } },
+      callAbort.signal,
+    );
+    callAbort.abort();
+    expect(body(await hung)).toMatchObject({ id: 9, error: { code: -32000 } });
+
+    // Reusing the same id works immediately (no stuck duplicate-id error).
+    const reused = await first.post(sessionId, {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "ok" } },
+    });
+    expect(body(reused)).toMatchObject({ id: 9, result: { content: [{ text: "ok" }] } });
+
+    // Because busy is cleared, another session can evict it via LRU.
+    const second = await harness(core, server(), "t2", "b").initialize();
+    expect(second.sessionId).toBeDefined();
+    await until(() => !alive(firstPid!));
+    core.closeAll();
+
+    // Aborting an in-flight initialize closes the half-initialized session without leaking a process.
+    const initAbort = new AbortController();
+    const pendingInit = harness(core, server({ FAKE_MCP_NEVER_INIT: "1" }), "t3", "c").initialize(
+      initAbort.signal,
+    );
+    await until(() => core.pids().length === 1);
+    const [halfPid] = core.pids();
+    initAbort.abort();
+    const cancelled = await pendingInit;
+    expect(cancelled.sessionId).toBeUndefined();
+    expect(body(cancelled.response)).toMatchObject({ id: 0, error: { code: -32000 } });
+    await until(() => !alive(halfPid!));
     expect(core.sessionCount).toBe(0);
   });
+
+  it("counts retiring processes against the session cap until they actually exit", async () => {
+    const core = makeCore({ maxSessions: 1, killGraceMs: 250 });
+    const first = harness(core, server({ FAKE_MCP_IGNORE_SIGTERM: "1" }), "t1", "a");
+    const { sessionId } = await first.initialize();
+    const [firstPid] = core.pids();
+    expect(alive(firstPid!)).toBe(true);
+
+    // Close moves the SIGTERM-ignoring child into retiring until SIGKILL ends it.
+    await core.handle({
+      serverId: "a",
+      server: server({ FAKE_MCP_IGNORE_SIGTERM: "1" }),
+      owner: "t1",
+      method: "DELETE",
+      sessionId,
+      body: "",
+    });
+    expect(core.sessionCount).toBe(0);
+    expect(core.retiringCount).toBe(1);
+
+    // A replacement waits for the retiring process to exit before spawning, then succeeds.
+    const second = await harness(core, server(), "t2", "b").initialize();
+    expect(second.sessionId).toBeDefined();
+    expect(alive(firstPid!)).toBe(false);
+    expect(core.retiringCount).toBe(0);
+    expect(core.sessionCount).toBe(1);
+  });
+
+  it("reconcile keeps sessions matching the new config while closing stale ones", async () => {
+    const core = makeCore();
+    const oldConfig = server({ VERSION: "1" });
+    const newConfig = server({ VERSION: "2" });
+    const oldSession = await harness(core, oldConfig, "t1", "local").initialize();
+    const newSession = await harness(core, newConfig, "t2", "local").initialize();
+    const [oldPid, newPid] = core.pids("local");
+
+    const localId = McpServerId.make("local");
+    core.reconcile({
+      [localId]: { transport: "stdio", ...newConfig, enabled: true },
+    } as ServerSettings["mcpServers"]);
+
+    await until(() => !alive(oldPid!));
+    expect(alive(newPid!)).toBe(true);
+    expect(
+      (
+        await harness(core, oldConfig, "t1", "local").post(oldSession.sessionId, {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/list",
+        })
+      ).status,
+    ).toBe(404);
+    const stillAlive = await harness(core, newConfig, "t2", "local").post(newSession.sessionId, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "survived" } },
+    });
+    expect(body(stillAlive)).toMatchObject({ id: 1, result: { content: [{ text: "survived" }] } });
+  });
+
+  it("answers server-initiated ping with {} and rejects explicit invalid request ids", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core);
+    const { sessionId } = await initialize();
+    const pinged = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "ping-client" },
+    });
+    expect(body(pinged)).toMatchObject({ id: 4, result: { pong: {}, error: null } });
+
+    for (const badId of [null, {}, [], true]) {
+      const invalid = await post(sessionId, {
+        jsonrpc: "2.0",
+        id: badId,
+        method: "tools/list",
+      });
+      expect(body(invalid)).toMatchObject({ id: null, error: { code: -32600 } });
+    }
+    // Absent id is still a valid notification.
+    expect(
+      (await post(sessionId, { jsonrpc: "2.0", method: "notifications/initialized" })).status,
+    ).toBe(202);
+  });
+
+  it.effect(
+    "routes bridge logs through the Effect logger without leaking stderr or spawn paths",
+    () =>
+      Effect.gen(function* () {
+        const logs: Array<string> = [];
+        const captureLogger = Logger.make(({ message }) => {
+          logs.push(JSON.stringify(message));
+        });
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const bridge = yield* makeStdioMcpBridge({ killGraceMs: 200 });
+            const missing = yield* bridge.handle({
+              serverId: "missing",
+              server: { command: "/nonexistent/secret-bin/mcp", args: ["--token=abc"], env: {} },
+              owner: "t1",
+              method: "POST",
+              sessionId: undefined,
+              body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} }),
+            });
+            expect(missing.body).not.toContain("/nonexistent/secret-bin/mcp");
+            expect(missing.body).not.toContain("--token=abc");
+            expect(body(missing)).toMatchObject({ id: 0, error: { code: -32000 } });
+
+            const init = yield* bridge.handle({
+              serverId: "exec",
+              server: server(),
+              owner: "t1",
+              method: "POST",
+              sessionId: undefined,
+              body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} }),
+            });
+            yield* bridge.handle({
+              serverId: "exec",
+              server: server(),
+              owner: "t1",
+              method: "POST",
+              sessionId: init.headers["mcp-session-id"],
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "tools/call",
+                params: { name: "crash" },
+              }),
+            });
+          }),
+        ).pipe(Effect.provide(Logger.layer([captureLogger])));
+
+        yield* Effect.promise(() =>
+          expect.poll(() => logs.length, { timeout: 2000, interval: 10 }).toBeGreaterThanOrEqual(2),
+        );
+        const joined = logs.join("\n");
+        expect(joined).toContain("stdio MCP session closed");
+        expect(joined).toContain("ENOENT");
+        expect(joined).not.toContain("SECRET_TOKEN_DO_NOT_LOG");
+        expect(joined).not.toContain("/nonexistent/secret-bin/mcp");
+      }),
+  );
 
   it("retires a session whose command, args or env changed in Settings", async () => {
     const core = makeCore();

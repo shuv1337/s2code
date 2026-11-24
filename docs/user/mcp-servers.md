@@ -71,5 +71,5 @@ agents see every tool twice.
 
 ## Not supported
 
-- Servers that run as a local command (stdio). Only HTTP servers can be added.
+- Adding or editing local-command (stdio) servers in the Settings UI form. Stdio servers are supported via the host's `settings.json` or settings RPC; server-to-client streaming (such as sampling, elicitation, or roots) is not supported through the bridge.
 - Servers that need an OAuth sign-in. Use a bearer token instead.

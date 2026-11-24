@@ -7,6 +7,7 @@ import { useFocusEffect, useNavigation, type StaticScreenProps } from "@react-na
 import {
   AuthProvidersManageScope,
   AuthOrchestrationReadScope,
+  isHttpMcpServer,
   type EnvironmentId,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -542,7 +543,7 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                     <SettingsRow
                       icon="point.3.connected.trianglepath.dotted"
                       label={gt("MCP servers")}
-                      value={`${Object.keys(config.settings.mcpServers).length}`}
+                      value={`${Object.values(config.settings.mcpServers).filter(isHttpMcpServer).length}`}
                       valuePosition="trailing"
                       onPress={() => navigation.navigate("SettingsMcpServers", { environmentId })}
                     />

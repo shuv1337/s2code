@@ -4,8 +4,14 @@ import * as NodeReadline from "node:readline";
 
 const initDelay = Number(process.env.FAKE_MCP_INIT_DELAY_MS ?? "50");
 const neverInit = process.env.FAKE_MCP_NEVER_INIT === "1";
+if (process.env.FAKE_MCP_IGNORE_SIGTERM === "1") {
+  process.on("SIGTERM", () => {});
+  // Keep alive until SIGKILL even after stdin closes.
+  setInterval(() => {}, 60_000);
+}
 let initialized = false;
 let early = 0;
+const serverRequests = new Map();
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 process.stderr.write(`fake server started pid=${process.pid}\n`);
 
@@ -39,6 +45,12 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.id === undefined) return; // notification
   if (message.result !== undefined || message.error !== undefined) {
+    const callback = serverRequests.get(message.id);
+    if (callback !== undefined) {
+      serverRequests.delete(message.id);
+      callback(message);
+      return;
+    }
     process.stderr.write(`client answered ${JSON.stringify(message)}\n`);
     return;
   }
@@ -58,12 +70,18 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
       });
     case "tools/call": {
       const { name, arguments: args } = message.params;
-      if (name === "echo")
-        return send({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { content: [{ type: "text", text: String(args?.text) }], early },
-        });
+      if (name === "echo") {
+        const reply = () =>
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { content: [{ type: "text", text: String(args?.text) }], early },
+          });
+        const delayMs = Number(args?.delayMs ?? 0);
+        if (delayMs > 0) setTimeout(reply, delayMs);
+        else reply();
+        return;
+      }
       if (name === "env")
         return send({
           jsonrpc: "2.0",
@@ -88,24 +106,37 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
           result: { content: [{ type: "text", text: String(process.pid) }] },
         });
       if (name === "flood") {
-        // One unterminated line past the bridge's cap.
-        process.stdout.write("x".repeat(Number(args?.chars ?? 4096)));
+        const fill = String(args?.char ?? "x").repeat(Number(args?.chars ?? 4096));
+        if (args?.terminated === true) {
+          // A newline-terminated JSON-RPC response whose byte length exceeds the bridge's cap.
+          send({ jsonrpc: "2.0", id: message.id, result: { text: fill } });
+        } else {
+          // One unterminated line past the bridge's cap.
+          process.stdout.write(fill);
+        }
         return;
       }
       if (name === "crash") {
-        process.stderr.write("crashing on purpose\n");
+        process.stderr.write("crashing on purpose SECRET_TOKEN_DO_NOT_LOG\n");
         process.exit(3);
       }
       if (name === "ask") {
         // Server-initiated request; the bridge must refuse it, then we answer the call.
+        serverRequests.set("srv-1", (m) => {
+          send({ jsonrpc: "2.0", id: message.id, result: { refused: m.error?.code ?? null } });
+        });
         send({ jsonrpc: "2.0", id: "srv-1", method: "sampling/createMessage", params: {} });
-        const wait = (l) => {
-          const m = JSON.parse(l);
-          if (m.id === "srv-1") {
-            send({ jsonrpc: "2.0", id: message.id, result: { refused: m.error?.code ?? null } });
-          }
-        };
-        NodeReadline.createInterface({ input: process.stdin }).once("line", wait);
+        return;
+      }
+      if (name === "ping-client") {
+        serverRequests.set("ping-1", (m) => {
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { pong: m.result ?? null, error: m.error ?? null },
+          });
+        });
+        send({ jsonrpc: "2.0", id: "ping-1", method: "ping" });
         return;
       }
       return send({

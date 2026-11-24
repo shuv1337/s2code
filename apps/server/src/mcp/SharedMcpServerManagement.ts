@@ -267,12 +267,16 @@ const make = Effect.gen(function* () {
     id: McpServerId,
     caller: SharedMcpServerCaller,
   ) {
-    const saved = yield* reachable((yield* current).mcpServers, id, caller);
+    const configured = (yield* current).mcpServers;
+    const saved = yield* reachable(configured, id, caller);
+    if (
+      (saved !== undefined && !isHttpMcpServer(saved)) ||
+      (saved === undefined && Object.hasOwn(configured, id))
+    )
+      return yield* new SharedMcpServerManagementError({ reason: "local_process" });
     if (saved === undefined)
       return yield* new SharedMcpServerManagementError({ reason: "not_found" });
-    return yield* isStdioMcpServer(saved)
-      ? servers.testStdioConnection(saved)
-      : servers.testConnection(saved);
+    return yield* servers.testConnection(saved);
   });
   return SharedMcpServerManagement.of({ list, set, remove, test });
 });

@@ -70,6 +70,7 @@ import {
 import {
   mapSettingsSecrets,
   mapSettingsSecretValues,
+  mcpServerStdioEnvSecretName,
   withoutRemovedSecretProviderReferences,
   withoutRedirectedSimlockTokens,
   SECRET_REDACTED,
@@ -146,7 +147,7 @@ type McpServerReach = {
 };
 
 /** True when `next` reaches a thread `previous` did not: more projects, or subagents let back in. */
-export function widensMcpServerBinding(previous: McpServerReach, next: McpServerReach): boolean {
+function widensMcpServerBinding(previous: McpServerReach, next: McpServerReach): boolean {
   if ((previous.excludeSubagents ?? false) && !(next.excludeSubagents ?? false)) return true;
   const before = previous.projectIds ?? [];
   if (before.length === 0) return false; // Already every project.
@@ -197,9 +198,17 @@ export function redactServerSettingsForClient(
   return {
     ...shaped,
     // Older clients decode every entry as HTTP and reject the whole settings on one stdio entry.
-    // Their writes patch per entry, so a hidden entry stays saved.
+    // Their writes patch per entry, so a hidden entry stays saved. Unknown transports strip down
+    // to their transport tag so future credential fields never leave the server.
     mcpServers: client.stdioMcpServers
-      ? shaped.mcpServers
+      ? (Object.fromEntries(
+          Object.entries(shaped.mcpServers).map(([id, server]) => [
+            id,
+            isHttpMcpServer(server) || isStdioMcpServer(server)
+              ? server
+              : { transport: server.transport },
+          ]),
+        ) as ServerSettings["mcpServers"])
       : (Object.fromEntries(
           Object.entries(shaped.mcpServers).filter(([, server]) => isHttpMcpServer(server)),
         ) as ServerSettings["mcpServers"]),
@@ -1231,7 +1240,118 @@ const make = Effect.gen(function* () {
     return changed ? { ...next, mcpServers } : next;
   };
 
-  const persistSettingsSecrets = (current: ServerSettings, next: ServerSettings) =>
+  /**
+   * When a write narrows a stdio entry's audience while echoing SECRET_REDACTED, the secret slot
+   * name changes; carry the saved value into the new slot so narrowing keeps it and the old slot
+   * is removed as stale.
+   */
+  const carryNarrowedStdioSecrets = Effect.fnUntraced(function* (
+    current: ServerSettings,
+    next: ServerSettings,
+  ) {
+    const carried = new Map<string, Uint8Array>();
+    let changed = false;
+    const mcpServersEntries = Object.entries(next.mcpServers);
+    const updatedEntries: Array<[string, ServerSettings["mcpServers"][McpServerId]]> = [];
+    for (const [id, server] of mcpServersEntries) {
+      if (!isStdioMcpServer(server)) {
+        updatedEntries.push([id, server]);
+        continue;
+      }
+      const previous = Object.hasOwn(current.mcpServers, id)
+        ? current.mcpServers[id as McpServerId]
+        : undefined;
+      if (
+        previous === undefined ||
+        !isStdioMcpServer(previous) ||
+        previous.command !== server.command ||
+        !sameArgs(previous.args, server.args) ||
+        widensMcpServerBinding(previous, server)
+      ) {
+        updatedEntries.push([id, server]);
+        continue;
+      }
+      let envChanged = false;
+      const envEntries: Array<[string, string]> = [];
+      for (const [variable, value] of Object.entries(server.env)) {
+        if (value !== SECRET_REDACTED) {
+          envEntries.push([variable, value]);
+          continue;
+        }
+        const oldSlot = mcpServerStdioEnvSecretName(
+          id,
+          previous.command,
+          previous.args,
+          variable,
+          previous,
+        );
+        const newSlot = mcpServerStdioEnvSecretName(
+          id,
+          server.command,
+          server.args,
+          variable,
+          server,
+        );
+        if (oldSlot === newSlot) {
+          envEntries.push([variable, value]);
+          continue;
+        }
+        const previousInline = Object.hasOwn(previous.env, variable)
+          ? previous.env[variable]
+          : undefined;
+        let savedBytes: Uint8Array | undefined;
+        if (
+          previousInline !== undefined &&
+          previousInline !== SECRET_REDACTED &&
+          previousInline.length > 0
+        ) {
+          savedBytes = textEncoder.encode(previousInline);
+        } else {
+          const stored = yield* secretStore.get(oldSlot).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({
+                  settingsPath,
+                  operation: "read-secret",
+                  cause,
+                }),
+            ),
+          );
+          if (Option.isSome(stored) && stored.value.length > 0) {
+            savedBytes = stored.value;
+          }
+        }
+        if (savedBytes !== undefined) {
+          carried.set(newSlot, savedBytes);
+          envEntries.push([variable, value]);
+        } else {
+          envChanged = true;
+          envEntries.push([variable, ""]);
+        }
+      }
+      if (envChanged) {
+        changed = true;
+        updatedEntries.push([id, { ...server, env: Object.fromEntries(envEntries) }]);
+      } else {
+        updatedEntries.push([id, server]);
+      }
+    }
+    return {
+      settings: changed
+        ? {
+            ...next,
+            mcpServers: Object.fromEntries(updatedEntries) as ServerSettings["mcpServers"],
+          }
+        : next,
+      carried,
+    };
+  });
+
+  const persistSettingsSecrets = (
+    current: ServerSettings,
+    next: ServerSettings,
+    carried: ReadonlyMap<string, Uint8Array> = new Map(),
+  ) =>
     Effect.sync(() => {
       // Only sensitive rows own a stored secret; a plain duplicate must not hide one from cleanup.
       const previous = new Map<string, SettingsSecret>();
@@ -1266,6 +1386,12 @@ const make = Effect.gen(function* () {
         if (secret.redacted) {
           keptSecretNames.add(secret.secretName);
           nextSecretNames.add(secret.secretName);
+          const carriedValue = carried.get(secret.secretName);
+          if (carriedValue !== undefined) {
+            writtenSecretNames.add(secret.secretName);
+            changes.push({ ...metadata, kind: "write", value: carriedValue });
+            return { value: "", redacted: true };
+          }
           const inlineValue = inlineValues.get(secret.secretName);
           if (inlineValue !== undefined) {
             inlineWrites.set(secret.secretName, {
@@ -1450,7 +1576,8 @@ const make = Effect.gen(function* () {
       current,
       withoutRemovedSecretProviderReferences(current, vettedProviders.settings),
     );
-    const persisted = yield* persistSettingsSecrets(current, updated);
+    const narrowed = yield* carryNarrowedStdioSecrets(current, updated);
+    const persisted = yield* persistSettingsSecrets(current, narrowed.settings, narrowed.carried);
     const next = yield* normalizeServerSettings(persisted.settings);
     const materializedNext = yield* Effect.uninterruptibleMask(() =>
       Effect.gen(function* () {

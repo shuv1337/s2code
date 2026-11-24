@@ -15,6 +15,7 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -402,20 +403,6 @@ const proxy = Effect.gen(function* () {
   });
 }).pipe(Effect.withSpan("SharedMcpServers.proxy"));
 
-/** Why a stdio entry's running processes should stop after a settings change, if they should. */
-const staleStdioReason = (
-  before: McpServerStdioConfig,
-  after: ServerSettings["mcpServers"][keyof ServerSettings["mcpServers"]] | undefined,
-) => {
-  if (after === undefined) return "it was removed in Settings";
-  if (!isStdioMcpServer(after)) return "it is no longer a local process in Settings";
-  if (!after.enabled) return "it was turned off in Settings";
-  return StdioMcpBridge.stdioServerFingerprint(after) !==
-    StdioMcpBridge.stdioServerFingerprint(before)
-    ? "its settings changed"
-    : undefined;
-};
-
 const RETIRE_WATCHER_RESTART_DELAY = "1 second";
 
 /** Stops a removed, disabled or edited stdio entry's processes now, not at their next call or idle. */
@@ -423,28 +410,27 @@ const layerRetireStaleStdioSessions = Layer.effectDiscard(
   Effect.gen(function* () {
     const bridge = yield* StdioMcpBridge.StdioMcpBridge;
     const settings = yield* ServerSettingsService.ServerSettingsService;
-    let previous = Option.match(yield* Effect.option(settings.getSettings), {
-      onNone: (): ServerSettings["mcpServers"] => ({}),
-      onSome: (current) => current.mcpServers,
-    });
-    const watch = settings.streamChanges.pipe(
-      Stream.runForEach((next) =>
-        Effect.gen(function* () {
-          for (const [id, before] of Object.entries(previous)) {
-            if (!isStdioMcpServer(before)) continue;
-            const after = Object.hasOwn(next.mcpServers, id)
-              ? next.mcpServers[id as keyof ServerSettings["mcpServers"]]
-              : undefined;
-            const reason = staleStdioReason(before, after);
-            if (reason !== undefined) yield* bridge.closeServer(id, reason);
-          }
-          previous = next.mcpServers;
+    const reconcileSnapshot = settings.getSettings.pipe(
+      Effect.option,
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: (current) => bridge.reconcile(current.mcpServers),
         }),
       ),
     );
-    // A stopped watcher would leave edited entries' processes (and their old env) running until
-    // their next call or idle timeout, so it logs and starts again. `previous` survives the restart,
-    // so the first change after it still compares against what was running.
+    const watch = Effect.scoped(
+      Effect.gen(function* () {
+        // Subscribe before reconciling the snapshot so changes during startup or restart are not missed.
+        const fiber = yield* settings.streamChanges.pipe(
+          Stream.runForEach((next) => bridge.reconcile(next.mcpServers)),
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* reconcileSnapshot;
+        return yield* Fiber.join(fiber);
+      }),
+    );
     yield* watch.pipe(
       Effect.exit,
       Effect.flatMap((exit) =>
