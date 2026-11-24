@@ -140,18 +140,39 @@ For the separate production installation, use `APP_VARIANT=production`, workspac
 ## Share an install link with Sqim
 
 `sqim upload --device --build` archives and exports on its own, which fails for this
-project because of the T3Watch watch target. Build with the `xcodebuild` command
-above, then package the `.app` as an IPA and upload that:
+project because of the T3Watch watch target. Build with the `xcodebuild` command above.
+
+A plain `zip -qry S2CodeNightly.ipa Payload` can put the embedded
+`Watch/T3Watch.app/Info.plist` before `Payload/S2CodeNightly.app/Info.plist`.
+Sqim v0.2.4 then writes `dev.shuv.shuv2code.nightly.watchkitapp` as the
+`bundle-identifier` in `manifest.plist`. iOS tries to install a separate
+placeholder app and reports “Unable to Install”. Add the main app’s plist and
+provisioning profile first. `-y` preserves symlinks without changing the signed `.app`:
 
 ```bash
 IPA_DIR=$(mktemp -d)
 mkdir -p "$IPA_DIR/Payload"
 cp -R "$APP" "$IPA_DIR/Payload/"
-(cd "$IPA_DIR" && zip -qry S2CodeNightly.ipa Payload)
+(
+  cd "$IPA_DIR" &&
+    zip -qy S2CodeNightly.ipa \
+      Payload/S2CodeNightly.app/Info.plist \
+      Payload/S2CodeNightly.app/embedded.mobileprovision &&
+    zip -qry S2CodeNightly.ipa Payload
+)
 sqim upload --device --ipa "$IPA_DIR/S2CodeNightly.ipa"
 ```
 
-It prints an HTTPS install link (`https://build.sqim.dev/sqim/install/<token>`);
-treat it as valid only when the command exits 0. Signing needs a macOS desktop
-(Aqua) session: over plain SSH, codesign fails with `errSecInternalComponent` or
-"User interaction is not allowed".
+After the upload exits 0, set `SQIM_URL` to the printed HTTPS install link
+(`https://build.sqim.dev/sqim/install/<token>`). Share it only if this check passes:
+
+```bash
+(
+  manifest=$(curl -fsSL "$SQIM_URL/manifest.plist") &&
+    grep -Fq '<string>dev.shuv.shuv2code.nightly</string>' <<< "$manifest" &&
+    ! grep -Fq '.watchkitapp' <<< "$manifest"
+)
+```
+
+Signing needs a macOS desktop (Aqua) session: over plain SSH, codesign fails with
+`errSecInternalComponent` or "User interaction is not allowed".
