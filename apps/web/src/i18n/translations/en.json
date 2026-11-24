@@ -9202,7 +9202,17 @@
   "0be6b2546df12f66": "Stop",
   "7dbd7e8943e8931f": "Opening microphone…",
   "efa31f38b611e912": "Could not play this recording. Try recording again.",
-  "0889b9effa5f3657": "Fork mobile apps are not available yet.",
+  "4fe5a4634974ac55": [
+    "The mobile apps are in a private",
+    " ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    " ",
+    "beta. Email",
+    " ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    " ",
+    "for access."
+  ],
   "73da41e93823fd71": [
     "We do not recommend managing multiple ",
     {
@@ -12049,7 +12059,7 @@
   "0ac0d09d8555d962": "release channel installed separate installations stable latest nightly preview prerelease",
   "8920de9319894d26": "cli terminal shell path install command line s2c shuv2code",
   "86479042bae0e2db": "Mobile app",
-  "dc2a999ca67ccf31": "phone tablet iPhone iPad iOS Android App Store Google Play QR",
+  "7bcdb8144c8698dc": "phone tablet iPhone iPad iOS Android App Store Google Play QR TestFlight beta",
   "6310b97b04ef239f": "Welcome page",
   "df9fa3a9cb004b9b": "onboarding setup first run getting started agents import projects",
   "3188bc3b3c4508bc": "Privacy policy",

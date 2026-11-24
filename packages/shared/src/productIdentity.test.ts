@@ -9,14 +9,18 @@ import {
   isProductIdentity,
 } from "./productIdentity.ts";
 
-it("routes desktop downloads only to the fork and makes mobile distribution explicitly unavailable", () => {
-  expect(resolveProductDownload(false)).toEqual({
+it("routes desktop to fork releases, iOS to the private TestFlight beta, and Android to no app", () => {
+  expect(resolveProductDownload("desktop")).toEqual({
     url: "https://github.com/shuv1337/s2code/releases",
     label: "Fork releases",
   });
-  expect(resolveProductDownload(true)).toEqual({
+  expect(resolveProductDownload("ios")).toEqual({
+    url: "https://testflight.apple.com",
+    label: "Private TestFlight beta: email shuv@shuv.dev for access",
+  });
+  expect(resolveProductDownload("android")).toEqual({
     url: null,
-    label: "Fork mobile apps are not available yet.",
+    label: "The fork Android app is not available yet.",
   });
 });
 

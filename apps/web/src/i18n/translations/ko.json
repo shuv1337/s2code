@@ -9152,7 +9152,13 @@
   "0be6b2546df12f66": "중지",
   "7dbd7e8943e8931f": "마이크 여는 중…",
   "efa31f38b611e912": "이 녹음을 재생할 수 없습니다. 다시 녹음해 보세요.",
-  "0889b9effa5f3657": "포크의 모바일 앱은 아직 사용할 수 없습니다.",
+  "4fe5a4634974ac55": [
+    "모바일 앱은 비공개 ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    " 베타입니다. 이용하려면 ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    "로 이메일을 보내세요."
+  ],
   "73da41e93823fd71": [
     "T3 Code에서 여러 ",
     {
@@ -11986,7 +11992,7 @@
   "0ac0d09d8555d962": "릴리스 채널 설치됨 별도 설치 안정판 최신 나이틀리 미리보기 시험판",
   "8920de9319894d26": "CLI 터미널 셸 PATH 설치 명령줄 s2c shuv2code",
   "86479042bae0e2db": "모바일 앱",
-  "dc2a999ca67ccf31": "휴대폰 태블릿 iPhone iPad iOS Android App Store Google Play QR",
+  "7bcdb8144c8698dc": "휴대폰 태블릿 iPhone iPad iOS Android App Store Google Play QR TestFlight 베타",
   "6310b97b04ef239f": "시작 페이지",
   "df9fa3a9cb004b9b": "온보딩 설정 첫 실행 시작하기 에이전트 프로젝트 가져오기",
   "3188bc3b3c4508bc": "개인정보 처리방침",

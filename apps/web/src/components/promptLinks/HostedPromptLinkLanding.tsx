@@ -9,7 +9,10 @@ import * as Schema from "effect/Schema";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import { resolveProductDownload } from "@t3tools/shared/productIdentity";
+import {
+  type ProductDownloadPlatform,
+  resolveProductDownload,
+} from "@t3tools/shared/productIdentity";
 import type { MessageResolver } from "../../i18n/messages";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { isHostedStaticApp } from "~/hostedPairing";
@@ -142,8 +145,13 @@ function HostedPromptLinkLanding({
   const summary = summarize(appPath, m);
   const [remember, setRemember] = useState(false);
   const deepLink = promptLinkDeepLink(appPath);
-  const onPhone = /android|iphone|ipad/i.test(navigator.userAgent);
-  const download = resolveProductDownload(onPhone);
+  const platform: ProductDownloadPlatform = /iphone|ipad/i.test(navigator.userAgent)
+    ? "ios"
+    : /android/i.test(navigator.userAgent)
+      ? "android"
+      : "desktop";
+  const onPhone = platform !== "desktop";
+  const download = resolveProductDownload(platform);
   const autoOpenedRef = useRef(false);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- redirects window.location to the app deep link once when the user chose to always open in the app

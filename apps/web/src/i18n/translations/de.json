@@ -9193,7 +9193,13 @@
   "0be6b2546df12f66": "Stoppen",
   "7dbd7e8943e8931f": "Mikrofon wird geöffnet…",
   "efa31f38b611e912": "Diese Aufnahme konnte nicht abgespielt werden. Versuch erneut aufzunehmen.",
-  "0889b9effa5f3657": "Die Mobil-Apps des Forks sind noch nicht verfügbar.",
+  "4fe5a4634974ac55": [
+    "Die Mobil-Apps sind in einer privaten ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    "-Beta. Schreib eine E-Mail an ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    ", um Zugang zu erhalten."
+  ],
   "73da41e93823fd71": [
     "Wir raten davon ab, mehrere ",
     {
@@ -12040,7 +12046,7 @@
   "0ac0d09d8555d962": "Release-Kanal installiert separate Installationen stabil aktuell Nightly Vorschau Vorabversion",
   "8920de9319894d26": "CLI Terminal Shell PATH installieren Befehlszeile s2c shuv2code",
   "86479042bae0e2db": "Mobile App",
-  "dc2a999ca67ccf31": "telefon tablet iPhone iPad iOS Android App Store Google Play QR",
+  "7bcdb8144c8698dc": "telefon tablet iPhone iPad iOS Android App Store Google Play QR TestFlight Beta",
   "6310b97b04ef239f": "Willkommensseite",
   "df9fa3a9cb004b9b": "onboarding einrichtung erster start erste schritte agenten import projekte",
   "3188bc3b3c4508bc": "Datenschutzerklärung",

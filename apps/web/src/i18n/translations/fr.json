@@ -9194,7 +9194,13 @@
   "0be6b2546df12f66": "Arrêter",
   "7dbd7e8943e8931f": "Ouverture du microphone…",
   "efa31f38b611e912": "Impossible de lire cet enregistrement. Essayez de réenregistrer.",
-  "0889b9effa5f3657": "Les applications mobiles de cette version dérivée ne sont pas encore disponibles.",
+  "4fe5a4634974ac55": [
+    "Les applications mobiles sont en bêta privée sur ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    ". Écrivez à ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    " pour y accéder."
+  ],
   "73da41e93823fd71": [
     "Nous déconseillons de gérer plusieurs comptes ",
     {
@@ -12039,7 +12045,7 @@
   "0ac0d09d8555d962": "canal de publication installé installations séparées stable dernière nightly aperçu préversion",
   "8920de9319894d26": "cli terminal shell chemin PATH installer ligne de commande s2c shuv2code",
   "86479042bae0e2db": "App mobile",
-  "dc2a999ca67ccf31": "téléphone tablette iPhone iPad iOS Android App Store Google Play QR",
+  "7bcdb8144c8698dc": "téléphone tablette iPhone iPad iOS Android App Store Google Play QR TestFlight bêta",
   "6310b97b04ef239f": "Page d’accueil",
   "df9fa3a9cb004b9b": "prise en main configuration premier lancement démarrer agents importer projets",
   "3188bc3b3c4508bc": "Politique de confidentialité",

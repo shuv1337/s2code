@@ -9193,7 +9193,13 @@
   "0be6b2546df12f66": "Parar",
   "7dbd7e8943e8931f": "Abrindo microfone…",
   "efa31f38b611e912": "Não foi possível reproduzir esta gravação. Tente gravar novamente.",
-  "0889b9effa5f3657": "Os aplicativos móveis deste fork ainda não estão disponíveis.",
+  "4fe5a4634974ac55": [
+    "Os apps móveis estão em um beta privado do ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    ". Envie um e-mail para ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    " para ter acesso."
+  ],
   "73da41e93823fd71": [
     "Não recomendamos gerenciar várias contas ",
     {
@@ -12039,7 +12045,7 @@
   "0ac0d09d8555d962": "canal de lançamento instalado instalações separadas estável mais recente nightly prévia pré-lançamento",
   "8920de9319894d26": "cli terminal shell caminho PATH instalar linha de comando s2c shuv2code",
   "86479042bae0e2db": "App móvel",
-  "dc2a999ca67ccf31": "celular tablet iPhone iPad iOS Android App Store Google Play QR",
+  "7bcdb8144c8698dc": "celular tablet iPhone iPad iOS Android App Store Google Play QR TestFlight beta",
   "6310b97b04ef239f": "Página de boas-vindas",
   "df9fa3a9cb004b9b": "integração configuração primeira execução primeiros passos agentes importar projetos",
   "3188bc3b3c4508bc": "Política de privacidade",
