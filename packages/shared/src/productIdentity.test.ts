@@ -9,14 +9,14 @@ import {
   isProductIdentity,
 } from "./productIdentity.ts";
 
-it("routes desktop to fork releases, iOS to the private TestFlight beta, and Android to no app", () => {
+it("routes desktop to fork releases, iOS to the public TestFlight beta, and Android to no app", () => {
   expect(resolveProductDownload("desktop")).toEqual({
     url: "https://github.com/shuv1337/s2code/releases",
     label: "Fork releases",
   });
   expect(resolveProductDownload("ios")).toEqual({
-    url: "https://testflight.apple.com",
-    label: "Private TestFlight beta: email shuv@shuv.dev for access",
+    url: "https://testflight.apple.com/join/vhmETHSn",
+    label: "Join the TestFlight beta",
   });
   expect(resolveProductDownload("android")).toEqual({
     url: null,
