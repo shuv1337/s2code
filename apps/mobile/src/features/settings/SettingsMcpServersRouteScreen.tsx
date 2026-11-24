@@ -4,6 +4,7 @@ import { useNavigation, type StaticScreenProps } from "@react-navigation/native"
 import {
   AuthProvidersManageScope,
   type EnvironmentId,
+  isHttpMcpServer,
   type McpServerConfig,
   type ProjectId,
   type ServerSettingsPatch,
@@ -14,7 +15,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, TextInput as RNTextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -51,9 +52,20 @@ const NO_SERVERS: Readonly<Record<string, McpServerConfig>> = {};
 function useMcpServers(environmentId: EnvironmentId) {
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const canManage = useAtomValue(serverEnvironment.testMcpServer.permissionAtom(environmentId));
-  const servers: Readonly<Record<string, McpServerConfig>> =
-    config?.settings.mcpServers ?? NO_SERVERS;
-  return { loaded: config !== null, servers, canManage };
+  const saved = config?.settings.mcpServers;
+  // TODO(#488): show stdio entries. This screen covers http servers only.
+  const servers = useMemo<Readonly<Record<string, McpServerConfig>>>(
+    () =>
+      saved === undefined
+        ? NO_SERVERS
+        : Object.fromEntries(
+            Object.entries(saved).filter((entry): entry is [string, McpServerConfig] =>
+              isHttpMcpServer(entry[1]),
+            ),
+          ),
+    [saved],
+  );
+  return { loaded: config !== null, servers, allServers: saved ?? NO_SERVERS, canManage };
 }
 
 function useWriteMcpServers(environmentId: EnvironmentId) {
@@ -224,7 +236,7 @@ function McpServerEditor(props: {
   const isNew = serverId === null;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { loaded, servers, canManage } = useMcpServers(environmentId);
+  const { loaded, servers, allServers, canManage } = useMcpServers(environmentId);
   const saved = serverId === null ? undefined : servers[serverId];
   const write = useWriteMcpServers(environmentId);
   const testMcpServer = useAtomCommand(serverEnvironment.testMcpServer, {
@@ -246,7 +258,7 @@ function McpServerEditor(props: {
 
   const save = async () => {
     if (readOnly) return;
-    const parsed = parseMcpServerDraft(draft, servers, isNew);
+    const parsed = parseMcpServerDraft(draft, allServers, isNew);
     if (!parsed.ok) {
       setError(parsed.error);
       return;
@@ -259,7 +271,7 @@ function McpServerEditor(props: {
 
   const runTest = async () => {
     if (readOnly || !readEnvironmentScope(environmentId, AuthProvidersManageScope)) return;
-    const input = mcpServerTestInput(draft, servers, isNew);
+    const input = mcpServerTestInput(draft, allServers, isNew);
     if (!input.ok) {
       setError(input.error);
       return;

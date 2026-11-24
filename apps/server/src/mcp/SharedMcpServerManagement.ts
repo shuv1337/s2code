@@ -1,5 +1,9 @@
 import {
+  isHttpMcpServer,
+  isStdioMcpServer,
   type McpServerConfig,
+  type McpServerEntry,
+  type McpServerStdioConfig,
   type McpServerId,
   type McpServerTestResult,
   type ServerSettings,
@@ -30,6 +34,7 @@ export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcp
       "secret_required",
       "secret_unavailable",
       "settings_failed",
+      "local_process",
     ]),
     cause: Schema.optional(Schema.Defect()),
   },
@@ -52,6 +57,8 @@ export class SharedMcpServerManagementError extends Schema.TaggedError<SharedMcp
         return "This server has a saved token. Changing its url, projectIds, or excludeSubagents needs a new bearerTokenSecretRef, or clearBearerToken: true, in the same call.";
       case "secret_unavailable":
         return "The secret ref is unavailable, expired, already used, or belongs to another host or project.";
+      case "local_process":
+        return "This server runs a local process. Only the owner can change it, in Settings → MCP servers.";
       case "settings_failed":
         return "Could not update shared MCP server settings. If a secret ref was passed, it was used; request a new one.";
     }
@@ -82,7 +89,11 @@ export class SharedMcpServerManagement extends Context.Service<
   }
 >()("t3/mcp/SharedMcpServerManagement") {}
 
-const redactedSummary = (id: McpServerId, server: McpServerConfig): SharedMcpServerSummary => ({
+type KnownMcpServer = McpServerConfig | McpServerStdioConfig;
+const isKnown = (server: McpServerEntry): server is KnownMcpServer =>
+  isHttpMcpServer(server) || isStdioMcpServer(server);
+
+const redactedSummary = (id: McpServerId, server: KnownMcpServer): SharedMcpServerSummary => ({
   id,
   ...(server.label === undefined ? {} : { label: server.label }),
   enabled: server.enabled,
@@ -90,7 +101,17 @@ const redactedSummary = (id: McpServerId, server: McpServerConfig): SharedMcpSer
   ...(server.excludeSubagents === undefined ? {} : { excludeSubagents: server.excludeSubagents }),
 });
 
-const summary = (id: McpServerId, server: McpServerConfig): SharedMcpServerSummary => ({
+/** A stdio entry's command, args and env never reach an agent. */
+const summary = (id: McpServerId, server: KnownMcpServer): SharedMcpServerSummary =>
+  isStdioMcpServer(server)
+    ? {
+        ...redactedSummary(id, server),
+        transport: "stdio",
+        harnessName: sharedMcpServerHarnessName(id),
+      }
+    : httpSummary(id, server);
+
+const httpSummary = (id: McpServerId, server: McpServerConfig): SharedMcpServerSummary => ({
   ...redactedSummary(id, server),
   url: server.url,
   hasToken: server.bearerToken.length > 0,
@@ -112,10 +133,13 @@ const make = Effect.gen(function* () {
       ? cause
       : new SharedMcpServerManagementError({ reason: "settings_failed", cause });
   const current = settings.getSettings.pipe(Effect.mapError(settingsFailed));
-  const admitted = (server: McpServerConfig, caller: SharedMcpServerCaller) =>
+  const admitted = (server: KnownMcpServer, caller: SharedMcpServerCaller) =>
     caller === undefined || SharedMcpServers.sharedMcpServerAdmits(server, caller);
-  const find = (configured: ServerSettings["mcpServers"], id: McpServerId) =>
-    Object.hasOwn(configured, id) ? configured[id] : undefined;
+  /** Entries of a transport this version doesn't know are invisible here, as if absent. */
+  const find = (configured: ServerSettings["mcpServers"], id: McpServerId) => {
+    const entry = Object.hasOwn(configured, id) ? configured[id] : undefined;
+    return entry !== undefined && isKnown(entry) ? entry : undefined;
+  };
   /** The saved server, refused when its binding excludes the caller. */
   const reachable = (
     configured: ServerSettings["mcpServers"],
@@ -132,10 +156,12 @@ const make = Effect.gen(function* () {
     caller: SharedMcpServerCaller,
   ) {
     const { mcpServers } = yield* current;
-    return Object.entries(mcpServers).map(([id, server]) =>
-      admitted(server, caller)
-        ? summary(id as McpServerId, server)
-        : redactedSummary(id as McpServerId, server),
+    return Object.entries(mcpServers).flatMap(([id, server]) =>
+      !isKnown(server)
+        ? []
+        : admitted(server, caller)
+          ? summary(id as McpServerId, server)
+          : redactedSummary(id as McpServerId, server),
     );
   });
   const set = Effect.fn("SharedMcpServerManagement.set")(function* (
@@ -148,7 +174,14 @@ const make = Effect.gen(function* () {
     if (validated.bearerTokenSecretRef !== undefined && validated.clearBearerToken === true)
       return yield* new SharedMcpServerManagementError({ reason: "token_conflict" });
     const resolve = Effect.fnUntraced(function* (configured: ServerSettings["mcpServers"]) {
-      const saved = yield* reachable(configured, validated.id, caller);
+      const reached = yield* reachable(configured, validated.id, caller);
+      // Agents' set tool is URL-only: it never creates, repoints or rebinds a local process.
+      if (reached !== undefined && !isHttpMcpServer(reached))
+        return yield* new SharedMcpServerManagementError({ reason: "local_process" });
+      const unknownEntry = Object.hasOwn(configured, validated.id) && reached === undefined;
+      if (unknownEntry)
+        return yield* new SharedMcpServerManagementError({ reason: "local_process" });
+      const saved = reached;
       const url = validated.url ?? saved?.url;
       if (url === undefined)
         return yield* new SharedMcpServerManagementError({ reason: "url_required" });
@@ -207,7 +240,7 @@ const make = Effect.gen(function* () {
         ),
       )
       .pipe(Effect.mapError(settingsFailed));
-    return summary(validated.id, updated.mcpServers[validated.id]!);
+    return httpSummary(validated.id, updated.mcpServers[validated.id] as McpServerConfig);
   });
   const remove = Effect.fn("SharedMcpServerManagement.remove")(function* (
     id: McpServerId,
@@ -216,7 +249,14 @@ const make = Effect.gen(function* () {
     yield* settings
       .modifySettings((now) =>
         Effect.gen(function* () {
-          if ((yield* reachable(now.mcpServers, id, caller)) === undefined)
+          const reached = yield* reachable(now.mcpServers, id, caller);
+          // Like set: a local process, or a transport this version doesn't know, is the owner's to remove.
+          if (
+            (reached !== undefined && !isHttpMcpServer(reached)) ||
+            (reached === undefined && Object.hasOwn(now.mcpServers, id))
+          )
+            return yield* new SharedMcpServerManagementError({ reason: "local_process" });
+          if (reached === undefined)
             return yield* new SharedMcpServerManagementError({ reason: "not_found" });
           return { mcpServers: { [id]: null } };
         }),
@@ -227,7 +267,13 @@ const make = Effect.gen(function* () {
     id: McpServerId,
     caller: SharedMcpServerCaller,
   ) {
-    const saved = yield* reachable((yield* current).mcpServers, id, caller);
+    const configured = (yield* current).mcpServers;
+    const saved = yield* reachable(configured, id, caller);
+    if (
+      (saved !== undefined && !isHttpMcpServer(saved)) ||
+      (saved === undefined && Object.hasOwn(configured, id))
+    )
+      return yield* new SharedMcpServerManagementError({ reason: "local_process" });
     if (saved === undefined)
       return yield* new SharedMcpServerManagementError({ reason: "not_found" });
     return yield* servers.testConnection(saved);

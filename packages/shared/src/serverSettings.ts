@@ -1,5 +1,10 @@
 import type { ModelPreferences } from "@t3tools/contracts/settings";
 import {
+  isHttpMcpServer,
+  isStdioMcpServer,
+  type McpServerEntry,
+} from "@t3tools/contracts/settings";
+import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -251,6 +256,23 @@ function mergeSettingsEntries<Value>(
   return Object.fromEntries(next);
 }
 
+const isKnownMcpServer = (server: McpServerEntry) =>
+  isHttpMcpServer(server) || isStdioMcpServer(server);
+
+type McpServerEntryPatch = NonNullable<
+  NonNullable<ServerSettingsPatch["mcpServers"]>[keyof NonNullable<
+    ServerSettingsPatch["mcpServers"]
+  >]
+>;
+const isStdioPatch = (
+  config: McpServerEntryPatch,
+): config is Extract<McpServerEntryPatch, { readonly command: string }> =>
+  config.transport === "stdio";
+const isHttpPatch = (
+  config: McpServerEntryPatch,
+): config is Extract<McpServerEntryPatch, { readonly url: string }> =>
+  config.transport === undefined || config.transport === "http";
+
 type McpServerBinding = {
   readonly url: string;
   readonly projectIds?: McpServerConfig["projectIds"];
@@ -284,18 +306,55 @@ function mergeMcpServersPatch(
       next.delete(id);
       continue;
     }
-    const saved = Object.hasOwn(current, id) ? current[id as keyof typeof current] : undefined;
+    const savedEntry = Object.hasOwn(current, id) ? current[id as keyof typeof current] : undefined;
+    if (isStdioPatch(config)) {
+      // Whole-entry like any other write, keeping an omitted binding for the same reason as below.
+      const savedBinding =
+        savedEntry !== undefined && isKnownMcpServer(savedEntry) ? savedEntry : undefined;
+      const projectIds = config.projectIds ?? savedBinding?.projectIds;
+      const excludeSubagents = config.excludeSubagents ?? savedBinding?.excludeSubagents;
+      const { projectIds: _p, excludeSubagents: _e, ...stdio } = config;
+      next.set(id, {
+        ...stdio,
+        ...(projectIds === undefined ? {} : { projectIds }),
+        ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
+      });
+      continue;
+    }
+    if (!isHttpPatch(config)) {
+      // Clients only receive `{ transport }` for unknown transports; echoing that stub keeps what is saved.
+      if (
+        savedEntry !== undefined &&
+        !isKnownMcpServer(savedEntry) &&
+        Object.keys(config).length === 1 &&
+        config.transport === savedEntry.transport
+      ) {
+        continue;
+      }
+      next.set(id, config); // A newer client's transport: kept exactly as sent.
+      continue;
+    }
+    // A client that predates other transports sends no `transport`; it can't see a stdio or newer
+    // entry, so its write to that name is a clash, not a replacement. Only an explicit
+    // `transport: "http"` turns another transport's entry into an HTTP one.
+    if (savedEntry !== undefined && !isHttpMcpServer(savedEntry) && config.transport !== "http") {
+      continue;
+    }
+    // A saved token only carries over from an HTTP entry at the same binding.
+    const saved = savedEntry !== undefined && isHttpMcpServer(savedEntry) ? savedEntry : undefined;
     const {
       bearerToken,
       projectIds: patchedProjectIds,
       excludeSubagents: patchedExclude,
       ...rest
     } = config;
-    const projectIds = patchedProjectIds ?? saved?.projectIds;
-    const excludeSubagents = patchedExclude ?? saved?.excludeSubagents;
+    const savedBinding =
+      savedEntry !== undefined && isKnownMcpServer(savedEntry) ? savedEntry : undefined;
+    const projectIds = patchedProjectIds ?? savedBinding?.projectIds;
+    const excludeSubagents = patchedExclude ?? savedBinding?.excludeSubagents;
     const merged = {
       ...rest,
-      enabled: rest.enabled ?? saved?.enabled ?? true,
+      enabled: rest.enabled ?? savedBinding?.enabled ?? true,
       ...(projectIds === undefined ? {} : { projectIds }),
       ...(excludeSubagents === undefined ? {} : { excludeSubagents }),
     };

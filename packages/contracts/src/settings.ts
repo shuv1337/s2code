@@ -969,7 +969,9 @@ export type McpServerId = typeof McpServerId.Type;
 /** The name harnesses and agents see; the prefix keeps it from replacing a server configured in the harness. */
 export const sharedMcpServerHarnessName = (id: string) => `shared-${id}`;
 
+/** A remote server the proxy forwards to. Entries saved before transports existed have no `transport`. */
 export const McpServerConfig = Schema.Struct({
+  transport: Schema.optionalKey(Schema.Literal("http")),
   label: Schema.optional(TrimmedNonEmptyString),
   url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/./i)),
   bearerToken: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("")), secretSetting),
@@ -980,12 +982,67 @@ export const McpServerConfig = Schema.Struct({
 });
 export type McpServerConfig = typeof McpServerConfig.Type;
 
+/** A local process this server spawns per harness session and bridges to the same proxy route. */
+export const McpServerStdioConfig = Schema.Struct({
+  transport: Schema.Literal("stdio"),
+  label: Schema.optional(TrimmedNonEmptyString),
+  command: TrimmedNonEmptyString,
+  args: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  env: Schema.Record(Schema.String, Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  projectIds: Schema.optionalKey(Schema.Array(ProjectId)),
+  excludeSubagents: Schema.optionalKey(Schema.Boolean),
+});
+export type McpServerStdioConfig = typeof McpServerStdioConfig.Type;
+
+const KNOWN_MCP_TRANSPORTS: ReadonlySet<string> = new Set(["http", "stdio"]);
+
+/**
+ * A transport a newer T3 Code saved. It round-trips untouched so an older server never drops or
+ * rewrites it, and it is never offered to a harness.
+ */
+export const McpServerUnknownTransportConfig = Schema.StructWithRest(
+  Schema.Struct({
+    transport: Schema.String.check(Schema.makeFilter((value) => !KNOWN_MCP_TRANSPORTS.has(value))),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
+export type McpServerUnknownTransportConfig = typeof McpServerUnknownTransportConfig.Type;
+
+export const McpServerEntry = Schema.Union([
+  McpServerStdioConfig,
+  McpServerConfig,
+  McpServerUnknownTransportConfig,
+]);
+export type McpServerEntry = typeof McpServerEntry.Type;
+
+export const isHttpMcpServer = (server: McpServerEntry): server is McpServerConfig =>
+  server.transport === undefined || server.transport === "http";
+export const isStdioMcpServer = (server: McpServerEntry): server is McpServerStdioConfig =>
+  server.transport === "stdio";
+/** An HTTP entry's saved token; undefined for any other transport. */
+export const mcpServerBearerToken = (server: McpServerEntry | undefined): string | undefined =>
+  server !== undefined && isHttpMcpServer(server) ? server.bearerToken : undefined;
+/** Whether a harness session may be offered this entry; unknown transports never are. */
+export const isEnabledMcpServer = (
+  server: McpServerEntry,
+): server is McpServerConfig | McpServerStdioConfig =>
+  (isHttpMcpServer(server) || isStdioMcpServer(server)) && server.enabled;
+
 const McpServerConfigPatch = Schema.Struct({
   ...McpServerConfig.fields,
   /** Omission keeps the token at the same URL and audience; an empty string clears it. */
   bearerToken: Schema.optionalKey(TrimmedString).pipe(secretSetting),
   enabled: Schema.optionalKey(Schema.Boolean),
 });
+/** Stdio entries are written whole; only an owner client sends them (agents' set tool is URL-only). */
+const McpServerEntryPatch = Schema.Union([
+  McpServerStdioConfig,
+  McpServerConfigPatch,
+  McpServerUnknownTransportConfig,
+]);
 
 export const TextGeneratorKind = Schema.Literals(["openaiCompatible", "anthropic"]);
 export type TextGeneratorKind = typeof TextGeneratorKind.Type;
@@ -1646,7 +1703,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   // Remote MCP servers every agent here gets, proxied so credentials stay on this server.
-  mcpServers: Schema.Record(McpServerId, McpServerConfig).pipe(
+  mcpServers: Schema.Record(McpServerId, McpServerEntry).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   cursorKeychainUsageEnabled: Schema.Boolean.pipe(
@@ -1812,6 +1869,7 @@ export const ServerSettingsOperation = Schema.Literals([
   "prepare-directory",
   "write-managed-setting",
   "use-disallowed-provider",
+  "write-mcp-server",
 ]);
 export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
 
@@ -1831,12 +1889,17 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
     managedBy: Schema.optional(Schema.String),
     /** For `use-disallowed-provider`: the provider's name as users know it. */
     providerLabel: Schema.optional(Schema.String),
+    /** For `write-mcp-server`: the saved entry's id. */
+    mcpServerId: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     if (this.operation === "write-managed-setting") {
       return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
+    }
+    if (this.operation === "write-mcp-server") {
+      return `An MCP server named "${this.mcpServerId ?? ""}" already exists on this host as a local process, and this version of the app can't change it. Pick another name, or update the app.`;
     }
     if (this.operation === "use-disallowed-provider") {
       return disallowedProviderMessage(
@@ -2050,7 +2113,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(SecretProviderId, Schema.NullOr(SecretProviderConfigWrite)),
   ),
   // Merge per server; null removes one.
-  mcpServers: Schema.optionalKey(Schema.Record(McpServerId, Schema.NullOr(McpServerConfigPatch))),
+  mcpServers: Schema.optionalKey(Schema.Record(McpServerId, Schema.NullOr(McpServerEntryPatch))),
   cursorKeychainUsageEnabled: Schema.optionalKey(Schema.Boolean),
 
   usageHistoryRetentionDays: Schema.optionalKey(UsageHistoryRetentionDays),

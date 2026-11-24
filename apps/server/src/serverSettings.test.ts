@@ -19,6 +19,7 @@ import {
   UsageLimitSourceId,
   type SimlockDeviceHostConfig,
 } from "@t3tools/contracts";
+import { mcpServerBearerToken } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -36,7 +37,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { sourceControlHostSecretName } from "./sourceControl/sourceControlHostSecrets.ts";
-import { mcpServerSecretName, SECRET_REDACTED } from "./settingsSecrets.ts";
+import {
+  mcpServerSecretName,
+  mcpServerStdioEnvSecretName,
+  SECRET_REDACTED,
+} from "./settingsSecrets.ts";
 import * as ServerConfig from "./config.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
@@ -1681,7 +1686,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         const withoutToken = yield* service.updateSettings(
           yield* decodeServerSettingsPatch({ mcpServers: { [id]: { url, enabled: false } } }),
         );
-        assert.equal(withoutToken.mcpServers[id]?.bearerToken, "mcp-secret");
+        assert.equal(mcpServerBearerToken(withoutToken.mcpServers[id]), "mcp-secret");
         assert.isFalse(withoutToken.mcpServers[id]?.enabled);
 
         const cleared = yield* service.updateSettings(
@@ -1689,7 +1694,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
             mcpServers: { [id]: { url, label: "Renamed", bearerToken: "" } },
           }),
         );
-        assert.equal(cleared.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(cleared.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
 
         if (state === "removed") yield* service.updateSettings({ mcpServers: { [id]: null } });
@@ -1697,7 +1702,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         const echoed = yield* service.updateSettings({
           mcpServers: { [id]: { url, bearerToken: SECRET_REDACTED } },
         });
-        assert.equal(echoed.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(echoed.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
@@ -1762,24 +1767,24 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           label: "Renamed",
           ...sameAudience,
         });
-        assert.equal(relabeled.mcpServers[id]?.bearerToken, "mcp-secret");
+        assert.equal(mcpServerBearerToken(relabeled.mcpServers[id]), "mcp-secret");
 
         const moved = yield* echo(changes);
         assert.deepInclude(moved.mcpServers[id], changes);
-        assert.equal(moved.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(moved.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
 
         const replaced = yield* service.updateSettings({
           mcpServers: { [id]: { ...original, bearerToken: "new-secret" } },
         });
-        assert.equal(replaced.mcpServers[id]?.bearerToken, "new-secret");
+        assert.equal(mcpServerBearerToken(replaced.mcpServers[id]), "new-secret");
 
         const movedWithoutToken = yield* service.updateSettings(
           yield* decodeServerSettingsPatch({
             mcpServers: { [id]: { url: original.url, ...changes } },
           }),
         );
-        assert.equal(movedWithoutToken.mcpServers[id]?.bearerToken, "");
+        assert.equal(mcpServerBearerToken(movedWithoutToken.mcpServers[id]), "");
         assert.isTrue(Option.isNone(yield* store.get(secretName)));
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
@@ -1810,8 +1815,345 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
 
       const loaded = yield* serverSettings.getSettings;
 
-      assert.equal(loaded.mcpServers[McpServerId.make("executor")]?.bearerToken, "");
-      assert.equal(loaded.mcpServers[McpServerId.make("docs")]?.bearerToken, "docs-secret");
+      assert.equal(mcpServerBearerToken(loaded.mcpServers[McpServerId.make("executor")]), "");
+      assert.equal(
+        mcpServerBearerToken(loaded.mcpServers[McpServerId.make("docs")]),
+        "docs-secret",
+      );
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("keeps stdio MCP env values in the secret store, bound to the command", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const id = McpServerId.make("local");
+      const command = "/usr/local/bin/executor";
+      const entry = {
+        transport: "stdio" as const,
+        command,
+        args: ["mcp"],
+        env: { EXECUTOR_TOKEN: "stdio-env-secret", MODE: "quiet" },
+        enabled: true,
+      };
+      yield* service.updateSettings({ mcpServers: { [id]: entry } });
+
+      const loaded = yield* service.getSettings;
+      assert.deepEqual(loaded.mcpServers[id], entry);
+      const onDisk = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(onDisk, "stdio-env-secret");
+      assert.notInclude(onDisk, "quiet");
+      const tokenSlot = mcpServerStdioEnvSecretName(id, command, ["mcp"], "EXECUTOR_TOKEN");
+      assert.isTrue(Option.isSome(yield* store.get(tokenSlot)));
+      const client = ServerSettingsModule.redactServerSettingsForClient(loaded, {
+        secretReferences: true,
+        stdioMcpServers: true,
+      });
+      assert.notInclude(JSON.stringify(client), "stdio-env-secret");
+      const echoed = client.mcpServers[id];
+      assert.deepInclude(echoed, {
+        env: { EXECUTOR_TOKEN: SECRET_REDACTED, MODE: SECRET_REDACTED },
+      });
+
+      // A client echo keeps the values; a new command drops them; a dropped variable is deleted.
+      yield* service.updateSettings({
+        mcpServers: { [id]: { ...echoed!, label: "Local" } } as never,
+      });
+      assert.deepInclude((yield* service.getSettings).mcpServers[id], {
+        label: "Local",
+        env: entry.env,
+      });
+      yield* service.updateSettings({
+        mcpServers: { [id]: { ...echoed!, env: { MODE: SECRET_REDACTED } } } as never,
+      });
+      assert.deepInclude((yield* service.getSettings).mcpServers[id], { env: { MODE: "quiet" } });
+      assert.isTrue(Option.isNone(yield* store.get(tokenSlot)));
+      yield* service.updateSettings({
+        mcpServers: {
+          [id]: { ...echoed!, command: "/tmp/other", env: { MODE: SECRET_REDACTED } },
+        } as never,
+      });
+      assert.deepInclude((yield* service.getSettings).mcpServers[id], {
+        command: "/tmp/other",
+        env: { MODE: "" },
+      });
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect(
+    "drops echoed stdio env values when the args change or the entry reaches more threads",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        const store = yield* ServerSecretStore.ServerSecretStore;
+        const id = McpServerId.make("local");
+        const entry = {
+          transport: "stdio" as const,
+          command: "/usr/local/bin/executor",
+          args: ["mcp"],
+          env: { EXECUTOR_TOKEN: "stdio-env-secret" },
+          enabled: true,
+          projectIds: [ProjectId.make("p1")],
+          excludeSubagents: true,
+        };
+        const save = (next: Record<string, unknown>) =>
+          service.updateSettings({ mcpServers: { [id]: { ...entry, ...next } } } as never);
+        const env = Effect.map(
+          service.getSettings,
+          (now) => (now.mcpServers[id] as typeof entry).env,
+        );
+        const echo = { env: { EXECUTOR_TOKEN: SECRET_REDACTED } };
+
+        yield* save({});
+        yield* save({ ...echo, projectIds: [] }); // Every project now.
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "" });
+        yield* save({});
+        yield* save({ ...echo, excludeSubagents: false });
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "" });
+        yield* save({});
+        yield* save({ ...echo, args: ["mcp", "--host", "https://elsewhere.example"] });
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "" });
+        // Narrowing keeps the saved value by moving it to the narrower audience slot and deleting the old slot.
+        const widerAudience = {
+          projectIds: [ProjectId.make("p1"), ProjectId.make("p2")],
+          excludeSubagents: false,
+        };
+        const narrowerAudience = {
+          projectIds: [ProjectId.make("p1")],
+          excludeSubagents: true,
+        };
+        yield* save(widerAudience);
+        const oldSlot = mcpServerStdioEnvSecretName(
+          id,
+          entry.command,
+          entry.args,
+          "EXECUTOR_TOKEN",
+          widerAudience,
+        );
+        const newSlot = mcpServerStdioEnvSecretName(
+          id,
+          entry.command,
+          entry.args,
+          "EXECUTOR_TOKEN",
+          narrowerAudience,
+        );
+        assert.notEqual(oldSlot, newSlot);
+        assert.isTrue(Option.isSome(yield* store.get(oldSlot)));
+        yield* save({ ...echo, ...narrowerAudience });
+        assert.deepEqual(yield* env, { EXECUTOR_TOKEN: "stdio-env-secret" });
+        assert.isTrue(Option.isNone(yield* store.get(oldSlot)));
+        assert.isTrue(Option.isSome(yield* store.get(newSlot)));
+      }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("never materializes a stdio env secret after a disk edit widens its audience", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const store = yield* ServerSecretStore.ServerSecretStore;
+      const id = McpServerId.make("local");
+      const command = "/usr/local/bin/executor";
+      const args = ["mcp"];
+      const savedAudience = {
+        projectIds: [ProjectId.make("p1")],
+        excludeSubagents: true,
+      };
+      yield* store.set(
+        mcpServerStdioEnvSecretName(id, command, args, "EXECUTOR_TOKEN", savedAudience),
+        new TextEncoder().encode("stdio-env-secret"),
+      );
+
+      const readFresh = Effect.gen(function* () {
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        return yield* service.getSettings;
+      }).pipe(
+        Effect.provide(
+          Layer.fresh(ServerSettingsModule.layer).pipe(Layer.provide(ManagedPolicy.layerTest())),
+        ),
+      );
+
+      // Unmodified saved audience materializes the stored secret.
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({
+          mcpServers: {
+            [id]: {
+              transport: "stdio",
+              command,
+              args,
+              env: { EXECUTOR_TOKEN: SECRET_REDACTED },
+              enabled: true,
+              ...savedAudience,
+            },
+          },
+        }),
+      );
+      const reloadedOriginal = yield* readFresh;
+      assert.deepEqual((reloadedOriginal.mcpServers[id] as { env: Record<string, string> }).env, {
+        EXECUTOR_TOKEN: "stdio-env-secret",
+      });
+
+      // Disk edit widens projectIds while leaving SECRET_REDACTED.
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({
+          mcpServers: {
+            [id]: {
+              transport: "stdio",
+              command,
+              args,
+              env: { EXECUTOR_TOKEN: SECRET_REDACTED },
+              enabled: true,
+              projectIds: [],
+              excludeSubagents: true,
+            },
+          },
+        }),
+      );
+      const reloadedWidenedProjects = yield* readFresh;
+      assert.deepEqual(
+        (reloadedWidenedProjects.mcpServers[id] as { env: Record<string, string> }).env,
+        { EXECUTOR_TOKEN: "" },
+      );
+
+      // Disk edit turns off excludeSubagents while leaving SECRET_REDACTED.
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({
+          mcpServers: {
+            [id]: {
+              transport: "stdio",
+              command,
+              args,
+              env: { EXECUTOR_TOKEN: SECRET_REDACTED },
+              enabled: true,
+              projectIds: [ProjectId.make("p1")],
+              excludeSubagents: false,
+            },
+          },
+        }),
+      );
+      const reloadedWidenedSubagents = yield* readFresh;
+      assert.deepEqual(
+        (reloadedWidenedSubagents.mcpServers[id] as { env: Record<string, string> }).env,
+        { EXECUTOR_TOKEN: "" },
+      );
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect(
+    "redacts opaque unknown-transport MCP entries for clients while preserving them on disk",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        const future = {
+          transport: "websocket",
+          endpoint: "wss://future.example.invalid",
+          apiKey: "future-secret",
+        };
+        const saved = yield* service.updateSettings({
+          mcpServers: {
+            future,
+            docs: { url: "https://docs.example/mcp", enabled: true },
+          },
+        } as never);
+
+        const client = ServerSettingsModule.redactServerSettingsForClient(saved, {
+          secretReferences: true,
+          stdioMcpServers: true,
+        });
+        assert.deepEqual(client.mcpServers[McpServerId.make("future")], {
+          transport: "websocket",
+        });
+        assert.notInclude(JSON.stringify(client), "future-secret");
+        assert.notInclude(JSON.stringify(client), "future.example.invalid");
+
+        // Writing an unrelated entry keeps the full opaque entry untouched on disk.
+        yield* service.updateSettings({
+          mcpServers: { docs: { url: "https://docs.example/mcp", label: "Docs", enabled: true } },
+        } as never);
+        assert.deepEqual(
+          (yield* service.getSettings).mcpServers[McpServerId.make("future")],
+          future,
+        );
+
+        // Echoing the redacted `{ transport }` stub alongside another edit also preserves the full entry on disk.
+        yield* service.updateSettings({
+          mcpServers: {
+            ...client.mcpServers,
+            docs: { url: "https://docs.example/mcp", label: "Docs Echoed", enabled: true },
+          },
+        } as never);
+        const afterEcho = yield* service.getSettings;
+        assert.deepEqual(afterEcho.mcpServers[McpServerId.make("future")], future);
+        assert.deepInclude(afterEcho.mcpServers[McpServerId.make("docs")], {
+          label: "Docs Echoed",
+        });
+      }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("refuses an HTTP write without a transport to an id a stdio entry already has", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const local = {
+        transport: "stdio",
+        command: "executor",
+        args: ["mcp"],
+        env: {},
+        enabled: true,
+      };
+      yield* service.updateSettings({ mcpServers: { local } } as never);
+      const error = yield* service
+        .updateSettings({
+          mcpServers: { local: { url: "https://docs.example/mcp", enabled: true } },
+        } as never)
+        .pipe(Effect.flip);
+      assert.strictEqual(error.operation, "write-mcp-server");
+      assert.include(
+        error.message,
+        'An MCP server named "local" already exists on this host as a local process',
+      );
+      assert.deepInclude((yield* service.getSettings).mcpServers[McpServerId.make("local")], local);
+      // An explicit switch to HTTP is still allowed, and a brand-new id is unaffected.
+      yield* service.updateSettings({
+        mcpServers: { docs: { url: "https://docs.example/mcp", enabled: true } },
+      } as never);
+      yield* service.updateSettings({
+        mcpServers: {
+          local: { transport: "http", url: "https://docs.example/mcp", enabled: true },
+        },
+      } as never);
+      assert.deepInclude((yield* service.getSettings).mcpServers[McpServerId.make("local")], {
+        url: "https://docs.example/mcp",
+      });
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("hides stdio MCP entries from clients that can't decode them", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const saved = yield* service.updateSettings({
+        mcpServers: {
+          local: { transport: "stdio", command: "executor", args: ["mcp"], env: {}, enabled: true },
+          docs: { url: "https://docs.example/mcp", enabled: true },
+        },
+      } as never);
+      const old = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+      });
+      assert.deepEqual(Object.keys(old.mcpServers), ["docs"]);
+      const current = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+        stdioMcpServers: true,
+      });
+      assert.sameMembers(Object.keys(current.mcpServers), ["docs", "local"]);
+      // The old client's write patches its own entry and leaves the hidden one saved.
+      yield* service.updateSettings({
+        mcpServers: { docs: { ...old.mcpServers[McpServerId.make("docs")]!, label: "Docs" } },
+      } as never);
+      assert.property((yield* service.getSettings).mcpServers, "local");
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

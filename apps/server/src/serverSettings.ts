@@ -22,6 +22,8 @@ import {
   isSecretReference,
   type SecretReference,
   withIdleCompaction,
+  isHttpMcpServer,
+  isStdioMcpServer,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -68,6 +70,7 @@ import {
 import {
   mapSettingsSecrets,
   mapSettingsSecretValues,
+  mcpServerStdioEnvSecretName,
   withoutRemovedSecretProviderReferences,
   withoutRedirectedSimlockTokens,
   SECRET_REDACTED,
@@ -138,6 +141,20 @@ const clearUsageLimitNotesOfEnabledInstances = (settings: ServerSettings): Serve
   return { ...settings, providerInstances };
 };
 
+type McpServerReach = {
+  readonly projectIds?: ReadonlyArray<string>;
+  readonly excludeSubagents?: boolean;
+};
+
+/** True when `next` reaches a thread `previous` did not: more projects, or subagents let back in. */
+function widensMcpServerBinding(previous: McpServerReach, next: McpServerReach): boolean {
+  if ((previous.excludeSubagents ?? false) && !(next.excludeSubagents ?? false)) return true;
+  const before = previous.projectIds ?? [];
+  if (before.length === 0) return false; // Already every project.
+  const after = next.projectIds ?? [];
+  return after.length === 0 || after.some((id) => !before.includes(id));
+}
+
 const normalizeServerSettings = (
   settings: ServerSettings,
 ): Effect.Effect<ServerSettings, ServerSettingsError> =>
@@ -157,9 +174,15 @@ const normalizeServerSettings = (
     ),
   );
 
+/** What a connected client can decode, from its clientCapabilities. */
+export interface SettingsClient {
+  readonly secretReferences: boolean;
+  readonly stdioMcpServers?: boolean;
+}
+
 export function redactServerSettingsForClient(
   settings: ServerSettings,
-  client: { readonly secretReferences: boolean },
+  client: SettingsClient,
 ): ServerSettings {
   const redacted = mapSettingsSecrets(settings, (secret) =>
     secret.sensitive
@@ -172,7 +195,25 @@ export function redactServerSettingsForClient(
     : mapSettingsSecretValues(redacted, (value) =>
         isSecretReference(value) ? SECRET_REDACTED : value,
       );
-  return { ...shaped, secretProviders: withoutUnknownSecretProviderConfigs(shaped) };
+  return {
+    ...shaped,
+    // Older clients decode every entry as HTTP and reject the whole settings on one stdio entry.
+    // Their writes patch per entry, so a hidden entry stays saved. Unknown transports strip down
+    // to their transport tag so future credential fields never leave the server.
+    mcpServers: client.stdioMcpServers
+      ? (Object.fromEntries(
+          Object.entries(shaped.mcpServers).map(([id, server]) => [
+            id,
+            isHttpMcpServer(server) || isStdioMcpServer(server)
+              ? server
+              : { transport: server.transport },
+          ]),
+        ) as ServerSettings["mcpServers"])
+      : (Object.fromEntries(
+          Object.entries(shaped.mcpServers).filter(([, server]) => isHttpMcpServer(server)),
+        ) as ServerSettings["mcpServers"]),
+    secretProviders: withoutUnknownSecretProviderConfigs(shaped),
+  };
 }
 
 /** A client shown a reference as a saved secret sends that marker back; it keeps the reference. */
@@ -242,6 +283,30 @@ function ensureSecretProviderWritesAllowed(
           operation: "write-secret-provider",
           cause: new Error(problem),
         }),
+      );
+    }
+  }
+  return Effect.void;
+}
+
+/**
+ * A client that predates other transports writes HTTP entries with no `transport`. It can't see a
+ * stdio (or newer) entry, so a write to that id would be dropped by the merge; say so instead.
+ */
+function ensureMcpServerWritesAllowed(
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+  settingsPath: string,
+): Effect.Effect<void, ServerSettingsError> {
+  for (const [id, entry] of Object.entries(patch.mcpServers ?? {})) {
+    if (entry === null || (entry as { readonly transport?: unknown }).transport !== undefined)
+      continue;
+    const saved = Object.hasOwn(current.mcpServers, id)
+      ? current.mcpServers[id as keyof ServerSettings["mcpServers"]]
+      : undefined;
+    if (saved !== undefined && !isHttpMcpServer(saved)) {
+      return Effect.fail(
+        new ServerSettingsError({ settingsPath, operation: "write-mcp-server", mcpServerId: id }),
       );
     }
   }
@@ -1116,6 +1181,9 @@ const make = Effect.gen(function* () {
     | { readonly kind: "remove"; readonly operation: "remove-secret" | "remove-stale-secret" }
   );
 
+  const sameArgs = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
+    left.length === right.length && left.every((arg, index) => arg === right[index]);
+
   // A marker may keep an existing token, not claim an orphaned slot.
   const clearUnboundMcpServerTokenMarkers = (
     current: ServerSettings,
@@ -1127,9 +1195,39 @@ const make = Effect.gen(function* () {
         const previous = Object.hasOwn(current.mcpServers, id)
           ? current.mcpServers[id as McpServerId]
           : undefined;
+        if (isStdioMcpServer(server)) {
+          // A kept env value needs the same variable, set, on the same command line it was saved
+          // for, reaching no more threads than before.
+          const saved =
+            previous !== undefined &&
+            isStdioMcpServer(previous) &&
+            previous.command === server.command &&
+            sameArgs(previous.args, server.args) &&
+            !widensMcpServerBinding(previous, server)
+              ? previous.env
+              : {};
+          let envChanged = false;
+          const env = Object.fromEntries(
+            Object.entries(server.env).map(([variable, value]) => {
+              if (
+                value !== SECRET_REDACTED ||
+                (Object.hasOwn(saved, variable) && saved[variable] !== "")
+              ) {
+                return [variable, value];
+              }
+              envChanged = true;
+              return [variable, ""];
+            }),
+          );
+          if (!envChanged) return [id, server];
+          changed = true;
+          return [id, { ...server, env }];
+        }
         if (
+          !isHttpMcpServer(server) ||
           server.bearerToken !== SECRET_REDACTED ||
           (previous !== undefined &&
+            isHttpMcpServer(previous) &&
             previous.bearerToken !== "" &&
             sameMcpServerBinding(previous, server))
         ) {
@@ -1142,7 +1240,118 @@ const make = Effect.gen(function* () {
     return changed ? { ...next, mcpServers } : next;
   };
 
-  const persistSettingsSecrets = (current: ServerSettings, next: ServerSettings) =>
+  /**
+   * When a write narrows a stdio entry's audience while echoing SECRET_REDACTED, the secret slot
+   * name changes; carry the saved value into the new slot so narrowing keeps it and the old slot
+   * is removed as stale.
+   */
+  const carryNarrowedStdioSecrets = Effect.fnUntraced(function* (
+    current: ServerSettings,
+    next: ServerSettings,
+  ) {
+    const carried = new Map<string, Uint8Array>();
+    let changed = false;
+    const mcpServersEntries = Object.entries(next.mcpServers);
+    const updatedEntries: Array<[string, ServerSettings["mcpServers"][McpServerId]]> = [];
+    for (const [id, server] of mcpServersEntries) {
+      if (!isStdioMcpServer(server)) {
+        updatedEntries.push([id, server]);
+        continue;
+      }
+      const previous = Object.hasOwn(current.mcpServers, id)
+        ? current.mcpServers[id as McpServerId]
+        : undefined;
+      if (
+        previous === undefined ||
+        !isStdioMcpServer(previous) ||
+        previous.command !== server.command ||
+        !sameArgs(previous.args, server.args) ||
+        widensMcpServerBinding(previous, server)
+      ) {
+        updatedEntries.push([id, server]);
+        continue;
+      }
+      let envChanged = false;
+      const envEntries: Array<[string, string]> = [];
+      for (const [variable, value] of Object.entries(server.env)) {
+        if (value !== SECRET_REDACTED) {
+          envEntries.push([variable, value]);
+          continue;
+        }
+        const oldSlot = mcpServerStdioEnvSecretName(
+          id,
+          previous.command,
+          previous.args,
+          variable,
+          previous,
+        );
+        const newSlot = mcpServerStdioEnvSecretName(
+          id,
+          server.command,
+          server.args,
+          variable,
+          server,
+        );
+        if (oldSlot === newSlot) {
+          envEntries.push([variable, value]);
+          continue;
+        }
+        const previousInline = Object.hasOwn(previous.env, variable)
+          ? previous.env[variable]
+          : undefined;
+        let savedBytes: Uint8Array | undefined;
+        if (
+          previousInline !== undefined &&
+          previousInline !== SECRET_REDACTED &&
+          previousInline.length > 0
+        ) {
+          savedBytes = textEncoder.encode(previousInline);
+        } else {
+          const stored = yield* secretStore.get(oldSlot).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({
+                  settingsPath,
+                  operation: "read-secret",
+                  cause,
+                }),
+            ),
+          );
+          if (Option.isSome(stored) && stored.value.length > 0) {
+            savedBytes = stored.value;
+          }
+        }
+        if (savedBytes !== undefined) {
+          carried.set(newSlot, savedBytes);
+          envEntries.push([variable, value]);
+        } else {
+          envChanged = true;
+          envEntries.push([variable, ""]);
+        }
+      }
+      if (envChanged) {
+        changed = true;
+        updatedEntries.push([id, { ...server, env: Object.fromEntries(envEntries) }]);
+      } else {
+        updatedEntries.push([id, server]);
+      }
+    }
+    return {
+      settings: changed
+        ? {
+            ...next,
+            mcpServers: Object.fromEntries(updatedEntries) as ServerSettings["mcpServers"],
+          }
+        : next,
+      carried,
+    };
+  });
+
+  const persistSettingsSecrets = (
+    current: ServerSettings,
+    next: ServerSettings,
+    carried: ReadonlyMap<string, Uint8Array> = new Map(),
+  ) =>
     Effect.sync(() => {
       // Only sensitive rows own a stored secret; a plain duplicate must not hide one from cleanup.
       const previous = new Map<string, SettingsSecret>();
@@ -1177,6 +1386,12 @@ const make = Effect.gen(function* () {
         if (secret.redacted) {
           keptSecretNames.add(secret.secretName);
           nextSecretNames.add(secret.secretName);
+          const carriedValue = carried.get(secret.secretName);
+          if (carriedValue !== undefined) {
+            writtenSecretNames.add(secret.secretName);
+            changes.push({ ...metadata, kind: "write", value: carriedValue });
+            return { value: "", redacted: true };
+          }
           const inlineValue = inlineValues.get(secret.secretName);
           if (inlineValue !== undefined) {
             inlineWrites.set(secret.secretName, {
@@ -1361,7 +1576,8 @@ const make = Effect.gen(function* () {
       current,
       withoutRemovedSecretProviderReferences(current, vettedProviders.settings),
     );
-    const persisted = yield* persistSettingsSecrets(current, updated);
+    const narrowed = yield* carryNarrowedStdioSecrets(current, updated);
+    const persisted = yield* persistSettingsSecrets(current, narrowed.settings, narrowed.carried);
     const next = yield* normalizeServerSettings(persisted.settings);
     const materializedNext = yield* Effect.uninterruptibleMask(() =>
       Effect.gen(function* () {
@@ -1420,6 +1636,7 @@ const make = Effect.gen(function* () {
         const current = yield* readForUpdate;
         const patch = yield* build(yield* getMaterializedSettings);
         yield* ensureSecretProviderWritesAllowed(patch, settingsPath);
+        yield* ensureMcpServerWritesAllowed(current, patch, settingsPath);
         return yield* persistUpdate(current, applyServerSettingsPatch(current, patch), patch);
       }),
     );
@@ -1573,6 +1790,7 @@ const make = Effect.gen(function* () {
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(
+          Effect.andThen(ensureMcpServerWritesAllowed(current, patch, settingsPath)),
           Effect.as(applyServerSettingsPatch(current, patch)),
         ),
       ),
@@ -1581,6 +1799,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* ensureSecretProviderWritesAllowed(patch, settingsPath);
           yield* ensureProviderInstanceMutationAllowed(current, mutation, settingsPath);
+          yield* ensureMcpServerWritesAllowed(current, patch, settingsPath);
           const patched = applyServerSettingsPatch(current, patch);
           return applyProviderInstanceMutation(patched, mutation);
         }),

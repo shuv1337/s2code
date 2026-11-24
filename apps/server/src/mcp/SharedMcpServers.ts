@@ -1,17 +1,25 @@
 import {
   isDelegatedAppThread,
+  isEnabledMcpServer,
+  isHttpMcpServer,
+  isStdioMcpServer,
   type McpServerConfig,
+  type McpServerStdioConfig,
   type McpServerTestInput,
   type McpServerTestResult,
   type OrchestrationV2ThreadShell,
   type ProjectId,
   type ServerSettings,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import {
   FetchHttpClient,
   HttpBody,
@@ -27,6 +35,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import { SECRET_REDACTED } from "../settingsSecrets.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
+import * as StdioMcpBridge from "./StdioMcpBridge.ts";
 
 const ROUTE_PREFIX = "/mcp/servers";
 
@@ -61,7 +70,7 @@ export const enabledSharedMcpServerNames = (
   thread === undefined
     ? []
     : Object.entries(settings.mcpServers)
-        .filter(([, server]) => server.enabled && sharedMcpServerAdmits(server, thread))
+        .filter(([, server]) => isEnabledMcpServer(server) && sharedMcpServerAdmits(server, thread))
         .map(([name]) => name)
         .toSorted();
 
@@ -148,17 +157,66 @@ const emptyListing = (body: string) => {
     : undefined;
 };
 
+const fullAccessOnly = (body: string, label: string) =>
+  unavailable(
+    body,
+    403,
+    `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
+  );
+
 /** What a supervised thread gets instead of the upstream response, or undefined to forward it. */
 const supervisedAnswer = (body: string, label: string) => {
   if (Option.getOrUndefined(decodeJsonRpcMethod(body))?.method === "initialize") return undefined;
-  return (
-    emptyListing(body) ??
-    unavailable(
-      body,
-      403,
-      `${label} only works in threads with Full access. Switch this thread to Full access, then use Restart agent.`,
-    )
-  );
+  return emptyListing(body) ?? fullAccessOnly(body, label);
+};
+
+/** No bridge session has this id, so after a switch to Full access the next call gets 404 and re-initializes. */
+const SUPERVISED_STDIO_SESSION = "supervised";
+
+const decodeInitializeRequest = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      id: Schema.Union([Schema.String, Schema.Number]),
+      method: Schema.Literal("initialize"),
+      params: Schema.optional(Schema.Struct({ protocolVersion: Schema.optional(Schema.String) })),
+    }),
+  ),
+);
+
+/**
+ * A supervised thread can't use a stdio server's tools, so it never starts its process: T3 answers
+ * the handshake itself, with no session, and the rest as it does for an HTTP server.
+ */
+const supervisedStdioAnswer = (method: string, body: string, label: string) => {
+  // Closing a session from before the switch only stops its process.
+  if (method === "DELETE") return undefined;
+  if (method !== "POST") {
+    return HttpServerResponse.text("Method Not Allowed", { status: 405, headers: NO_STORE });
+  }
+  const initialize = decodeInitializeRequest(body);
+  if (Option.isSome(initialize)) {
+    return HttpServerResponse.jsonUnsafe(
+      {
+        jsonrpc: "2.0",
+        id: initialize.value.id,
+        result: {
+          protocolVersion: initialize.value.params?.protocolVersion ?? "2025-06-18",
+          capabilities: { tools: {} },
+          serverInfo: { name: label, version: "0" },
+        },
+      },
+      {
+        headers: {
+          ...NO_STORE,
+          "mcp-session-id": SUPERVISED_STDIO_SESSION,
+        },
+      },
+    );
+  }
+  if (Option.getOrUndefined(decodeJsonRpcMethod(body))?.method.startsWith("notifications/")) {
+    return HttpServerResponse.empty({ status: 202, headers: NO_STORE });
+  }
+  return supervisedAnswer(body, label) ?? fullAccessOnly(body, label);
 };
 
 /** A thread outside a server's binding never reaches it, not even to initialize. */
@@ -181,7 +239,8 @@ const invalidCredential = HttpServerResponse.jsonUnsafe(
   },
 );
 
-const displayName = (name: string, server: McpServerConfig) => server.label ?? name;
+const displayName = (name: string, server: McpServerConfig | McpServerStdioConfig) =>
+  server.label ?? name;
 
 const upstreamHeaders = (server: McpServerConfig): Record<string, string> =>
   server.bearerToken.length > 0 ? { authorization: `Bearer ${server.bearerToken}` } : {};
@@ -225,7 +284,7 @@ const proxy = Effect.gen(function* () {
       ? settings.value.mcpServers[name as keyof ServerSettings["mcpServers"]]
       : undefined
     : undefined;
-  if (server === undefined || !server.enabled) {
+  if (server === undefined || !isEnabledMcpServer(server)) {
     return unavailable(body, 404, `MCP server "${name}" is turned off or removed in Settings.`);
   }
   // Read per request: narrowing a running thread's mode or a server's binding takes effect on its next call.
@@ -249,8 +308,42 @@ const proxy = Effect.gen(function* () {
     return unboundAnswer(body, displayName(name, server));
   }
   if (thread.runtimeMode !== "full-access") {
-    const answer = supervisedAnswer(body, displayName(name, server));
+    const answer = isStdioMcpServer(server)
+      ? supervisedStdioAnswer(request.method, body, displayName(name, server))
+      : supervisedAnswer(body, displayName(name, server));
     if (answer !== undefined) return answer;
+  }
+  if (isStdioMcpServer(server)) {
+    const bridge = yield* StdioMcpBridge.StdioMcpBridge;
+    const answer = bridge.handle({
+      serverId: name,
+      server,
+      owner: caller.thread.threadId,
+      method: request.method,
+      sessionId: request.headers["mcp-session-id"],
+      body,
+    });
+    // initialize spawns the process and has the bridge's own longer limit.
+    const prompt =
+      answersPromptly(request.method, body) &&
+      Option.getOrUndefined(decodeJsonRpcMethod(body))?.method !== "initialize";
+    const bridged = yield* prompt
+      ? Effect.timeoutOption(answer, PROMPT_TIMEOUT)
+      : Effect.asSome(answer);
+    if (Option.isNone(bridged)) {
+      return unavailable(
+        body,
+        504,
+        `${displayName(name, server)} did not answer within ${PROMPT_TIMEOUT}.`,
+      );
+    }
+    return HttpServerResponse.text(bridged.value.body, {
+      status: bridged.value.status,
+      headers: { ...NO_STORE, ...bridged.value.headers },
+      ...(bridged.value.headers["content-type"] === undefined
+        ? {}
+        : { contentType: bridged.value.headers["content-type"] }),
+    });
   }
   const headers: Record<string, string> = {};
   for (const header of FORWARDED_REQUEST_HEADERS) {
@@ -310,7 +403,63 @@ const proxy = Effect.gen(function* () {
   });
 }).pipe(Effect.withSpan("SharedMcpServers.proxy"));
 
-export const layerProxyRoute = HttpRouter.add("*", `${ROUTE_PREFIX}/*`, proxy);
+const RETIRE_WATCHER_RESTART_DELAY = "1 second";
+
+/** Stops a removed, disabled or edited stdio entry's processes now, not at their next call or idle. */
+const layerRetireStaleStdioSessions = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const bridge = yield* StdioMcpBridge.StdioMcpBridge;
+    const settings = yield* ServerSettingsService.ServerSettingsService;
+    const reconcileSnapshot = settings.getSettings.pipe(
+      Effect.option,
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: (current) => bridge.reconcile(current.mcpServers),
+        }),
+      ),
+    );
+    const watch = Effect.scoped(
+      Effect.gen(function* () {
+        // Subscribe before reconciling the snapshot so changes during startup or restart are not missed.
+        const fiber = yield* settings.streamChanges.pipe(
+          Stream.runForEach((next) => bridge.reconcile(next.mcpServers)),
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* reconcileSnapshot;
+        return yield* Fiber.join(fiber);
+      }),
+    );
+    yield* watch.pipe(
+      Effect.exit,
+      Effect.flatMap((exit) =>
+        Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+          ? Effect.interrupt
+          : Effect.logWarning("shared MCP stdio settings watcher stopped; restarting", {
+              cause: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "settings stream ended",
+            }),
+      ),
+      Effect.andThen(Effect.sleep(RETIRE_WATCHER_RESTART_DELAY)),
+      Effect.forever,
+      Effect.forkScoped,
+    );
+  }),
+);
+
+export const layerProxyRoute = Layer.merge(
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const bridge = yield* StdioMcpBridge.StdioMcpBridge;
+      return HttpRouter.add(
+        "*",
+        `${ROUTE_PREFIX}/*`,
+        proxy.pipe(Effect.provideService(StdioMcpBridge.StdioMcpBridge, bridge)),
+      );
+    }),
+  ),
+  layerRetireStaleStdioSessions,
+).pipe(Layer.provide(StdioMcpBridge.layer));
 
 const PROTOCOL_VERSION = "2025-06-18";
 const TEST_TIMEOUT = "10 seconds";
@@ -351,6 +500,9 @@ export class SharedMcpServers extends Context.Service<
     readonly test: (input: McpServerTestInput) => Effect.Effect<McpServerTestResult>;
     readonly testConnection: (
       server: Pick<McpServerConfig, "url" | "bearerToken">,
+    ) => Effect.Effect<McpServerTestResult>;
+    readonly testStdioConnection: (
+      server: Pick<McpServerStdioConfig, "command" | "args" | "env">,
     ) => Effect.Effect<McpServerTestResult>;
   }
 >()("t3/mcp/SharedMcpServers") {}
@@ -458,11 +610,20 @@ const make = Effect.gen(function* () {
     // A saved token only goes to the URL it was saved for.
     return yield* testConnection({
       url: input.url,
-      bearerToken: saved?.url === input.url ? saved.bearerToken : "",
+      bearerToken:
+        saved !== undefined && isHttpMcpServer(saved) && saved.url === input.url
+          ? saved.bearerToken
+          : "",
     });
   });
 
-  return SharedMcpServers.of({ test, testConnection });
+  const testStdioConnection = (server: Pick<McpServerStdioConfig, "command" | "args" | "env">) =>
+    Effect.promise(() => StdioMcpBridge.testStdioServer(server)).pipe(
+      Effect.map((result): McpServerTestResult => result),
+      Effect.withSpan("SharedMcpServers.testStdioConnection"),
+    );
+
+  return SharedMcpServers.of({ test, testConnection, testStdioConnection });
 });
 
 export const layer = Layer.effect(SharedMcpServers, make);
