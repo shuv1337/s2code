@@ -9194,7 +9194,13 @@
   "0be6b2546df12f66": "Arrêter",
   "7dbd7e8943e8931f": "Ouverture du microphone…",
   "efa31f38b611e912": "Impossible de lire cet enregistrement. Essayez de réenregistrer.",
-  "4fe5a4634974ac55": ["Les applications mobiles sont en bêta privée sur ",{"t":"a","i":1,"c":"TestFlight"},". Écrivez à ",{"t":"a","i":2,"c":{"i":3,"k":"_gt_value_3","v":"v"}}," pour y accéder."],
+  "4fe5a4634974ac55": [
+    "Les applications mobiles sont en bêta privée sur ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    ". Écrivez à ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    " pour y accéder."
+  ],
   "73da41e93823fd71": [
     "Nous déconseillons de gérer plusieurs comptes ",
     {

@@ -9192,7 +9192,13 @@
   "0be6b2546df12f66": "Detener",
   "7dbd7e8943e8931f": "Abriendo micrófono…",
   "efa31f38b611e912": "No se pudo reproducir esta grabación. Vuelve a grabar.",
-  "4fe5a4634974ac55": ["Las apps móviles están en una beta privada de ",{"t":"a","i":1,"c":"TestFlight"},". Escribe a ",{"t":"a","i":2,"c":{"i":3,"k":"_gt_value_3","v":"v"}}," para obtener acceso."],
+  "4fe5a4634974ac55": [
+    "Las apps móviles están en una beta privada de ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    ". Escribe a ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    " para obtener acceso."
+  ],
   "73da41e93823fd71": [
     "No recomendamos gestionar varias cuentas de ",
     {

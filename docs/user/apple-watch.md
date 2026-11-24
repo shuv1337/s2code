@@ -1,7 +1,9 @@
 # Apple Watch
 
-Fork mobile/watch distributions are not available yet. These steps apply only
-to a fork app built from source; do not install an upstream app as a substitute.
+The fork's iPhone app is a private TestFlight beta; email
+[shuv@shuv.dev](mailto:shuv@shuv.dev) for access. There is no separate Watch
+distribution. These steps need a fork iPhone companion that includes T3 Watch;
+do not install an upstream app as a substitute.
 
 T3 Watch lets you record an instruction, review its transcript, and send it to an
 existing thread. The iPhone companion must include T3 Watch, and each connected

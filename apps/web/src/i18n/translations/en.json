@@ -9202,7 +9202,17 @@
   "0be6b2546df12f66": "Stop",
   "7dbd7e8943e8931f": "Opening microphone…",
   "efa31f38b611e912": "Could not play this recording. Try recording again.",
-  "4fe5a4634974ac55": ["The mobile apps are in a private"," ",{"t":"a","i":1,"c":"TestFlight"}," ","beta. Email"," ",{"t":"a","i":2,"c":{"i":3,"k":"_gt_value_3","v":"v"}}," ","for access."],
+  "4fe5a4634974ac55": [
+    "The mobile apps are in a private",
+    " ",
+    { "t": "a", "i": 1, "c": "TestFlight" },
+    " ",
+    "beta. Email",
+    " ",
+    { "t": "a", "i": 2, "c": { "i": 3, "k": "_gt_value_3", "v": "v" } },
+    " ",
+    "for access."
+  ],
   "73da41e93823fd71": [
     "We do not recommend managing multiple ",
     {

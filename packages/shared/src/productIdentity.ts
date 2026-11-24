@@ -22,14 +22,22 @@ export const isProductIdentity = (value: string) =>
 export const PRODUCT_TESTFLIGHT_URL = "https://testflight.apple.com";
 export const PRODUCT_BETA_ACCESS_EMAIL = "shuv@shuv.dev";
 
+export type ProductDownloadPlatform = "desktop" | "ios" | "android";
+
 /** Never substitute an upstream store listing for the fork's own distribution. */
-export const resolveProductDownload = (mobile: boolean) =>
-  mobile
-    ? {
+export const resolveProductDownload = (platform: ProductDownloadPlatform) => {
+  switch (platform) {
+    case "ios":
+      return {
         url: PRODUCT_TESTFLIGHT_URL,
         label: `Private TestFlight beta: email ${PRODUCT_BETA_ACCESS_EMAIL} for access`,
-      }
-    : { url: PRODUCT_RELEASES_URL, label: "Fork releases" };
+      };
+    case "android":
+      return { url: null, label: "The fork Android app is not available yet." };
+    case "desktop":
+      return { url: PRODUCT_RELEASES_URL, label: "Fork releases" };
+  }
+};
 
 /** Public settings are fork-owned; T3CODE names below remain runtime adapter inputs. */
 const PUBLIC_CONFIG_KEYS = [
