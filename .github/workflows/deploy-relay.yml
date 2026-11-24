@@ -63,6 +63,8 @@ jobs:
       CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
       CLERK_JWT_AUDIENCE: ${{ vars.CLERK_JWT_AUDIENCE }}
       APNS_ENABLED: ${{ vars.APNS_ENABLED || 'false' }}
+      FEEDBACK_GITHUB_REPO: ${{ vars.FEEDBACK_GITHUB_REPO }}
+      FEEDBACK_GITHUB_AUTO_ISSUES: ${{ vars.FEEDBACK_GITHUB_AUTO_ISSUES || 'false' }}
       ALCHEMY_TELEMETRY_DISABLED: "1"
     steps:
       - name: Checkout
@@ -154,6 +156,7 @@ jobs:
           RELAY_DB_ACCESS_CLIENT_ID: ${{ secrets.RELAY_DB_ACCESS_CLIENT_ID }}
           RELAY_DB_ACCESS_CLIENT_SECRET: ${{ secrets.RELAY_DB_ACCESS_CLIENT_SECRET }}
           RELAY_OTLP_TRACES_TOKEN: ${{ secrets.RELAY_OTLP_TRACES_TOKEN }}
+          FEEDBACK_GITHUB_TOKEN: ${{ secrets.FEEDBACK_GITHUB_TOKEN }}
 
       - name: Publish relay deploy commit status
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0

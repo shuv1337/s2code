@@ -6,7 +6,11 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 
-import { assertForkRelayDeploymentEnv, forkRelayDeploymentConfig } from "./forkOwnership.ts";
+import {
+  assertForkFeedbackGithubRepo,
+  assertForkRelayDeploymentEnv,
+  forkRelayDeploymentConfig,
+} from "./forkOwnership.ts";
 
 const VALID_ACCOUNT_ID = "771240435fb4f1407f2b4669085dc79d";
 const VALID_CLERK_KEY = `pk_live_${btoa("clerk.s2code.dev$")}`;
@@ -177,6 +181,32 @@ describe("assertForkRelayDeploymentEnv", () => {
       }),
   );
 
+  it("validates FEEDBACK_GITHUB_REPO with fork default and rejects upstream or malformed slugs", () => {
+    expect(assertForkFeedbackGithubRepo(undefined)).toBe("shuv1337/s2code");
+    expect(assertForkFeedbackGithubRepo("   ")).toBe("shuv1337/s2code");
+    expect(assertForkFeedbackGithubRepo("shuv1337/s2code")).toBe("shuv1337/s2code");
+    expect(assertForkFeedbackGithubRepo("my-org/my.repo_1")).toBe("my-org/my.repo_1");
+    for (const bad of [
+      "pingdotgg/t3code",
+      "PINGDOTGG/t3code",
+      "t3tools/t3code",
+      "t3-oss/t3code",
+      "example/repo",
+      "test/repo",
+      "invalid/repo",
+      "not-a-slug",
+      "owner/.",
+      "owner/..",
+      "owner/repo/extra",
+      "https://github.com/shuv1337/s2code",
+    ]) {
+      expect(() => assertForkFeedbackGithubRepo(bad)).toThrow("FEEDBACK_GITHUB_REPO");
+      expect(() =>
+        assertForkRelayDeploymentEnv(validExternalEnv({ FEEDBACK_GITHUB_REPO: bad })),
+      ).toThrow("FEEDBACK_GITHUB_REPO");
+    }
+  });
+
   it("pins Cloudflare.state through Effect Config rather than top-level process.env", () => {
     const source = NodeFS.readFileSync(new URL("../alchemy.run.ts", import.meta.url), "utf8");
     expect(source).not.toContain("process.env");
@@ -221,7 +251,18 @@ describe("hosted workflow guards", () => {
     expect(summaryStep).toContain("relay-client-config.env");
     expect(summaryStep).not.toContain("npx");
     expect(summaryStep).not.toMatch(
-      /CLOUDFLARE_API_TOKEN|Token|token|Credentials|credentials|PASSWORD/,
+      /CLOUDFLARE_API_TOKEN|Token|token|Credentials|credentials|PASSWORD|FEEDBACK_GITHUB_TOKEN/,
+    );
+
+    const deployStep = deploy.slice(
+      deployIndex,
+      deploy.indexOf("- name: Publish relay deploy commit status"),
+    );
+    expect(deployStep).toContain("FEEDBACK_GITHUB_TOKEN: ${{ secrets.FEEDBACK_GITHUB_TOKEN }}");
+    expect(deploy.slice(0, deployIndex)).not.toContain("FEEDBACK_GITHUB_TOKEN");
+    expect(deploy).toContain("FEEDBACK_GITHUB_REPO: ${{ vars.FEEDBACK_GITHUB_REPO }}");
+    expect(deploy).toContain(
+      "FEEDBACK_GITHUB_AUTO_ISSUES: ${{ vars.FEEDBACK_GITHUB_AUTO_ISSUES || 'false' }}",
     );
   });
 

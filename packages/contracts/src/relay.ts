@@ -15,6 +15,9 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import { RelayAgentFeedbackRequest, RelayAgentFeedbackResponse } from "./relayFeedback.ts";
+
+export * from "./relayFeedback.ts";
 
 export const RelayAgentAwarenessPlatform = Schema.Literals(["ios", "android"]);
 export type RelayAgentAwarenessPlatform = typeof RelayAgentAwarenessPlatform.Type;
@@ -1322,6 +1325,17 @@ const RelayMobileTelemetryGroup = HttpApiGroup.make("mobileTelemetry")
   )
   .annotate(OpenApi.Description, "Receive mobile app telemetry from expo-observe.");
 
+const RelayFeedbackGroup = HttpApiGroup.make("feedback")
+  .add(
+    HttpApiEndpoint.post("submitAgentFeedback", "/v1/feedback", {
+      payload: RelayAgentFeedbackRequest,
+      success: RelayAgentFeedbackResponse,
+      error: RelayAuthAndInternalErrors,
+    }).annotate(OpenApi.Summary, "Submit an agent feedback report"),
+  )
+  .annotate(OpenApi.Description, "Environment-authenticated agent feedback ingestion.")
+  .middleware(RelayEnvironmentAuth);
+
 export const RelayApi = HttpApi.make("RelayApi")
   .add(
     RelayHealthGroup,
@@ -1333,6 +1347,7 @@ export const RelayApi = HttpApi.make("RelayApi")
     RelayServerGroup,
     RelayHooksGroup,
     RelayMobileTelemetryGroup,
+    RelayFeedbackGroup,
   )
   .annotate(OpenApi.Title, "T3 Code Relay API")
   .annotate(OpenApi.Version, "1.0.0")

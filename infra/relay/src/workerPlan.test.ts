@@ -213,4 +213,26 @@ describe("RelayWorker plan and runtime isolation", () => {
         assert.isDefined(enabledObs);
       }),
   );
+
+  test.provider(
+    "plan phase binds optional FEEDBACK_GITHUB_TOKEN and rejects upstream FEEDBACK_GITHUB_REPO",
+    () =>
+      Effect.gen(function* () {
+        const { envKeys } = yield* planWorker({
+          ...externalDbEnv,
+          FEEDBACK_GITHUB_REPO: "shuv1337/s2code",
+          FEEDBACK_GITHUB_AUTO_ISSUES: "true",
+          FEEDBACK_GITHUB_TOKEN: "github_pat_test_secret",
+        });
+        assert.include(envKeys, "FEEDBACK_GITHUB_TOKEN");
+        assert.include(envKeys, "FEEDBACK_GITHUB_REPO");
+        assert.include(envKeys, "FEEDBACK_GITHUB_AUTO_ISSUES");
+
+        const rejected = yield* planWorker({
+          ...externalDbEnv,
+          FEEDBACK_GITHUB_REPO: "pingdotgg/t3code",
+        }).pipe(Effect.exit);
+        assert.equal(rejected._tag, "Failure");
+      }),
+  );
 });

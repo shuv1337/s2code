@@ -121,6 +121,17 @@ Optional self-hosted Worker OTLP traces (used when `AXIOM_TOKEN` is unset):
 - Variable: `RELAY_OTLP_TRACES_URL` (fork-owned HTTPS OTLP/HTTP traces endpoint)
 - Secret: `RELAY_OTLP_TRACES_TOKEN` _(optional bearer token)_
 
+Optional agent feedback GitHub issue creation (runs in the relay's 5-minute cron; full scrubbed
+reports always persist in Postgres `agent_feedback`):
+
+- Variables: `FEEDBACK_GITHUB_REPO` _(optional; defaults to `shuv1337/s2code`, validated at deploy
+  preflight and Worker startup to reject upstream/placeholder owners)_,
+  `FEEDBACK_GITHUB_AUTO_ISSUES` _(optional; defaults to `false` so only user-requested reports file
+  GitHub issues)_
+- Secret: `FEEDBACK_GITHUB_TOKEN` _(optional fine-grained GitHub PAT scoped strictly to `Issues:
+  Read and write` on `FEEDBACK_GITHUB_REPO`; bound only in the `production` deploy step, never
+  exposed to summaries or client builds)_
+
 Optional upstream-compatible PlanetScale + Axiom mode (leave unset on the self-hosted stack):
 
 - PlanetScale variables: `PLANETSCALE_ORGANIZATION`, optional

@@ -1,14 +1,17 @@
 # Product usage data
 
-Product usage events are off unless you opt in by setting `S2CODE_TELEMETRY_ENABLED=true` in the
-server's environment before starting it. When enabled, the S2Code server sends product usage events
-to upstream T3 Code's endpoint at `ingest.t3.codes`, associated with a hashed account or installation identifier. To count how many installations one person
-uses, the server also sends hashed account identifiers: your S2 Connect account, your OpenAI and
-Claude accounts when you are signed in, and a random identifier for each device that connects. The endpoint keeps a copy of each
-event and forwards events to PostHog. Events include the provider, model, reasoning effort,
-permission mode, turn and request results, duration, release channel, and token counts when
-available. Child-agent token counts are reported separately from the main agent's. Events include
-the model ID the provider used, including custom models and models served by a custom endpoint.
+Product usage events are off by default, and S2Code strips upstream T3 Code's analytics host and
+key defaults (`ingest.t3.codes` and all upstream hosted domains are rejected). Product usage events
+are only sent if you explicitly configure a non-upstream `S2CODE_POSTHOG_HOST` and
+`S2CODE_POSTHOG_KEY` alongside `S2CODE_TELEMETRY_ENABLED=true` in the server's environment before
+starting it. When configured and enabled, events are associated with a hashed account or
+installation identifier. To count how many installations one person uses, the server also sends
+hashed account identifiers: your S2 Connect account, your OpenAI and Claude accounts when you are
+signed in, and a random identifier for each device that connects. Events include the provider,
+model, reasoning effort, permission mode, turn and request results, duration, release channel, and
+token counts when available. Child-agent token counts are reported separately from the main agent's.
+Events include the model ID the provider used, including custom models and models served by a custom
+endpoint.
 
 Product events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. The one exception is [agent feedback](#agent-feedback),
@@ -16,26 +19,26 @@ which is off unless you turn it on.
 
 ## Agent feedback
 
-Agent feedback lets agents tell the T3 team about T3 Code: a T3 tool or `t3` command that did not
-do what they expected, a confusing instruction, or a missing capability. Choose a mode in
-**Agent feedback** in **Settings > Labs**:
+Agent feedback lets agents report S2Code issues: a tool or `t3` command that did not do what they
+expected, a confusing instruction, or a missing capability. Choose a mode in **Agent feedback** in
+**Settings > Labs**:
 
 - **Off**, the default: agents do not see the feedback tools, and `t3 feedback` stops with a
   message pointing to Labs.
-- **When I ask**: agents send a report only when you ask them to, about anything in T3 Code.
-- **Automatic**: agents also report T3 Code problems they hit on their own, such as a T3 tool that
+- **When I ask**: agents send a report only when you ask them to, about anything in S2Code.
+- **Automatic**: agents also report S2Code problems they hit on their own, such as a tool that
   failed and made them find another way. These reports carry no outline and no message text, and
   go out without asking you. `t3 feedback --kind bug --subject "t3 thread send" --expected "…" --actual "…"`
   sends one the same way, so it works only in this mode.
 
-When you ask your agent for a report, in either mode, T3 Code shows it in the thread as a card
+When you ask your agent for a report, in either mode, S2Code shows it in the thread as a card
 with exactly what would leave your machine, and sends it only if you press **Send**. The agent
 carries on without waiting and never learns your answer. The card stays open until you answer it,
 even after the turn ends or the server restarts; **Don't send** sends nothing, and the agent is
 told not to send it another way. Only someone who can run agents on that machine can answer the
 card; people on a guest link cannot.
 
-Each report has the kind of problem, the T3 tool or command it concerns (or `general`), and up to
+Each report has the kind of problem, the tool or command it concerns (or `general`), and up to
 300 characters each of expected behavior, actual behavior, and workaround, written by the agent,
 which is told not to quote your messages or code. The agent also says how many recent turns the
 problem spans. A report you approved carries an outline of those turns, and of at least the last 5,
@@ -49,18 +52,23 @@ and you can decline the old one. Tool inputs and outputs, files, and attachments
 show you at most 3 report cards and send 3 reports on its own per turn, and `t3 feedback` can
 send at most 10 an hour.
 
-Before anything is saved, T3 Code removes file paths (when text mentions one, the rest of that line
+Before anything is saved, S2Code removes file paths (when text mentions one, the rest of that line
 goes with it), your user name, machine name, project title, branch, and git remote, and anything
 that looks like a key, token, email address, or URL with a password. It cannot recognise your code
 or a name written in a sentence, so only include the conversation when it holds nothing you would
-not send. Reports from agents also name the provider and the model. No thread IDs or project IDs
-are sent.
+not send. Reports from agents also name the provider, model, server version, release channel, OS,
+architecture, and mode. No thread IDs, project IDs, or install IDs are sent.
 
 Reports are saved on your machine first, and a declined one is not saved at all; its card keeps
-only what you would have sent without the conversation. When product usage
-data is turned off, saved reports stay there and are not sent. `t3 feedback list` shows recent
-reports, the thread each came from, and a line for each outline; `t3 feedback list --json` shows
-exactly what each one holds.
+only what you would have sent without the conversation. When your host is linked to S2 Connect,
+approved and automatic reports are delivered to the S2 Connect relay (`POST /v1/feedback`) and stored
+privately in its Postgres database. For user-approved reports, the relay also files a public GitHub
+issue on `shuv1337/s2code` containing only the structured fields, non-PII metadata, and structural
+trace outline—never conversation turn text, environment IDs, IPs, or user IDs. Unlinked hosts,
+servers started with `S2CODE_TELEMETRY_ENABLED=false`, or servers where managed policy disables
+telemetry keep saved reports locally without sending them. `t3 feedback list` shows recent reports,
+the thread each came from, and a line for each outline; `t3 feedback list --json` shows exactly
+what each one holds.
 
 Relay tracing goes to S2Code's own relay and stays on unless you set
 `S2CODE_TELEMETRY_ENABLED=false`. It also stops when `S2CODE_OTEL_SDK_DISABLED` or

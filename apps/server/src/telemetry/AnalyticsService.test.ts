@@ -441,4 +441,51 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AnalyticsService
       assert.deepEqual(capturedPaths, []);
     }),
   );
+
+  it.effect.each([
+    {
+      label: "host and key are unset",
+      config: { T3CODE_TELEMETRY_ENABLED: true },
+    },
+    {
+      label: "host targets upstream ingest.t3.codes",
+      config: {
+        T3CODE_TELEMETRY_ENABLED: true,
+        T3CODE_POSTHOG_KEY: "phc_test_key",
+        T3CODE_POSTHOG_HOST: "https://ingest.t3.codes",
+      },
+    },
+  ])("records nothing and sends zero HTTP requests when $label", ({ config }) =>
+    Effect.gen(function* () {
+      const requestedUrls: Array<string> = [];
+      const client = HttpClient.make((request) => {
+        requestedUrls.push(request.url);
+        return respondWithStatus(204)(request);
+      });
+      const runtimeLayer = AnalyticsService.layer.pipe(
+        Layer.provideMerge(
+          ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix: "t3-telemetry-no-ingest-" }),
+        ),
+        Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(config))),
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(HostProcess.Platform, "linux"),
+            Layer.succeed(HostProcess.Architecture, "x64"),
+            Layer.succeed(HttpClient.HttpClient, client),
+            ManagedPolicy.layerTest(),
+          ),
+        ),
+      );
+
+      const recorded = yield* Effect.gen(function* () {
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        const ok = yield* analytics.record("test.blocked", { index: 1 });
+        yield* analytics.flush;
+        return ok;
+      }).pipe(Effect.provide(runtimeLayer));
+
+      assert.equal(recorded, false);
+      assert.deepEqual(requestedUrls, []);
+    }),
+  );
 });

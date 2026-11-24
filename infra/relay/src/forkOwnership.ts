@@ -1,5 +1,6 @@
 import * as Alchemy from "alchemy";
 import { forkClerkPublishableKey, forkHostedOrigin } from "@t3tools/shared/hostedConfig";
+import { PRODUCT_RELEASE_REPOSITORY } from "@t3tools/shared/productIdentity";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,6 +11,15 @@ import * as SchemaIssue from "effect/SchemaIssue";
 const CLOUDFLARE_ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/iu;
 const PLACEHOLDER_DOMAINS = ["example.com", "example.net", "example.org"] as const;
 const PLACEHOLDER_TLDS = [".example", ".invalid", ".test"] as const;
+const GITHUB_REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/u;
+const FORBIDDEN_FEEDBACK_GITHUB_OWNERS = new Set([
+  "pingdotgg",
+  "t3tools",
+  "t3-oss",
+  "example",
+  "test",
+  "invalid",
+]);
 
 export interface ForkRelayDeploymentEnv {
   readonly cloudflareAccountId: string;
@@ -74,6 +84,23 @@ export function assertForkOtlpTracesUrl(value: string): string {
   }
   assertForkRelayHost("RELAY_OTLP_TRACES_URL", parsed.hostname);
   return parsed.toString();
+}
+
+export function assertForkFeedbackGithubRepo(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  const repo = trimmed.length > 0 ? trimmed : PRODUCT_RELEASE_REPOSITORY;
+  if (!GITHUB_REPOSITORY_PATTERN.test(repo)) {
+    throw new Error(
+      "FEEDBACK_GITHUB_REPO must be a valid GitHub owner/repo slug (e.g. shuv1337/s2code).",
+    );
+  }
+  const [owner, name] = repo.split("/") as [string, string];
+  if (name === "." || name === ".." || FORBIDDEN_FEEDBACK_GITHUB_OWNERS.has(owner.toLowerCase())) {
+    throw new Error(
+      `FEEDBACK_GITHUB_REPO must target a fork-owned repository, not "${owner}/${name}".`,
+    );
+  }
+  return repo;
 }
 
 function assertForkRelayClerkPublishableKey(value: string | undefined): string {
@@ -151,6 +178,7 @@ export function assertForkRelayDeploymentEnv(
   if (rawOtlpTracesUrl) {
     assertForkOtlpTracesUrl(rawOtlpTracesUrl);
   }
+  assertForkFeedbackGithubRepo(env.FEEDBACK_GITHUB_REPO);
   const observabilityBackend = env.AXIOM_TOKEN?.trim() ? "axiom" : "none";
 
   return {
@@ -203,5 +231,6 @@ export const forkRelayDeploymentConfig: Config.Config<ForkRelayDeploymentEnv> = 
   RELAY_DB_ACCESS_CLIENT_SECRET: optionalConfigString("RELAY_DB_ACCESS_CLIENT_SECRET"),
   PLANETSCALE_ORGANIZATION: optionalConfigString("PLANETSCALE_ORGANIZATION"),
   RELAY_OTLP_TRACES_URL: optionalConfigString("RELAY_OTLP_TRACES_URL"),
+  FEEDBACK_GITHUB_REPO: optionalConfigString("FEEDBACK_GITHUB_REPO"),
   AXIOM_TOKEN: optionalConfigString("AXIOM_TOKEN"),
 }).pipe(Config.mapEffect(validateForkRelayConfig));

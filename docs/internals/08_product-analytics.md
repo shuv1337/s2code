@@ -31,12 +31,17 @@ an authenticated connection does not count as product use.
   IDs, or user-named provider instance IDs. Model IDs are reported as the provider used them,
   including custom models; known aliases and routed IDs map to one catalog slug, and a model
   that is a file path reports only its file name.
-- The sole exception is opt-in `agent.feedback`, which
+- The sole exception is opt-in agent feedback, which
   [`FeedbackService`](../../apps/server/src/feedback/FeedbackService.ts) scrubs of paths, private
   values, and secret-shaped strings, and only attaches bounded conversation traces when the user
-  explicitly previews and sends them.
-- Delivery ([`AnalyticsService.ts`](../../apps/server/src/telemetry/AnalyticsService.ts)) attaches a
-  UUID per event, backs off on failure, and drops batches after bounded retries so a stuck batch
+  explicitly previews and sends them. [`FeedbackRelayDelivery`](../../apps/server/src/feedback/FeedbackRelayDelivery.ts)
+  delivers stored reports directly to the linked fork Connect relay (`POST /v1/feedback`, omitting
+  `threadId`, `projectId`, `distinctId`, and `installId`) rather than PostHog; the relay stores full
+  reports privately in Postgres and files public GitHub issues without conversation turn text or
+  environment IDs.
+- Product analytics delivery ([`AnalyticsService.ts`](../../apps/server/src/telemetry/AnalyticsService.ts))
+  carries no upstream host or key defaults, rejects upstream domains via `forkHostedOrigin`, attaches
+  a UUID per event, backs off on failure, and drops batches after bounded retries so a stuck batch
   cannot loop forever.
 - Dev-runner servers and CI smoke tests disable telemetry (and relay tracing) by default so they do
   not inflate install counts; set `T3CODE_TELEMETRY_ENABLED=true` to test locally.
