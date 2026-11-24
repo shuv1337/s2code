@@ -127,9 +127,7 @@ an active link between your account and the host.
   that is already connected, or run `s2code-nightly auth connect-device approve <code>` on
   the host. See [Approve new devices](./remote-access.md#approve-new-devices).
 - **Your account reached its tunnel limit.** Remove an environment you do not
-  use from your S2 account's S2 Connect page, or
-  [link a paid T3 Chat account](./remote-access.md#more-machines-with-t3-chat)
-  for a higher limit. Then restart S2Code on the host.
+  use from your S2 account's S2 Connect page, then restart S2Code on the host.
 
 ## The clock is off
 
@@ -146,7 +144,7 @@ This app needs a newer S2Code on the host. Update S2Code on the host. See
 
 | Error                                                     | Fix                                                                                                                                                                                                 |
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Remove an unused environment or link a paid T3 Chat account, then restart S2Code on the host.                                                                                                       |
+| `environment_link_limit_exceeded` or managed tunnel limit | Remove an unused environment, then restart S2Code on the host.                                                                                                                                      |
 | `auth_invalid` or `invalid_bearer`                        | Run `s2code-nightly connect login`. If credentials were revoked, run `s2code-nightly connect logout`, then `s2code-nightly connect` again. Restart the server after signing in.                     |
 | Expired or invalid link proof                             | Check the host's date and time, update S2Code, then restart it.                                                                                                                                     |
 | HTTP 403 without a recognized error                       | If the host requires approval for new devices, update S2Code on this device and approve it. Otherwise check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report. |
@@ -161,7 +159,7 @@ If S2Code on the host disappears when SSH closes, see
 ## Report a problem
 
 If none of this helps, open an issue on
-[GitHub](https://github.com/pingdotgg/t3code/issues). Include:
+[GitHub](https://github.com/shuv1337/s2code/issues). Include:
 
 - The text from **Copy diagnostics** in the environment's **Details**.
 - The output of `s2code-nightly connect status` on the host.

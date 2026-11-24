@@ -86,18 +86,6 @@ the defaults. Without a terminal:
 `s2code status --json` prints the settings. `s2code up --help` lists every flag with
 examples.
 
-### More machines with T3 Chat
-
-Each S2 Connect account can link up to 3 machines. Phones and browsers do not
-count. A paid T3 Chat plan raises the limit to 10 machines with Pro, or 100 with
-Premier.
-
-To link T3 Chat, open your account menu on the web or desktop app, go to
-**T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat in the window that
-opens and approve. The new limit applies the next time you add a machine. If you
-cancel or downgrade T3 Chat, machines you already linked stay linked, but you
-cannot add more until you are under the limit again.
-
 ## Pair over a LAN or private network
 
 Use direct pairing when the other device can reach the host's network address.

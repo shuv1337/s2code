@@ -2,22 +2,20 @@
 
 ## Is S2Code a harness?
 
-No. A harness is what turns an LLM into an agent: it gives the model tools, a way to call them, runs them, and hands the results back. Claude Code is kind of a harness. It is an interface (the TUI, the Code tab in the desktop app) plus a harness underneath (the Anthropic Agent SDK). Codex is the same split: the app plus the Codex App Server. S2Code uses those harnesses. It is not a harness, and it does not work without one.
+No. A harness is what turns an LLM into an agent: it gives the model tools, runs them, and hands the results back. Claude Code combines an interface with the Anthropic Agent SDK harness underneath; Codex pairs its interface with the Codex App Server. S2Code drives those harnesses from one control surface. It is not a harness and does not work without one.
 
-Chef = LLM. Kitchen = harness. S2Code = the restaurant that lets you bring whatever kitchen you want. Our MCP is a cookbook we hand the kitchen, but the chef won't open it unless you tell them to :) I wrote the long version here: [What is a harness?](https://t3.gg/blog/post/what-is-a-harness)
-
-Bring your own: Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, Kiro, Pi, Muse Code, or fx. [Provider setup](./install.md#providers)
+Bring your own: Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, Kiro, Pi, Muse Code, fx, or any [ACP](./providers-acp.md) agent. [Provider setup](./install.md#providers)
 
 ## Why use S2Code instead of Claude Code or the Codex app?
 
-We were inspired by the Codex desktop app, Conductor, Claude Desktop, and Cursor Glass, but none met our bar. What you get:
+S2Code gives you one consistent workspace across every agent you run:
 
-- Bring your own sub. Claude, Codex, and whatever else you already have installed.
-- Best in class remote. Run `s2code-nightly up` on any box and drive it from anywhere.
-- Best in class mobile app.
-- Truly 100% open source. If we go the wrong direction, fork it.
+- Bring your own subscriptions across Claude, Codex, Cursor, OpenCode, and other installed CLIs.
+- Built-in remote control: run `s2code-nightly up` on any machine and drive it from anywhere.
+- Mobile and Apple Watch companion support over LAN, Tailscale, or S2 Connect.
+- Zero background telemetry, MIT open source, and open contributions.
 
-Every harness feels nearly identical in here, so you can stop worrying about harnesses and focus on building :) [Install](./install.md)
+See [Install](./install.md) to get started.
 
 ## Can I use S2Code with my Claude Code subscription?
 
@@ -25,39 +23,33 @@ Yes.
 
 ## How much does S2Code cost?
 
-Nothing. There's no way to pay us to use S2Code. You bring your own sub. It is free and open source (MIT). You still pay your provider like you already do. S2 Connect is free too, for now. Every account can connect up to 3 machines running S2Code. Phones and browsers that connect to them do not count. Need more? Link a paid T3 Chat account. [More machines](#can-i-connect-more-than-3-machines-with-s2-connect) We don't want to charge for this, but if the bill gets unacceptable we may have to change course. If you hit limits or have issues, you can always fork it, self host, or use Tailscale. [Install](./install.md)
-
-## Can I connect more than 3 machines with S2 Connect?
-
-Yes. Link your T3 Chat account and S2 Connect raises your limit: up to 10 machines with T3 Chat Pro, or 100 with Premier. Open your account menu in S2Code, go to **T3 Chat**, and select **Link T3 Chat**. Sign in to T3 Chat and approve. The free T3 Chat plan keeps the normal limit of 3. [More machines with T3 Chat](./remote-access.md#more-machines-with-t3-chat)
+Nothing. S2Code is free and open source under the MIT license. You bring your own provider subscriptions or API keys and pay your providers directly. Local networking, Tailscale, and desktop-managed SSH require no hosted account, and you can self-host or configure your own S2 Connect relay if needed. [Install](./install.md)
 
 ## Why is my Claude 5-hour limit draining so fast?
 
-It shouldn't anymore. S2Code drives Claude through Anthropic's Agent SDK, and Anthropic's 5h meter used to charge Agent SDK usage about 1.7x more than using Claude Code directly. Weekly limits were never affected. Since upstream v0.1.7, Claude in S2Code drains your 5h limit at the same rate as Claude Code. Still seeing it? [Update S2Code](./updating.md) on the machine that runs your agents. [My post on it](https://x.com/theo/status/2114166439813017873) · [Tracking issue](https://github.com/pingdotgg/t3code/issues/24649)
+It should not anymore. S2Code drives Claude through Anthropic's Agent SDK, and older Agent SDK releases charged Anthropic's 5-hour meter higher than direct Claude Code usage (weekly limits were unaffected). Current S2Code releases drain the 5-hour limit at the same rate as Claude Code. If you still see faster drain, [update S2Code](./updating.md) on the machine that runs your agents.
 
 ## How do I use S2Code remotely?
 
-Your agents run wherever S2Code runs: your desktop, a server, a VPS. You connect to it from anywhere. I do this constantly. Less than 5% of my prompts run on my laptop. Run `s2code-nightly up` on that machine and you get really good remote support. S2 Connect is the easy path. LAN pairing and Tailscale work too, and [app.t3.codes](https://app.t3.codes) is the web client. [Remote access](./remote-access.md)
+Your agents run wherever the S2Code server runs: your desktop, a home server, or a VPS. Run `s2code-nightly up` on that machine and connect from another computer or phone over direct LAN pairing, Tailscale HTTPS, desktop-managed SSH, or an operator-configured S2 Connect relay. [Remote access](./remote-access.md)
 
 ## How do I use S2Code on my phone?
 
-Get the [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) app, then connect it to your computer with S2 Connect or a pairing link. The phone is a remote. Your computer does the work and needs to stay on. [Mobile setup](./install.md#mobile-app) · [Remote access](./remote-access.md)
+Join the iOS public [TestFlight beta](https://testflight.apple.com/join/vhmETHSn) (which also includes the [Apple Watch](./apple-watch.md) companion), then connect it to your computer with a pairing link, Tailscale, or S2 Connect. There is no fork App Store or Google Play listing; on Android, connect with the web client. Your computer still runs the agents and must stay on. [Mobile setup](./install.md#mobile-app) · [Remote access](./remote-access.md)
 
 ## Why does S2 Connect keep disconnecting?
 
-S2 Connect is our built-in alternative to Tailscale for remote connections. If it keeps dropping, open **Settings > Environments**, find the machine, and select **Details**. The first part marked as failed is the cause. I will not be disappointed if you set up Tailscale as a fallback (I do this personally). [S2 Connect troubleshooting](./t3-connect-troubleshooting.md)
+S2 Connect is an optional tunnel alternative to Tailscale for remote connections. If it keeps dropping, open **Settings > Environments**, find the machine, and select **Details**. The first part marked as failed shows the cause. Adding a direct LAN or Tailscale route gives you automatic fallback when a tunnel drops. [S2 Connect troubleshooting](./t3-connect-troubleshooting.md)
 
 ## Will I get banned for using my subscription?
 
-No. We work with all of the labs and S2Code is within the TOS of Claude Code, Codex, and Google Antigravity. We worked directly with [SpaceXAI](https://x.com/SpaceXSI/status/2070195830192320600) to collaborate on the Grok Build and Cursor integrations. Everything else uses official ACP bindings.
+S2Code drives each provider through its official CLI, SDK, or ACP binding using your own local authentication. It does not scrape private endpoints or spoof client traffic. Always follow each provider's terms of service when configuring accounts and automation.
 
-If it works in S2Code, you can trust it is safe.
+## Can I add multiple accounts for one provider?
 
-## Can I add a bunch of accounts for one provider?
+Yes, for separate workspaces such as personal and work accounts. Add a second provider instance in **Settings > Providers** with its own config directory or credentials: [Codex](./providers-codex.md#use-multiple-accounts) · [Claude](./providers-claude.md#separate-accounts-or-configurations).
 
-I don't think S2Code is the right place to manage a pile of accounts. If we add an auto-switcher, we are risking TOS bans for our users.
-
-A separate work account is fine. Setup for two: [Codex](./providers-codex.md#use-multiple-accounts) · [Claude](./providers-claude.md#separate-accounts-or-configurations). For a bigger pool, manage them outside S2Code with a self-hosted proxy like [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). I walked through how I use 6 Claude subs and 3 Codex subs in [this video](https://www.youtube.com/watch?v=D8PikZ1KhUo), and wrote up the setup in [this guide](https://gist.github.com/t3dotgg/59a521d2ee8d70aaf90e280c175072af). Hand it to your agent and it will walk you through it. Early apologies if it gets you banned 💀 After you set up a hub, S2Code can show its pooled limits under Usage. [Connect a hub](./usage.md#connect-a-cliproxyapi-hub)
+S2Code does not include an automatic account switcher. If you already manage pooled accounts externally through a self-hosted proxy such as [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), S2Code can display its pooled limits under Usage. [Connect a hub](./usage.md#connect-a-cliproxyapi-hub)
 
 ## Can I use an API key or OpenRouter instead of a subscription?
 
@@ -65,15 +57,15 @@ Yes. Add another provider instance in Settings and give it its own keys and endp
 
 ## Does S2Code support local models?
 
-No. S2Code is a serious developer tool. Locally runnable models are not capable of meaningful engineering work.
+S2Code does not ship a built-in local-model provider, because it relies on agent harnesses rather than raw completion endpoints. You can connect any compatible [ACP agent](./providers-acp.md) or point a custom provider instance (such as OpenCode or a custom API endpoint) at a local model server in **Settings > Providers**.
 
-## Does my code go to T3 servers?
+## Does my code go to S2Code servers?
 
-No. Your code and prompts go from your machine to your provider (Anthropic, OpenAI, etc.), not to us. With S2 Connect, traffic rides a Cloudflare tunnel (`cloudflared` on your machine). Our relay sets up the link. It does not proxy your HTTP or WebSocket sessions. S2Code sends no background usage data, fingerprints, crash reports, or relay traces. Optional Agent feedback and OpenTelemetry export stay off unless you explicitly enable them. [Telemetry and data flows](./telemetry.md)
+No. Your code and prompts go directly from your machine to your configured provider (Anthropic, OpenAI, and so on), not to S2Code servers. With S2 Connect, traffic rides a Cloudflare tunnel (`cloudflared` on your machine); the relay sets up the link and does not proxy your HTTP or WebSocket sessions. S2Code sends no background usage data, fingerprints, crash reports, or relay traces. Optional Agent feedback and OpenTelemetry export stay off unless you explicitly enable them. [Telemetry and data flows](./telemetry.md)
 
 ## Worktrees are eating my disk. How do I clean them up?
 
-Open **Settings → Worktrees → Cleanup** and turn on automatic worktree cleanup. You can also run it now from there. Worktrees add up fast. One user cleared 500 GB. [Storage cleanup](./project-settings.md#storage-cleanup)
+Open **Settings → Worktrees → Cleanup** and turn on automatic worktree cleanup. You can also run it now from there. Worktrees add up fast on active repositories. [Storage cleanup](./project-settings.md#storage-cleanup)
 
 ## Is there voice input?
 
@@ -81,8 +73,8 @@ Yes. On iPhone and Android, dictation uses on-device speech by default, with the
 
 ## Does it work on Windows, Mac, and Linux?
 
-Yes, all three. Desktop app, CLI, the works. Two catches: Intel Macs and Windows on Arm are no longer built. Existing Intel installs stop getting updates but keep offering one that fails to download ([details](./install.md#intel-macs)), and existing Windows on Arm installs are updated to the x64 build, which runs emulated and may break WSL or fail to start on Windows 10 on Arm ([details](./install.md#windows-on-arm)). On those machines [run from source](./install.md#intel-macs) or connect to a server elsewhere. Windows folks can also run agents inside WSL. [Install](./install.md)
+Yes, all three—desktop app and CLI. Two catches: Intel Macs and Windows on Arm are no longer built. Existing Intel installs stop getting updates but keep offering one that fails to download ([details](./install.md#intel-macs)), and existing Windows on Arm installs are updated to the x64 build, which runs emulated and may break WSL or fail to start on Windows 10 on Arm ([details](./install.md#windows-on-arm)). On those machines [run from source](./install.md#intel-macs) or connect to a server elsewhere. Windows users can also run agents inside WSL. [Install](./install.md)
 
 ## Why is my provider not showing up?
 
-Almost always, the CLI is not installed or not on the `PATH` of the machine that runs the server. (Not your phone. The computer.) Log in on that machine first, like `codex login` or `claude auth login`. Still missing? Point **Binary path** at it in provider settings. Version managers love to cause this one. [Provider setup](./install.md#providers)
+Almost always, the CLI is not installed or not on the `PATH` of the machine that runs the server (not your phone—the computer). Log in on that machine first, such as `codex login` or `claude auth login`. Still missing? Set **Binary path** in provider settings. Version managers commonly cause this when non-interactive shells use a different `PATH`. [Provider setup](./install.md#providers)

@@ -1,8 +1,9 @@
 # Security policy
 
-Report security vulnerabilities affecting T3 Code or T3 Tools-operated infrastructure to
-[security@t3.codes](mailto:security@t3.codes). Please do not disclose them publicly until we have had
-a reasonable opportunity to investigate and remediate them.
+Report security vulnerabilities affecting S2Code privately through
+[GitHub Security Advisories](https://github.com/shuv1337/s2code/security/advisories/new).
+Please do not disclose them publicly until we have had a reasonable opportunity to investigate and
+remediate them.
 
-See the [full security policy](https://t3.codes/security-policy) for reporting details, scope,
-and safe harbor terms for good-faith research.
+See [SECURITY.md](../SECURITY.md) for our trust boundaries, threat model, and what counts as a
+security finding.
