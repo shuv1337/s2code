@@ -15,6 +15,7 @@ import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useAuth, useUser } from "@clerk/expo";
+import Constants from "expo-constants";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { use, type ComponentProps } from "react";
 import { Platform, View } from "react-native";
@@ -133,12 +134,16 @@ function ConfiguredSettingsRouteScreen() {
           onPress: () => navigation.navigate("SettingsAuth"),
         },
         environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
-        {
-          id: "SettingsNotifications",
-          icon: "bell.badge",
-          label: gt("Notifications"),
-          target: "SettingsNotifications",
-        },
+        ...(Constants.expoConfig?.extra?.pushEnabled !== false
+          ? [
+              {
+                id: "SettingsNotifications",
+                icon: "bell.badge",
+                label: gt("Notifications"),
+                target: "SettingsNotifications",
+              } satisfies SettingsListRow,
+            ]
+          : []),
       ]}
     />
   );

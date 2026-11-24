@@ -52,19 +52,34 @@ git rev-parse HEAD
 git rev-list --count HEAD
 vp i
 
+cat > "$WORKTREE/.env.local" <<EOF
+MOBILE_AUTH_ENABLED=1
+MOBILE_RELAY_URL=$(gh variable get T3CODE_RELAY_URL --repo shuv1337/s2code)
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=$(gh variable get T3CODE_CLERK_PUBLISHABLE_KEY --repo shuv1337/s2code)
+EXPO_PUBLIC_CLERK_JWT_TEMPLATE=$(gh variable get T3CODE_CLERK_JWT_TEMPLATE --repo shuv1337/s2code)
+EOF
+
 export APP_VARIANT=preview APPLE_TEAM_ID=7H54B326YZ
 cd apps/mobile
 CI=1 EXPO_NO_GIT_STATUS=1 vp exec expo prebuild --clean --platform ios
+! grep -E 'applesignin|aps-environment' ios/S2CodeNightly/S2CodeNightly.entitlements
 ```
+
+`loadRepoEnv` reads `$WORKTREE/.env.local` in both `expo prebuild` and `xcodebuild`, so
+Xcode's JavaScript bundling phase sees the same S2 Connect settings even when shell
+environment variables are dropped (explicit process environment variables override `.env.local`).
 
 For a shell-created worktree, `vp i` performs the initial setup. If another tool
 already started setup (`.t3/setup-running` contains a live PID), wait for it rather
 than installing concurrently. Do not copy another worktree's generated `ios/`,
 Pods, or `node_modules`: dependency patches can change their absolute paths.
 
-No hosted Expo account, EAS build, live server state, or root `.env` copy is needed
-for direct server connections. Hosted auth, push, and OTA remain disabled unless
-explicitly configured; see [mobile release configuration](operations/mobile-release.md).
+S2 Connect is enabled via the four public values in `.env.local` above while push
+(`MOBILE_PUSH_ENABLED`), OTA (`MOBILE_UPDATES_ENABLED`), `MOBILE_AUTH_DOMAIN`,
+`MOBILE_APPLE_SIGN_IN_ENABLED`, `MOBILE_RELEASE_INTENT`, and `EXPO_PROJECT_ID` stay
+off so the existing `7H54B326YZ` signing profiles remain untouched. No hosted Expo
+account, EAS build, or live server state is needed; see
+[mobile release configuration](operations/mobile-release.md).
 
 ## Build, install, and verify
 
@@ -87,6 +102,15 @@ APP="$DERIVED/Build/Products/Release-iphoneos/S2CodeNightly.app"
 /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Info.plist"
 codesign --verify --deep --strict "$APP"
 test -s "$APP/main.jsbundle"
+node -e '
+  const cfg = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+  if (!cfg.extra?.relay?.url || !cfg.extra?.clerk?.publishableKey || !cfg.extra?.clerk?.jwtTemplate || cfg.extra?.pushEnabled !== false) {
+    throw new Error("Unexpected embedded app.config: " + JSON.stringify(cfg.extra));
+  }
+' "$APP/EXConstants.bundle/app.config"
+/usr/libexec/PlistBuddy -c 'Print CFBundleURLTypes' "$APP/Info.plist" | grep -q 'dev.shuv.shuv2code.nightly'
+# Compare signed entitlements against the previous build (PREV_APP) to verify no unexpected capabilities were added.
+codesign -d --entitlements :- "$APP" 2>/dev/null | diff -u <(codesign -d --entitlements :- "$PREV_APP" 2>/dev/null) -
 
 xcrun devicectl device install app --device "$DEVICE" "$APP"
 xcrun devicectl device info apps --device "$DEVICE" \

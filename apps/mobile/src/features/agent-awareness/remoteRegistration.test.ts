@@ -52,6 +52,7 @@ import {
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { configureAndroidAgentNotifications } from "./androidNotifications";
+import { supportsAgentAwarenessPush } from "./capabilities";
 
 vi.mock("./androidNotifications", () => ({
   supportsAndroidAgentNotifications: vi.fn(() => true),
@@ -570,6 +571,12 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     expect(end).toHaveBeenCalledWith("immediate");
     expect(widgetMocks.dismissEnded).toHaveBeenCalled();
     expect(appStateMock.listeners).toHaveLength(0);
+  });
+
+  it("disables push capability when fork push is disabled", () => {
+    expect(supportsAgentAwarenessPush()).toBe(true);
+    Constants.expoConfig!.extra = { pushEnabled: false };
+    expect(supportsAgentAwarenessPush()).toBe(false);
   });
 
   it.effect(
