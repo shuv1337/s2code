@@ -244,11 +244,11 @@ folder paths, so in the web app use **Add project** instead.
 
 ## Mobile app
 
-S2Code for iPhone and iPad is in a private [TestFlight](https://testflight.apple.com/)
-beta. There is no public join link: email shuv@shuv.dev for an invite, then install
-it from the TestFlight app. Settings → About → Mobile app links here too. There is no
-fork App Store or Google Play listing, and upstream store/beta apps are not a substitute
-for the fork; on Android, use the connected web client.
+The mobile apps are in a private [TestFlight](https://testflight.apple.com) beta.
+There is no public join link: email [shuv@shuv.dev](mailto:shuv@shuv.dev) for access,
+then install from the TestFlight app. Settings → About → Mobile app says the same.
+There is no fork App Store or Google Play listing, and upstream store/beta apps are
+not a substitute for the fork; on Android, use the connected web client.
 
 If the app crashes during launch, open Settings → Diagnostics on the next launch
 that succeeds. It lists startup crashes from the last 7 days with the error and

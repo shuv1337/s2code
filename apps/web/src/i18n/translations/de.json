@@ -9193,8 +9193,7 @@
   "0be6b2546df12f66": "Stoppen",
   "7dbd7e8943e8931f": "Mikrofon wird geöffnet…",
   "efa31f38b611e912": "Diese Aufnahme konnte nicht abgespielt werden. Versuch erneut aufzunehmen.",
-  "a0bce35e345babb1": "S2Code für iPhone und iPad ist in einer privaten TestFlight-Beta. Schreib eine E-Mail an shuv@shuv.dev, um Zugang zu erhalten.",
-  "3404fadb88670067": "TestFlight öffnen",
+  "4fe5a4634974ac55": ["Die Mobil-Apps sind in einer privaten ",{"t":"a","i":1,"c":"TestFlight"},"-Beta. Schreib eine E-Mail an ",{"t":"a","i":2,"c":{"i":3,"k":"_gt_value_3","v":"v"}},", um Zugang zu erhalten."],
   "73da41e93823fd71": [
     "Wir raten davon ab, mehrere ",
     {

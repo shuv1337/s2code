@@ -1,28 +1,32 @@
-import { T, useGT } from "gt-react";
-import { Button } from "../ui/button";
+import { PRODUCT_BETA_ACCESS_EMAIL, PRODUCT_TESTFLIGHT_URL } from "@t3tools/shared/productIdentity";
+import { T, Var } from "gt-react";
 import { SettingsRow } from "./settingsLayout";
 import { useSearchableSetting } from "./settingsSearch";
 
-/** The iOS beta is a private TestFlight with no public join link; access is by invite. */
-const TESTFLIGHT_URL = "https://testflight.apple.com/";
+const LINK_CLASS = "underline underline-offset-2 hover:text-foreground";
 
 export function MobileAppSettingsRow() {
   const searchableSetting = useSearchableSetting();
-  const gt = useGT();
   return (
     <SettingsRow
       {...searchableSetting("mobile-app")}
-      description={gt(
-        "S2Code for iPhone and iPad is in a private TestFlight beta. Email shuv@shuv.dev for access.",
-      )}
-      control={
-        <Button
-          render={<a href={TESTFLIGHT_URL} target="_blank" rel="noreferrer noopener" />}
-          size="sm"
-          variant="outline"
-        >
-          <T>Open TestFlight</T>
-        </Button>
+      description={
+        <T>
+          The mobile apps are in a private{" "}
+          <a
+            href={PRODUCT_TESTFLIGHT_URL}
+            target="_blank"
+            rel="noreferrer noopener"
+            className={LINK_CLASS}
+          >
+            TestFlight
+          </a>{" "}
+          beta. Email{" "}
+          <a href={`mailto:${PRODUCT_BETA_ACCESS_EMAIL}`} className={LINK_CLASS}>
+            <Var>{PRODUCT_BETA_ACCESS_EMAIL}</Var>
+          </a>{" "}
+          for access.
+        </T>
       }
     />
   );
