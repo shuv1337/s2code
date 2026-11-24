@@ -82,10 +82,12 @@ const sections = [
               headline.
             </li>
             <li>
-              <strong>Product usage data.</strong> If you opt in, S2Code sends anonymous usage
-              data, such as which provider and model a turn used, whether it succeeded, and your app
-              version and operating system. It is off by default and you can turn it off again
-              at any time; see “Product Usage Data” under Your Choices below.
+              <strong>Product usage data.</strong> S2Code sends no background product usage data,
+              fingerprints, crash reports, or relay traces. See{" "}
+              <a href="https://github.com/shuv1337/s2code/blob/main/docs/user/telemetry.md">
+                Telemetry and data flows
+              </a>{" "}
+              for details on opt-in features.
             </li>
             <li>
               <strong>Information you provide to us.</strong> We collect information that you choose
@@ -160,12 +162,8 @@ const sections = [
             <li>To process and fulfill requests you make through the Services;</li>
             <li>To provide customer service and respond to support requests and feedback;</li>
             <li>To communicate with you about the Services and your relationship with us;</li>
-            <li>To monitor reliability, prevent abuse, and investigate security incidents;</li>
-            <li>To comply with applicable law and enforce the terms governing the Services; and</li>
-            <li>
-              To analyze and improve T3 Code using product usage data and aggregated,
-              de-identified, or other anonymous operational information.
-            </li>
+            <li>To monitor reliability, prevent abuse, and investigate security incidents; and</li>
+            <li>To comply with applicable law and enforce the terms governing the Services.</li>
           </ul>
 
           <h3>Training of AI Models</h3>
@@ -243,21 +241,6 @@ const sections = [
               You can view Vercel's privacy notice here:{" "}<a
                 href="https://vercel.com/legal/privacy-notice"
                 >https://vercel.com/legal/privacy-notice</a
-              >.
-            </li>
-            <li>
-              <strong>PostHog</strong> <em>(PostHog, Inc.)</em>.<br />
-              We use PostHog to receive and analyze product usage data.<br />
-              You can view PostHog's privacy policy here:{" "}<a href="https://posthog.com/privacy"
-                >https://posthog.com/privacy</a
-              >.
-            </li>
-            <li>
-              <strong>Axiom</strong> <em>(Axiom, Inc.)</em>.<br />
-              We use Axiom for operational diagnostics that help us maintain and troubleshoot the
-              Services.<br />
-              You can view Axiom's privacy policy here:{" "}<a
-                href="https://axiom.co/docs/legal/privacy">https://axiom.co/docs/legal/privacy</a
               >.
             </li>
             <li>
@@ -344,9 +327,12 @@ const sections = [
 
           <h3>Product Usage Data</h3>
           <p>
-            S2Code sends product usage data only if you opt in by setting the environment variable{" "}
-            <code>S2CODE_TELEMETRY_ENABLED=true</code>{" "}where S2Code runs, for example in your
-            shell profile, and restarting S2Code.
+            S2Code sends no background product usage data and cannot be enabled via environment
+            variables. See{" "}
+            <a href="https://github.com/shuv1337/s2code/blob/main/docs/user/telemetry.md">
+              Telemetry and data flows
+            </a>{" "}
+            for what stays local and which optional features you can turn on.
           </p>
 
           <h3>Cookies and Local Data</h3>

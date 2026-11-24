@@ -47,7 +47,7 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePersistEnvironmentProviderInstanceMutation } from "../../hooks/useSettings";
 import { useCloudLinkState } from "../../cloud/cloudLinkState";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
-import { PRIVACY_POLICY_URL } from "../../legalLinks";
+import { TELEMETRY_DOC_URL } from "../../legalLinks";
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import { retryClerkLoad, useClerkLoadFailed } from "../clerk/clerkLoadFailure";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
@@ -85,7 +85,7 @@ import { newProjectId, randomUUID } from "../../lib/utils";
 import { agentSessionImport } from "../../state/agentSessions";
 import { readProjects, useProjects, waitForProject } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { managedTelemetryOffMessage, useManagedPolicy } from "../../state/managedPolicy";
+import { useManagedPolicy } from "../../state/managedPolicy";
 import { useProjectScans } from "../../onboarding/useProjectScans";
 import { projectEnvironment } from "../../state/projects";
 import { serverEnvironment } from "../../state/server";
@@ -280,7 +280,7 @@ export function WelcomePage({
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-12 pb-8 sm:pt-20">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              <T>Welcome to T3 Code</T>
+              <T>Welcome to S2Code</T>
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground">
               <T>
@@ -335,7 +335,7 @@ export function WelcomePage({
                 </Button>
               </div>
             </div>
-            <TelemetryNotice environmentId={environmentId} />
+            <TelemetryNotice />
           </div>
         </div>
       </div>
@@ -343,41 +343,21 @@ export function WelcomePage({
   );
 }
 
-function TelemetryNotice({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const messages = useMessages();
-  const telemetryOff = managedTelemetryOffMessage(useManagedPolicy(environmentId), messages);
+function TelemetryNotice() {
   return (
     <p className="mt-auto pt-12 text-2xs leading-relaxed text-muted-foreground/70">
-      {telemetryOff === undefined ? (
-        <T>
-          T3 Code collects anonymous usage data to improve the app. To opt out, see the{" "}
-          <a
-            className="underline decoration-current/40 underline-offset-2 hover:text-muted-foreground"
-            href={PRIVACY_POLICY_URL}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            privacy policy
-          </a>
-          .
-        </T>
-      ) : (
-        <>
-          {telemetryOff}{" "}
-          <T>
-            See the{" "}
-            <a
-              className="underline decoration-current/40 underline-offset-2 hover:text-muted-foreground"
-              href={PRIVACY_POLICY_URL}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              privacy policy
-            </a>
-            .
-          </T>
-        </>
-      )}
+      <T>
+        S2Code sends no background usage data or crash reports. See{" "}
+        <a
+          className="underline decoration-current/40 underline-offset-2 hover:text-muted-foreground"
+          href={TELEMETRY_DOC_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          what leaves your machine
+        </a>
+        .
+      </T>
     </p>
   );
 }

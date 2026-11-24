@@ -3117,7 +3117,6 @@
   "c646366e142ba05f": "Der WSL-Status des Desktops ist nicht verfügbar.",
   "228dcd284ea651b3": "Der WSL-Status konnte nicht geladen werden.",
   "b08d105dd2553f8d": "Das Projekt ist nicht in der Desktop-App erschienen.",
-  "7a4b3f3b83e121d7": "{organization} hat anonyme Nutzungsdaten deaktiviert.",
   "d85822b18e9475df": "Verwaltet von {organization}.",
   "922269f8691aa3ba": "Es ließ sich nicht feststellen, ob diese Umgebung auf diesem Computer läuft.",
   "35cade9cc8a01363": "Portweiterleitung braucht die Desktop-App.",
@@ -6270,7 +6269,7 @@
   "a0fd24f965eb070b": "Thread-Verlauf konnte nicht importiert werden.",
   "a506c135c2183ac3": "{count, plural, one {{count} Ordner} other {{count} Ordner}}",
   "efc48b9736a534bc": "jetzt",
-  "edf393ff951b533a": "Willkommen bei T3 Code",
+  "c35291053a1d97a4": "Willkommen bei S2Code",
   "3cc77f9daa7eeafd": [
     {
       "t": "span",
@@ -6285,23 +6284,13 @@
   ],
   "216ab7514aea1d61": "Ohne Agenten starten",
   "501ce2d99da8bfd1": "Richte einen Agenten ein, um zu starten.",
-  "71f3822326109c8e": [
-    "T3 Code erfasst anonyme Nutzungsdaten, um die App zu verbessern. Wie du widersprichst, steht in der",
+  "ea24aff9973d7027": [
+    "S2Code sendet im Hintergrund keine Nutzungsdaten oder Absturzberichte. Siehe",
     " ",
     {
       "t": "a",
       "i": 1,
-      "c": "Datenschutzerklärung"
-    },
-    "."
-  ],
-  "b33f35083757b42c": [
-    "Siehe",
-    " ",
-    {
-      "t": "a",
-      "i": 1,
-      "c": "Datenschutzerklärung"
+      "c": "was Ihren Rechner verlässt"
     },
     "."
   ],
@@ -10391,8 +10380,7 @@
   "c424bee294b9f778": "Diese Umgebung wird von {organization} verwaltet. Einige Einstellungen und Funktionen folgen deren Richtlinie.",
   "82d9538af590f58c": "Sieh deine Agenten, importiere Projekte und richte dein Smartphone ein.",
   "6a48fd0a37e725a1": "Rechtliches",
-  "855bf7fb073bd51d": "Wie die Upstream-Dienste deine Daten verarbeiten, einschließlich anonymer Nutzungsdaten.",
-  "0bbeb973f0e71cb6": "Wie die Upstream-Dienste deine Daten verarbeiten. {telemetryOff}",
+  "3291299902301031": "S2Code sendet im Hintergrund keine Nutzungsdaten. Agenten-Feedback und OpenTelemetry-Export bleiben deaktiviert, bis Sie sie einschalten.",
   "bd658e3097ad6366": "Hinweise zu Abhängigkeiten, Assets und optionalen Tools, die S2Code verwendet.",
   "0dde92a0e2d0258a": "Neueste",
   "3476687eaa175b32": "Nightly",
@@ -10420,7 +10408,6 @@
   "5fe5a45199fa9c07": "Keine Anbieter für Textgenerierung verfügbar.",
   "99ceba64591c9257": "Diagnose anzeigen",
   "eb576a5feda7b535": "Öffnen",
-  "66647e8c8123a51f": "Richtlinie anzeigen",
   "6d59e1e516e53d17": "Lizenzen anzeigen",
   "941d08db15f62d17": "Archiviert",
   "e122b2428c0d03a5": "Alle Umgebungen öffnen",
@@ -12053,8 +12040,8 @@
   "7bcdb8144c8698dc": "telefon tablet iPhone iPad iOS Android App Store Google Play QR TestFlight Beta",
   "6310b97b04ef239f": "Willkommensseite",
   "df9fa3a9cb004b9b": "onboarding einrichtung erster start erste schritte agenten import projekte",
-  "3188bc3b3c4508bc": "Datenschutzerklärung",
-  "901a823214edc8c4": "telemetrie analyse nutzungsdaten tracking rechtliches deaktivieren",
+  "bc8cb980d99dd7c9": "Datenschutz und Telemetrie",
+  "0dddf4d31f960a92": "telemetrie analyse nutzungsdaten tracking datenschutz absturzberichte",
   "82136480255a5106": "OTel OTLP telemetrie export endpunkte logs traces metriken Grafana",
   "659d081051faf7ff": "logs traces prozesse ressourcenverlauf fehler spans cpu speicher",
   "1a9e4b39a32586e7": "bericht fehler problem s2code team senden feedback agenten tools automatisch wenn ich darum bitte",

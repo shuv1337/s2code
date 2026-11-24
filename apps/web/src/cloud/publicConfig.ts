@@ -2,6 +2,7 @@ import {
   clerkFrontendApiHostnameFromPublishableKey,
   relayClerkTokenOptions,
 } from "@t3tools/shared/relayAuth";
+import type { RelayClientTracingConfig } from "@t3tools/shared/relayTracing";
 import * as Schema from "effect/Schema";
 import { forkHostedOrigin, forkClerkPublishableKey } from "@t3tools/shared/hostedConfig";
 
@@ -20,24 +21,10 @@ export interface CloudPublicConfig {
   readonly clerkPublishableKey: string | null;
   readonly clerkJwtTemplate: string | null;
   readonly relayUrl: string | null;
-  readonly relayTracing: {
-    readonly tracesUrl: string | null;
-    readonly tracesDataset: string | null;
-    readonly tracesToken: string | null;
-  };
 }
 
 export function trimNonEmpty(value: string | undefined): string | null {
   return value?.trim() || null;
-}
-
-function normalizeSecureUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 export function resolveCloudPublicConfig(): CloudPublicConfig {
@@ -47,40 +34,16 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
     ),
     clerkJwtTemplate: trimNonEmpty(import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined),
     relayUrl: forkHostedOrigin((import.meta.env.VITE_T3CODE_RELAY_URL as string | undefined) ?? ""),
-    relayTracing: {
-      tracesUrl: normalizeSecureUrl(
-        (import.meta.env.VITE_RELAY_OTLP_TRACES_URL as string | undefined) ?? "",
-      ),
-      tracesDataset: trimNonEmpty(
-        import.meta.env.VITE_RELAY_OTLP_TRACES_DATASET as string | undefined,
-      ),
-      tracesToken: trimNonEmpty(import.meta.env.VITE_RELAY_OTLP_TRACES_TOKEN as string | undefined),
-    },
   };
 }
 
-let desktopRelayTelemetry: boolean | null = null;
-
-/** Whether relay spans may be exported now; the desktop host may not know yet at startup. */
+/** S2Code never exports relay client spans. */
 export function relayTelemetryEnabled(): boolean | null {
-  if (typeof window === "undefined" || !window.desktopBridge) return true;
-  desktopRelayTelemetry ??= window.desktopBridge.getRelayTelemetryEnabled();
-  return desktopRelayTelemetry;
+  return false;
 }
 
-export function resolveRelayTracingConfig() {
-  // The relay exporter is created during module initialization, so this must be synchronous.
-  if (relayTelemetryEnabled() === false) {
-    return null;
-  }
-  const { relayTracing } = resolveCloudPublicConfig();
-  return relayTracing.tracesUrl && relayTracing.tracesDataset && relayTracing.tracesToken
-    ? {
-        tracesUrl: relayTracing.tracesUrl,
-        tracesDataset: relayTracing.tracesDataset,
-        tracesToken: relayTracing.tracesToken,
-      }
-    : null;
+export function resolveRelayTracingConfig(): RelayClientTracingConfig | null {
+  return null;
 }
 
 export function hasConfiguredCloudBuild(): boolean {

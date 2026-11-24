@@ -76,7 +76,7 @@ Locks and provider fields go in the two JSON policies, as the same objects a pol
 Machines pick up a change at the next Group Policy refresh; run `gpupdate /target:computer /force`
 to apply it now, then restart S2Code.
 Setting **Allow S2 Connect**, **Allow webhook tasks**, **Allow importing browser cookies**, or
-**Allow usage data** to **Disabled** turns that feature off. Setting any other policy in this template to
+**Allow agent feedback delivery** to **Disabled** turns that feature off. Setting any other policy in this template to
 **Disabled** restricts nothing, the same as **Not Configured**.
 
 **Windows registry value.** Instead of the template, set the `Policy` value (`REG_SZ`) to the whole policy as one line of JSON,
@@ -256,9 +256,9 @@ so restart S2Code after that.
   Browser tabs stream from it instead, and port forwarding and **Open on this device** are
   unavailable. This wins over the user's
   [Preview tunnel setting](./remote-access.md#browser-on-a-remote-environment).
-- `telemetry: false`: the server and desktop app send no [product usage data](./telemetry.md) or
-  relay connection traces. A policy cannot turn them on. A browser that opens the server, such as
-  app.t3.codes, still sends its own relay traces.
+- `telemetry: false`: opt-in [Agent feedback](./telemetry.md#agent-feedback) reports are never
+  delivered off-machine. Background product analytics and relay connection traces are always
+  disabled in S2Code regardless of policy.
 
 ### Providers
 

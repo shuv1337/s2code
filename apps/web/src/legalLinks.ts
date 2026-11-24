@@ -1,1 +1,2 @@
-export const PRIVACY_POLICY_URL = "https://t3.codes/privacy-policy";
+export const TELEMETRY_DOC_URL =
+  "https://github.com/shuv1337/s2code/blob/main/docs/user/telemetry.md";

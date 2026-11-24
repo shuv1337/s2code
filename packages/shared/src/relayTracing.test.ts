@@ -1,12 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Tracer from "effect/Tracer";
 
 import {
-  nonInterferingTracer,
+  layer,
   RelayClientTracer,
   withLocalTracing,
   withRelayClientTracing,
@@ -26,6 +24,31 @@ function collectingTracer(spans: Array<string>): Tracer.Tracer {
   });
 }
 
+describe("layer", () => {
+  it.effect("always provides no relay tracer even with a complete config", () =>
+    Effect.gen(function* () {
+      const tracer = yield* RelayClientTracer;
+      expect(Option.isNone(tracer)).toBe(true);
+    }).pipe(
+      Effect.provide(
+        layer(
+          {
+            tracesUrl: "https://traces.example.test/v1/traces",
+            tracesDataset: "relay",
+            tracesToken: "test-token",
+          },
+          {
+            serviceName: "s2code-test",
+            runtime: "node",
+            serviceInstanceId: "instance-1",
+            client: "test",
+          },
+        ),
+      ),
+    ),
+  );
+});
+
 describe("withRelayClientTracing", () => {
   it.effect("uses the product tracer only for relay operations", () =>
     Effect.gen(function* () {
@@ -44,45 +67,6 @@ describe("withRelayClientTracing", () => {
 
       expect(userSpans).toEqual(["user.operation"]);
       expect(productSpans).toEqual(["relay.operation"]);
-    }),
-  );
-});
-
-describe("nonInterferingTracer", () => {
-  it.effect("exports failures without their messages", () =>
-    Effect.gen(function* () {
-      const exits: Array<Exit.Exit<unknown, unknown>> = [];
-      const delegate = Tracer.make({
-        span: (options) => {
-          const span = new Tracer.NativeSpan(options);
-          const end = span.end.bind(span);
-          span.end = (endTime, exit) => {
-            end(endTime, exit);
-            exits.push(exit);
-          };
-          return span;
-        },
-      });
-      const failure = Object.assign(
-        new Error("studio-mac could not establish a WebSocket connection.", {
-          cause: new Error("connect ECONNREFUSED studio-mac.local"),
-        }),
-        { name: "ConnectionTransientError" },
-      );
-
-      yield* Effect.fail(failure).pipe(
-        Effect.withSpan("relay.connection.attempt"),
-        Effect.withTracer(nonInterferingTracer(delegate)),
-        Effect.ignore,
-      );
-
-      const exit = exits[0];
-      if (exit === undefined || !Exit.isFailure(exit)) throw new Error("expected a failed span");
-      const exported = Cause.prettyErrors(exit.cause);
-      expect(exported.map((error) => error.name)).toEqual(["ConnectionTransientError"]);
-      const text = exported.map((error) => `${error.message}\n${error.stack}`).join("\n");
-      expect(text).toContain("Caused by: Error");
-      expect(text).not.toContain("studio-mac");
     }),
   );
 });

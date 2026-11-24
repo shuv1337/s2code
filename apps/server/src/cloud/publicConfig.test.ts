@@ -144,17 +144,18 @@ it("requires a pinned mint public key and does not require a hosted app URL", ()
   );
 });
 
-it("product opt-out disables relay tracing with either built-in or runtime credentials", () => {
+it("always disables relay tracing even with opt-in env and full credentials", () => {
   const fallback = {
     tracesUrl: "https://embedded.example.test/v1/traces",
     tracesDataset: "embedded-dataset",
     tracesToken: "embedded-token",
   };
   const env = {
-    T3CODE_TELEMETRY_ENABLED: "false",
+    T3CODE_TELEMETRY_ENABLED: "true",
     T3CODE_OTEL_SDK_DISABLED: "false",
   };
 
+  assert.equal(resolveRelayClientTracingConfig({}, fallback), null);
   assert.equal(resolveRelayClientTracingConfig(env, fallback), null);
   assert.equal(
     resolveRelayClientTracingConfig(

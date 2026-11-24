@@ -265,7 +265,6 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
-import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
@@ -299,7 +298,6 @@ import {
   SOCKET_FRAME_PARTS_QUERY_PARAM,
   splitLargeSocketFrames,
 } from "@t3tools/shared/socketFrameParts";
-import { isTelemetryIdHash } from "@t3tools/shared/telemetryId";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -875,28 +873,6 @@ function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) 
     ...(hasDeviceModel ? { deviceModel, clientDeviceModel: deviceModel } : {}),
     ...(isClientConnectionMethod(connectionMethod) ? { connectionMethod } : {}),
   };
-}
-
-/**
- * Owners a connecting client reports: its hashed T3 Connect account and its
- * hashed device id. Only hashes are accepted, so a raw id never reaches analytics.
- */
-function readClientOwners(
-  request: HttpServerRequest.HttpServerRequest,
-): ReadonlyArray<TelemetryOwner> {
-  const url = requestUrl(request);
-  if (Option.isNone(url)) {
-    return [];
-  }
-  const params = url.value.searchParams;
-  return (
-    [
-      ["connect", params.get("clientOwner")],
-      ["device", params.get("clientDevice")],
-    ] as const
-  ).flatMap(([source, ownerId]) =>
-    ownerId !== null && isTelemetryIdHash(ownerId) ? [{ source, ownerId }] : [],
-  );
 }
 
 const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
@@ -3826,7 +3802,6 @@ export const layer = Layer.unwrap(
           ];
         }
         const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* analytics.recordOwners(readClientOwners(request), "client");
         const reportProfiles = yield* serverBrowser.profileReporter;
         // Handshake `Effect.provide` closes before the socket is served, so this scope follows the socket.
         const voiceScope = yield* Scope.make();

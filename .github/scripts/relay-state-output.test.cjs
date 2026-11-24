@@ -3,21 +3,17 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
 
-// The fork never deploys the production relay, so release.yml has no relay
-// state to read tracing config from. release-desktop.yml would wait for a
-// `relay-client-tracing-config` artifact that no job uploads.
-const workflow = readFileSync(join(__dirname, "../workflows/release.yml"), "utf8");
+const releaseWorkflow = readFileSync(join(__dirname, "../workflows/release.yml"), "utf8");
+const desktopWorkflow = readFileSync(join(__dirname, "../workflows/release-desktop.yml"), "utf8");
 
 test("release does not read or publish production relay tracing config", () => {
-  assert.doesNotMatch(workflow, /- name: Read production relay tracing config\n/);
-  assert.doesNotMatch(workflow, /relay-client-tracing-config/);
+  assert.doesNotMatch(releaseWorkflow, /- name: Read production relay tracing config\n/);
+  assert.doesNotMatch(releaseWorkflow, /relay-client-tracing-config/);
+  assert.doesNotMatch(releaseWorkflow, /relay_client_tracing/);
 });
 
-test("every desktop build opts out of relay client tracing", () => {
-  const values = Array.from(
-    workflow.matchAll(/^\s+relay_client_tracing: (.*)$/gm),
-    (match) => match[1],
-  );
-  assert.ok(values.length > 0, "Expected release.yml to set relay_client_tracing");
-  assert.deepEqual(new Set(values), new Set(["false"]));
+test("desktop release workflow does not accept or load relay client tracing config", () => {
+  assert.doesNotMatch(desktopWorkflow, /relay_client_tracing/);
+  assert.doesNotMatch(desktopWorkflow, /relay-client-tracing-config/);
+  assert.doesNotMatch(desktopWorkflow, /T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN/);
 });

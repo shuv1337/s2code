@@ -1,46 +1,35 @@
-# Product analytics
+# Product analytics (zero-telemetry architecture)
 
-The server owns analytics delivery, opt-out, and identity for every connected client. Clients never
-load the PostHog browser SDK, PostHog person profiles stay disabled, and visiting hosted web without
-an authenticated connection does not count as product use.
+S2Code sends no background product analytics, account or install fingerprints, relay client traces,
+or mobile crash reports.
 
-## Identity
+## Invariants
 
-- **Never change `distinct_id`.** It preserves historical continuity in PostHog charts; add fields
-  instead of changing how it is computed.
-- **Count installs with `installId`, resolve owners at query time.** `installId` is a stable hash
-  persisted in the state directory; `install.owner_observed` links installs to owners (Connect
-  account, OpenAI `user_id`—not the shared Codex Team `account_id` or per-login `sub`—Claude id,
-  client device). Two Connect accounts are never merged as one person.
-- **Hash everywhere with [one helper](../../packages/shared/src/telemetryId.ts).** Clients and
-  servers hash with the same SHA-256 helper so IDs correlate; the server accepts only hashes from
-  clients.
+- [`AnalyticsService`](../../apps/server/src/telemetry/AnalyticsService.ts) is a zero-requirement
+  no-op (`Layer.Layer<AnalyticsService>`). Keeping its three-member service shape lets upstream
+  `analytics.record(...)` call sites merge unchanged while guaranteeing at compile time that it
+  cannot reach HTTP, the filesystem, or config.
+- [`Identify.ts`](../../apps/server/src/telemetry/Identify.ts) exports only `TelemetryOwnerSource`
+  and `TelemetryOwner`. The server never reads provider auth files or Connect secrets for analytics
+  and never creates `anonymous-id`. Clients send no `clientOwner` or `clientDevice` query params.
+- [`RelayTracing.layer`](../../packages/shared/src/relayTracing.ts) unconditionally returns
+  `Layer.succeed(RelayClientTracer, Option.none())` and
+  [`isRelayTracingEnabled`](../../packages/shared/src/otelEnvironment.ts) unconditionally returns
+  `false`. User-configured OTLP export (`OtelEnvironment.load` / `resolveSignalEndpoint`) stays
+  intact and off until configured.
+- `expo-observe` is removed from `apps/mobile/package.json` and `app.config.ts`.
+- Opt-in [`FeedbackService`](../../apps/server/src/feedback/FeedbackService.ts) and
+  [`FeedbackRelayDelivery`](../../apps/server/src/feedback/FeedbackRelayDelivery.ts) remain
+  decoupled from `AnalyticsService`, default to `off`, and honor `S2CODE_TELEMETRY_ENABLED=false`
+  and managed policy `limits.telemetry: false`.
 
-## Attribution boundaries
+## Upstream merges and guard test
 
-- Client dimensions (`surface`, etc.) belong to the event's WebSocket connection, never a
-  server-global "current client". Keep client and server dimensions separate, and leave missing
-  client metadata unknown rather than backfilling from server properties.
-- Active-use reports count `client.turn.requested` (deduplicated by command ID), not connections
-  (T3 Connect sessions renew hourly).
-
-## Collection boundary and delivery
-
-- Payloads stay strictly to product metadata, closed contract enums, and normalized measurements:
-  never attach prompts, file paths, credentials, raw provider payloads, device names, conversation
-  IDs, or user-named provider instance IDs. Model IDs are reported as the provider used them,
-  including custom models; known aliases and routed IDs map to one catalog slug, and a model
-  that is a file path reports only its file name.
-- The sole exception is opt-in agent feedback, which
-  [`FeedbackService`](../../apps/server/src/feedback/FeedbackService.ts) scrubs of paths, private
-  values, and secret-shaped strings, and only attaches bounded conversation traces when the user
-  explicitly previews and sends them. [`FeedbackRelayDelivery`](../../apps/server/src/feedback/FeedbackRelayDelivery.ts)
-  sends stored reports to the linked fork Connect relay rather than PostHog, without local thread,
-  project, or install identifiers; the relay keeps full reports private in Postgres and strips
-  conversation turn text and environment identifiers from public GitHub issues.
-- Product analytics delivery ([`AnalyticsService.ts`](../../apps/server/src/telemetry/AnalyticsService.ts))
-  carries no upstream host or key defaults, rejects upstream domains via `forkHostedOrigin`, attaches
-  a UUID per event, backs off on failure, and drops batches after bounded retries so a stuck batch
-  cannot loop forever.
-- Dev-runner servers and CI smoke tests disable telemetry (and relay tracing) by default so they do
-  not inflate install counts; set `T3CODE_TELEMETRY_ENABLED=true` to test locally.
+When merging upstream, always take the fork side in: `apps/server/src/telemetry/AnalyticsService.ts`,
+`apps/server/src/telemetry/Identify.ts`, `packages/shared/src/relayTracing.ts`, the
+`isRelayTracingEnabled` export in `packages/shared/src/otelEnvironment.ts`,
+`packages/client-runtime/src/authorization/remote.ts` (owner params),
+`apps/mobile/src/features/observability/observe.ts` (kept deleted), `apps/mobile/app.config.ts`
+(`observe` / `observability`), and `infra/relay/src/worker.ts` (`MobileTelemetry.layerDisabled`).
+Review any new upstream network client or SDK dependency manually, then run
+`vp test run scripts/zero-telemetry.test.ts`.

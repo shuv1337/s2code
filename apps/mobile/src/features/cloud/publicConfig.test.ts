@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("resolveCloudPublicConfig", () => {
-  it("accepts a fork Clerk development key, relay URL, and JWT template", () => {
+  it("accepts a fork Clerk development key, relay URL, and JWT template without observability config", () => {
     const forkKey = `pk_test_${btoa("example-fork.clerk.accounts.dev$")}`;
     const extra = {
       clerk: { publishableKey: forkKey, jwtTemplate: "t3-relay" },
@@ -30,11 +30,6 @@ describe("resolveCloudPublicConfig", () => {
       },
       relay: {
         url: "https://relay.slopcartel.dev",
-      },
-      observability: {
-        tracesUrl: null,
-        tracesDataset: null,
-        tracesToken: null,
       },
     });
     Constants.expoConfig!.extra = extra;
@@ -63,11 +58,6 @@ describe("resolveCloudPublicConfig", () => {
       },
       relay: {
         url: null,
-      },
-      observability: {
-        tracesUrl: null,
-        tracesDataset: null,
-        tracesToken: null,
       },
     });
   });

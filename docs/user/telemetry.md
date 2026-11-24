@@ -1,23 +1,21 @@
-# Product usage data
+# Telemetry and data flows
 
-Product usage events are off by default, and S2Code strips upstream T3 Code's analytics host and
-key defaults (`ingest.t3.codes` and all upstream hosted domains are rejected). Product usage events
-are only sent if you explicitly configure a non-upstream `S2CODE_POSTHOG_HOST` and
-`S2CODE_POSTHOG_KEY` alongside `S2CODE_TELEMETRY_ENABLED=true` in the server's environment before
-starting it. When configured and enabled, events are associated with a hashed account or
-installation identifier. To count how many installations one person uses, the server also sends
-hashed account identifiers: your S2 Connect account, your OpenAI and Claude accounts when you are
-signed in, and a random identifier for each device that connects. Events include the provider,
-model, reasoning effort, permission mode, turn and request results, duration, release channel, and
-token counts when available. Child-agent token counts are reported separately from the main agent's.
-Events include the model ID the provider used, including custom models and models served by a custom
-endpoint.
+S2Code sends no background product analytics, account or install fingerprints, relay connection
+traces, or mobile crash reports. No environment variable, build variable, or managed policy can
+turn any of them back on.
 
-Product events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
-raw provider events, or child-agent output. The one exception is [agent feedback](#agent-feedback),
-which is off unless you turn it on.
+## What was removed
 
-## Agent feedback
+| Mechanism                                   | Status in S2Code                                                                                                                                                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product usage analytics (PostHog)           | Removed. `AnalyticsService` is a zero-requirement no-op.                                                                                                                                                                                                |
+| Install, account, and device fingerprinting | Removed. The server never creates `anonymous-id` or reads `~/.codex/auth.json`, `~/.claude.json`, or S2 Connect secrets for analytics. Clients never generate `t3code:analytics-device-id` or send `clientOwner` / `clientDevice` WebSocket parameters. |
+| Relay client tracing (Axiom / OTLP)         | Removed across server, desktop, web, and mobile. `RelayTracing.layer` always returns no tracer and `isRelayTracingEnabled` always returns `false`.                                                                                                      |
+| Mobile crash reporting (`expo-observe`)     | Removed from dependencies and app config. Nothing dispatches crash reports or startup timings off-device.                                                                                                                                               |
+
+## What leaves your machine only when you turn it on
+
+### Agent feedback
 
 Agent feedback lets agents report S2Code issues: a tool or `t3` command that did not do what they
 expected, a confusing instruction, or a missing capability. Choose a mode in **Agent feedback** in
@@ -67,67 +65,64 @@ issue on `shuv1337/s2code` containing only the scrubbed `expected`, `actual`, an
 fields, metadata (including model ID, provider, version, channel, OS, architecture, and mode), and
 structural trace outline—never conversation turn text, environment IDs, IPs, or user IDs. Unlinked
 hosts, servers started with `S2CODE_TELEMETRY_ENABLED=false` (or `0`/`off`/`no`), or servers where
-managed policy disables telemetry keep saved reports locally without sending them. `t3 feedback list`
-shows recent reports, the thread each came from, and a line for each outline; `t3 feedback list --json`
-shows exactly what each one holds.
+[managed policy](./managed-policy.md#other-capabilities) disables `telemetry` keep saved reports
+locally without sending them. `t3 feedback list` shows recent reports, the thread each came from,
+and a line for each outline; `t3 feedback list --json` shows exactly what each one holds.
 
-Relay tracing goes to S2Code's own relay and stays on unless you set
-`S2CODE_TELEMETRY_ENABLED=false`. It also stops when `S2CODE_OTEL_SDK_DISABLED` or
-`OTEL_SDK_DISABLED` turns OpenTelemetry export off. Depending on the client version, traces can
-include connection timings, environment identifiers and the connected machine's name. Failed spans
-can include error messages and stack traces; error text can quote a value the app was handling.
+### Export diagnostics to your own receiver
 
-An administrator can turn product events and relay tracing off in the server and desktop app with
-a [managed policy](./managed-policy.md#other-capabilities). This does not control traces sent by
-separate browser or mobile clients.
-
-The desktop app reads `S2CODE_TELEMETRY_ENABLED` from your shell profile (for example `~/.zshrc`) on macOS and
-Linux, so export it there and restart the app. On Windows, set it as a user environment variable.
-
-The web app in a browser, including one the `s2code` CLI opens, does not read these environment
-variables. When its build has relay tracing configured, it sends its own connection traces even
-if the server has opted out. The browser app has no relay tracing toggle.
-
-## Mobile app diagnostics
-
-When the iOS or Android app crashes or hits an error, it sends a report to the S2Code team: the error
-message, the stack trace, the app version, and the device model and OS version. Each launch also
-sends startup timings, and every report carries a random ID for the install. Reports go through
-the S2 Connect relay to Axiom. They do not include your threads, prompts, or connection details,
-but an error message can quote a value the app was handling.
-
-To stop sending them, turn off **Send crash reports** in **Settings > About > Diagnostics**.
-
-The mobile app also sends relay connection traces when its build has tracing configured. These
-carry an identifier for the current app session. **Send crash reports** does not control these
-traces, and the mobile app has no separate relay tracing toggle. Server environment variables and
-managed policy do not disable mobile tracing.
-
-## Agent activity for mobile notifications
-
-When **Publish agent activity** is enabled on a host, it sends project and thread titles, model
-names, activity status, and environment and thread identifiers to the S2 Connect relay for
-[mobile notifications and live activities](./mobile-notifications.md). This is separate from
-product events and relay diagnostics. The telemetry opt-out does not disable it.
-
-To stop publishing, turn off **Publish agent activity** under **Settings > Sharing & access** on
-the host. Turning off notifications on a phone controls that phone's alerts, not the host's
-publishing setting.
-
-## Export diagnostics to your own receiver
-
-To send traces, metrics, or logs to an OpenTelemetry receiver, open
+To send traces, metrics, or logs to an OpenTelemetry receiver you control, open
 **Settings > Maintenance > Diagnostics**, select an environment, and enter each signal's OTLP HTTP
 endpoint under **OpenTelemetry export** (for example `http://localhost:4318/v1/traces`). Save, then
-restart that environment's server. The receiver must be reachable from the server's machine.
-**Test** sends an empty export from the server to check an endpoint before or after you save it;
-saved endpoints are checked when the section opens. Checks send authentication headers only to
-the signal's currently running endpoint and do not follow redirects. To check a new endpoint
-that requires authentication, save it and restart the server first.
+restart that environment's server. Nothing is exported until you configure an endpoint.
+
+The receiver must be reachable from the server's machine. **Test** sends an empty export from the
+server to check an endpoint before or after you save it; saved endpoints are checked when the
+section opens. Checks send authentication headers only to the signal's currently running endpoint
+and do not follow redirects. To check a new endpoint that requires authentication, save it and
+restart the server first.
 
 `S2CODE_OTLP_*_URL` and standard `OTEL_EXPORTER_OTLP_*` environment variables override the saved
 settings. An overridden signal shows **Set by environment** and names the variable that set it, and its
-**Test** checks the running endpoint instead of the field. For endpoints saved here or set with `S2CODE_OTLP_*_URL`, set `S2CODE_OTLP_HEADERS` for
-receivers that need authentication and `S2CODE_OTLP_PROTOCOL=http/protobuf` for receivers that do
-not accept JSON. An endpoint set with `OTEL_EXPORTER_OTLP_*` takes its headers and protocol from
-`OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL` instead.
+**Test** checks the running endpoint instead of the field. For endpoints saved here or set with
+`S2CODE_OTLP_*_URL`, set `S2CODE_OTLP_HEADERS` for receivers that need authentication and
+`S2CODE_OTLP_PROTOCOL=http/protobuf` for receivers that do not accept JSON. An endpoint set with
+`OTEL_EXPORTER_OTLP_*` takes its headers and protocol from `OTEL_EXPORTER_OTLP_HEADERS` and
+`OTEL_EXPORTER_OTLP_PROTOCOL` instead.
+
+### Agent activity for mobile notifications
+
+When **Publish agent activity** is enabled on a host, it sends project and thread titles, model
+names, activity status, and environment and thread identifiers to the S2 Connect relay for
+[mobile notifications and live activities](./mobile-notifications.md). To stop publishing, turn off
+**Publish agent activity** under **Settings > Sharing & access** on the host. Turning off
+notifications on a phone controls that phone's alerts, not the host's publishing setting.
+
+### S2 Connect linking
+
+When you explicitly link a machine to S2 Connect, the server authenticates with the configured fork
+relay to establish remote tunnel credentials and session routing. Direct LAN and Tailscale
+connections do not contact the relay.
+
+## Network calls S2Code still makes to operate
+
+- **Your configured AI providers and MCP servers:** Prompts, code, and tool traffic go directly from
+  your machine to the provider CLIs, APIs, and MCP servers you configure.
+- **Release and update checks:** Desktop and CLI builds check GitHub Releases for `shuv1337/s2code`
+  (or your configured update repository) and npm metadata when checking for updates, unless disabled
+  with `S2CODE_DISABLE_AUTO_UPDATE` or managed policy.
+
+## Local-only diagnostics
+
+- **Resource Monitor:** CPU, memory, and process metrics stay between the local desktop shell,
+  server, and UI; nothing is sent off-machine.
+- **Mobile startup crash log:** **Settings > About > Diagnostics** reads `expo-updates` startup
+  crash entries stored on the device for 7 days and lets you manually **Copy crash report** to
+  paste into an issue. Nothing is uploaded automatically.
+
+## Legacy telemetry variables
+
+- Setting `S2CODE_TELEMETRY_ENABLED=true`, `S2CODE_POSTHOG_HOST`, or `S2CODE_POSTHOG_KEY` does
+  nothing. Background analytics and relay tracing cannot be re-enabled.
+- Setting `S2CODE_TELEMETRY_ENABLED=false` (or a managed policy with `limits.telemetry: false`)
+  remains supported as an explicit kill switch that blocks opt-in **Agent feedback** delivery.
