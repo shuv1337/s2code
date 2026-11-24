@@ -2078,6 +2078,19 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           (yield* service.getSettings).mcpServers[McpServerId.make("future")],
           future,
         );
+
+        // Echoing the redacted `{ transport }` stub alongside another edit also preserves the full entry on disk.
+        yield* service.updateSettings({
+          mcpServers: {
+            ...client.mcpServers,
+            docs: { url: "https://docs.example/mcp", label: "Docs Echoed", enabled: true },
+          },
+        } as never);
+        const afterEcho = yield* service.getSettings;
+        assert.deepEqual(afterEcho.mcpServers[McpServerId.make("future")], future);
+        assert.deepInclude(afterEcho.mcpServers[McpServerId.make("docs")], {
+          label: "Docs Echoed",
+        });
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

@@ -1,5 +1,6 @@
 // A stdio MCP server for StdioMcpBridge tests. Like `executor mcp`, it answers 400-style errors to
 // anything sent before it has replied to initialize. Behaviour knobs come from FAKE_MCP_* env vars.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
 
 const initDelay = Number(process.env.FAKE_MCP_INIT_DELAY_MS ?? "50");
@@ -12,6 +13,7 @@ if (process.env.FAKE_MCP_IGNORE_SIGTERM === "1") {
 let initialized = false;
 let early = 0;
 const serverRequests = new Map();
+const heldReplies = [];
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 process.stderr.write(`fake server started pid=${process.pid}\n`);
 
@@ -77,10 +79,42 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
             id: message.id,
             result: { content: [{ type: "text", text: String(args?.text) }], early },
           });
+        if (args?.hold === true) {
+          heldReplies.push(reply);
+          return;
+        }
         const delayMs = Number(args?.delayMs ?? 0);
         if (delayMs > 0) setTimeout(reply, delayMs);
         else reply();
         return;
+      }
+      if (name === "held-count") {
+        return send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { count: heldReplies.length },
+        });
+      }
+      if (name === "release-and-echo") {
+        for (const reply of heldReplies.splice(0)) reply();
+        return send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { content: [{ type: "text", text: String(args?.text) }], early },
+        });
+      }
+      if (name === "spawn-grandchild") {
+        // Stays in this launcher's process group and ignores SIGTERM so only process-group SIGKILL stops it.
+        const grandchild = NodeChildProcess.spawn(
+          process.execPath,
+          ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 60000);"],
+          { stdio: "ignore" },
+        );
+        return send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { content: [{ type: "text", text: String(grandchild.pid) }] },
+        });
       }
       if (name === "env")
         return send({

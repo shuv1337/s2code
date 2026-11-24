@@ -1,8 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalJsonInEffect:off globalDate:off
+import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import { McpServerId, type ServerSettings } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
 
@@ -400,6 +405,157 @@ describe("StdioMcpBridgeCore", () => {
     expect(core.retiringCount).toBe(0);
     expect(core.sessionCount).toBe(1);
   });
+
+  it("waits for an existing retiring child before evicting a healthy idle session", async () => {
+    const core = makeCore({ maxSessions: 2, killGraceMs: 250 });
+    const retiring = await harness(
+      core,
+      server({ FAKE_MCP_IGNORE_SIGTERM: "1" }),
+      "t1",
+      "a",
+    ).initialize();
+    const healthy = await harness(core, server(), "t2", "b").initialize();
+    const [retiringPid, healthyPid] = core.pids();
+
+    await core.handle({
+      serverId: "a",
+      server: server({ FAKE_MCP_IGNORE_SIGTERM: "1" }),
+      owner: "t1",
+      method: "DELETE",
+      sessionId: retiring.sessionId,
+      body: "",
+    });
+    expect(core.sessionCount).toBe(1);
+    expect(core.retiringCount).toBe(1);
+
+    // Global cap is 2 (1 retiring + 1 active idle); initializing a third waits on retiring instead of evicting healthy.
+    const third = await harness(core, server(), "t3", "c").initialize();
+    expect(third.sessionId).toBeDefined();
+    expect(alive(retiringPid!)).toBe(false);
+    expect(alive(healthyPid!)).toBe(true);
+    expect(core.sessionCount).toBe(2);
+    expect(core.retiringCount).toBe(0);
+
+    const healthyReply = await harness(core, server(), "t2", "b").post(healthy.sessionId, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "still-healthy" } },
+    });
+    expect(body(healthyReply)).toMatchObject({
+      id: 1,
+      result: { content: [{ text: "still-healthy" }] },
+    });
+  });
+
+  it("invalidates a queued initialize waiter on reconcile so it never spawns an obsolete server", async () => {
+    const marker = NodePath.join(NodeOS.tmpdir(), `s2code-queued-init-${NodeCrypto.randomUUID()}`);
+    const core = makeCore({ maxSessions: 1, killGraceMs: 300 });
+    const first = await harness(
+      core,
+      server({ FAKE_MCP_IGNORE_SIGTERM: "1" }),
+      "t1",
+      "a",
+    ).initialize();
+    await core.handle({
+      serverId: "a",
+      server: server({ FAKE_MCP_IGNORE_SIGTERM: "1" }),
+      owner: "t1",
+      method: "DELETE",
+      sessionId: first.sessionId,
+      body: "",
+    });
+    expect(core.retiringCount).toBe(1);
+
+    const tripwire: StdioBridgeRequest["server"] = {
+      command: process.execPath,
+      args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`],
+      env: {},
+    };
+    const queued = harness(core, tripwire, "t2", "b").initialize();
+    core.reconcile({} as ServerSettings["mcpServers"]);
+    const result = await queued;
+    expect(result.sessionId).toBeUndefined();
+    expect(body(result.response)).toMatchObject({ id: 0, error: { code: -32000 } });
+    expect(body(result.response).error.message).toMatch(/removed in Settings/);
+
+    await until(() => core.retiringCount === 0);
+    expect(NodeFS.existsSync(marker)).toBe(false);
+    expect(core.sessionCount).toBe(0);
+  });
+
+  it("ignores late responses to aborted requests even when the caller reuses the same id", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+
+    const firstAbort = new AbortController();
+    const firstCall = post(
+      sessionId,
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "echo", arguments: { text: "first", hold: true } },
+      },
+      firstAbort.signal,
+    );
+    // Confirm the child has received the first call before aborting.
+    const held = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 99,
+      method: "tools/call",
+      params: { name: "held-count" },
+    });
+    expect(body(held)).toMatchObject({ id: 99, result: { count: 1 } });
+
+    firstAbort.abort();
+    expect(body(await firstCall)).toMatchObject({ id: 1, error: { code: -32000 } });
+
+    // Reusing id: 1 immediately flushes the old held reply first, then sends the new reply.
+    const replacement = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "release-and-echo", arguments: { text: "second" } },
+    });
+    expect(body(replacement)).toMatchObject({
+      id: 1,
+      result: { content: [{ text: "second" }] },
+    });
+  });
+
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "sends process-group SIGKILL to surviving descendants after the launcher exits on SIGTERM",
+    async () => {
+      const core = makeCore({ killGraceMs: 250 });
+      const { post, initialize } = harness(core, server());
+      const { sessionId } = await initialize();
+      const [launcherPid] = core.pids();
+      const spawned = await post(sessionId, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "spawn-grandchild" },
+      });
+      const grandchildPid = Number(body(spawned).result.content[0].text);
+      expect(alive(launcherPid!)).toBe(true);
+      expect(alive(grandchildPid)).toBe(true);
+
+      await core.handle({
+        serverId: "exec",
+        server: server(),
+        owner: "thread-a",
+        method: "DELETE",
+        sessionId,
+        body: "",
+      });
+      await until(() => !alive(launcherPid!));
+      // Grandchild ignored SIGTERM and is cleaned up when the process-group SIGKILL grace timer fires.
+      await until(() => !alive(grandchildPid));
+      await until(() => core.retiringCount === 0);
+    },
+  );
 
   it("reconcile keeps sessions matching the new config while closing stale ones", async () => {
     const core = makeCore();

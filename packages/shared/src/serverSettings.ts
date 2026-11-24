@@ -322,6 +322,15 @@ function mergeMcpServersPatch(
       continue;
     }
     if (!isHttpPatch(config)) {
+      // Clients only receive `{ transport }` for unknown transports; echoing that stub keeps what is saved.
+      if (
+        savedEntry !== undefined &&
+        !isKnownMcpServer(savedEntry) &&
+        Object.keys(config).length === 1 &&
+        config.transport === savedEntry.transport
+      ) {
+        continue;
+      }
       next.set(id, config); // A newer client's transport: kept exactly as sent.
       continue;
     }
