@@ -82,7 +82,7 @@ function RevokeConnectDeviceDialogPopup({
         <AlertDialogTitle>{request.title}</AlertDialogTitle>
         <AlertDialogDescription>
           <T>
-            Approval for new devices is off, so a revoked device signed in to your T3 Connect
+            Approval for new devices is off, so a revoked device signed in to your S2 Connect
             account can connect again on its own.
           </T>
         </AlertDialogDescription>

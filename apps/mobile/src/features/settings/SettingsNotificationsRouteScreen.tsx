@@ -197,7 +197,7 @@ export function SettingsNotificationsRouteScreen() {
           contentContainerClassName="px-5 pt-4"
         >
           <Text className="text-base text-foreground-muted">
-            {gt("Notifications require {product} in this app build.", { product: "T3 Connect" })}
+            {gt("Notifications require {product} in this app build.", { product: "S2 Connect" })}
           </Text>
         </ScrollView>
       </SettingsScreen>
@@ -281,7 +281,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           gt("Couldn't finish enabling notifications"),
           gt(
             "Notification access was granted, but this device could not be registered with {product}. Notifications will start once registration succeeds.",
-            { product: "T3 Connect" },
+            { product: "S2 Connect" },
           ),
         );
       }
@@ -312,9 +312,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
 
   const promptSignIn = () => {
     Dialog.alert(
-      gt("Sign in to {product}", { product: "T3 Connect" }),
+      gt("Sign in to {product}", { product: "S2 Connect" }),
       gt("Live Activity updates require {product} so relay can deliver updates to this device.", {
-        product: "T3 Connect",
+        product: "S2 Connect",
       }),
       [
         { text: gt("Cancel"), style: "cancel" },
@@ -440,7 +440,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
         gt("Couldn't finish enabling activity updates"),
         gt(
           "This device could not be registered with {product}, so activity updates won't appear yet. They'll start once registration succeeds.",
-          { product: "T3 Connect" },
+          { product: "S2 Connect" },
         ),
       );
     }

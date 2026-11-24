@@ -14,9 +14,9 @@ and desktop releases do not require a hosted account.
 The Connect instructions in this guide apply only after your operator supplies
 a separately configured fork-owned deployment and its matching client build.
 
-T3 Connect makes an environment available to your other devices without setting
+S2 Connect makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
-Sharing & access**, sign in, and enable **T3 Connect** for that environment.
+Sharing & access**, sign in, and enable **S2 Connect** for that environment.
 
 For a command-line host, run:
 
@@ -24,8 +24,8 @@ For a command-line host, run:
 s2code up
 ```
 
-It asks how your other devices reach the machine: T3 Connect, the local network,
-or both. Choose T3 Connect and follow the sign-in instructions. On Linux and
+It asks how your other devices reach the machine: S2 Connect, the local network,
+or both. Choose S2 Connect and follow the sign-in instructions. On Linux and
 macOS, it then runs S2Code as a [background service](./background-service.md).
 `s2code connect` is the same as `s2code up --connect`. Run `s2code up` again to change your
 choice, and `s2code status` to see it.
@@ -36,24 +36,24 @@ app running with its local environment enabled. Closing the desktop app's last
 window stops its local server. Saving your sign-in alone does not start a server
 or make the machine reachable.
 
-On your other device, sign in to the same T3 Connect account and choose the
+On your other device, sign in to the same S2 Connect account and choose the
 environment. On the app.t3.codes home page with no computer added yet, signing
 in adds compatible computers linked to your account. Over SSH, the CLI prints a
 browser link and a short code. Open the link on any device, confirm the code
 matches, and approve. The CLI continues on its own, so you do not need to forward
 an OAuth callback port.
 
-T3 Connect renews access credentials when needed without disconnecting a healthy
+S2 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not
 disconnect an otherwise healthy conversation.
 
 ### Approve new devices
 
-By default, any device signed in to your T3 Connect account can open a linked
+By default, any device signed in to your S2 Connect account can open a linked
 machine. To require approval instead, turn on **Require approval for new
-devices** with the T3 Connect settings in **Settings → Sharing & access** on the
-host, or when you first set up T3 Connect. Then someone who takes over your T3
+devices** with the S2 Connect settings in **Settings → Sharing & access** on the
+host, or when you first set up S2 Connect. Then someone who takes over your S2
 Connect account cannot reach the machine from a new device without your
 approval. Review the devices that are already approved, described below.
 
@@ -65,10 +65,10 @@ headless host, run `s2code auth connect-device list` and then
 and the device asks again when it retries. Deny keeps that device out until its
 request expires.
 
-Each device is approved once. Revoke it from **T3 Connect devices** in the same
+Each device is approved once. Revoke it from **S2 Connect devices** in the same
 settings page, or with `s2code auth connect-device revoke <code>`. With approval on,
 it has to ask again. With approval off, it can connect again on its own, so
-revoking in the app offers to turn approval on first. Devices that connected through T3 Connect while approval was off stay
+revoking in the app offers to turn approval on first. Devices that connected through S2 Connect while approval was off stay
 approved and appear in that list for you to review. A device that has not
 connected since you updated S2Code asks for approval like a new one. Older apps
 cannot show the code, so update them before you turn approval on.
@@ -79,7 +79,7 @@ cannot show the code, so update them before you turn approval on.
 `--no-` forms. Choices you do not name keep their settings, and `--yes` takes
 the defaults. Without a terminal:
 
-- T3 Connect sign-in prints a URL and a code. Approve it on any device.
+- S2 Connect sign-in prints a URL and a code. Approve it on any device.
 - A needed restart runs without asking, and stops running agent turns.
 - With nothing set up and no choice named, `s2code up` stops and names the flags.
 
@@ -88,7 +88,7 @@ examples.
 
 ### More machines with T3 Chat
 
-Each T3 Connect account can link up to 3 machines. Phones and browsers do not
+Each S2 Connect account can link up to 3 machines. Phones and browsers do not
 count. A paid T3 Chat plan raises the limit to 10 machines with Pro, or 100 with
 Premier.
 
@@ -148,18 +148,18 @@ another link to share.
 ### Reach one machine several ways
 
 A machine can have more than one route: LAN, Tailscale, another VPN, a public
-URL, SSH, or T3 Connect. Tailscale shares its `100.64.0.0/10` address range with
+URL, SSH, or S2 Connect. Tailscale shares its `100.64.0.0/10` address range with
 other VPNs such as Cloudflare WARP, so an address in that range shows as VPN
 unless the machine confirms it is on Tailscale. To add a route, choose **Add
-route** in the machine's route list, or next to it in the T3 Connect list.
+route** in the machine's route list, or next to it in the S2 Connect list.
 A pairing link for a saved machine is refused when it comes from an address
 that machine does not have yet; add that address with **Add route** instead.
 Pairing again over an address the machine already has still works. A new route
 is placed by speed, in that order, and you can reorder routes at any time.
 
-While connected through T3 Connect or a paired address, S2Code also learns the
+While connected through S2 Connect or a paired address, S2Code also learns the
 machine's current LAN and Tailscale addresses and adds them as routes, so
-pairing once through T3 Connect is enough to use the LAN at home. When the
+pairing once through S2 Connect is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
 address to be learned: **Network access** in the desktop app, or the
@@ -179,14 +179,14 @@ refused**; pair that address again with **Add route** to use it.
 On web and desktop, select the route count under the machine's name in
 **Settings → Environments** to see its routes. Drag a route to change the order,
 or remove it. On mobile, open the machine under **Settings → Environments** and
-choose **Edit**. Signing out of T3 Connect removes only that route; a machine
+choose **Edit**. Signing out of S2 Connect removes only that route; a machine
 you can still reach another way stays saved.
 
 Open **Permissions** next to **Routes** in web or desktop, or **Your permissions**
 in the mobile route details, to see what your current connection can do on that
 environment. For a remote environment, this is in its route details. Permissions
 shown there apply only to the route marked **In use**; other routes are not
-checked. Direct pairing and T3 Connect have separate sessions and may grant
+checked. Direct pairing and S2 Connect have separate sessions and may grant
 different permissions.
 
 ### Balance new threads across machines
@@ -585,7 +585,7 @@ management is available through `s2code auth --help`.
 
 When the app connects to more than one environment, choose one at the top of the
 page. A desktop app with **Local environment** off can manage a background
-service on the same machine this way, including its T3 Connect link.
+service on the same machine this way, including its S2 Connect link.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -600,7 +600,7 @@ The selected scopes replace the default permissions. The same option works with
 `s2code auth pairing create` and `s2code auth session issue`; each command's
 `--help` lists the available scopes. Without `--scope`, pairing tokens and issued
 bearer sessions get the standard client permissions, including managing access.
-Setting up or replacing a T3 Connect link requires the separate `relay:configure` permission.
+Setting up or replacing an S2 Connect link requires the separate `relay:configure` permission.
 A terminal or a full-access agent on the host can reach those as well, so a
 client that should not manage access also needs to go without `terminal:operate`
 and `orchestration:operate`.
@@ -623,8 +623,8 @@ worktree still creates that branch and worktree with `orchestration:operate`,
 and the agent it runs can use Git however the environment allows.
 
 Settings changes, provider management, environment maintenance, access
-management, and T3 Connect preferences can each be granted separately. Setting
-up or replacing a T3 Connect link requires the administrative
+management, and S2 Connect preferences can each be granted separately. Setting
+up or replacing an S2 Connect link requires the administrative
 `relay:configure` permission. `relay:write` covers preferences and unlinking.
 New pairings without `--scope` include the standard client permissions. Existing clients keep the
 permissions they paired with and can stay connected after an update, but newly
@@ -643,12 +643,12 @@ can access, even when the pairing link omits file permissions. With
 credentials. Grant these permissions only to clients you trust with those
 capabilities.
 
-To remove an environment from T3 Connect, open your account menu's **T3 Connect**
-page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
+To remove an environment from S2 Connect, open your account menu's **S2 Connect**
+page, or **Settings → S2 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
-offline or has been wiped. When T3 Connect rejects a host's link, the host
-shows that it was removed from T3 Connect. To link it again, turn on
-**T3 Connect** in **Settings → Sharing & access** on web or desktop, or turn on
+offline or has been wiped. When S2 Connect rejects a host's link, the host
+shows that it was removed from S2 Connect. To link it again, turn on
+**S2 Connect** in **Settings → Sharing & access** on web or desktop, or turn on
 **Live Activity Updates** in **Settings → Notifications** on mobile; if it is
 already on, turn it off and on again. Either needs a client paired with
 `relay:read`, `relay:write`, and `relay:configure`. The desktop app's own session
@@ -658,16 +658,16 @@ run `s2code connect link` on the host and then restart S2Code there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `s2code connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on
-that device and doesn't change your T3 Connect account. A device keeps a saved
+that device and doesn't change your S2 Connect account. A device keeps a saved
 environment after it's deregistered until you remove it from that device.
 
-When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
+When idle tunnel cleanup is enabled, S2 Connect removes a linked environment's
 tunnel after it stays offline for several minutes. The environment stays linked
-and keeps the same address. When the host starts again or wakes, T3 Connect
+and keeps the same address. When the host starts again or wakes, S2 Connect
 creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
-T3 Connect also removes the tunnel of an environment running an older version of
+S2 Connect also removes the tunnel of an environment running an older version of
 S2Code once it has been offline for seven days. That environment shows a message
 asking you to update. Start S2Code on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
@@ -679,7 +679,7 @@ your login; `s2code connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
-## T3 Connect troubleshooting
+## S2 Connect troubleshooting
 
 Run `s2code connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
@@ -709,7 +709,7 @@ If a computer should only drive work running elsewhere, turn off its local envir
 desktop app, open **Settings → Environments** and switch off **Local
 environment**. S2Code restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
-history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
+history, and saved connections are kept, and you keep working through pairing, S2 Connect, or SSH.
 If a [background service](./background-service.md) on this computer uses the same S2Code home, the
 app still treats it as this computer: **Open in** and file reveal for its projects run here,
 whichever connection you reach it through.

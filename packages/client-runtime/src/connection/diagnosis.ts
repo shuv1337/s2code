@@ -107,7 +107,7 @@ function headline(
     case "offline":
       return resolve(msg("This device is offline"));
     case "session_pending":
-      return resolve(msg("This device is still loading its T3 Connect sign-in"));
+      return resolve(msg("This device is still loading its S2 Connect sign-in"));
     case "approval_pending":
       return resolve(msg("{host} is waiting for someone to approve this device", { host }));
     case "outdated":
@@ -115,13 +115,13 @@ function headline(
     case "clock_skew":
       return resolve(msg("This device's clock is off"));
     case "not_linked":
-      return resolve(msg("{host} is not linked to your T3 Connect account", { host }));
+      return resolve(msg("{host} is not linked to your S2 Connect account", { host }));
     case "relay_error":
-      return resolve(msg("T3 Connect returned an error"));
+      return resolve(msg("S2 Connect returned an error"));
     case "tunnel_pending":
       return resolve(msg("{host}'s tunnel is still being set up", { host }));
     case "tunnel_not_enabled":
-      return resolve(msg("T3 Connect is not turned on for {host}", { host }));
+      return resolve(msg("S2 Connect is not turned on for {host}", { host }));
     case "released":
     case "tunnel_down":
       return resolve(msg("{host}'s tunnel is offline", { host }));
@@ -146,15 +146,15 @@ function headline(
       return resolve(msg("This device could not prepare the connection"));
     case "relay":
       return failure?.reason === "authentication"
-        ? resolve(msg("T3 Connect did not accept this device's sign-in"))
-        : resolve(msg("This device can't reach T3 Connect"));
+        ? resolve(msg("S2 Connect did not accept this device's sign-in"))
+        : resolve(msg("This device can't reach S2 Connect"));
     case "tunnel":
       // The relay already reached the host when this device fails on its own.
       return failure?.reason === "network" ||
         failure?.reason === "transport" ||
         failure?.reason === "timeout"
         ? resolve(msg("This device can't reach {host}'s tunnel", { host }))
-        : resolve(msg("T3 Connect could not reach {host}'s tunnel", { host }));
+        : resolve(msg("S2 Connect could not reach {host}'s tunnel", { host }));
     case "server":
       return failure?.reason === "authentication" || failure?.reason === "permission"
         ? resolve(msg("T3 Code on {host} did not accept this device", { host }))
@@ -169,7 +169,7 @@ function steps(
   resolve: MFunctionType,
 ): string[] {
   const checkHost = resolve(
-    msg("On {host}, check Settings > Sharing & access or run `t3 connect status`.", { host }),
+    msg("On {host}, check Settings > Sharing & access or run `s2code connect status`.", { host }),
   );
   switch (located.cause) {
     case "offline":
@@ -217,10 +217,10 @@ function steps(
     case "not_linked":
       return [
         resolve(
-          msg("Check that this device is signed in to the same T3 Connect account as the host."),
+          msg("Check that this device is signed in to the same S2 Connect account as the host."),
         ),
         resolve(
-          msg("On {host}, open Settings > Sharing & access and turn T3 Connect on.", { host }),
+          msg("On {host}, open Settings > Sharing & access and turn S2 Connect on.", { host }),
         ),
       ];
     case "tunnel_pending":
@@ -233,7 +233,7 @@ function steps(
     case "tunnel_not_enabled":
       return [
         resolve(
-          msg("On {host}, open Settings > Sharing & access and turn T3 Connect on.", { host }),
+          msg("On {host}, open Settings > Sharing & access and turn S2 Connect on.", { host }),
         ),
       ];
     case "released":
@@ -271,10 +271,10 @@ function steps(
       ];
     case "relay":
       return failure?.reason === "authentication"
-        ? [resolve(msg("Sign out of T3 Connect and sign in again."))]
+        ? [resolve(msg("Sign out of S2 Connect and sign in again."))]
         : [
             resolve(msg("Check this device's internet connection.")),
-            resolve(msg("A VPN, firewall, or ad blocker on this device can block T3 Connect.")),
+            resolve(msg("A VPN, firewall, or ad blocker on this device can block S2 Connect.")),
           ];
     case "tunnel":
       return failure?.reason === "network" ||
@@ -356,7 +356,7 @@ function helpSection(
   }
 }
 
-const T3_CONNECT_NAME = "T3 Connect";
+const T3_CONNECT_NAME = "S2 Connect";
 
 const HOP_ORDER = {
   relay: ["device", "relay", "tunnel", "server"],
@@ -429,7 +429,7 @@ export function presentConnectionDiagnosis(
   );
   add(
     resolve(msg("Route", { $context: "diagnostics field label" })),
-    relayPath ? "T3 Connect" : resolve(msg("Direct", { $context: "connection route" })),
+    relayPath ? "S2 Connect" : resolve(msg("Direct", { $context: "connection route" })),
   );
   add(resolve(msg("App version")), input.clientVersion);
   add(resolve(msg("Host version")), input.serverVersion);

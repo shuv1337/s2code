@@ -65,7 +65,7 @@ export function ConnectDeviceApprovalSettings({
   };
 
   return (
-    <SettingsSection id="connect-devices" title={gt("T3 Connect devices")}>
+    <SettingsSection id="connect-devices" title={gt("S2 Connect devices")}>
       {requests.map((request) => {
         const connectRequest = request.connectDeviceRequest;
         if (!connectRequest) return null;
@@ -173,7 +173,7 @@ export function ConnectDeviceApprovalSettings({
       {devices.length === 0 && requests.length === 0 ? (
         <div className={ITEM_ROW_CLASSNAME}>
           <p className="text-xs text-muted-foreground/60">
-            <T>No device has connected through T3 Connect yet.</T>
+            <T>No device has connected through S2 Connect yet.</T>
           </p>
         </div>
       ) : null}

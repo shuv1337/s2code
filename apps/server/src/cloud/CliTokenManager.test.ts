@@ -15,6 +15,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { forkCliCommand } from "../cli/invocation.ts";
 import * as ExternalLauncher from "../process/externalLauncher.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 
@@ -227,7 +228,7 @@ it.effect.each([
       const error = yield* manager.getExisting.pipe(Effect.flip);
       assert.instanceOf(error, CliTokenManager.CloudCliCredentialRefreshError);
       assert.equal(error.requiresLogin, requiresLogin);
-      assert.equal(error.message.includes("t3 connect login"), requiresLogin);
+      assert.equal(error.message.includes(forkCliCommand("connect login")), requiresLogin);
       assert.equal(error.message.includes("OAuth error: invalid_grant"), diagnostic);
       assert.notInclude(error.message, "private");
       assert.equal(error.message.includes("OAuth error:"), diagnostic);

@@ -104,13 +104,13 @@ nobody is logged in at the Mac's screen can fail at the final start step; the
 service is still installed and will start at the next login.
 
 Windows background services are not supported. To keep a Windows host available
-through T3 Connect, leave the desktop app running with its local environment
+through S2 Connect, leave the desktop app running with its local environment
 enabled, or keep `s2code serve` running in a terminal. Minimize the desktop app rather
-than closing its last window, which stops its local server. Linking T3 Connect
+than closing its last window, which stops its local server. Linking S2 Connect
 does not configure automatic startup at Windows sign-in.
 
-`s2code up` installs the service when you set up T3 Connect, but the two are managed
-separately. Signing out of T3 Connect does not stop or uninstall the service.
+`s2code up` installs the service when you set up S2 Connect, but the two are managed
+separately. Signing out of S2 Connect does not stop or uninstall the service.
 
 ## Linux agent memory budget
 
@@ -186,7 +186,7 @@ Downloads, it may need Full Disk Access for the runtime executable listed in
 `ProgramArguments` in
 the channel's launchd plist (stable: `~/Library/LaunchAgents/dev.shuv.s2code.v2.service.plist`).
 
-For failures after signing in to T3 Connect, see
+For failures after signing in to S2 Connect, see
 [connection troubleshooting](./t3-connect-troubleshooting.md).
 
 ## Reclaim database space

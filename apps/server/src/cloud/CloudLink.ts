@@ -131,13 +131,13 @@ export const CLOUD_REPLAY_MARKER_PREFIXES = [
 ] as const;
 const MANAGED_ENDPOINT_PROVISION_REQUEST_TIMEOUT = Duration.minutes(2);
 const RELAY_CONFIG_FIELD_MESSAGES = {
-  relayUrl: "Relay URL must be the T3 Connect relay this environment is configured for.",
+  relayUrl: "Relay URL must be the S2 Connect relay this environment is configured for.",
   relayIssuer:
     "Relay issuer must be a secure absolute HTTPS URL outside the upstream hosted service.",
   environmentCredential: "Relay environment credential is required.",
   cloudUserId: "Cloud user id is required.",
   cloudMintPublicKey:
-    "Cloud mint public key must match the key pinned for this environment's T3 Connect relay.",
+    "Cloud mint public key must match the key pinned for this environment's S2 Connect relay.",
 } as const;
 
 export class CloudLinkRelayConfigInvalidError extends Schema.TaggedError<CloudLinkRelayConfigInvalidError>()(
@@ -173,7 +173,7 @@ export class CloudLinkNotLinkedError extends Schema.TaggedError<CloudLinkNotLink
   {},
 ) {
   override get message(): string {
-    return "Link this environment to T3 Connect first.";
+    return "Link this environment to S2 Connect first.";
   }
 }
 
@@ -245,15 +245,15 @@ const INTERNAL_OPERATION_MESSAGES = {
   "persist-relay-config": "Could not persist environment relay configuration.",
   "register-endpoint-origin": "Could not register the managed endpoint origin.",
   "resolve-server-origin": "Could not resolve the local server origin.",
-  "persist-desired-link": "Could not persist desired T3 Connect link state.",
+  "persist-desired-link": "Could not persist desired S2 Connect link state.",
   "sign-recovery-proof": "Could not sign the managed tunnel recovery request.",
   "unsupported-recovered-tunnel":
-    "T3 Connect returned an unsupported managed tunnel configuration.",
+    "S2 Connect returned an unsupported managed tunnel configuration.",
   "persist-recovered-tunnel": "Could not persist the recovered managed tunnel configuration.",
   "read-relay-config": "Could not read environment relay configuration.",
   "remove-relay-config": "Could not remove environment relay configuration.",
-  "update-live-activity-preference": "Could not update T3 Connect Live Activity preferences.",
-  "update-webhook-settings": "Could not update T3 Connect webhook settings.",
+  "update-live-activity-preference": "Could not update S2 Connect Live Activity preferences.",
+  "update-webhook-settings": "Could not update S2 Connect webhook settings.",
   "read-preferences": "Could not read environment cloud preferences.",
   "persist-preferences": "Could not persist environment cloud preferences.",
   "answer-health": "Could not answer cloud health request.",
