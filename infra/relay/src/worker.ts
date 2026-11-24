@@ -12,6 +12,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 import * as Etag from "effect/http/Etag";
 import * as HttpMiddleware from "effect/http/HttpMiddleware";
@@ -74,6 +76,8 @@ import * as HeldHooks from "./hooks/HeldHooks.ts";
 import * as HookInbox from "./hooks/HookInbox.ts";
 import * as HookInboxObject from "./hooks/HookInboxObject.ts";
 import * as MobileTelemetry from "./mobileTelemetry/MobileTelemetry.ts";
+import * as AgentFeedback from "./feedback/AgentFeedback.ts";
+import { assertForkFeedbackGithubRepo } from "./forkOwnership.ts";
 
 const layerWebcrypto = Layer.mergeAll(
   Digest.layerWebCrypto,
@@ -179,6 +183,30 @@ export const layer = Api.make(
     const t3ChatBaseUrl = yield* Config.String("T3CHAT_URL").pipe(
       Config.withDefault("https://t3.chat"),
     );
+    const feedbackGithubToken = Option.getOrUndefined(
+      Option.filter(
+        yield* Config.option(Config.Redacted("FEEDBACK_GITHUB_TOKEN")),
+        (value) => Redacted.value(value).trim().length > 0,
+      ),
+    );
+    const rawFeedbackGithubRepo = Option.getOrUndefined(
+      yield* Config.option(Config.String("FEEDBACK_GITHUB_REPO")),
+    );
+    const feedbackGithubRepo = yield* Effect.try({
+      try: () => assertForkFeedbackGithubRepo(rawFeedbackGithubRepo),
+      catch: (error) =>
+        new Config.ConfigError(
+          new Schema.SchemaError(
+            new SchemaIssue.InvalidValue({
+              message:
+                error instanceof Error ? error.message : "Invalid FEEDBACK_GITHUB_REPO setting.",
+            }),
+          ),
+        ),
+    });
+    const feedbackGithubAutoIssues = yield* Config.Boolean("FEEDBACK_GITHUB_AUTO_ISSUES").pipe(
+      Config.withDefault(false),
+    );
 
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
@@ -274,7 +302,20 @@ export const layer = Api.make(
     });
 
     const layerRuntime = Layer.empty.pipe(
-      Layer.provideMerge(MobileRegistrations.layer),
+      Layer.provideMerge(
+        Layer.mergeAll(
+          MobileRegistrations.layer,
+          AgentFeedback.layer.pipe(
+            Layer.provide(
+              Layer.succeed(AgentFeedback.AgentFeedbackSettings, {
+                githubRepo: feedbackGithubRepo,
+                githubToken: feedbackGithubToken,
+                createIssuesForAutoReports: feedbackGithubAutoIssues,
+              }),
+            ),
+          ),
+        ),
+      ),
       Layer.provideMerge(AgentActivityPublisher.layer),
       Layer.provideMerge(EnvironmentConnector.layer),
       Layer.provideMerge(EnvironmentLinker.layer),
@@ -435,6 +476,7 @@ export const layer = Api.make(
 
     const layerApp = Layer.mergeAll(
       layerRelayApi,
+      AgentFeedback.layerApi,
       HookForwarder.layerApi.pipe(
         Layer.provide(HookForwarder.layer),
         Layer.provide(layerHookRateLimiter),
@@ -525,8 +567,21 @@ export const layer = Api.make(
                 : Effect.logWarning("Failed to end idle Live Activities", { cause }),
             ),
           ),
+          AgentFeedback.AgentFeedback.pipe(
+            Effect.flatMap((feedback) => feedback.processGithubIssues),
+            Effect.tap((result) =>
+              result.claimed > 0 || result.staleMarkedUnknown > 0
+                ? Effect.logInfo("Processed agent feedback GitHub issues", result)
+                : Effect.void,
+            ),
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("Failed to process agent feedback GitHub issues", { cause }),
+            ),
+          ),
         ],
-        { concurrency: 3, discard: true },
+        { concurrency: 4, discard: true },
       ).pipe(
         Effect.withSpan("relay.cron.prune_expired_state"),
         Observability.withSchemaErrorSpanAttributes,

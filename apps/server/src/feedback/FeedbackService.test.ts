@@ -32,7 +32,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as Projects from "../project/ProjectService.ts";
 import * as Providers from "../provider/ProviderRegistry.ts";
 import * as Settings from "../serverSettings.ts";
-import * as Analytics from "../telemetry/AnalyticsService.ts";
+import * as FeedbackRelayDelivery from "./FeedbackRelayDelivery.ts";
 import {
   FEEDBACK_AWAITING_APPROVAL_NOTE,
   FeedbackInput,
@@ -284,12 +284,28 @@ const harness = Effect.gen(function* () {
               Effect.andThen(settingsLock.withPermits(1)(readSettings.pipe(Effect.flatMap(use)))),
             ),
         }),
-        Layer.mock(Analytics.AnalyticsService)({
-          record: (event, properties) =>
+        Layer.mock(FeedbackRelayDelivery.FeedbackRelayDelivery)({
+          deliver: (report, dimensions) =>
             Ref.get(telemetry).pipe(
               Effect.tap((on) =>
                 on
-                  ? Ref.update(events, (rows) => [...rows, [event, properties] as const])
+                  ? Ref.update(events, (rows) => [
+                      ...rows,
+                      [
+                        "agent.feedback",
+                        {
+                          kind: report.kind,
+                          subject: report.subject,
+                          expected: report.expected,
+                          actual: report.actual,
+                          workaround: report.workaround,
+                          userRequested: report.userRequested,
+                          trace: report.trace,
+                          source: report.source,
+                          ...dimensions,
+                        },
+                      ] as const,
+                    ])
                   : Effect.void,
               ),
             ),

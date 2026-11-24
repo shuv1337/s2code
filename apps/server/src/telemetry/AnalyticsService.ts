@@ -1,4 +1,5 @@
-// T3 ingest retains events and forwards to PostHog; UUIDs deduplicate retries there.
+// Forwards opt-in product events to a configured fork PostHog endpoint; UUIDs deduplicate retries there.
+import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import type { ClientOs } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -65,13 +66,9 @@ function retryDelayMs(failures: number, random: number): number {
 }
 
 const TelemetryEnvConfig = Config.all({
-  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(
-    Config.withDefault("phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
-  ),
-  posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(
-    Config.withDefault("https://ingest.t3.codes"),
-  ),
-  // The fork sends upstream's analytics project, so collection is opt-in.
+  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(Config.option),
+  posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(Config.option),
+  // Telemetry is opt-in and requires an explicit non-upstream PostHog host and key.
   enabled: Config.Boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(false)),
   flushBatchSize: Config.Number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
   maxBufferedEvents: Config.Number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
@@ -118,18 +115,36 @@ function serverOsFromNodePlatform(platform: string): ClientOs {
   }
 }
 
+function safeHostForLog(rawHost: string): string {
+  try {
+    return new URL(rawHost).hostname || "invalid_url";
+  } catch {
+    return "invalid_url";
+  }
+}
+
 /** @public */
 /** @public */
 export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
   const hostEnvironment = yield* HostProcess.Environment;
+  const rawHost = Option.getOrElse(telemetryConfig.posthogHost, () => "").trim();
+  const rawKey = Option.getOrElse(telemetryConfig.posthogKey, () => "").trim();
+  const allowedHost = rawHost.length > 0 ? forkHostedOrigin(rawHost, true) : null;
+  if (rawHost.length > 0 && allowedHost === null) {
+    yield* Effect.logWarning("Ignoring disallowed telemetry host", {
+      hostname: safeHostForLog(rawHost),
+    });
+  }
+  const ingest =
+    allowedHost !== null && rawKey.length > 0 ? { key: rawKey, host: allowedHost } : null;
   const awaitingShellConsent = hostEnvironment.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING === "1";
   // A managed policy can switch analytics off over the environment, never on.
   const policyAllows =
     ManagedPolicy.deniedBy(yield* ManagedPolicy.ManagedPolicy, "telemetry") === undefined;
   // A cached PATH does not establish consent from the current login shell.
   const telemetryEnabled = Effect.suspend(() => {
-    if (!telemetryConfig.enabled || !policyAllows) return Effect.succeed(false);
+    if (ingest === null || !telemetryConfig.enabled || !policyAllows) return Effect.succeed(false);
     if (!awaitingShellConsent) return Effect.succeed(true);
     if (hostEnvironment.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING === "1")
       return Effect.succeed(false);
@@ -201,10 +216,10 @@ export const make = Effect.gen(function* () {
   const sendBatch = Effect.fn("AnalyticsService.sendBatch")(function* (
     events: ReadonlyArray<BufferedAnalyticsEvent>,
   ) {
-    if (!(yield* telemetryEnabled) || !distinctId) return;
+    if (ingest === null || !(yield* telemetryEnabled) || !distinctId) return;
 
     const payload = {
-      api_key: telemetryConfig.posthogKey,
+      api_key: ingest.key,
       batch: events.map((event) => ({
         uuid: event.uuid,
         event: event.event,
@@ -229,7 +244,7 @@ export const make = Effect.gen(function* () {
       })),
     };
 
-    yield* HttpClientRequest.post(`${telemetryConfig.posthogHost}/batch/`).pipe(
+    yield* HttpClientRequest.post(`${ingest.host}/batch/`).pipe(
       HttpClientRequest.bodyJson(payload),
       Effect.flatMap(httpClient.execute),
       Effect.flatMap(HttpClientResponse.filterStatusOk),

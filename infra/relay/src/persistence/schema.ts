@@ -200,3 +200,5 @@ export const relayDpopProofs = pgTable(
     primaryKey({ columns: [table.thumbprint, table.jti] }),
   ],
 );
+
+export * from "./feedbackSchema.ts";

@@ -66,6 +66,7 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as FeedbackRelayDelivery from "../feedback/FeedbackRelayDelivery.ts";
 import * as FeedbackStore from "../feedback/FeedbackStore.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
@@ -335,7 +336,7 @@ const layerSecretRequestsProvided = SecretRequests.layer.pipe(
 );
 // Cards are shown from /mcp and answered over WebSocket; one instance serializes both.
 const layerFeedbackStoreProvided = FeedbackStore.layer.pipe(
-  Layer.provide(layerThreadManagementProvided),
+  Layer.provide(Layer.merge(layerThreadManagementProvided, FeedbackRelayDelivery.layer)),
 );
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
   Layer.provide(

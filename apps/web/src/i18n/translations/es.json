@@ -3694,8 +3694,8 @@
   "c53bc5a4b0314342": "Elemento siguiente",
   "2950b1424a3cddf5": "Vuelve a conectarte a este entorno y abre de nuevo el contenido.",
   "ef638bf1479a5461": "El entorno devolvió una URL de contenido no válida.",
-  "3ccfbf7e86868c35": "Comentarios para el equipo de T3",
-  "4e0710d19dfc2e7e": "¿Enviar este informe al equipo de T3?",
+  "c72605f249ac9c45": "Comentarios para S2Code",
+  "029e0ef5ed340129": "¿Enviar este informe a S2Code?",
   "87d0ae0723ba75d1": "Esto es todo lo que sale de tu máquina. No se envía nada hasta que pulses Enviar.",
   "bf19826f81484328": "Incluir la conversación",
   "ddb7e6f8ce99e657": "Solo quien pueda ejecutar agentes en esta máquina puede enviarlo o rechazarlo.",
@@ -8955,9 +8955,9 @@
   "90a258fff61fd77e": "Desactivado",
   "4060244a7079a0d2": "Cuando lo pida",
   "e88c9d8769544731": "Automático",
-  "f29d1dade4dde8aa": "Los agentes no envían comentarios al equipo de T3.",
-  "93c4c53562d30a98": "Cuando lo pides, los agentes te muestran un breve informe sobre T3 Code y lo envían al equipo de T3 si lo apruebas.",
-  "cd9ee803e8727017": "Los agentes también informan por su cuenta de los problemas que encuentran en T3 Code, como una herramienta de T3 que falla.",
+  "6cd581ae531afa32": "Los agentes no envían comentarios a S2Code.",
+  "cc6e19ae17288767": "Cuando lo pides, los agentes te muestran un breve informe sobre S2Code y lo envían si lo apruebas.",
+  "398891d79aadb4d5": "Los agentes también informan por su cuenta de los problemas que encuentran en S2Code, como una herramienta que falla.",
   "45fa271ea0e1ac8e": "Beta",
   "3a678332fc7142f7": "Agrupa los hilos de la barra lateral en carpetas de proyecto. Los hilos fijados quedan arriba, y Pospuestos y Resueltos quedan debajo de las carpetas.",
   "e4e91d155cb6a9b4": "Barra lateral simple (agrupar por proyecto)",
@@ -9195,7 +9195,11 @@
   "da18c0ca1699b1bd": [
     "La app de iOS está en una beta pública de",
     " ",
-    { "t": "a", "i": 1, "c": "TestFlight" },
+    {
+      "t": "a",
+      "i": 1,
+      "c": "TestFlight"
+    },
     "."
   ],
   "73da41e93823fd71": [
@@ -12046,7 +12050,7 @@
   "901a823214edc8c4": "telemetría analítica datos de uso seguimiento legal desactivar",
   "82136480255a5106": "OTel OTLP telemetría exportar endpoints registros trazas métricas Grafana",
   "659d081051faf7ff": "registros trazas procesos historial de recursos fallos spans cpu memoria",
-  "5eaeacfa9f82051a": "informe error problema t3 equipo enviar comentarios agentes herramientas automático cuando lo pida",
+  "1a9e4b39a32586e7": "informe error problema s2code equipo enviar comentarios agentes herramientas automático cuando lo pida",
   "f537f91e1ee41d47": "atajos de teclado teclas rápidas comandos combinaciones json",
   "1ba01e7ceed64b95": "ventana captura captura de pantalla",
   "279b1cceb779ff38": "Incluir el texto de la app",
