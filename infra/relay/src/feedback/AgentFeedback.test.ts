@@ -338,6 +338,39 @@ describe("AgentFeedback", () => {
     expect(issue.body).toContain("turn 2 · assistant · 19 chars");
     expect(issue.body).not.toContain("PRIVATE_CONVERSATION_CANARY");
     expect(issue.body).not.toContain(SECRET_ENV_ID);
+
+    // Unsafe stored metadata (backticks, mentions, links, newlines) and malformed stored IDs cannot inject HTML/Markdown.
+    const hostile = AgentFeedback.formatFeedbackGithubIssue({
+      id: "fb-bad --> <script>alert(1)</script>",
+      receivedAt: "2026-11-24T01:00:00.000Z",
+      createdAt: "2026-11-24T00:59:59.000Z",
+      kind: "bug",
+      subject: "t3_thread_read",
+      expected: "a",
+      actual: "b",
+      workaround: "",
+      userRequested: true,
+      source: "mcp",
+      traceJson: {
+        turns: 1,
+        textTurns: 0,
+        truncated: false,
+        entries: [{ turn: 1, type: "tool", tool: "custom\ntool", outcome: "error" }],
+      },
+      provider: "codex",
+      model: "`@owner` [click](https://evil.test)\ninjected",
+      serverVersion: "0.1.11-nightly.20261124+abc",
+      telemetryChannel: "nightly",
+      serverOs: "Linux",
+      serverArch: "x64",
+      serverMode: "desktop",
+    });
+    expect(hostile.body).not.toContain("<!-- s2code-feedback-id:");
+    expect(hostile.body).not.toContain("<script>");
+    expect(hostile.body).toContain(
+      "- **Model:** `` `@owner` [click](https://evil.test) injected ``",
+    );
+    expect(hostile.body).toContain("turn 1 · tool · custom tool · error");
   });
 
   it.effect(
@@ -367,8 +400,23 @@ describe("AgentFeedback", () => {
         );
         expect(largeBody.status).toBe(413);
 
-        // Invalid JSON, invalid subject, and oversized trace return 400.
+        // Invalid JSON, invalid ID/metadata, invalid subject, and oversized trace return 400.
         expect((yield* harness.send(feedbackRequest("{not-json"))).status).toBe(400);
+        expect(
+          (yield* harness.send(
+            feedbackRequest(encodeJson(makeFeedbackPayload({ id: "fb-1 --> <img src=x>" }))),
+          )).status,
+        ).toBe(400);
+        expect(
+          (yield* harness.send(
+            feedbackRequest(encodeJson(makeFeedbackPayload({ provider: "codex`bad" }))),
+          )).status,
+        ).toBe(400);
+        expect(
+          (yield* harness.send(
+            feedbackRequest(encodeJson(makeFeedbackPayload({ serverVersion: "0.1.0\ninjected" }))),
+          )).status,
+        ).toBe(400);
         expect(
           (yield* harness.send(
             feedbackRequest(encodeJson(makeFeedbackPayload({ subject: "bad\nsubject" }))),
@@ -617,6 +665,41 @@ describe("AgentFeedback", () => {
         };
         const mixedRun = yield* harness.service.processGithubIssues;
         expect(mixedRun).toMatchObject({ claimed: 2, failed: 1, unknown: 1, aborted: false });
+
+        // 502 and 422 accompanied by x-ratelimit-remaining: 0 still honor at-most-once/failed (never abort to pending).
+        yield* harness.send(feedbackRequest(encodeJson(makeFeedbackPayload({ id: "fb-rl-502" }))));
+        yield* harness.send(feedbackRequest(encodeJson(makeFeedbackPayload({ id: "fb-rl-422" }))));
+        nextResponse = (request) => {
+          const text =
+            request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
+          const status = text.includes("fb-rl-422") ? 422 : 502;
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response("", {
+                status,
+                headers: { "x-ratelimit-remaining": "0" },
+              }),
+            ),
+          );
+        };
+        const rlMixedRun = yield* harness.service.processGithubIssues;
+        expect(rlMixedRun).toMatchObject({
+          claimed: 2,
+          failed: 1,
+          unknown: 1,
+          retried: 0,
+          aborted: false,
+        });
+        const rlRows = yield* Effect.promise(() =>
+          harness.pg.query<{ readonly id: string; readonly github_issue_state: string }>(
+            "SELECT id, github_issue_state FROM agent_feedback WHERE id IN ('fb-rl-502', 'fb-rl-422') ORDER BY id",
+          ),
+        );
+        expect(rlRows.rows).toEqual([
+          { id: "fb-rl-422", github_issue_state: "failed" },
+          { id: "fb-rl-502", github_issue_state: "unknown" },
+        ]);
 
         // 503 retries up to 5 attempts, then marks failed.
         yield* harness.send(feedbackRequest(encodeJson(makeFeedbackPayload({ id: "fb-retry" }))));

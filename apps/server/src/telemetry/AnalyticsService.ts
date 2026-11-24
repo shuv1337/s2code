@@ -115,6 +115,14 @@ function serverOsFromNodePlatform(platform: string): ClientOs {
   }
 }
 
+function safeHostForLog(rawHost: string): string {
+  try {
+    return new URL(rawHost).hostname || "invalid_url";
+  } catch {
+    return "invalid_url";
+  }
+}
+
 /** @public */
 /** @public */
 export const make = Effect.gen(function* () {
@@ -124,7 +132,9 @@ export const make = Effect.gen(function* () {
   const rawKey = Option.getOrElse(telemetryConfig.posthogKey, () => "").trim();
   const allowedHost = rawHost.length > 0 ? forkHostedOrigin(rawHost, true) : null;
   if (rawHost.length > 0 && allowedHost === null) {
-    yield* Effect.logWarning("Ignoring disallowed telemetry host", { host: rawHost });
+    yield* Effect.logWarning("Ignoring disallowed telemetry host", {
+      hostname: safeHostForLog(rawHost),
+    });
   }
   const ingest =
     allowedHost !== null && rawKey.length > 0 ? { key: rawKey, host: allowedHost } : null;

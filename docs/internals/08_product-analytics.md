@@ -35,10 +35,9 @@ an authenticated connection does not count as product use.
   [`FeedbackService`](../../apps/server/src/feedback/FeedbackService.ts) scrubs of paths, private
   values, and secret-shaped strings, and only attaches bounded conversation traces when the user
   explicitly previews and sends them. [`FeedbackRelayDelivery`](../../apps/server/src/feedback/FeedbackRelayDelivery.ts)
-  delivers stored reports directly to the linked fork Connect relay (`POST /v1/feedback`, omitting
-  `threadId`, `projectId`, `distinctId`, and `installId`) rather than PostHog; the relay stores full
-  reports privately in Postgres and files public GitHub issues without conversation turn text or
-  environment IDs.
+  sends stored reports to the linked fork Connect relay rather than PostHog, without local thread,
+  project, or install identifiers; the relay keeps full reports private in Postgres and strips
+  conversation turn text and environment identifiers from public GitHub issues.
 - Product analytics delivery ([`AnalyticsService.ts`](../../apps/server/src/telemetry/AnalyticsService.ts))
   carries no upstream host or key defaults, rejects upstream domains via `forkHostedOrigin`, attaches
   a UUID per event, backs off on failure, and drops batches after bounded retries so a stuck batch

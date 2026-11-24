@@ -129,6 +129,8 @@ function parseContentLength(header: string | undefined): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+const SAFE_FEEDBACK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
+
 function fencedBlock(content: string): string {
   const normalized = content.replace(/\r\n/gu, "\n");
   let longest = 0;
@@ -137,6 +139,46 @@ function fencedBlock(content: string): string {
   }
   const fence = "`".repeat(Math.max(3, longest + 1));
   return `${fence}text\n${normalized}\n${fence}`;
+}
+
+function inlineCode(value: string): string {
+  const collapsed = value.replace(/[\r\n]+/gu, " ");
+  let longest = 0;
+  for (const match of collapsed.matchAll(/`+/gu)) {
+    if (match[0].length > longest) longest = match[0].length;
+  }
+  const fence = "`".repeat(longest + 1);
+  const needsPadding =
+    collapsed.startsWith("`") ||
+    collapsed.endsWith("`") ||
+    collapsed.startsWith(" ") ||
+    collapsed.endsWith(" ");
+  return needsPadding ? `${fence} ${collapsed} ${fence}` : `${fence}${collapsed}${fence}`;
+}
+
+function sanitizedPersistenceFailure(error: unknown): {
+  readonly errorTag: string;
+  readonly pgCode?: string;
+} {
+  const errorTag =
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    typeof (error as { readonly _tag: unknown })._tag === "string"
+      ? (error as { readonly _tag: string })._tag
+      : "PersistenceError";
+  const cause =
+    typeof error === "object" && error !== null && "cause" in error
+      ? (error as { readonly cause: unknown }).cause
+      : undefined;
+  const pgCode =
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    typeof (cause as { readonly code: unknown }).code === "string"
+      ? (cause as { readonly code: string }).code
+      : undefined;
+  return pgCode === undefined ? { errorTag } : { errorTag, pgCode };
 }
 
 export interface FeedbackIssueRecord {
@@ -168,7 +210,7 @@ export interface FormattedGithubIssue {
 
 function formatTraceOutlineEntry(entry: AgentFeedbackTrace["entries"][number]): string {
   const parts: Array<string> = [`turn ${entry.turn}`, entry.type];
-  if (entry.tool !== undefined) parts.push(entry.tool);
+  if (entry.tool !== undefined) parts.push(entry.tool.replace(/[\r\n]+/gu, " "));
   if (entry.outcome !== undefined) parts.push(entry.outcome);
   if (entry.durationMs !== undefined) parts.push(`${entry.durationMs}ms`);
   if (entry.length !== undefined) parts.push(`${entry.length} chars`);
@@ -183,26 +225,33 @@ export function formatFeedbackGithubIssue(record: FeedbackIssueRecord): Formatte
   const safeSubject = record.subject.replace(/[\r\n]+/gu, " ").trim();
   const title = `Agent feedback: ${record.kind} · ${safeSubject}`;
   const metadata: Array<string> = [
-    `- **Kind:** \`${record.kind}\``,
-    `- **Subject:** \`${safeSubject}\``,
-    `- **Source:** \`${record.source}\``,
+    `- **Kind:** ${inlineCode(record.kind)}`,
+    `- **Subject:** ${inlineCode(safeSubject)}`,
+    `- **Source:** ${inlineCode(record.source)}`,
     `- **User requested:** ${record.userRequested ? "yes" : "no"}`,
   ];
-  if (record.provider) metadata.push(`- **Provider:** \`${record.provider}\``);
-  if (record.model) metadata.push(`- **Model:** \`${record.model}\``);
-  if (record.serverVersion) metadata.push(`- **Server version:** \`${record.serverVersion}\``);
-  if (record.telemetryChannel) metadata.push(`- **Channel:** \`${record.telemetryChannel}\``);
-  if (record.serverOs) metadata.push(`- **OS:** \`${record.serverOs}\``);
-  if (record.serverArch) metadata.push(`- **Arch:** \`${record.serverArch}\``);
-  if (record.serverMode) metadata.push(`- **Mode:** \`${record.serverMode}\``);
-  metadata.push(`- **Received:** \`${record.receivedAt}\``);
+  if (record.provider) metadata.push(`- **Provider:** ${inlineCode(record.provider)}`);
+  if (record.model) metadata.push(`- **Model:** ${inlineCode(record.model)}`);
+  if (record.serverVersion) {
+    metadata.push(`- **Server version:** ${inlineCode(record.serverVersion)}`);
+  }
+  if (record.telemetryChannel) {
+    metadata.push(`- **Channel:** ${inlineCode(record.telemetryChannel)}`);
+  }
+  if (record.serverOs) metadata.push(`- **OS:** ${inlineCode(record.serverOs)}`);
+  if (record.serverArch) metadata.push(`- **Arch:** ${inlineCode(record.serverArch)}`);
+  if (record.serverMode) metadata.push(`- **Mode:** ${inlineCode(record.serverMode)}`);
+  metadata.push(`- **Received:** ${inlineCode(record.receivedAt)}`);
 
-  const sections: Array<string> = [
-    `<!-- s2code-feedback-id: ${record.id} -->`,
+  const sections: Array<string> = [];
+  if (SAFE_FEEDBACK_ID_PATTERN.test(record.id)) {
+    sections.push(`<!-- s2code-feedback-id: ${record.id} -->`);
+  }
+  sections.push(
     metadata.join("\n"),
     `### Expected\n\n${fencedBlock(record.expected)}`,
     `### Actual\n\n${fencedBlock(record.actual)}`,
-  ];
+  );
   if (record.workaround.trim().length > 0) {
     sections.push(`### Workaround\n\n${fencedBlock(record.workaround)}`);
   }
@@ -291,12 +340,9 @@ function mapClaimedRow(row: RawClaimedRow): ClaimedFeedbackRow {
   };
 }
 
-function isAbortBatchStatus(status: number, headers: Readonly<Record<string, string>>): boolean {
+function isAbortBatchStatus(status: number): boolean {
   if (status >= 300 && status < 400) return true;
-  if (status === 401 || status === 403 || status === 404 || status === 410 || status === 429) {
-    return true;
-  }
-  return headers["x-ratelimit-remaining"] === "0";
+  return status === 401 || status === 403 || status === 404 || status === 410 || status === 429;
 }
 
 const make = Effect.gen(function* () {
@@ -407,7 +453,7 @@ const make = Effect.gen(function* () {
     if (Result.isFailure(persisted)) {
       yield* Effect.logWarning("Failed to store agent feedback report", {
         reportId: payload.id,
-        error: String(persisted.failure),
+        ...sanitizedPersistenceFailure(persisted.failure),
       });
       return errorResponse(500, "persistence_failed");
     }
@@ -438,21 +484,28 @@ const make = Effect.gen(function* () {
       },
     }).pipe(HttpClientRequest.bodyJson(issue));
 
-    const response = yield* httpClient
-      .execute(request)
-      .pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-        Effect.timeoutOption(AGENT_FEEDBACK_GITHUB_TIMEOUT),
-      );
-    if (Option.isNone(response)) {
+    const executed = yield* httpClient.execute(request).pipe(
+      Effect.flatMap((response) =>
+        response.text.pipe(
+          Effect.orElseSucceed(() => ""),
+          Effect.map((text) => ({
+            status: response.status,
+            headers: response.headers,
+            text,
+          })),
+        ),
+      ),
+      Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+      Effect.timeoutOption(AGENT_FEEDBACK_GITHUB_TIMEOUT),
+    );
+    if (Option.isNone(executed)) {
       return { kind: "timeout" as const };
     }
-    const text = yield* response.value.text.pipe(Effect.orElseSucceed(() => ""));
     return {
       kind: "response" as const,
-      status: response.value.status,
-      headers: response.value.headers,
-      text,
+      status: executed.value.status,
+      headers: executed.value.headers,
+      text: executed.value.text,
     };
   });
 
@@ -627,9 +680,9 @@ const make = Effect.gen(function* () {
         continue;
       }
 
-      if (isAbortBatchStatus(status, headers)) {
+      if (isAbortBatchStatus(status)) {
         const reason =
-          status === 429 || headers["x-ratelimit-remaining"] === "0"
+          status === 429 || (status === 403 && headers["x-ratelimit-remaining"] === "0")
             ? "github_rate_limited"
             : `github_http_${status}`;
         yield* releaseClaimedPending(row, reason);

@@ -63,12 +63,13 @@ Reports are saved on your machine first, and a declined one is not saved at all;
 only what you would have sent without the conversation. When your host is linked to S2 Connect,
 approved and automatic reports are delivered to the S2 Connect relay (`POST /v1/feedback`) and stored
 privately in its Postgres database. For user-approved reports, the relay also files a public GitHub
-issue on `shuv1337/s2code` containing only the structured fields, non-PII metadata, and structural
-trace outline—never conversation turn text, environment IDs, IPs, or user IDs. Unlinked hosts,
-servers started with `S2CODE_TELEMETRY_ENABLED=false`, or servers where managed policy disables
-telemetry keep saved reports locally without sending them. `t3 feedback list` shows recent reports,
-the thread each came from, and a line for each outline; `t3 feedback list --json` shows exactly
-what each one holds.
+issue on `shuv1337/s2code` containing only the scrubbed `expected`, `actual`, and `workaround`
+fields, metadata (including model ID, provider, version, channel, OS, architecture, and mode), and
+structural trace outline—never conversation turn text, environment IDs, IPs, or user IDs. Unlinked
+hosts, servers started with `S2CODE_TELEMETRY_ENABLED=false` (or `0`/`off`/`no`), or servers where
+managed policy disables telemetry keep saved reports locally without sending them. `t3 feedback list`
+shows recent reports, the thread each came from, and a line for each outline; `t3 feedback list --json`
+shows exactly what each one holds.
 
 Relay tracing goes to S2Code's own relay and stays on unless you set
 `S2CODE_TELEMETRY_ENABLED=false`. It also stops when `S2CODE_OTEL_SDK_DISABLED` or

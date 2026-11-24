@@ -1,5 +1,8 @@
 import type { ClientOs } from "@t3tools/contracts";
-import type { RelayAgentFeedbackRequest } from "@t3tools/contracts/relay";
+import {
+  RelayAgentFeedbackResponse,
+  type RelayAgentFeedbackRequest,
+} from "@t3tools/contracts/relay";
 import { forkHostedOrigin } from "@t3tools/shared/hostedConfig";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -8,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -23,6 +27,10 @@ import type { FeedbackReport } from "./FeedbackReport.ts";
 const DELIVERY_TIMEOUT = Duration.seconds(4);
 const RETRY_DELAY = Duration.millis(500);
 const NON_RETRYABLE_STATUSES = new Set([400, 401, 413]);
+const TELEMETRY_OPT_OUT_VALUES = new Set(["false", "0", "no", "off", "n"]);
+const decodeFeedbackResponse = Schema.decodeUnknownOption(
+  Schema.fromJsonString(RelayAgentFeedbackResponse),
+);
 
 function serverOsFromNodePlatform(platform: string): ClientOs {
   switch (platform) {
@@ -41,8 +49,7 @@ function serverOsFromNodePlatform(platform: string): ClientOs {
 
 function isExplicitTelemetryOptOut(value: string | undefined): boolean {
   if (value === undefined) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === "false" || normalized === "0";
+  return TELEMETRY_OPT_OUT_VALUES.has(value.trim().toLowerCase());
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -84,16 +91,24 @@ const make = Effect.gen(function* () {
         },
       }).pipe(HttpClientRequest.bodyJson(payload));
 
-      const response = yield* httpClient
-        .execute(request)
-        .pipe(
-          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
-          Effect.timeoutOption(DELIVERY_TIMEOUT),
-        );
-      if (Option.isNone(response)) {
+      const executed = yield* Effect.gen(function* () {
+        const response = yield* httpClient.execute(request);
+        if (response.status === 200) {
+          const text = yield* response.text;
+          return Option.isSome(decodeFeedbackResponse(text))
+            ? ({ kind: "ok" } as const)
+            : ({ kind: "invalid_response" } as const);
+        }
+        yield* response.text.pipe(Effect.ignore);
+        return { kind: "status", status: response.status } as const;
+      }).pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
+        Effect.timeoutOption(DELIVERY_TIMEOUT),
+      );
+      if (Option.isNone(executed)) {
         return { kind: "timeout" as const };
       }
-      return { kind: "status" as const, status: response.value.status };
+      return executed.value;
     }).pipe(
       Effect.result,
       Effect.map((result) =>
@@ -147,13 +162,13 @@ const make = Effect.gen(function* () {
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const outcome = yield* sendOnce(relayOrigin, connection.environmentCredential, payload);
-      if (outcome.kind === "status" && outcome.status === 200) {
+      if (outcome.kind === "ok") {
         return true;
       }
       const retryable =
         outcome.kind === "timeout" ||
         outcome.kind === "transport_error" ||
-        isRetryableStatus(outcome.status);
+        (outcome.kind === "status" && isRetryableStatus(outcome.status));
       if (attempt === 1 && retryable) {
         yield* Effect.sleep(RETRY_DELAY);
         continue;

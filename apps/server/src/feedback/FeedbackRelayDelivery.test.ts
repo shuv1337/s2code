@@ -122,6 +122,9 @@ it.effect(
         },
         { env: { T3CODE_TELEMETRY_ENABLED: "false" } },
         { env: { T3CODE_TELEMETRY_ENABLED: "0" } },
+        { env: { T3CODE_TELEMETRY_ENABLED: "off" } },
+        { env: { T3CODE_TELEMETRY_ENABLED: "no" } },
+        { env: { T3CODE_TELEMETRY_ENABLED: "N" } },
         { secrets: {} },
         {
           secrets: {
@@ -274,6 +277,20 @@ it.effect("retries once on 503/429/404/transport/timeout and does not retry on 4
       const { layer, requests } = makeLayer({
         execute: (request) =>
           Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status }))),
+      });
+      const sent = yield* Effect.gen(function* () {
+        const delivery = yield* FeedbackRelayDelivery.FeedbackRelayDelivery;
+        return yield* delivery.deliver(sampleReport, {});
+      }).pipe(Effect.provide(layer));
+      expect(sent).toBe(false);
+      expect(requests).toHaveLength(1);
+    }
+
+    // 200 OK with HTML (e.g. captive portal / Access login) or invalid JSON returns false without retrying.
+    for (const body of ["<html><body>Sign in</body></html>", '{"ok":false}']) {
+      const { layer, requests } = makeLayer({
+        execute: (request) =>
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response(body, { status: 200 }))),
       });
       const sent = yield* Effect.gen(function* () {
         const delivery = yield* FeedbackRelayDelivery.FeedbackRelayDelivery;
