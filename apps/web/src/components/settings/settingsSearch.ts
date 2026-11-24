@@ -1006,7 +1006,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "mobile-app",
     title: msg("Mobile app"),
     to: "/settings/about",
-    searchTerms: [msg("phone tablet iPhone iPad iOS Android App Store Google Play QR")],
+    searchTerms: [
+      msg("phone tablet iPhone iPad iOS Android App Store Google Play QR TestFlight beta"),
+    ],
   },
   {
     id: "welcome-page",
