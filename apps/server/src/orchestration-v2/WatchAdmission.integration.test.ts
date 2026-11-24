@@ -240,7 +240,7 @@ const makeHarness = Effect.fn("watchAdmissionHarness")(function* (
         (event) =>
           event.type === "run.updated" &&
           event.payload.id === first.runId &&
-          event.payload.status === "waiting",
+          event.payload.status === "completed",
       );
       const projection = yield* orchestrator.getThreadProjection(threadId);
       const turn = projection.providerTurns[0]!;
@@ -523,6 +523,8 @@ it.effect.each(["none", "follow_up"] as const)(
             ...(policy === "none" ? { steerFollowUpPolicy: policy } : {}),
           });
           yield* s.complete;
+          yield* s.worker.drain();
+          yield* s.orchestrator.resumeQueuedRuns;
           yield* s.worker.drain();
           assert.equal(h.started.length, policy === "none" ? 1 : 2);
           if (policy === "none") {

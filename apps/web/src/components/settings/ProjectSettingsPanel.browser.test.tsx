@@ -178,7 +178,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function setup() {
+function setup(): Disposable {
   vi.clearAllMocks();
   state.sessions.clear();
   for (const id of [primaryId, remoteId])
@@ -215,7 +215,14 @@ function setup() {
   });
   state.delete.mockResolvedValue(AsyncResult.success(undefined));
   state.confirm.mockResolvedValue(true);
+  const initialDraftStore = useComposerDraftStore.getState();
   useComposerDraftStore.setState({ clearProjectDraftThreadId: state.clearDraft });
+  return {
+    [Symbol.dispose]() {
+      useComposerDraftStore.setState(initialDraftStore, true);
+      useComposerDraftStore.persist.clearStorage();
+    },
+  };
 }
 
 function projectKey() {
@@ -337,7 +344,7 @@ async function expectProjectAccessDeniedToast(title: string) {
 
 describe("project organization", () => {
   it("archives the checkout on every machine while one machine is picked", async () => {
-    setup();
+    using _setup = setup();
     await using _screen = await mountPanel({ machine: primaryId });
     await userEvent.click(page.getByRole("button", { name: "Archive" }));
     await vi.waitFor(() => expect(state.update).toHaveBeenCalledTimes(2));
@@ -352,7 +359,7 @@ describe("project organization", () => {
 
 describe("project settings permissions", () => {
   it("disables shared edits when any member lacks project access", async () => {
-    setup();
+    using _setup = setup();
     await grant(remoteId, AsyncResult.success(session([AuthSettingsWriteScope])));
     await using screen = await mountPanel();
 
@@ -365,7 +372,7 @@ describe("project settings permissions", () => {
   });
 
   it("renames every member when all have project access without settings access", async () => {
-    setup();
+    using _setup = setup();
     await using screen = await mountPanel();
     await rename(screen, "Renamed");
     expect(state.update.mock.calls.map(([request]) => request.environmentId)).toEqual([
@@ -376,7 +383,7 @@ describe("project settings permissions", () => {
   });
 
   it("stops before the next member if its grant is revoked during an earlier update", async () => {
-    setup();
+    using _setup = setup();
     const firstUpdate = deferred<AsyncResult.Success<void>>();
     state.update.mockReturnValueOnce(firstUpdate.promise);
     await using screen = await mountPanel();
@@ -394,7 +401,7 @@ describe("project settings permissions", () => {
   });
 
   it("disables removal for a checkout whose project grant is missing", async () => {
-    setup();
+    using _setup = setup();
     await grant(remoteId, AsyncResult.success(session([])));
     await using screen = await mountPanel();
     expect(removeCheckout(screen, "/work/remote").disabled).toBe(true);
@@ -402,7 +409,7 @@ describe("project settings permissions", () => {
   });
 
   it("removes a writable checkout while removal of the mixed group stays denied", async () => {
-    setup();
+    using _setup = setup();
     await grant(remoteId, AsyncResult.success(session([])));
     await using screen = await mountPanel();
     const initialHref = screen.router.state.location.href;
@@ -420,7 +427,7 @@ describe("project settings permissions", () => {
   });
 
   it("moves a draft on the removed checkout to a remaining checkout of the group", async () => {
-    setup();
+    using _setup = setup();
     const draftId = DraftId.make("draft-handed-off");
     const [primaryProject, remoteProject] = state.projects;
     const drafts = useComposerDraftStore.getState();
@@ -451,7 +458,7 @@ describe("project settings permissions", () => {
   });
 
   it("rechecks every removal target after confirmation before deleting or clearing drafts", async () => {
-    setup();
+    using _setup = setup();
     const confirmed = deferred<boolean>();
     state.confirm.mockReturnValueOnce(confirmed.promise);
     await using screen = await mountPanel();
@@ -470,7 +477,7 @@ describe("project settings permissions", () => {
   });
 
   it("does not save an edit whose grant was revoked mid-edit, and recovers when restored", async () => {
-    setup();
+    using _setup = setup();
     await using screen = await mountPanel();
     await userEvent.fill(nameInput(screen), "Renamed");
     await grant(remoteId, AsyncResult.success(session([])));
@@ -501,7 +508,7 @@ describe("project settings permissions", () => {
   ] as const)(
     "uses the current grant while a member's session is %s",
     async (_state, result, allowed) => {
-      setup();
+      using _setup = setup();
       await grant(remoteId, result());
       await using screen = await mountPanel();
       expect(nameInput(screen).disabled).toBe(!allowed);
@@ -525,7 +532,7 @@ describe("project identity reset", () => {
   });
 
   it("restores a renamed scratch project's built-in name and icon", async () => {
-    setup();
+    using _setup = setup();
     state.projects = [{ ...asScratch(state.projects[0]!), faviconPath: null, projectIcon: null }];
     await using screen = await mountPanel();
 
@@ -536,17 +543,20 @@ describe("project identity reset", () => {
         input: { projectId: state.projects[0]!.id, title: "No project" },
       }),
     );
-    await userEvent.click(resetButton(screen, "project icon")!);
+    const iconReset = resetButton(screen, "project icon")!;
+    const iconRow = iconReset.closest('[data-slot="settings-row"]');
+    await userEvent.click(iconReset);
     await vi.waitFor(() =>
       expect(state.update).toHaveBeenLastCalledWith({
         environmentId: primaryId,
         input: { projectId: state.projects[0]!.id, faviconPath: null, projectIcon: scratchIcon },
       }),
     );
+    expect(document.activeElement).toBe(iconRow);
   });
 
   it("resets each member of a mixed group to its own default icon", async () => {
-    setup();
+    using _setup = setup();
     const [primary, remote] = state.projects;
     state.projects = [asScratch(primary!), { ...remote!, faviconPath: "logo.png" }];
     await using screen = await mountPanel();
@@ -567,7 +577,7 @@ describe("project identity reset", () => {
   });
 
   it("refreshes a saved checkout's icon when a later checkout update fails", async () => {
-    setup();
+    using _setup = setup();
     state.projects = state.projects.map((project) => ({ ...project, faviconPath: "logo.png" }));
     let iconExists = false;
     const iconUrl = Atom.make(() =>
@@ -602,7 +612,7 @@ describe("project identity reset", () => {
 });
 
 it("opens the fallback search target across all environments from a checkout", async () => {
-  setup();
+  using _setup = setup();
   const root = createRootRoute();
   const settings = createRoute({
     getParentRoute: () => root,
@@ -649,7 +659,7 @@ describe("project settings scope", () => {
   const remoteOption = () => page.getByRole("menuitemradio", { name: /^remote/ });
 
   it("offers every environment while no project is selected", async () => {
-    setup();
+    using _setup = setup();
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);
     await using _screen = await mountSettings({});
 
@@ -659,7 +669,7 @@ describe("project settings scope", () => {
   });
 
   it("lists only the selected environment's projects and keeps it when one is opened", async () => {
-    setup();
+    using _setup = setup();
     const [primaryProject, remoteProject] = state.projects;
     state.projects = [
       primaryProject!,
@@ -686,7 +696,7 @@ describe("project settings scope", () => {
   });
 
   it("offers only the selected project's checkout environments", async () => {
-    setup();
+    using _setup = setup();
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);
     await using _screen = await mountSettings({ project: projectKey() });
 
@@ -697,7 +707,7 @@ describe("project settings scope", () => {
   });
 
   it("reaches each checkout on one environment and returns to all of them", async () => {
-    setup();
+    using _setup = setup();
     const [first] = state.projects;
     state.projects = [
       { ...first!, id: ProjectId.make("clone-a"), workspaceRoot: "/work/clone-a" },
@@ -727,7 +737,7 @@ describe("project settings scope", () => {
   });
 
   it("keeps an unknown project recoverable from any environment", async () => {
-    setup();
+    using _setup = setup();
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);
     await using screen = await mountSettings({ project: "removed-project" });
 
@@ -750,7 +760,7 @@ describe("project settings scope", () => {
       "This checkout is no longer available in the selected project and environment.",
     ],
   ])("recovers a stale environment link with checkout %s", async (checkout, message) => {
-    setup();
+    using _setup = setup();
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);
     const key = projectKey();
     await using screen = await mountSettings({
@@ -781,7 +791,7 @@ describe("project settings scope", () => {
 });
 
 it("returns to the project overview after removal, clearing the selection but keeping the environment", async () => {
-  setup();
+  using _setup = setup();
   state.projects = [state.projects[1]!];
   await using screen = await mountPanel({ machine: remoteId, checkout: "remote:/work/remote" });
   const removeProject = [...screen.container.querySelectorAll("button")].find(
@@ -801,7 +811,7 @@ describe("project name composition", () => {
     { isComposing: true, keyCode: 13 },
     { isComposing: false, keyCode: 229 },
   ])("does not save a partial name for $isComposing/$keyCode", async (composition) => {
-    setup();
+    using _setup = setup();
     await using screen = await mountPanel();
     const input = nameInput(screen);
     await userEvent.fill(input, "日本");

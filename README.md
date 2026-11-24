@@ -6,7 +6,7 @@ client architecture with the devil-terminal identity and Apple Watch work.
 ## Run this fork
 
 Use [fork builds](https://github.com/shuv1337/s2code/releases) or build from source with
-`vp i` and `vp run dev`. [Fork packaging instructions](docs/operations/release.md#matrix-and-source)
+`vp i` and `vp run dev`. [Fork packaging and release instructions](docs/operations/hosted-fork.md#fork-release-invariants)
 cover desktop artifacts. The npm package is `shuv2code`; it installs the `shuv2code`, `s2code`
 and `s2c` commands.
 
@@ -162,7 +162,7 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 
 [All docs](./docs/README.md) has the full list.
 
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
+Building from source? Start at [docs/internals/01_architecture.md](./docs/internals/01_architecture.md).
 
 ## If you REALLY want to contribute still.... read this first
 

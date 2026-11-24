@@ -388,6 +388,7 @@ vi.mock("node:fs/promises", { spy: true });
 describe("MuseAdapterV2", () => {
   it.effect("connects the thread's MCP credential on native start and resume", () =>
     Effect.gen(function* () {
+      const sessions = yield* McpProviderSessions.McpProviderSessions;
       for (const [sharedMcpServers, sharedConfig] of [
         [undefined, {}],
         [[], {}],
@@ -403,7 +404,7 @@ describe("MuseAdapterV2", () => {
           },
         ],
       ] as const) {
-        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        const config = {
           environmentId: EnvironmentId.make("test-environment"),
           threadId: THREAD_ID,
           providerSessionId: "test-session",
@@ -412,11 +413,12 @@ describe("MuseAdapterV2", () => {
           authorizationHeader: "Bearer thread-scoped-test-token",
           browserToolsAvailable: true,
           ...(sharedMcpServers === undefined ? {} : { sharedMcpServers }),
-        });
+        };
         for (const nativeId of [undefined, "saved-native-session"]) {
+          yield* sessions.set(config);
           const fake = yield* makeFakeMuse();
           fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
-          yield* makeHarness(fake, INSTANCE_ID, nativeId);
+          const harness = yield* makeHarness(fake, INSTANCE_ID, nativeId);
           const call = yield* fake.takeCall(nativeId ? "session/resume" : "session/start");
           assert.deepStrictEqual(call.params.config, {
             mcpServers: {
@@ -429,6 +431,13 @@ describe("MuseAdapterV2", () => {
               ...sharedConfig,
             },
           });
+          yield* sessions.clear(THREAD_ID);
+          yield* harness.runtime.startTurn({
+            ...(yield* turnInput(harness.providerThread, 1, harness.policy)),
+            agentFeedback: "auto",
+          });
+          const turn = yield* fake.takeCall("turn/start");
+          assert.match(JSON.stringify(turn.params.input), /t3_feedback/);
         }
       }
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
@@ -565,6 +574,7 @@ describe("MuseAdapterV2", () => {
       const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
         ...runtimePolicy,
         cwd: "C:\\work\\repo",
+        workspace: { folders: [], extraRoots: ["C:\\work\\api"] },
       });
       const harness = yield* makeHarness(
         fake,
@@ -583,7 +593,10 @@ describe("MuseAdapterV2", () => {
       yield* startConversation(harness, fake);
       const turnStart = fake.calls.find((call) => call.method === "turn/start");
       // Muse 1.4.3 accepts only verbatim canonical roots.
-      assert.deepStrictEqual(turnStart?.params.workspaceRoots, ["\\\\?\\C:\\work\\repo"]);
+      assert.deepStrictEqual(turnStart?.params.workspaceRoots, [
+        "\\\\?\\C:\\work\\repo",
+        "\\\\?\\C:\\work\\api",
+      ]);
       // The muse.cmd launcher runs under cmd.exe, which cannot start in a verbatim directory.
       assert.strictEqual(hostCwd, "C:\\work\\repo");
     }).pipe(

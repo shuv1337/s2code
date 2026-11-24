@@ -193,3 +193,100 @@ Expo build inputs.
 
 No credentials belong in public configuration except service-scoped public
 client keys/tokens intended for distribution.
+
+## Local Connect and `cloudflared`
+
+A `cloudflared` binary on `PATH` or an explicit `S2CODE_CLOUDFLARED_PATH` is the
+user's choice and is never replaced by managed connector downloads.
+
+For local source builds against a fork-owned relay, copy `.env.example` to `.env`
+and set `T3CODE_CLERK_PUBLISHABLE_KEY`, `T3CODE_CLERK_JWT_TEMPLATE=t3-relay`,
+`T3CODE_CLERK_CLI_OAUTH_CLIENT_ID`, `T3CODE_RELAY_URL`, and
+`T3CODE_CLOUD_MINT_PUBLIC_KEY`. When `T3CODE_HOSTED_APP_URL` is unset, `s2code connect`
+uses Clerk's OAuth device-authorization grant (enable it on the Clerk public OAuth
+application with redirect `http://127.0.0.1:34338/callback` and `openid`, `profile`,
+`email`, `offline_access` scopes).
+
+## Private-fork CI
+
+Normal PRs and `main` pushes run **one validation job**, named `CI` on Ubuntu:
+one pinned dependency install, formatting, lint, a small fork identity/release
+invariant suite, and the usage-limit pool failover integration test. The Protect
+`main` required status remains `CI`.
+
+For the full checks, select **Actions → CI Full → Run workflow** or run
+`gh workflow run ci-full.yml --ref <branch>`. Public-contribution size/vouch jobs
+are skipped in this private fork. Mobile fingerprinting requires the
+`ci:mobile-fingerprint` PR label. Web previews are disabled (notice-only). Relay
+deploys run from `.github/workflows/deploy-relay.yml` in the `production`
+environment when fork relay variables are configured (and skip cleanly when unset).
+Mobile production delivery is manual-only (`workflow_dispatch`).
+
+This fork's source of truth is GitHub (`shuv1337/s2code`), with no forge mirror.
+
+## Fork release invariants
+
+- A failed Windows x64 build does not block the release; macOS and Linux still do.
+  Publication omits the Windows installer and CLI archive, publishes the `shuv2code`
+  npm launcher without a Windows checksum, notes the omission, excludes the release
+  from the rolling index, and fails the final `windows_missing` job. Before upload,
+  Windows builds verify `resources/wsl-runtime.tar.gz` is present in the installer
+  payload.
+- CLI archives cover four targets (`darwin-arm64`, `linux-arm64`, `linux-x64`,
+  `win32-x64`), named `s2code-<version>-<platform>-<arch>` with byte-identical
+  `shuv2code-*` and `t3-*` aliases (all checksummed). The archive root directory
+  retains `shuv2code-<version>-<platform>-<arch>` and the internal executable stays
+  `t3`.
+- When npm is enabled, the only published npm package is `shuv2code`
+  (`scripts/build-npm-launcher.ts`). On first run `bin/shuv2code.mjs` downloads,
+  SHA-256 verifies, and caches the release archive under `<cache>/s2code/runtime/<version>`.
+  Use **Re-run failed jobs** (never **Re-run all jobs**) on a release run so signed
+  desktop artifacts are not rebuilt with different bytes.
+- `encrypted-windows-build.yml` is a manual, non-publishing validation build on
+  `main` that encrypts the signed Windows installer, CLI zip, provenance, `SHA256SUMS`,
+  and `verify-windows.ps1` with a caller-supplied `age1...` public recipient into
+  `s2code-windows-encrypted-<run-id>` (7-day retention).
+
+## Fork Android notifications and package IDs
+
+The product rename retains the registered `dev.shuv.shuv2code*` Android application
+identifiers (`dev.shuv.shuv2code.dev`, `dev.shuv.shuv2code.nightly`,
+`dev.shuv.shuv2code`) and their signing certificates. Register those identifiers in a
+fork-owned Firebase project, pass `ANDROID_GOOGLE_SERVICES_FILE` and
+`FIREBASE_PROJECT_ID` when building, and enable Android push explicitly with
+`MOBILE_PUSH_ENABLED=1`.
+
+## Fork-only server features
+
+### Spent-quota account sync across linked environments
+
+- Spent-quota account states sync in one exchange over the linking side's session,
+  carrying both directions so the linked side never calls back. The tool is visible
+  only to full-access peer-link sessions, and a peer is called only when its
+  descriptor advertises `providerAccountSync`.
+- States are last-writer-wins with canonical UTC ISO timestamps; local edits stamp
+  just after the replaced state so a user re-enable beats any previously observed
+  spent state regardless of clock skew. States more than 5 minutes ahead of the
+  receiver's clock are refused, and local changes clamp to the same bound.
+- States travel one link and no further: each side accepts only records originated
+  by the peer and exports only its own (bounded to 1,000 per origin, 5,000 total).
+  Account keys are unsalted hashes of driver, email, and workspace.
+
+### Voice session logs
+
+GPT Live calls and dictation append one JSON object per line under
+`<stateDir>/logs/voice/<YYYYMMDD>-<sessionId>.jsonl` (default
+`~/.s2code-v2/userdata/logs/voice/`). Transcripts are enabled by default
+(`voiceLogTranscripts` in server settings); audio, SDP, API keys, and `sk-…` /
+`Bearer …` strings are excluded or redacted. Files cap at 5 MB (ending with a
+`truncated` line) and prune older logs on session start.
+
+### Cross-project `delegate_task`
+
+Passing a local `target.projectId` to `delegate_task` launches an ordinary child
+thread in that project with `delegatedFrom` pointing back to the parent, reusing the
+remote-delegation lifecycle locally (`delegated_task.remote.request` / `remoteChild`
+with this environment's ID) without requiring linked environments. Shared isolation
+uses the target project root; worktree isolation prepares a checkout from the target
+repository's `HEAD`. Shared MCP server administration and audience bindings are
+documented in [MCP servers](../user/mcp-servers.md).

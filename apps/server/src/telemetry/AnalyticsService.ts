@@ -83,10 +83,11 @@ const TelemetryEnvConfig = Config.all({
 export class AnalyticsService extends Context.Service<
   AnalyticsService,
   {
+    /** Whether the event was queued to send; false when telemetry is off. */
     readonly record: (
       event: string,
       properties?: Readonly<Record<string, unknown>>,
-    ) => Effect.Effect<void>;
+    ) => Effect.Effect<boolean>;
 
     readonly flush: Effect.Effect<void>;
 
@@ -312,11 +313,11 @@ export const make = Effect.gen(function* () {
 
   const record: AnalyticsService["Service"]["record"] = Effect.fn("AnalyticsService.record")(
     function* (event, properties) {
-      if (!(yield* telemetryEnabled) || !distinctId) return;
+      if (!(yield* telemetryEnabled) || !distinctId) return false;
 
       // Catch Node UUID defects too; best-effort telemetry drops events without UUIDs.
       const uuid = yield* Effect.exit(crypto.uuidV7());
-      if (Exit.isFailure(uuid)) return;
+      if (Exit.isFailure(uuid)) return false;
 
       const enqueueResult = yield* enqueueBufferedEvent(uuid.value, event, properties);
       if (enqueueResult.dropped) {
@@ -325,6 +326,7 @@ export const make = Effect.gen(function* () {
           event,
         });
       }
+      return true;
     },
   );
 

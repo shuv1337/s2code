@@ -20,7 +20,7 @@ it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
       await NodeFSP.writeFile(NodePath.join(legacy, "settings.json"), "existing state");
       const run = () =>
         NodeChildProcess.spawnSync("bash", ["-s"], {
-          input: `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/archive.tar.gz", "runtime-test", "0".repeat(64), "1.2.3-nightly.20261014.1")}`,
+          input: `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/archive.tar.gz", "runtime-test", "0".repeat(64), null, "1.2.3-nightly.20261014.1")}`,
           env: { PATH: process.env.PATH, HOME: home },
           encoding: "utf8",
         });
@@ -55,7 +55,7 @@ it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
       }
       await NodeFSP.writeFile(NodePath.join(current, "settings.json"), "existing state");
       const result = NodeChildProcess.spawnSync("bash", ["-s"], {
-        input: `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/archive.tar.gz", "runtime-test", "0".repeat(64), "1.2.3-nightly.20261014.1")}`,
+        input: `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/archive.tar.gz", "runtime-test", "0".repeat(64), null, "1.2.3-nightly.20261014.1")}`,
         env: { PATH: process.env.PATH, HOME: home },
         encoding: "utf8",
       });
@@ -76,7 +76,7 @@ it.skipIf(HostProcess.Platform.defaultValue() === "win32").each(["nightly", "pre
     try {
       // This test isolates ownership from Linux flock availability; the native
       // runtime suite exercises the real lock in an actual Linux/WSL shell.
-      const script = `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/test-archive.tar.gz", "runtime-test", "0".repeat(64), `1.2.3-${channel}.20261014.1`)}\n`;
+      const script = `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/test-archive.tar.gz", "runtime-test", "0".repeat(64), null, `1.2.3-${channel}.20261014.1`)}\n`;
       const result = NodeChildProcess.spawnSync("bash", ["-s"], {
         input: script,
         env: { PATH: process.env.PATH, HOME: home },
@@ -110,7 +110,7 @@ it
       if (kind === "foreign")
         await NodeFSP.writeFile(NodePath.join(root, ".product-identity"), "t3code\n");
       const result = NodeChildProcess.spawnSync("bash", ["-s"], {
-        input: `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/test-archive.tar.gz", "runtime-test", "0".repeat(64), kind === "stable-unmarked" ? "1.2.3" : "1.2.3-nightly.20261014.1")}`,
+        input: `flock() { :; }\n${buildWslRuntimeInstallScript("/missing/test-archive.tar.gz", "runtime-test", "0".repeat(64), null, kind === "stable-unmarked" ? "1.2.3" : "1.2.3-nightly.20261014.1")}`,
         env: { PATH: process.env.PATH, HOME: home },
         encoding: "utf8",
       });

@@ -125,6 +125,8 @@ const LOGIN_SHELL_ENV_NAMES = [
   "NODE_EXTRA_CA_CERTS",
   "S2CODE_TELEMETRY_ENABLED",
   "SHUV2CODE_TELEMETRY_ENABLED",
+  "T3CODE_TELEMETRY_ENABLED",
+  "T3CODE_FEATURE_FLAGS",
   "T3CODE_GITHUB_APP_CLIENT_ID",
   "T3CODE_RELEASE_BASE_URL",
   CLI_RELEASE_BASE_URL_ENV,
@@ -238,6 +240,8 @@ const logShellEnvironmentCommandError = (
 const captureWindowsEnvironmentCommand = (names: ReadonlyArray<string>) =>
   [
     "$ErrorActionPreference = 'Stop'",
+    // Redirected PowerShell output uses the console code page, which mangles non-ASCII paths.
+    "try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}",
     ...names.flatMap((name) => {
       return [
         `Write-Output '${startMarker(name)}'`,
@@ -558,7 +562,7 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "SHUV2CODE_TELEMETRY_ENABLED",
       "PNPM_HOME",
       "T3CODE_TELEMETRY_ENABLED",
-      "T3CODE_GITHUB_APP_CLIENT_ID",
+      "T3CODE_FEATURE_FLAGS",
       "T3CODE_RELEASE_BASE_URL",
       CLI_RELEASE_BASE_URL_ENV,
       "SHUV2CODE_RELEASE_BASE_URL",
@@ -671,6 +675,8 @@ const CACHED_ENV_NAMES = [
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
   "T3CODE_TELEMETRY_ENABLED",
+  // The server reads its flags once at start, before discovery can finish.
+  "T3CODE_FEATURE_FLAGS",
 ] as const;
 
 /** @public */

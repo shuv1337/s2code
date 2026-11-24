@@ -1169,7 +1169,79 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("waits out a background check instead of refusing a channel change", () =>
+  it.effect("offers nothing below a track switch's checked release", () => {
+    const harness = makeHarness({
+      appVersion: "1.2.3",
+      beforeSetUpdateChannel: Effect.void,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* updates.setChannel("latest", { minimumVersion: "1.2.5" });
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        assert.isNull((yield* updates.getState).availableVersion);
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+        assert.isNull((yield* updates.getState).downloadedVersion);
+
+        harness.emit("update-available", { version: "1.2.5" });
+        yield* flushCallbacks;
+        assert.equal((yield* updates.getState).availableVersion, "1.2.5");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("keeps the current track's offers when a track switch fails to save", () => {
+    const harness = makeHarness({
+      appVersion: "1.2.3",
+      setUpdateChannelError: new DesktopAppSettings.DesktopSettingsWriteError({
+        operation: "replace-settings-file",
+        path: "desktop-settings.json",
+        cause: new Error("rename failed"),
+      }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        assert.equal((yield* updates.getState).availableVersion, "1.2.4");
+
+        const error = yield* updates
+          .setChannel("latest", { minimumVersion: "1.2.6" })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "DesktopUpdateChannelPersistenceError");
+        assert.equal((yield* updates.getState).channel, "latest");
+
+        harness.emit("update-available", { version: "1.2.5" });
+        yield* flushCallbacks;
+        assert.equal((yield* updates.getState).availableVersion, "1.2.5");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("never offers an older Nightly to a Nightly build's own checks", () => {
+    const harness = makeHarness({ appVersion: "1.2.4-nightly.20261027.1" });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* updates.check("poll");
+
+        assert.equal((yield* updates.getState).channel, "nightly");
+        assert.deepEqual(harness.checkAllowedDowngrade, [false]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("waits out a background check instead of refusing a track change", () =>
     Effect.gen(function* () {
       const checkStarted = yield* Deferred.make<void>();
       const releaseCheck = yield* Deferred.make<void>();

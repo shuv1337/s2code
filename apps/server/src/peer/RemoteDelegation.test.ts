@@ -57,6 +57,7 @@ import * as ProviderContinuationRequests from "@t3tools/provider-core/server/Pro
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { layerNoTaskFolders } from "../orchestration-v2/ProviderTurnStartService.testkit.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
@@ -268,6 +269,7 @@ const serveBox = (thread: BoxThread, pooled = false) => {
   return servePeer(
     box,
     boxToolkitLayer(thread, pooled),
+    Layer.empty,
     pooled
       ? {
           providerInstances: {
@@ -821,6 +823,7 @@ const makeLaptop = (
           folderForThread: () => Effect.succeedNone,
         }),
       ),
+      Layer.provide(layerNoTaskFolders),
     );
     const layerHere = McpHttpServer.layerOrchestratorToolkit.pipe(
       Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
@@ -2486,7 +2489,7 @@ it.effect.each([
         const pages = reads.filter((read) => read.itemId === undefined && read.limit === 100);
         // The thread's final page starts at its canonical 100-item boundary.
         const tailPosition = Math.floor((timeline.length - 1) / 100) * 100 - 1;
-        expect(pages.at(0)?.afterPosition).toBeUndefined();
+        expect(pages.at(0)?.afterPosition).toBe(-1);
         expect(
           pages.every(
             (read) =>

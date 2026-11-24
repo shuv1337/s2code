@@ -231,7 +231,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     );
   const launcher =
     platform === "win32"
-      ? yield* findWindowsShim(input.launchedAs, input.currentVersion)
+      ? yield* findWindowsShim(input.launchedAs, input.currentVersion, versionsDir)
       : yield* findPosixLauncher({
           launchedAs: input.launchedAs,
           versionsDir,
@@ -296,32 +296,48 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
 
 /**
  * On Windows a `.cmd` shim is what PATH resolves, but the executable it runs
- * only ever sees its own path. Walk PATH for the channel's shim whose target is the
- * running executable; that is the launcher the install script wrote.
+ * only ever sees its own path. Walk PATH and recorded launchers for the channel's shim
+ * whose target is the running executable; that is the launcher the install script wrote.
  */
 export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(function* (
   executablePath: string,
   version = packageJson.version,
+  versionsDir?: string,
 ) {
+  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const environment = yield* HostProcess.Environment;
-  const candidates = [
+  const identities = [resolveChannelIdentity(version), resolveLegacyChannelIdentity(version)];
+  const shimNames = new Set(
+    identities.map((identity) => `${identity.executableName}.cmd`.toLowerCase()),
+  );
+  const directories = [
     ...(environment["T3CODE_INSTALL_BIN_DIR"] ? [environment["T3CODE_INSTALL_BIN_DIR"]] : []),
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(";"),
   ].filter((entry) => entry.trim().length > 0);
-  for (const directory of candidates) {
-    for (const identity of [
-      resolveChannelIdentity(version),
-      resolveLegacyChannelIdentity(version),
-    ]) {
-      const shimPath = path.join(directory, `${identity.executableName}.cmd`);
-      const target = (yield* readLauncherTarget(shimPath, version))?.target;
-      if (
-        target !== undefined &&
-        path.resolve(target).toLowerCase() === path.resolve(executablePath).toLowerCase()
-      ) {
-        return shimPath;
+  const candidates: Array<string> = [];
+  for (const directory of directories) {
+    for (const identity of identities) {
+      candidates.push(path.join(directory, `${identity.executableName}.cmd`));
+    }
+  }
+  if (versionsDir !== undefined) {
+    const recorded = yield* fs
+      .readFileString(path.join(path.dirname(versionsDir), "launchers"))
+      .pipe(Effect.orElseSucceed(() => ""));
+    for (const shimPath of recorded.split(/\r?\n/)) {
+      if (path.isAbsolute(shimPath) && shimNames.has(path.basename(shimPath).toLowerCase())) {
+        candidates.push(shimPath);
       }
+    }
+  }
+  for (const shimPath of candidates) {
+    const target = (yield* readLauncherTarget(shimPath, version))?.target;
+    if (
+      target !== undefined &&
+      path.resolve(target).toLowerCase() === path.resolve(executablePath).toLowerCase()
+    ) {
+      return shimPath;
     }
   }
   return undefined;
@@ -492,12 +508,8 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     return yield* new CliUpdateError({ reason: SEPARATE_CHANNEL_INSTALL_MESSAGE });
 
   const status = yield* service.status;
-  // The unit name is per channel and user, not per home. Only touch the service when it
-  // serves the home this update targets; otherwise it belongs to another
-  // install on this machine and restarting it would take that server down.
-  const servesThisHome =
-    status.installedBaseDir !== undefined &&
-    path.resolve(status.installedBaseDir) === path.resolve(input.baseDir);
+  // Service names are per user, so another home's unit belongs to a different install.
+  const servesThisHome = status.installedBaseDir !== undefined && status.otherBaseDir === undefined;
   const serviceInstalled = status.supported && status.installed && servesThisHome;
   const foreground = yield* findForegroundServer({
     serverRuntimeStatePath: input.serverRuntimeStatePath,
