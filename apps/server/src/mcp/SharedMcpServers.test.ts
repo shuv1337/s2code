@@ -25,8 +25,10 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import {
   FetchHttpClient,
@@ -160,9 +162,19 @@ const fixture = Effect.gen(function* () {
   let bearerTokenReads = 0;
   const hung = yield* Queue.unbounded<string>();
   const settings = yield* Ref.make<ServerSettings>(DEFAULT_SERVER_SETTINGS);
+  const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
   const settingsLayer = Layer.mock(ServerSettingsService.ServerSettingsService)({
     getSettings: Ref.get(settings),
+    streamChanges: Stream.fromPubSub(settingsChanges),
   });
+  /** Saves settings the way the real service does: the new value, then a change event. */
+  const saveMcpServers = (
+    update: (current: ServerSettings["mcpServers"]) => ServerSettings["mcpServers"],
+  ) =>
+    Ref.updateAndGet(settings, (current) => ({
+      ...current,
+      mcpServers: update(current.mcpServers),
+    })).pipe(Effect.flatMap((next) => PubSub.publish(settingsChanges, next)));
   /** The calling thread's current mode, or null for a thread that can't be read. */
   const runtimeMode = yield* Ref.make<RuntimeMode | null>("full-access");
   const threadPlacement = yield* Ref.make<
@@ -269,12 +281,22 @@ const fixture = Effect.gen(function* () {
     hung,
     runtimeMode,
     threadPlacement,
+    saveMcpServers,
     call,
     shared: Context.get(services, SharedMcpServers.SharedMcpServers),
   };
 });
 
 const asAgent = { authorization: `Bearer ${AGENT_TOKEN}` };
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 it.effect(
   "forwards agent requests with the saved token and passes responses through untouched",
@@ -779,6 +801,66 @@ it.effect("never starts a stdio server's process for a thread without full acces
     yield* send({ jsonrpc: "2.0", id: 4, method: "initialize", params: {} }, sessionId);
     expect(spawned()).toBe(true);
   }),
+);
+
+type StdioEntryEdit = (entry: Record<string, unknown>) => Record<string, unknown> | undefined;
+const staleStdioEdits: ReadonlyArray<readonly [string, StdioEntryEdit]> = [
+  ["removed", () => undefined],
+  ["turned off", (entry) => ({ ...entry, enabled: false })],
+  ["given a new env value", (entry) => ({ ...entry, env: { T3_BRIDGE_TEST_SECRET: "rotated" } })],
+  ["given new args", (entry) => ({ ...entry, args: [...(entry.args as Array<string>), "--v2"] })],
+];
+
+it.effect.each(staleStdioEdits)(
+  "stops a stdio server's processes as soon as its entry is %s, without waiting for a call",
+  ([, edit]) =>
+    Effect.gen(function* () {
+      const { call, saveMcpServers } = yield* fixture;
+      const local = McpServerId.make("local");
+      const paused = McpServerId.make("paused");
+      const askPid = (session: Record<string, string>) =>
+        call("/mcp/servers/local", {
+          body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "pid" } },
+          headers: session,
+        }).pipe(
+          Effect.flatMap((response) => response.json),
+          Effect.map((answer) =>
+            Number(
+              (answer as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
+            ),
+          ),
+        );
+      const open = Effect.gen(function* () {
+        const initialize = yield* call("/mcp/servers/local", {
+          body: { jsonrpc: "2.0", id: 0, method: "initialize", params: {} },
+          headers: asAgent,
+        });
+        const session = { ...asAgent, "mcp-session-id": initialize.headers["mcp-session-id"]! };
+        return { session, pid: yield* askPid(session) };
+      });
+      const first = yield* open;
+      const second = yield* open;
+      const pids = [first.pid, second.pid];
+
+      // Editing another entry leaves them running: the same process still answers.
+      yield* saveMcpServers((servers) => ({
+        ...servers,
+        [paused]: { ...servers[paused]!, label: "Paused" },
+      }));
+      expect(yield* askPid(first.session)).toBe(first.pid);
+      expect(pids.every(alive)).toBe(true);
+
+      yield* saveMcpServers((servers) => {
+        const next = { ...servers };
+        const entry = edit(next[local] as unknown as Record<string, unknown>);
+        if (entry === undefined) delete next[local];
+        else next[local] = entry as unknown as (typeof servers)[typeof local];
+        return next;
+      });
+      yield* Effect.promise(() =>
+        expect.poll(() => pids.some(alive), { timeout: 3000, interval: 20 }).toBe(false),
+      );
+    }),
 );
 
 it.effect("treats a transport from a newer version as turned off", () =>

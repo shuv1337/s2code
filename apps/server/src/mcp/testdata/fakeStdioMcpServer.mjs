@@ -81,6 +81,12 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
           },
         });
       if (name === "hang") return; // Keeps the call in flight.
+      if (name === "pid")
+        return send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { content: [{ type: "text", text: String(process.pid) }] },
+        });
       if (name === "flood") {
         // One unterminated line past the bridge's cap.
         process.stdout.write("x".repeat(Number(args?.chars ?? 4096)));
