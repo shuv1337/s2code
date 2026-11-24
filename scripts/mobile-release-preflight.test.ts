@@ -245,7 +245,8 @@ describe("fork mobile release preflight", () => {
       expect(app.extra.clerk.publishableKey).toBeNull();
       expect(app.updates.enabled).toBe(false);
       expect(app.extra.eas).toBeUndefined();
-      expect(app.plugins).toContain("./plugins/withoutAndroidExpoObserve.cjs");
+      expect(app.extra.observability).toBeUndefined();
+      expect(app.plugins).not.toContain("./plugins/withoutAndroidExpoObserve.cjs");
       const serialized = JSON.stringify(app);
       expect(serialized).toContain(`group.${app.ios.bundleIdentifier}`);
       expect(serialized).toContain(`${app.ios.bundleIdentifier}.widgets`);
@@ -345,7 +346,7 @@ describe("fork mobile release preflight", () => {
     expect(authDisabled.extra.clerk.publishableKey).toBeNull();
     expect(authDisabled.extra.clerk.jwtTemplate).toBeNull();
   });
-  it("points Observe at the fork relay and keeps it linked when an Expo project is configured", () => {
+  it("omits Observe and observability tracing config with or without a relay URL", () => {
     const cwd = NodeURL.fileURLToPath(new URL("../apps/mobile", import.meta.url));
     const evaluate = (relay: Record<string, string>) =>
       JSON.parse(
@@ -377,11 +378,14 @@ describe("fork mobile release preflight", () => {
       T3CODE_RELAY_URL: "https://relay.t3.codes",
     });
     expect(app.extra.relay.url).toBe("https://relay.fork.example");
-    expect(app.extra.eas.observe.endpointUrl).toBe("https://relay.fork.example/v1/mobile/observe");
+    expect(app.extra.eas).toEqual({ projectId: "00000000-0000-4000-8000-000000000000" });
+    expect(app.extra.eas.observe).toBeUndefined();
+    expect(app.extra.observability).toBeUndefined();
     expect(app.plugins).not.toContain("./plugins/withoutAndroidExpoObserve.cjs");
     const relayless = evaluate({ T3CODE_RELAY_URL: "https://relay.fork.example" });
     expect(relayless.extra.relay.url).toBeNull();
-    expect(relayless.extra.eas.observe.endpointUrl).toBe("https://observe.invalid");
+    expect(relayless.extra.eas.observe).toBeUndefined();
+    expect(relayless.extra.observability).toBeUndefined();
   });
   it("leaves local/direct config independent of Expo accounts", () => {
     expect(resolveExpoIdentity({})).toEqual({ owner: undefined, projectId: undefined });

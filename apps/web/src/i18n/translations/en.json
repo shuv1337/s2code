@@ -3116,7 +3116,6 @@
   "c646366e142ba05f": "Desktop WSL state is unavailable.",
   "228dcd284ea651b3": "Failed to load WSL state.",
   "b08d105dd2553f8d": "The project did not appear in the desktop app.",
-  "7a4b3f3b83e121d7": "{organization} turned off anonymous usage data.",
   "d85822b18e9475df": "Managed by {organization}.",
   "922269f8691aa3ba": "Could not tell whether this environment runs on this computer.",
   "35cade9cc8a01363": "Port forwarding needs the desktop app.",
@@ -6271,7 +6270,7 @@
   "a0fd24f965eb070b": "Could not import thread history.",
   "a506c135c2183ac3": "{count, plural, one {{count} folder} other {{count} folders}}",
   "efc48b9736a534bc": "now",
-  "edf393ff951b533a": "Welcome to T3 Code",
+  "c35291053a1d97a4": "Welcome to S2Code",
   "3cc77f9daa7eeafd": [
     "Setting up",
     " ",
@@ -6288,23 +6287,13 @@
   ],
   "216ab7514aea1d61": "Start without an agent",
   "501ce2d99da8bfd1": "Set up one agent to start.",
-  "71f3822326109c8e": [
-    "T3 Code collects anonymous usage data to improve the app. To opt out, see the",
+  "ea24aff9973d7027": [
+    "S2Code sends no background usage data or crash reports. See",
     " ",
     {
       "t": "a",
       "i": 1,
-      "c": "privacy policy"
-    },
-    "."
-  ],
-  "b33f35083757b42c": [
-    "See the",
-    " ",
-    {
-      "t": "a",
-      "i": 1,
-      "c": "privacy policy"
+      "c": "what leaves your machine"
     },
     "."
   ],
@@ -10400,8 +10389,7 @@
   "c424bee294b9f778": "This environment is managed by {organization}. Some settings and features follow its policy.",
   "82d9538af590f58c": "See your agents, import projects, and set up your phone.",
   "6a48fd0a37e725a1": "Legal",
-  "855bf7fb073bd51d": "How upstream services handle your data, including anonymous usage data.",
-  "0bbeb973f0e71cb6": "How upstream services handle your data. {telemetryOff}",
+  "3291299902301031": "S2Code sends no background usage data. Agent feedback and OpenTelemetry export stay off until you turn them on.",
   "bd658e3097ad6366": "Notices for dependencies, assets, and optional tools used by S2Code.",
   "0dde92a0e2d0258a": "Latest",
   "3476687eaa175b32": "Nightly",
@@ -10429,7 +10417,6 @@
   "5fe5a45199fa9c07": "No text generation providers available.",
   "99ceba64591c9257": "View diagnostics",
   "eb576a5feda7b535": "Open",
-  "66647e8c8123a51f": "View policy",
   "6d59e1e516e53d17": "View licenses",
   "941d08db15f62d17": "Archived",
   "e122b2428c0d03a5": "Open all environments",
@@ -12062,8 +12049,8 @@
   "7bcdb8144c8698dc": "phone tablet iPhone iPad iOS Android App Store Google Play QR TestFlight beta",
   "6310b97b04ef239f": "Welcome page",
   "df9fa3a9cb004b9b": "onboarding setup first run getting started agents import projects",
-  "3188bc3b3c4508bc": "Privacy policy",
-  "901a823214edc8c4": "telemetry analytics usage data tracking legal opt out",
+  "bc8cb980d99dd7c9": "Privacy and telemetry",
+  "0dddf4d31f960a92": "telemetry analytics usage data tracking privacy crash reports",
   "82136480255a5106": "OTel OTLP telemetry export endpoints logs traces metrics Grafana",
   "659d081051faf7ff": "logs traces processes resource history failures spans cpu memory",
   "1a9e4b39a32586e7": "report bug problem s2code team send feedback agents tools automatic when i ask",

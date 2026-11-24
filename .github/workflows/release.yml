@@ -216,7 +216,6 @@ jobs:
       ref: ${{ needs.preflight.outputs.ref }}
       version: ${{ needs.preflight.outputs.version }}
       release_channel: ${{ needs.preflight.outputs.release_channel }}
-      relay_client_tracing: false
       release_publication: true
       # Signing is resolved once, in the release environment; the build jobs
       # cannot see those secrets and must not resolve it again.
@@ -258,7 +257,6 @@ jobs:
       ref: ${{ needs.preflight.outputs.ref }}
       version: ${{ needs.preflight.outputs.version }}
       release_channel: ${{ needs.preflight.outputs.release_channel }}
-      relay_client_tracing: false
       release_publication: true
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
@@ -304,7 +302,6 @@ jobs:
       ref: ${{ needs.preflight.outputs.ref }}
       version: ${{ needs.preflight.outputs.version }}
       release_channel: ${{ needs.preflight.outputs.release_channel }}
-      relay_client_tracing: false
       release_publication: true
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}
@@ -382,7 +379,6 @@ jobs:
       ref: ${{ needs.preflight.outputs.ref }}
       version: ${{ needs.preflight.outputs.version }}
       release_channel: ${{ needs.preflight.outputs.release_channel }}
-      relay_client_tracing: false
       release_publication: true
       mac_signed: ${{ needs.preflight.outputs.mac_signed == 'true' }}
       win_signed: ${{ needs.preflight.outputs.win_signed == 'true' }}

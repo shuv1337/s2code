@@ -3116,7 +3116,6 @@
   "c646366e142ba05f": "Skrivbordsappens WSL-status är inte tillgänglig.",
   "228dcd284ea651b3": "Det gick inte att läsa in WSL-statusen.",
   "b08d105dd2553f8d": "Projektet visades inte i skrivbordsappen.",
-  "7a4b3f3b83e121d7": "{organization} har stängt av anonym användningsdata.",
   "d85822b18e9475df": "Hanteras av {organization}.",
   "922269f8691aa3ba": "Det gick inte att avgöra om den här miljön körs på den här datorn.",
   "35cade9cc8a01363": "Portvidarebefordring kräver skrivbordsappen.",
@@ -6270,7 +6269,7 @@
   "a0fd24f965eb070b": "Kunde inte importera trådhistorik.",
   "a506c135c2183ac3": "{count, plural, one {{count} mapp} other {{count} mappar}}",
   "efc48b9736a534bc": "nu",
-  "edf393ff951b533a": "Välkommen till T3 Code",
+  "c35291053a1d97a4": "Välkommen till S2Code",
   "3cc77f9daa7eeafd": [
     "Konfigurerar",
     " ",
@@ -6287,23 +6286,13 @@
   ],
   "216ab7514aea1d61": "Starta utan agent",
   "501ce2d99da8bfd1": "Konfigurera en agent för att starta.",
-  "71f3822326109c8e": [
-    "T3 Code samlar in anonym användningsdata för att förbättra appen. Se",
+  "ea24aff9973d7027": [
+    "S2Code skickar ingen användningsdata eller några kraschrapporter i bakgrunden. Se",
     " ",
     {
       "t": "a",
       "i": 1,
-      "c": "integritetspolicyn"
-    },
-    " för att välja bort det."
-  ],
-  "b33f35083757b42c": [
-    "Se",
-    " ",
-    {
-      "t": "a",
-      "i": 1,
-      "c": "integritetspolicyn"
+      "c": "vad som lämnar din dator"
     },
     "."
   ],
@@ -10398,8 +10387,7 @@
   "c424bee294b9f778": "Miljön hanteras av {organization}. Vissa inställningar och funktioner följer dess policy.",
   "82d9538af590f58c": "Se dina agenter, importera projekt och konfigurera din telefon.",
   "6a48fd0a37e725a1": "Juridiskt",
-  "855bf7fb073bd51d": "Så hanterar uppströmsprojektets tjänster dina data, inklusive anonyma användningsdata.",
-  "0bbeb973f0e71cb6": "Så hanterar uppströmsprojektets tjänster dina data. {telemetryOff}",
+  "3291299902301031": "S2Code skickar ingen användningsdata i bakgrunden. Återkoppling från agenter och OpenTelemetry-export förblir avstängda tills du slår på dem.",
   "bd658e3097ad6366": "Meddelanden för beroenden, resurser och valfria verktyg som S2Code använder.",
   "0dde92a0e2d0258a": "Senaste",
   "3476687eaa175b32": "Nightly",
@@ -10427,7 +10415,6 @@
   "5fe5a45199fa9c07": "Inga leverantörer för textgenerering tillgängliga.",
   "99ceba64591c9257": "Visa diagnostik",
   "eb576a5feda7b535": "Öppna",
-  "66647e8c8123a51f": "Visa policy",
   "6d59e1e516e53d17": "Visa licenser",
   "941d08db15f62d17": "Arkiverat",
   "e122b2428c0d03a5": "Öppna alla miljöer",
@@ -12060,8 +12047,8 @@
   "7bcdb8144c8698dc": "telefon surfplatta iPhone iPad iOS Android App Store Google Play QR TestFlight beta",
   "6310b97b04ef239f": "Välkomstsida",
   "df9fa3a9cb004b9b": "introduktion konfiguration första start kom igång agenter importera projekt",
-  "3188bc3b3c4508bc": "Integritetspolicy",
-  "901a823214edc8c4": "telemetri analys användningsdata spårning juridiskt avböj",
+  "bc8cb980d99dd7c9": "Integritet och telemetri",
+  "0dddf4d31f960a92": "telemetri analys användningsdata spårning integritet kraschrapporter",
   "82136480255a5106": "OTel OTLP telemetri export slutpunkter loggar spår mätvärden Grafana",
   "659d081051faf7ff": "loggar spår processer resurshistorik fel spans cpu minne",
   "1a9e4b39a32586e7": "rapport bugg problem s2code team skicka återkoppling agenter verktyg automatiskt när jag ber om det",

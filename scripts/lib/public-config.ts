@@ -11,12 +11,6 @@ export interface T3CodePublicConfig {
   readonly relayUrl: string | undefined;
   readonly cloudMintPublicKey: string | undefined;
   readonly hostedAppUrl: string | undefined;
-  readonly mobileOtlpTracesUrl: string | undefined;
-  readonly mobileOtlpTracesDataset: string | undefined;
-  readonly mobileOtlpTracesToken: string | undefined;
-  readonly relayClientOtlpTracesUrl: string | undefined;
-  readonly relayClientOtlpTracesDataset: string | undefined;
-  readonly relayClientOtlpTracesToken: string | undefined;
 }
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -75,42 +69,6 @@ export function loadRepoEnv({
           VITE_HOSTED_APP_URL: config.hostedAppUrl,
         }
       : {}),
-    ...(config.mobileOtlpTracesUrl
-      ? {
-          T3CODE_MOBILE_OTLP_TRACES_URL: config.mobileOtlpTracesUrl,
-          EXPO_PUBLIC_OTLP_TRACES_URL: config.mobileOtlpTracesUrl,
-        }
-      : {}),
-    ...(config.mobileOtlpTracesDataset
-      ? {
-          T3CODE_MOBILE_OTLP_TRACES_DATASET: config.mobileOtlpTracesDataset,
-          EXPO_PUBLIC_OTLP_TRACES_DATASET: config.mobileOtlpTracesDataset,
-        }
-      : {}),
-    ...(config.mobileOtlpTracesToken
-      ? {
-          T3CODE_MOBILE_OTLP_TRACES_TOKEN: config.mobileOtlpTracesToken,
-          EXPO_PUBLIC_OTLP_TRACES_TOKEN: config.mobileOtlpTracesToken,
-        }
-      : {}),
-    ...(config.relayClientOtlpTracesUrl
-      ? {
-          T3CODE_RELAY_CLIENT_OTLP_TRACES_URL: config.relayClientOtlpTracesUrl,
-          VITE_RELAY_OTLP_TRACES_URL: config.relayClientOtlpTracesUrl,
-        }
-      : {}),
-    ...(config.relayClientOtlpTracesDataset
-      ? {
-          T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.relayClientOtlpTracesDataset,
-          VITE_RELAY_OTLP_TRACES_DATASET: config.relayClientOtlpTracesDataset,
-        }
-      : {}),
-    ...(config.relayClientOtlpTracesToken
-      ? {
-          T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: config.relayClientOtlpTracesToken,
-          VITE_RELAY_OTLP_TRACES_TOKEN: config.relayClientOtlpTracesToken,
-        }
-      : {}),
   };
 }
 
@@ -136,36 +94,6 @@ function resolvePublicConfig(...sources: readonly Environment[]): T3CodePublicCo
     relayUrl: firstNonEmpty(sources, "T3CODE_RELAY_URL", "VITE_T3CODE_RELAY_URL"),
     cloudMintPublicKey: firstNonEmpty(sources, "T3CODE_CLOUD_MINT_PUBLIC_KEY"),
     hostedAppUrl: firstNonEmpty(sources, "T3CODE_HOSTED_APP_URL", "VITE_HOSTED_APP_URL"),
-    mobileOtlpTracesUrl: firstNonEmpty(
-      sources,
-      "T3CODE_MOBILE_OTLP_TRACES_URL",
-      "EXPO_PUBLIC_OTLP_TRACES_URL",
-    ),
-    mobileOtlpTracesDataset: firstNonEmpty(
-      sources,
-      "T3CODE_MOBILE_OTLP_TRACES_DATASET",
-      "EXPO_PUBLIC_OTLP_TRACES_DATASET",
-    ),
-    mobileOtlpTracesToken: firstNonEmpty(
-      sources,
-      "T3CODE_MOBILE_OTLP_TRACES_TOKEN",
-      "EXPO_PUBLIC_OTLP_TRACES_TOKEN",
-    ),
-    relayClientOtlpTracesUrl: firstNonEmpty(
-      sources,
-      "T3CODE_RELAY_CLIENT_OTLP_TRACES_URL",
-      "VITE_RELAY_OTLP_TRACES_URL",
-    ),
-    relayClientOtlpTracesDataset: firstNonEmpty(
-      sources,
-      "T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET",
-      "VITE_RELAY_OTLP_TRACES_DATASET",
-    ),
-    relayClientOtlpTracesToken: firstNonEmpty(
-      sources,
-      "T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN",
-      "VITE_RELAY_OTLP_TRACES_TOKEN",
-    ),
   };
 }
 
