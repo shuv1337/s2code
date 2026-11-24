@@ -209,7 +209,7 @@ const environmentLinkCommand = Command.make("link", {
   ...authLocationFlags,
   url: Argument.String("url").pipe(
     Argument.withDescription(
-      "Where the other environment answers: its T3 Connect, Tailscale, LAN or loopback address.",
+      "Where the other environment answers: its S2 Connect, Tailscale, LAN or loopback address.",
     ),
     Argument.optional,
   ),

@@ -105,6 +105,7 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import { WindowsPreparedServerCacheError } from "./windows-prepared-server-cache.ts";
 
 const encodeModuleUrl = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
 const decodePackageVersion = Schema.decodeUnknownEffect(
@@ -1768,24 +1769,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.deepStrictEqual(result.unpackedFiles, ["node_modules/native/addon.node"]);
         assert.isBelow(result.fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT);
         assert.deepStrictEqual(secondAsar, firstAsar);
-
-        const cacheDir = path.join(fixture.packagedAppDir, "resources", "server-compile-cache");
-        yield* fs.makeDirectory(cacheDir, { recursive: true });
-        for (let index = result.fileCount; index < WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT; index++) {
-          yield* fs.writeFileString(path.join(cacheDir, String(index)), "prepared bytecode");
-        }
-        const validate = validateWindowsPackagedPayload({
-          stageDistDir: fixture.stageDistDir,
-          appExecutableName: fixture.appExecutableName,
-          targetArch: "x64",
-          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-        });
-        assert.equal((yield* validate).fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT);
-        yield* fs.writeFileString(path.join(cacheDir, "unexpected"), "extra file");
-        const error = yield* validate.pipe(Effect.flip);
-        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-        assert.equal(error.reason, "file-limit-exceeded");
-        assert.equal(error.fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT + 1);
       }),
     ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
@@ -2185,6 +2168,91 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.isAbove(error.fileCount ?? 0, 2);
       }),
     ),
+  );
+
+  it.effect(
+    "excludes a validated prepared server cache from the Windows payload file limit and rejects stray cache files",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+          const resourcesDir = path.join(fixture.packagedAppDir, "resources");
+          const asarPath = path.join(resourcesDir, WINDOWS_SERVER_ASAR_RESOURCE);
+
+          const moduleNames = [
+            "bin.mjs",
+            ...Array.from(
+              { length: 36 },
+              (_, index) => `chunk-${String(index + 1).padStart(2, "0")}.mjs`,
+            ),
+          ];
+          for (const moduleName of moduleNames.slice(1)) {
+            yield* fs.writeFileString(
+              path.join(fixture.sourceDir, "apps/server/dist", moduleName),
+              `export const moduleName = ${JSON.stringify(moduleName)};\n`,
+            );
+          }
+          yield* packWindowsServerAsar({
+            sourceDir: fixture.sourceDir,
+            asarPath,
+            arch: "x64",
+          });
+
+          const cacheDir = path.join(resourcesDir, "server-compile-cache");
+          yield* fs.makeDirectory(cacheDir, { recursive: true });
+          const entries = moduleNames.map((moduleName, index) => ({
+            module: `server.asar/apps/server/dist/${moduleName}`,
+            file: (0x20000000 + index).toString(16).padStart(8, "0"),
+          }));
+          for (const entry of entries) {
+            yield* fs.writeFileString(path.join(cacheDir, entry.file), "prepared bytecode");
+          }
+          yield* fs.writeFileString(
+            path.join(cacheDir, "manifest.json"),
+            JSON.stringify({
+              format: 1,
+              runtime: "36.0.0-v24.0.0-win32-x64-1234567890",
+              entries,
+            }),
+          );
+
+          const validate = validateWindowsPackagedPayload({
+            stageDistDir: fixture.stageDistDir,
+            appExecutableName: fixture.appExecutableName,
+            targetArch: "x64",
+            appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+          });
+          const baseline = yield* validate;
+          for (
+            let index = baseline.fileCount;
+            index < WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT;
+            index++
+          ) {
+            yield* fs.writeFileString(
+              path.join(fixture.packagedAppDir, `runtime-file-${String(index)}.bin`),
+              "runtime payload",
+            );
+          }
+
+          assert.equal(WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT, 80);
+          assert.equal((yield* validate).fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT);
+
+          const extraRuntimeFile = path.join(fixture.packagedAppDir, "runtime-file-overflow.bin");
+          yield* fs.writeFileString(extraRuntimeFile, "overflow");
+          const limitError = yield* validate.pipe(Effect.flip);
+          assert.instanceOf(limitError, WindowsPackagedPayloadValidationError);
+          assert.equal(limitError.reason, "file-limit-exceeded");
+          assert.equal(limitError.fileCount, WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT + 1);
+
+          yield* fs.remove(extraRuntimeFile);
+          yield* fs.writeFileString(path.join(cacheDir, "unexpected"), "extra cache file");
+          const cacheError = yield* validate.pipe(Effect.flip);
+          assert.instanceOf(cacheError, WindowsPreparedServerCacheError);
+          assert.equal(cacheError.reason, "contents-mismatch");
+        }),
+      ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 
   it.effect("rejects a sidecar whose extracted server bundle cannot resolve", () =>

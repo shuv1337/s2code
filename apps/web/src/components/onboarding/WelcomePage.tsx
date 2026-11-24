@@ -1065,7 +1065,7 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
   if (isSignedIn && link === null && linkState.isPending) {
     return (
       <p className="text-sm text-muted-foreground">
-        <T>Checking T3 Connect…</T>
+        <T>Checking S2 Connect…</T>
       </p>
     );
   }
@@ -1073,9 +1073,9 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
     return (
       <>
         <p className="text-sm text-foreground">
-          <T>Could not check T3 Connect.</T>
+          <T>Could not check S2 Connect.</T>
         </p>
-        {settingsLink(gt("Check T3 Connect"))}
+        {settingsLink(gt("Check S2 Connect"))}
       </>
     );
   }
@@ -1090,7 +1090,7 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
   if (isSignedIn && shared && reachability === undefined) {
     return (
       <p className="text-sm text-foreground">
-        <T>T3 Connect is on for this computer. Sign in to the app with the same account.</T>
+        <T>S2 Connect is on for this computer. Sign in to the app with the same account.</T>
       </p>
     );
   }
@@ -1100,17 +1100,17 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
       <>
         <p className="text-sm text-foreground">
           {shared
-            ? gt("T3 Connect is on, but the app cannot reach this computer.")
+            ? gt("S2 Connect is on, but the app cannot reach this computer.")
             : gt("Signed in. Share this computer so the app can reach it.")}
         </p>
-        {settingsLink(shared ? gt("Check T3 Connect") : gt("Set up T3 Connect"))}
+        {settingsLink(shared ? gt("Check S2 Connect") : gt("Set up S2 Connect"))}
       </>
     );
   }
   return (
     <>
       <p className="text-sm text-foreground">
-        <T>Sign in to T3 Connect here, then in the app with the same account.</T>
+        <T>Sign in to S2 Connect here, then in the app with the same account.</T>
       </p>
       {loadFailed ? (
         <Button variant="outline" size="xs" onClick={retryClerkLoad}>
@@ -1118,7 +1118,7 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
         </Button>
       ) : (
         <Button variant="outline" size="xs" disabled={!isLoaded} onClick={openAuthPrompt}>
-          <T>Sign in to T3 Connect</T>
+          <T>Sign in to S2 Connect</T>
         </Button>
       )}
     </>

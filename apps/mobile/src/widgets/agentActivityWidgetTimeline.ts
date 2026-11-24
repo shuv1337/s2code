@@ -76,9 +76,9 @@ export function agentActivityWidgetTimeline(
       title: "S2Code",
       subtitle:
         source.kind === "signed-out"
-          ? resolve(msg("Sign in to {product} to see agents", { product: "T3 Connect" }))
+          ? resolve(msg("Sign in to {product} to see agents", { product: "S2 Connect" }))
           : source.kind === "unavailable"
-            ? resolve(msg("Couldn't reach {product}", { product: "T3 Connect" }))
+            ? resolve(msg("Couldn't reach {product}", { product: "S2 Connect" }))
             : source.kind === "loading"
               ? resolve(msg("Loading agents…"))
               : resolve(msg("No active agents")),

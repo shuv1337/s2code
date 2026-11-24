@@ -62,7 +62,7 @@ function ConfiguredT3ConnectSidebarSignIn() {
           <SidebarMenuButton onClick={retryClerkLoad}>
             <RotateCwIcon />
             <span>
-              <T>Retry T3 Connect</T>
+              <T>Retry S2 Connect</T>
             </span>
           </SidebarMenuButton>
         </SidebarMenuItem>
@@ -77,7 +77,7 @@ function ConfiguredT3ConnectSidebarSignIn() {
         <SidebarMenuButton onClick={openAuthPrompt}>
           <LogInIcon />
           <span>
-            <T>Sign in to T3 Connect</T>
+            <T>Sign in to S2 Connect</T>
           </span>
         </SidebarMenuButton>
       </SidebarMenuItem>

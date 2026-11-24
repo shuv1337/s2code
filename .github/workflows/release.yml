@@ -141,7 +141,7 @@ jobs:
       - name: Verify release logic
         run: |
           node --test .github/scripts/macos-arm64-runner-retry.test.cjs
-          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts scripts/build-npm-launcher.test.ts scripts/build-desktop-artifact.test.ts scripts/update-release-package-versions.test.ts
+          vp test run scripts/lib/fork-release.test.ts scripts/fork-release.test.ts scripts/fork-release-workflow.test.ts scripts/fork-release-publish.test.ts scripts/build-npm-launcher.test.ts scripts/build-desktop-artifact.test.ts scripts/windows-prepared-server-cache.test.ts scripts/update-release-package-versions.test.ts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan

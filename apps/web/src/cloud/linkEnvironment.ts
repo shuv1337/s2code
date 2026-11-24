@@ -300,8 +300,8 @@ export const checkCloudReachability: (input: {
         request: ({ client, headers }) => client.checkReachability({ headers }),
       },
       {
-        message: msg("Could not check T3 Connect."),
-        withDetail: msg("Could not check T3 Connect: {detail}"),
+        message: msg("Could not check S2 Connect."),
+        withDetail: msg("Could not check S2 Connect: {detail}"),
       },
     );
   });
@@ -369,7 +369,7 @@ export const unlinkEnvironmentFromCloud: (input: {
           decodedRelayClientError(
             m(
               msg(
-                "Disconnected locally, but T3 Connect did not confirm it removed this environment",
+                "Disconnected locally, but S2 Connect did not confirm it removed this environment",
               ),
             ),
           ),

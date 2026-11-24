@@ -23,7 +23,7 @@ describe("webhookAddress", () => {
     const result = webhookAddress(endpoint, null);
     expect(result.address).toBe("/hooks/abc");
     expect(result.copyable).toBe(false);
-    expect(result.note).toContain("T3 Connect");
+    expect(result.note).toContain("S2 Connect");
   });
 
   it("warns that loopback addresses only work on this computer", () => {

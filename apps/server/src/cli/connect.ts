@@ -94,7 +94,7 @@ function formatDeviceAuthorizationPrompt(
 ): string {
   const minutes = Math.max(1, Math.round(Duration.toMinutes(prompt.expiresIn)));
   return [
-    "Sign in to T3 Connect. Open on any device:",
+    "Sign in to S2 Connect. Open on any device:",
     `  ${prompt.verificationUriComplete ?? prompt.verificationUri}`,
     `Code: ${prompt.userCode}`,
     `Waiting for approval. Expires in ${minutes} min. Ctrl+C cancels.`,
@@ -121,7 +121,7 @@ const authorizeCli = Effect.fn("cloud.cli.authorize")(function* (options: {
   const existing = yield* tokens.getExisting.pipe(
     Effect.catchTags({
       CloudCliCredentialRefreshError: () =>
-        Console.log("T3 Connect sign-in expired. Sign in again.").pipe(Effect.as(Option.none())),
+        Console.log("S2 Connect sign-in expired. Sign in again.").pipe(Effect.as(Option.none())),
     }),
   );
   if (Option.isSome(existing)) {
@@ -197,7 +197,7 @@ function formatCloudStatus(
   }
 
   const provisioned = status.revoked
-    ? "removed from T3 Connect"
+    ? "removed from S2 Connect"
     : status.linked
       ? "provisioned"
       : status.desired && status.authenticated
@@ -209,17 +209,17 @@ function formatCloudStatus(
     status.desired && status.linked && !status.revoked
       ? undefined
       : !status.authenticated
-        ? `Run \`${commands.link}\` to authorize and enable T3 Connect.`
+        ? `Run \`${commands.link}\` to authorize and enable S2 Connect.`
         : status.revoked
           ? `Run \`${commands.link}\` to link this environment again.`
           : !status.desired
-            ? `Run \`${commands.link}\` to enable T3 Connect.`
+            ? `Run \`${commands.link}\` to enable S2 Connect.`
             : publishOnly
               ? "Start T3 to provision the environment link."
               : "Start T3 to provision the environment link and launch its managed tunnel.";
 
   return [
-    "T3 Connect",
+    "S2 Connect",
     `  Exposure: ${publishOnly ? "publish-only" : status.desired ? "enabled" : "disabled"}`,
     `  Authorization: ${status.authenticated ? "stored credential" : "missing"}`,
     `  Environment link: ${provisioned}`,
@@ -231,7 +231,7 @@ function formatCloudStatus(
       : publishOnly
         ? [
             "",
-            "This link only publishes agent activity. Remote access through T3 Connect is off, so other devices need their own route to this machine, such as LAN or Tailscale.",
+            "This link only publishes agent activity. Remote access through S2 Connect is off, so other devices need their own route to this machine, such as LAN or Tailscale.",
           ]
         : status.reachability === null
           ? [
@@ -253,7 +253,7 @@ const CLOUD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(5);
 const confirmRelayClientInstall = (version: string) =>
   Prompt.run(
     Prompt.Confirm({
-      message: `The T3 relay client is required for T3 Connect. Download and install version ${version}?`,
+      message: `The S2Code relay client is required for S2 Connect. Download and install version ${version}?`,
       initial: false,
     }),
   );
@@ -368,14 +368,14 @@ function formatAlertBox(text: string): string {
  * can reach it, so a broken tunnel fails setup instead of looking green.
  */
 export const waitForReachability = Effect.fn("cloud.cli.wait_for_reachability")(function* () {
-  yield* Console.log("Checking T3 Connect...");
+  yield* Console.log("Checking S2 Connect...");
   const deadline =
     (yield* Clock.currentTimeMillis) + Duration.toMillis(CLOUD_CLI_REACHABILITY_WAIT);
   let last: EnvironmentConnectReachability | null = null;
   while (true) {
     last = (yield* checkLiveReachability()) ?? last;
     if (last?.status === "reachable") {
-      yield* Console.log("✓ T3 Connect is reachable.");
+      yield* Console.log("✓ S2 Connect is reachable.");
       return;
     }
     if ((yield* Clock.currentTimeMillis) >= deadline) break;
@@ -384,7 +384,7 @@ export const waitForReachability = Effect.fn("cloud.cli.wait_for_reachability")(
   yield* Console.error(
     formatAlertBox(
       last === null
-        ? `✕ Could not check T3 Connect\n  The T3 server on this machine did not answer.\n  Fix: run \`${forkCliCommand("service status")}\`, then \`${forkCliCommand("connect status")}\`.`
+        ? `✕ Could not check S2 Connect\n  The S2Code server on this machine did not answer.\n  Fix: run \`${forkCliCommand("service status")}\`, then \`${forkCliCommand("connect status")}\`.`
         : formatReachabilityFailure(last),
     ),
   );
@@ -456,14 +456,14 @@ const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconnect_resu
         input.liveResult.cause,
       );
       yield* Console.warn(
-        "T3 Connect is disabled, but the running server could not stop its tunnel.\nRestart that server to stop the connector.",
+        "S2 Connect is disabled, but the running server could not stop its tunnel.\nRestart that server to stop the connector.",
       );
     } else {
-      yield* Console.log("T3 Connect is disabled locally.");
+      yield* Console.log("S2 Connect is disabled locally.");
       // A killed server cannot stop the connector it started, and nothing adopts it on restart.
       if (input.liveResult.status === "server-gone") {
         yield* Console.warn(
-          "The server that ran T3 Connect is gone, but its cloudflared process may still be running.\nStop that process if it is.",
+          "The server that ran S2 Connect is gone, but its cloudflared process may still be running.\nStop that process if it is.",
         );
       }
     }
@@ -477,11 +477,11 @@ const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconnect_resu
       yield* Console.warn(
         input.clearAuthorization
           ? "Could not revoke the relay-side environment record before signing out.\nThe stored CLI authorization was still removed locally."
-          : `Could not revoke the relay-side environment record yet.\nRun \`${forkCliCommand("connect unlink")}\` again when the relay is reachable, or deregister it from the T3 Connect page of your T3 account.`,
+          : `Could not revoke the relay-side environment record yet.\nRun \`${forkCliCommand("connect unlink")}\` again when the relay is reachable, or deregister it from the S2 Connect page of your S2 account.`,
       );
     } else if (input.relayResult.value.status === "not-authenticated") {
       yield* Console.warn(
-        `The relay-side environment record was not revoked.\nDeregister it from the T3 Connect page of your T3 account, or run \`${forkCliCommand("connect login")}\` and retry.`,
+        `The relay-side environment record was not revoked.\nDeregister it from the S2 Connect page of your S2 account, or run \`${forkCliCommand("connect login")}\` and retry.`,
       );
     } else if (input.relayResult.value.status === "revoked") {
       yield* Console.log("Revoked the relay-side environment record.");
@@ -510,7 +510,7 @@ export const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (opti
 
   if (options.clearAuthorization) {
     yield* Console.log(
-      `Signed out of T3 Connect locally.\nThe background service is managed separately with \`${forkCliCommand("service")}\`.`,
+      `Signed out of S2 Connect locally.\nThe background service is managed separately with \`${forkCliCommand("service")}\`.`,
     );
   }
   return liveResult;
@@ -589,12 +589,12 @@ const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(functi
       options.installRelayClient === true
         ? (event) =>
             event.type === "progress" && event.stage === "downloading"
-              ? Console.log("Installing the T3 Connect relay client...")
+              ? Console.log("Installing the S2 Connect relay client...")
               : Effect.void
         : reportRelayClientInstallProgress,
     );
     if (Option.isNone(installed)) {
-      yield* Console.log("T3 Connect setup cancelled. The relay client was not installed.");
+      yield* Console.log("S2 Connect setup cancelled. The relay client was not installed.");
       return null;
     }
     if (options.installRelayClient !== true) {
@@ -605,7 +605,7 @@ const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(functi
   const identity = yield* authorizeCli(options);
   yield* CliState.setCliDesiredCloudLink(true, publishOnly ? "publish_only" : "managed");
   if (yield* CliState.dropRevokedCloudLink) {
-    yield* Console.log("Replacing the link T3 Connect revoked.");
+    yield* Console.log("Replacing the link S2 Connect revoked.");
   }
   if (publishOnly) {
     const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -619,13 +619,13 @@ const connectLoginCommand = Command.make("login", {
   ...projectLocationFlags,
   headless: headlessFlag,
 }).pipe(
-  Command.withDescription("Authorize the T3 Connect CLI without enabling remote access."),
+  Command.withDescription("Authorize the S2 Connect CLI without enabling remote access."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
         yield* requireConnectAllowed;
-        yield* Console.log("T3 Connect\n");
+        yield* Console.log("S2 Connect\n");
         const identity = yield* authorizeCli(flags);
         yield* Console.log(`✓ Signed in${connectedAs(identity)}`);
       }),
@@ -643,13 +643,13 @@ const connectLinkCommand = Command.make("link", {
     Flag.withDefault(false),
   ),
 }).pipe(
-  Command.withDescription("Authorize this environment for T3 Connect on next start."),
+  Command.withDescription("Authorize this environment for S2 Connect on next start."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
         yield* requireConnectAllowed;
-        yield* Console.log("T3 Connect\n");
+        yield* Console.log("S2 Connect\n");
         const linked = yield* linkEnvironmentForConnect(flags);
         if (linked) {
           const serveCommand = yield* resolveHostCliHint("serve", flags.baseDir);
@@ -669,7 +669,7 @@ const connectStatusCommand = Command.make("status", {
   json: jsonFlag,
 }).pipe(
   Command.withDescription(
-    "Show T3 Connect setup and check that other devices can reach this machine.",
+    "Show S2 Connect setup and check that other devices can reach this machine.",
   ),
   Command.withHandler((flags) =>
     runCloudCommand(
@@ -766,7 +766,7 @@ const connectPublishCommand = Command.make("publish", {
           const linkedNow = Option.isSome(yield* secrets.get(CLOUD_LINKED_USER_ID));
           if (!linkedNow && (yield* CliState.readCliDesiredLinkMode) === "publish_only") {
             yield* CliState.setCliDesiredCloudLink(false);
-            yield* Console.log("Cancelled the pending publish-only T3 Connect link.");
+            yield* Console.log("Cancelled the pending publish-only S2 Connect link.");
           }
           yield* Console.log("Publishing agent activity disabled.");
           return;
@@ -788,7 +788,7 @@ const connectPublishCommand = Command.make("publish", {
         // A desired managed link already covers publishing and must not be downgraded.
         if (yield* CliState.readCliDesiredCloudLink) {
           yield* Console.log(
-            "A T3 Connect link is already pending. Start T3 to finish provisioning it; publishing starts once it links.",
+            "An S2 Connect link is already pending. Start S2Code to finish provisioning it; publishing starts once it links.",
           );
           return;
         }
@@ -804,7 +804,7 @@ const connectPublishCommand = Command.make("publish", {
 const connectUnlinkCommand = Command.make("unlink", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable T3 Connect while retaining the stored authorization."),
+  Command.withDescription("Disable S2 Connect while retaining the stored authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: false })),
   ),
@@ -813,7 +813,7 @@ const connectUnlinkCommand = Command.make("unlink", {
 const connectLogoutCommand = Command.make("logout", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable T3 Connect and clear the stored CLI authorization."),
+  Command.withDescription("Disable S2 Connect and clear the stored CLI authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: true })),
   ),

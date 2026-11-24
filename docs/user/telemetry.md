@@ -3,7 +3,7 @@
 Product usage events are off unless you opt in by setting `S2CODE_TELEMETRY_ENABLED=true` in the
 server's environment before starting it. When enabled, the S2Code server sends product usage events
 to upstream T3 Code's endpoint at `ingest.t3.codes`, associated with a hashed account or installation identifier. To count how many installations one person
-uses, the server also sends hashed account identifiers: your T3 Connect account, your OpenAI and
+uses, the server also sends hashed account identifiers: your S2 Connect account, your OpenAI and
 Claude accounts when you are signed in, and a random identifier for each device that connects. The endpoint keeps a copy of each
 event and forwards events to PostHog. Events include the provider, model, reasoning effort,
 permission mode, turn and request results, duration, release channel, and token counts when
@@ -84,7 +84,7 @@ if the server has opted out. The browser app has no relay tracing toggle.
 When the iOS or Android app crashes or hits an error, it sends a report to the S2Code team: the error
 message, the stack trace, the app version, and the device model and OS version. Each launch also
 sends startup timings, and every report carries a random ID for the install. Reports go through
-the T3 Connect relay to Axiom. They do not include your threads, prompts, or connection details,
+the S2 Connect relay to Axiom. They do not include your threads, prompts, or connection details,
 but an error message can quote a value the app was handling.
 
 To stop sending them, turn off **Send crash reports** in **Settings > About > Diagnostics**.
@@ -97,7 +97,7 @@ managed policy do not disable mobile tracing.
 ## Agent activity for mobile notifications
 
 When **Publish agent activity** is enabled on a host, it sends project and thread titles, model
-names, activity status, and environment and thread identifiers to the T3 Connect relay for
+names, activity status, and environment and thread identifiers to the S2 Connect relay for
 [mobile notifications and live activities](./mobile-notifications.md). This is separate from
 product events and relay diagnostics. The telemetry opt-out does not disable it.
 

@@ -165,7 +165,7 @@ export function FleetDetails(props: FleetDetailsProps) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/60 px-3 py-2 sm:px-4">
           <p className="min-w-0 flex-1 text-muted-foreground">
             <span className="font-medium text-destructive">
-              <T>Could not load T3 Connect environments</T>
+              <T>Could not load S2 Connect environments</T>
             </span>{" "}
             {connectProblem.message}
           </p>

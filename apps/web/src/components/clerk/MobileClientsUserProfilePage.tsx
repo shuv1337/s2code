@@ -107,7 +107,7 @@ function EmptyMobileClients() {
         </EmptyTitle>
         <EmptyDescription>
           <T>
-            Install S2Code on your phone and sign in to T3 Connect to get push notifications and
+            Install S2Code on your phone and sign in to S2 Connect to get push notifications and
             Live Activities.
           </T>
         </EmptyDescription>

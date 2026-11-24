@@ -188,7 +188,7 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   }
 }
 
-const T3_CONNECT_NAME = "T3 Connect";
+const T3_CONNECT_NAME = "S2 Connect";
 
 /** The route's label in English. Display sites use `connectionRouteLabelText`. */
 export function connectionRouteLabel(route: ConnectionRoute): string {
