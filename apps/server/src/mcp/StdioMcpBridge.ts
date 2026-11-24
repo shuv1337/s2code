@@ -61,6 +61,8 @@ interface Envelope {
   readonly jsonrpc?: unknown;
   readonly id?: unknown;
   readonly method?: unknown;
+  readonly params?: unknown;
+  readonly requestId?: unknown;
   readonly result?: unknown;
   readonly error?: unknown;
 }
@@ -152,6 +154,90 @@ const staleServerReason = (
   return undefined;
 };
 
+const skipWs = (s: string, i: number): number => {
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) i++;
+    else break;
+  }
+  return i;
+};
+
+const skipString = (s: string, i: number): number => {
+  i++;
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    if (c === 0x5c) i += 2;
+    else if (c === 0x22) return i + 1;
+    else i++;
+  }
+  return i;
+};
+
+const skipValue = (s: string, i: number): number => {
+  if (i >= s.length) return i;
+  const c = s.charCodeAt(i);
+  if (c === 0x22) return skipString(s, i);
+  if (c === 0x7b || c === 0x5b) {
+    let depth = 1;
+    i++;
+    while (i < s.length && depth > 0) {
+      const ch = s.charCodeAt(i);
+      if (ch === 0x22) i = skipString(s, i);
+      else if (ch === 0x7b || ch === 0x5b) {
+        depth++;
+        i++;
+      } else if (ch === 0x7d || ch === 0x5d) {
+        depth--;
+        i++;
+      } else {
+        i++;
+      }
+    }
+    return i;
+  }
+  while (i < s.length) {
+    const ch = s.charCodeAt(i);
+    if (
+      ch === 0x2c ||
+      ch === 0x7d ||
+      ch === 0x5d ||
+      ch === 0x20 ||
+      ch === 0x09 ||
+      ch === 0x0a ||
+      ch === 0x0d
+    ) {
+      break;
+    }
+    i++;
+  }
+  return i;
+};
+
+/** Replaces only the top-level `"id"` value span so unrelated payload values (e.g. 64-bit ints) stay verbatim. */
+const replaceTopLevelJsonId = (line: string, callerId: JsonRpcId, fallback: Envelope): string => {
+  let i = skipWs(line, 0);
+  if (line.charCodeAt(i) !== 0x7b) return JSON.stringify({ ...fallback, id: callerId });
+  i = skipWs(line, i + 1);
+  while (i < line.length && line.charCodeAt(i) !== 0x7d) {
+    if (line.charCodeAt(i) !== 0x22) break;
+    const keyStart = i;
+    const keyEnd = skipString(line, i);
+    i = skipWs(line, keyEnd);
+    if (line.charCodeAt(i) !== 0x3a) break;
+    const valueStart = skipWs(line, i + 1);
+    const valueEnd = skipValue(line, valueStart);
+    const rawKey = line.slice(keyStart, keyEnd);
+    if (rawKey === '"id"' || (rawKey.includes("\\") && JSON.parse(rawKey) === "id")) {
+      return line.slice(0, valueStart) + JSON.stringify(callerId) + line.slice(valueEnd);
+    }
+    i = skipWs(line, valueEnd);
+    if (line.charCodeAt(i) === 0x2c) i = skipWs(line, i + 1);
+    else break;
+  }
+  return JSON.stringify({ ...fallback, id: callerId });
+};
+
 interface Pending {
   readonly callerId: JsonRpcId;
   readonly callerKey: string;
@@ -165,11 +251,21 @@ interface RoomWaiter {
   readonly wake: () => void;
 }
 
+interface RoomReservation {
+  readonly serverId: string;
+  readonly fingerprint: string;
+  invalidatedReason: string | undefined;
+}
+
+const MAX_RECENTLY_ABORTED_IDS = 256;
+
 class StdioSession {
   readonly id = NodeCrypto.randomUUID();
   private nextWireId = 1;
   private readonly pending = new Map<number, Pending>();
-  private readonly pendingCallerIds = new Set<string>();
+  private readonly callerToWireId = new Map<string, number>();
+  private readonly abortedCallerToWireId = new Map<string, number>();
+  private readonly abortedWireToCallerKey = new Map<number, string>();
   private frameChunks: Buffer[] = [];
   private frameBytes = 0;
   private initialized = false;
@@ -332,11 +428,24 @@ class StdioSession {
     }
     if (typeof message.id !== "number") return;
     const pending = this.pending.get(message.id);
-    if (pending === undefined) return;
+    if (pending === undefined) {
+      const abortedKey = this.abortedWireToCallerKey.get(message.id);
+      if (abortedKey !== undefined) {
+        this.abortedWireToCallerKey.delete(message.id);
+        if (this.abortedCallerToWireId.get(abortedKey) === message.id) {
+          this.abortedCallerToWireId.delete(abortedKey);
+        }
+      }
+      return;
+    }
     this.pending.delete(message.id);
-    this.pendingCallerIds.delete(pending.callerKey);
+    this.callerToWireId.delete(pending.callerKey);
     this.touch();
-    pending.resolve(json(200, { ...message, id: pending.callerId }));
+    pending.resolve({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: replaceTopLevelJsonId(line, pending.callerId, message),
+    });
   }
 
   private write(message: unknown) {
@@ -357,6 +466,30 @@ class StdioSession {
     for (const resume of this.waiting.splice(0)) resume();
   }
 
+  private clearAbortedCaller(callerKey: string) {
+    const oldWireId = this.abortedCallerToWireId.get(callerKey);
+    if (oldWireId !== undefined) {
+      this.abortedCallerToWireId.delete(callerKey);
+      this.abortedWireToCallerKey.delete(oldWireId);
+    }
+  }
+
+  private rememberAborted(callerKey: string, wireId: number) {
+    this.clearAbortedCaller(callerKey);
+    if (this.abortedWireToCallerKey.size >= MAX_RECENTLY_ABORTED_IDS) {
+      const oldestWireId = this.abortedWireToCallerKey.keys().next().value;
+      if (oldestWireId !== undefined) {
+        const oldestKey = this.abortedWireToCallerKey.get(oldestWireId);
+        this.abortedWireToCallerKey.delete(oldestWireId);
+        if (oldestKey !== undefined && this.abortedCallerToWireId.get(oldestKey) === oldestWireId) {
+          this.abortedCallerToWireId.delete(oldestKey);
+        }
+      }
+    }
+    this.abortedCallerToWireId.set(callerKey, wireId);
+    this.abortedWireToCallerKey.set(wireId, callerKey);
+  }
+
   request(
     id: JsonRpcId,
     message: Envelope,
@@ -366,14 +499,17 @@ class StdioSession {
     if (this.closed) return Promise.resolve(rpcError(id, "The MCP server process is closed."));
     if (signal?.aborted) return Promise.resolve(rpcError(id, "The request was cancelled."));
     const callerKey = idKey(id);
-    if (this.pendingCallerIds.has(callerKey))
+    if (this.callerToWireId.has(callerKey))
       return Promise.resolve(rpcError(id, "Duplicate request id.", -32600));
+    this.clearAbortedCaller(callerKey);
     const wireId = this.nextWireId++;
     const wireMessage = { ...message, id: wireId };
     return new Promise((resolve) => {
+      let sent = false;
       const onAbort = () => {
         if (!this.pending.delete(wireId)) return;
-        this.pendingCallerIds.delete(callerKey);
+        this.callerToWireId.delete(callerKey);
+        if (sent) this.rememberAborted(callerKey, wireId);
         if (!this.closed && !this.busy) this.touch();
         settle(rpcError(id, "The request was cancelled."));
       };
@@ -383,10 +519,10 @@ class StdioSession {
       };
       signal?.addEventListener("abort", onAbort, { once: true });
       this.pending.set(wireId, { callerId: id, callerKey, resolve: settle });
-      this.pendingCallerIds.add(callerKey);
+      this.callerToWireId.set(callerKey, wireId);
       const send = () => {
         if (this.closed || signal?.aborted || !this.pending.has(wireId)) return;
-        this.write(wireMessage);
+        sent = this.write(wireMessage);
       };
       if (gated) void this.ready().then(send);
       else send();
@@ -396,6 +532,16 @@ class StdioSession {
   async notify(message: unknown, signal?: AbortSignal): Promise<void> {
     await this.ready();
     if (signal?.aborted) return;
+    if (isRecord(message) && message.method === "notifications/cancelled") {
+      if (!isRecord(message.params) || !isId(message.params.requestId)) return;
+      const callerKey = idKey(message.params.requestId);
+      const wireId =
+        this.callerToWireId.get(callerKey) ?? this.abortedCallerToWireId.get(callerKey);
+      // Never forward an unmapped caller ID that could match a different concurrent wire ID.
+      if (wireId === undefined) return;
+      this.write({ ...message, params: { ...message.params, requestId: wireId } });
+      return;
+    }
     this.write(message);
   }
 
@@ -418,7 +564,9 @@ class StdioSession {
       );
     }
     this.pending.clear();
-    this.pendingCallerIds.clear();
+    this.callerToWireId.clear();
+    this.abortedCallerToWireId.clear();
+    this.abortedWireToCallerKey.clear();
     this.onClose(this, reason, details);
     if (!this.processEnded) {
       if (!this.childExited) {
@@ -448,7 +596,7 @@ class StdioSession {
 export class StdioMcpBridgeCore {
   private readonly sessions = new Map<string, StdioSession>();
   private readonly retiring = new Set<StdioSession>();
-  private readonly reserving: string[] = [];
+  private readonly reservations = new Set<RoomReservation>();
   private readonly waiters = new Set<RoomWaiter>();
   private readonly options: Required<StdioMcpBridgeOptions>;
 
@@ -491,6 +639,9 @@ export class StdioMcpBridgeCore {
       waiter.invalidatedReason = reason;
       waiter.wake();
     }
+    for (const reservation of this.reservations) {
+      reservation.invalidatedReason = reason;
+    }
     for (const session of this.sessions.values()) session.close(reason);
     for (const session of this.retiring) session.terminate();
   }
@@ -501,6 +652,11 @@ export class StdioMcpBridgeCore {
       if (waiter.serverId === serverId) {
         waiter.invalidatedReason = reason;
         waiter.wake();
+      }
+    }
+    for (const reservation of this.reservations) {
+      if (reservation.serverId === serverId) {
+        reservation.invalidatedReason = reason;
       }
     }
     for (const session of this.sessions.values()) {
@@ -520,6 +676,17 @@ export class StdioMcpBridgeCore {
       if (staleReason !== undefined) {
         waiter.invalidatedReason = staleReason;
         waiter.wake();
+      }
+    }
+    for (const reservation of this.reservations) {
+      const staleReason = staleServerReason(
+        mcpServers,
+        reservation.serverId,
+        reservation.fingerprint,
+        reason,
+      );
+      if (staleReason !== undefined) {
+        reservation.invalidatedReason = staleReason;
       }
     }
     for (const session of this.sessions.values()) {
@@ -604,8 +771,16 @@ export class StdioMcpBridgeCore {
         "Too many MCP server processes are busy right now. Try again when a running call finishes.",
       );
     }
+    const { reservation } = room;
     let session: StdioSession;
     try {
+      if (reservation.invalidatedReason !== undefined) {
+        return rpcError(
+          id,
+          `The MCP server process stopped before answering: ${reservation.invalidatedReason}.`,
+        );
+      }
+      if (signal?.aborted) return rpcError(id, "The request was cancelled.");
       const inherited: Record<string, string> = {};
       for (const name of this.options.inheritEnv) {
         const value = process.env[name];
@@ -649,8 +824,7 @@ export class StdioMcpBridgeCore {
       );
       this.sessions.set(session.id, session);
     } finally {
-      const index = this.reserving.indexOf(request.serverId);
-      if (index !== -1) this.reserving.splice(index, 1);
+      this.reservations.delete(reservation);
     }
     const remainingMs = Math.max(0, deadline - Date.now());
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -687,7 +861,7 @@ export class StdioMcpBridgeCore {
   private countActiveForServer(serverId: string) {
     let count = 0;
     for (const session of this.sessions.values()) if (session.serverId === serverId) count++;
-    for (const id of this.reserving) if (id === serverId) count++;
+    for (const reservation of this.reservations) if (reservation.serverId === serverId) count++;
     return count;
   }
 
@@ -698,7 +872,7 @@ export class StdioMcpBridgeCore {
   }
 
   private countActiveTotal() {
-    return this.sessions.size + this.reserving.length;
+    return this.sessions.size + this.reservations.size;
   }
 
   private waitForAnyExit(
@@ -741,8 +915,10 @@ export class StdioMcpBridgeCore {
     deadline: number,
     signal?: AbortSignal,
   ): Promise<
-    | { readonly status: "reserved" }
-    | { readonly status: "busy" | "timeout" | "aborted" }
+    | { readonly status: "reserved"; readonly reservation: RoomReservation }
+    | { readonly status: "busy" }
+    | { readonly status: "timeout" }
+    | { readonly status: "aborted" }
     | { readonly status: "invalidated"; readonly reason: string }
   > {
     let wakeWaiter: (() => void) | undefined;
@@ -764,8 +940,13 @@ export class StdioMcpBridgeCore {
         const activeTotal = this.countActiveTotal();
         const total = activeTotal + this.retiring.size;
         if (forServer < this.options.maxSessionsPerServer && total < this.options.maxSessions) {
-          this.reserving.push(serverId);
-          return { status: "reserved" };
+          const reservation: RoomReservation = {
+            serverId,
+            fingerprint,
+            invalidatedReason: undefined,
+          };
+          this.reservations.add(reservation);
+          return { status: "reserved", reservation };
         }
         const idle = (onlyThisServer: boolean) =>
           [...this.sessions.values()]

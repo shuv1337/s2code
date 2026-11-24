@@ -525,6 +525,122 @@ describe("StdioMcpBridgeCore", () => {
     });
   });
 
+  it("translates notifications/cancelled requestId to wire IDs and drops unmapped IDs", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+
+    // Hold two concurrent calls with caller IDs "call-a" and "call-b".
+    const callA = post(sessionId, {
+      jsonrpc: "2.0",
+      id: "call-a",
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "alpha", hold: true } },
+    });
+    const callB = post(sessionId, {
+      jsonrpc: "2.0",
+      id: "call-b",
+      method: "tools/call",
+      params: { name: "echo", arguments: { text: "beta", hold: true } },
+    });
+    expect(
+      body(
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          id: 99,
+          method: "tools/call",
+          params: { name: "held-count" },
+        }),
+      ),
+    ).toMatchObject({ id: 99, result: { count: 2 } });
+
+    // An unmapped caller ID (even one colliding with call B's numeric wire ID 3) must be dropped.
+    expect(
+      (
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: 3, reason: "spurious" },
+        })
+      ).status,
+    ).toBe(202);
+
+    // Cancelling call A by its caller ID reaches call A's wire ID and cancels only call A.
+    expect(
+      (
+        await post(sessionId, {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: "call-a", reason: "user cancelled" },
+        })
+      ).status,
+    ).toBe(202);
+    expect(body(await callA)).toMatchObject({
+      id: "call-a",
+      error: { code: -32800, message: "cancelled" },
+    });
+
+    // Release call B and verify it answers cleanly and only call A's wire ID (2) was cancelled.
+    const flushed = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: { name: "release-and-echo", arguments: { text: "done" } },
+    });
+    expect(body(flushed)).toMatchObject({ id: 100, result: { content: [{ text: "done" }] } });
+    expect(body(await callB)).toMatchObject({
+      id: "call-b",
+      result: { content: [{ text: "beta" }] },
+    });
+    const cancelled = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 101,
+      method: "tools/call",
+      params: { name: "cancelled-ids" },
+    });
+    expect(body(cancelled)).toMatchObject({ id: 101, result: { ids: [2] } });
+  });
+
+  it("invalidates a free-slot reservation across the await microtask gap on closeAll and reconcile", async () => {
+    for (const invalidate of ["closeAll", "reconcile"] as const) {
+      const marker = NodePath.join(
+        NodeOS.tmpdir(),
+        `s2code-sync-init-${invalidate}-${NodeCrypto.randomUUID()}`,
+      );
+      const core = makeCore({ maxSessions: 2 });
+      const tripwire: StdioBridgeRequest["server"] = {
+        command: process.execPath,
+        args: ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`],
+        env: {},
+      };
+      const pending = harness(core, tripwire, "t1", "b").initialize();
+      if (invalidate === "closeAll") core.closeAll("shutting down");
+      else core.reconcile({} as ServerSettings["mcpServers"]);
+      const result = await pending;
+      expect(result.sessionId).toBeUndefined();
+      expect(body(result.response)).toMatchObject({ id: 0, error: { code: -32000 } });
+      expect(core.sessionCount).toBe(0);
+      expect(NodeFS.existsSync(marker)).toBe(false);
+    }
+  });
+
+  it("restores top-level caller id without re-serializing unrelated payload values like 64-bit ints", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server());
+    const { sessionId } = await initialize();
+
+    const response = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: "big-req",
+      method: "tools/call",
+      params: { name: "big-int" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toContain('"id":"big-req"');
+    expect(response.body).toContain('"big":9007199254740993');
+    expect(response.body).toContain('"nested":{"id":999}');
+  });
+
   it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "sends process-group SIGKILL to surviving descendants after the launcher exits on SIGTERM",
     async () => {
