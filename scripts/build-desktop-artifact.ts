@@ -53,6 +53,7 @@ import { selectDesktopRuntimeExternalDependencies } from "./lib/desktop-external
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 import { resolveTaggedSourceVersion } from "./lib/tagged-source-version.ts";
 import { signWindowsStage } from "./lib/windows-stage-signing.ts";
+import { validateWindowsPreparedServerCache } from "./windows-prepared-server-cache.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -1088,10 +1089,7 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
   ];
 }
 
-// The Windows release has 76 runtime files plus one prepared server cache entry per bundled
-// server module the packaged engine compiles, and their manifest. The bundle now splits the
-// @opencode/client service-probe chunk into its own module, so that is 23 entries and 100 files.
-export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 100;
+export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {
@@ -3977,7 +3975,11 @@ export const validateWindowsPackagedPayload = Effect.fn(
     }
   }
 
-  const fileCount = yield* countPayloadFiles(packagedAppDir);
+  const preparedServerCache = yield* validateWindowsPreparedServerCache({
+    resourcesDir,
+    asarPath,
+  });
+  const fileCount = (yield* countPayloadFiles(packagedAppDir)) - preparedServerCache.fileCount;
   if (fileCount > fileLimit) {
     return yield* new WindowsPackagedPayloadValidationError({
       reason: "file-limit-exceeded",
