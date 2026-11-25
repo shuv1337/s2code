@@ -1308,6 +1308,23 @@ describe("source control tools", () => {
     }),
   );
 
+  it.effect("updates a numbered PR in a plain origin checkout", () =>
+    Effect.gen(function* () {
+      const writes: Array<string> = [];
+      const harness = yield* makeHarness({
+        project: makeProject(),
+        thread: branchThread,
+        pullRequests: {
+          update: (input) =>
+            Effect.sync(() => void writes.push(`${input.repository}#${input.number}`)),
+        },
+      });
+      const result = yield* harness.call("pull_request_update", { number: 42, title: "New title" });
+      expect(result.repository).toBe("t3tools/t3code");
+      expect(writes).toEqual(["t3tools/t3code#42"]);
+    }),
+  );
+
   it.effect("defaults numbered PR operations to origin when the identity tracks upstream", () =>
     Effect.gen(function* () {
       const updated: Array<string> = [];

@@ -128,7 +128,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(ProcessRunner.layer)),
   );
 
-  it.effect("keys a remote by its configured URL when insteadOf rewrites it", () =>
+  it.effect("prefers recognized insteadOf destinations over the configured repository", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
@@ -152,6 +152,30 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         source: "git-remote",
         remoteName: "origin",
         remoteUrl: "https://github.com/T3Tools/t3code.git",
+      });
+
+      yield* git(cwd, ["config", "--unset", "url.https://proxy.example/.insteadOf"]);
+      yield* git(cwd, [
+        "config",
+        "url.https://github.com/Other/project.git.insteadOf",
+        "https://github.com/T3Tools/t3code.git",
+      ]);
+      const rewritten = yield* resolver.resolve(cwd, { refresh: true });
+      expect(rewritten).toMatchObject({
+        canonicalKey: "github.com/other/project",
+        displayName: "Other/project",
+        locator: {
+          remoteName: "origin",
+          remoteUrl: "https://github.com/Other/project.git",
+        },
+      });
+      yield* git(cwd, ["config", "--unset", "remote.origin.gh-resolved"]);
+      yield* git(cwd, ["remote", "add", "upstream", "https://github.com/Upstream/project.git"]);
+      const fork = yield* resolver.resolve(cwd, { refresh: true });
+      expect(fork?.origin).toEqual({
+        canonicalKey: "github.com/other/project",
+        displayName: "Other/project",
+        remoteUrl: "https://github.com/Other/project.git",
       });
 
       const shorthandCwd = yield* fileSystem.makeTempDirectoryScoped({

@@ -52,8 +52,7 @@ function isLocalRemoteUrl(url: string): boolean {
   return colonIndex === -1 || (slashIndex !== -1 && slashIndex < colonIndex);
 }
 
-// `git remote -v` applies url.*.insteadOf, which can point a GitHub remote at a proxy or mirror.
-// A configured URL that names a forge wins; a shorthand like `gh:` is known only once rewritten.
+// Git expands insteadOf in `remote -v`; configured URLs are a fallback for unrecognized rewrites.
 function parseConfiguredRemoteUrls(config: string): Map<string, string> {
   const urls = new Map<string, string>();
   for (const line of config.split("\n")) {
@@ -78,6 +77,7 @@ function parseRemoteFetchUrls(
     const configuredUrl = configuredUrls.get(remoteName);
     const remoteUrl =
       configuredUrl !== undefined &&
+      (sourceControlDefinitions.recognizeRemote(fetchUrl)?.kind ?? "unknown") === "unknown" &&
       (sourceControlDefinitions.recognizeRemote(configuredUrl)?.kind ?? "unknown") !== "unknown"
         ? configuredUrl
         : fetchUrl;
