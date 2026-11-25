@@ -267,10 +267,44 @@ it.effect(
         localUrl.url ? Redacted.value(localUrl.url) : undefined,
         "postgresql://relay:secret@127.0.0.1:5432/s2coderelay?sslmode=disable",
       );
+      assert.equal(localUrl.ssl, false);
+
+      const ipv6LocalUrl = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          RELAY_DATABASE_URL: "postgresql://relay:secret@[::1]:5432/s2coderelay?sslmode=disable",
+        }),
+      );
+      assert.equal(
+        ipv6LocalUrl.url ? Redacted.value(ipv6LocalUrl.url) : undefined,
+        "postgresql://relay:secret@[::1]:5432/s2coderelay?sslmode=disable",
+      );
+      assert.equal(ipv6LocalUrl.ssl, false);
 
       for (const badEnv of [
         { RELAY_DATABASE_URL: "postgresql://relay:secret@db.t3.codes:5432/s2coderelay" },
         { RELAY_DATABASE_URL: "postgresql://relay:secret@db.example.com:5432/s2coderelay" },
+        {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=bogus",
+        },
+        {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=disable&sslmode=verify-full",
+        },
+        {
+          RELAY_DATABASE_URL: "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=",
+        },
+        {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=%20%20",
+        },
+        {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@127.0.0.1:5432/s2coderelay?host=db.t3.codes",
+        },
+        {
+          DATABASE_URL: "postgresql://relay:secret@127.0.0.1:5432/s2coderelay?host=pg.s2code.dev",
+        },
         {
           RELAY_DB_HOST: "db.t3.codes",
           RELAY_DB_NAME: "s2coderelay",
@@ -310,10 +344,105 @@ it.effect(
       assert.equal(disabled.host, "127.0.0.1");
       assert.equal(disabled.port, 15432);
 
-      const required = yield* resolveMigrationPgClientConfig().pipe(
+      const bracketedIpv6Disabled = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          ...base,
+          RELAY_DB_MIGRATION_TARGET_HOST: "[::1]",
+          RELAY_DB_MIGRATION_TARGET_PORT: "15432",
+          RELAY_DB_MIGRATION_SSLMODE: "disable",
+        }),
+      );
+      assert.equal(bracketedIpv6Disabled.ssl, false);
+      assert.equal(bracketedIpv6Disabled.host, "::1");
+      assert.equal(bracketedIpv6Disabled.port, 15432);
+
+      const requiredFromFields = yield* resolveMigrationPgClientConfig().pipe(
         provideEnv({ ...base, RELAY_DB_MIGRATION_SSLMODE: "require" }),
       );
-      assert.deepEqual(required.ssl, { rejectUnauthorized: false });
+      const requiredFromUrl = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=require",
+        }),
+      );
+      assert.equal(requiredFromFields.ssl, true);
+      assert.equal(requiredFromUrl.ssl, true);
+
+      const paddedRequiredUrl = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=%20require%20",
+        }),
+      );
+      assert.equal(paddedRequiredUrl.ssl, true);
+      assert.equal(
+        paddedRequiredUrl.url ? Redacted.value(paddedRequiredUrl.url) : undefined,
+        "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=require",
+      );
+
+      const requiredTunnel = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          ...base,
+          RELAY_DB_MIGRATION_TARGET_HOST: "127.0.0.1",
+          RELAY_DB_MIGRATION_TARGET_PORT: "15432",
+          RELAY_DB_MIGRATION_SSLMODE: "require",
+        }),
+      );
+      assert.deepEqual(requiredTunnel.ssl, {
+        rejectUnauthorized: true,
+        servername: "pg.s2code.dev",
+      });
+
+      for (const ipTunnelMode of ["require", "verify-full"] as const) {
+        const ipTunnel = yield* resolveMigrationPgClientConfig().pipe(
+          provideEnv({
+            ...base,
+            RELAY_DB_HOST: "203.0.113.10",
+            RELAY_DB_MIGRATION_TARGET_HOST: "127.0.0.1",
+            RELAY_DB_MIGRATION_TARGET_PORT: "15432",
+            RELAY_DB_MIGRATION_SSLMODE: ipTunnelMode,
+          }),
+        );
+        assert.isObject(ipTunnel.ssl);
+        if (typeof ipTunnel.ssl === "object") {
+          assert.equal(ipTunnel.ssl.rejectUnauthorized, true);
+          assert.isUndefined(ipTunnel.ssl.servername);
+          assert.isFalse("servername" in ipTunnel.ssl);
+          assert.isFunction(ipTunnel.ssl.checkServerIdentity);
+          type PeerCert = Parameters<NonNullable<typeof ipTunnel.ssl.checkServerIdentity>>[1];
+          const originIpCert = {
+            subject: { CN: "203.0.113.10" },
+            subjectaltname: "IP Address:203.0.113.10",
+          } as unknown as PeerCert;
+          const loopbackOnlyCert = {
+            subject: { CN: "127.0.0.1" },
+            subjectaltname: "IP Address:127.0.0.1",
+          } as unknown as PeerCert;
+          assert.isUndefined(ipTunnel.ssl.checkServerIdentity!("127.0.0.1", originIpCert));
+          assert.instanceOf(
+            ipTunnel.ssl.checkServerIdentity!("127.0.0.1", loopbackOnlyCert),
+            Error,
+          );
+        }
+      }
+
+      const verifyCaFromFields = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({ ...base, RELAY_DB_MIGRATION_SSLMODE: "verify-ca" }),
+      );
+      const verifyCaFromUrl = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=verify-ca",
+        }),
+      );
+      assert.isObject(verifyCaFromFields.ssl);
+      assert.isObject(verifyCaFromUrl.ssl);
+      if (typeof verifyCaFromFields.ssl === "object" && typeof verifyCaFromUrl.ssl === "object") {
+        assert.equal(verifyCaFromFields.ssl.rejectUnauthorized, true);
+        assert.equal(verifyCaFromUrl.ssl.rejectUnauthorized, true);
+        assert.isFunction(verifyCaFromFields.ssl.checkServerIdentity);
+        assert.isFunction(verifyCaFromUrl.ssl.checkServerIdentity);
+      }
 
       const verifyFullTunnel = yield* resolveMigrationPgClientConfig().pipe(
         provideEnv({
@@ -332,6 +461,38 @@ it.effect(
         provideEnv({ ...base, RELAY_DB_MIGRATION_SSLMODE: "prefer" }),
       );
       assert.isDefined(prefer.url);
+      assert.isUndefined(prefer.ssl);
       assert.include(Redacted.value(prefer.url!), "sslmode=prefer");
+
+      const ipv6Prefer = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          ...base,
+          RELAY_DB_MIGRATION_TARGET_HOST: "::1",
+          RELAY_DB_MIGRATION_TARGET_PORT: "15432",
+          RELAY_DB_MIGRATION_SSLMODE: "prefer",
+        }),
+      );
+      assert.isDefined(ipv6Prefer.url);
+      assert.isUndefined(ipv6Prefer.ssl);
+      const ipv6PreferUrl = new URL(Redacted.value(ipv6Prefer.url!));
+      assert.equal(ipv6PreferUrl.hostname, "[::1]");
+      assert.equal(ipv6PreferUrl.port, "15432");
+      assert.equal(ipv6PreferUrl.searchParams.get("sslmode"), "prefer");
+
+      const bracketedIpv6Allow = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          ...base,
+          RELAY_DB_MIGRATION_TARGET_HOST: "[::1]",
+          RELAY_DB_MIGRATION_TARGET_PORT: "15432",
+          RELAY_DB_MIGRATION_SSLMODE: "allow",
+        }),
+      );
+      assert.isDefined(bracketedIpv6Allow.url);
+      assert.isUndefined(bracketedIpv6Allow.ssl);
+      assert.notInclude(Redacted.value(bracketedIpv6Allow.url!), "[[::1]]");
+      const bracketedIpv6AllowUrl = new URL(Redacted.value(bracketedIpv6Allow.url!));
+      assert.equal(bracketedIpv6AllowUrl.hostname, "[::1]");
+      assert.equal(bracketedIpv6AllowUrl.port, "15432");
+      assert.equal(bracketedIpv6AllowUrl.searchParams.get("sslmode"), "allow");
     }),
 );

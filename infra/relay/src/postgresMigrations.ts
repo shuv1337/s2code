@@ -1,5 +1,7 @@
-// @effect-diagnostics nodeBuiltinImport:off - sha256 hashes migration SQL deterministically to match Alchemy's bookkeeping.
+// @effect-diagnostics nodeBuiltinImport:off - crypto hashes migration SQL deterministically; net/tls validate IP-literal TLS identity without illegal IP SNI.
 import * as NodeCrypto from "node:crypto";
+import * as NodeNet from "node:net";
+import * as NodeTls from "node:tls";
 import type * as PgClient from "@effect/sql-pg/PgClient";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -192,6 +194,38 @@ function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host.trim().toLowerCase());
 }
 
+function stripHostBrackets(host: string): string {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+}
+
+function formatUrlHost(host: string): string {
+  if (host.startsWith("[") && host.endsWith("]")) {
+    return host;
+  }
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+// Match @effect/sql-pg / pg semantics across URL and RELAY_DB_* forms: `require`
+// verifies server certificates and hostname so the default public-origin path stays verified.
+function resolveSslForMode(
+  sslMode: string,
+  tlsOriginHost: string | undefined,
+): PgClient.PgClientConfig["ssl"] {
+  if (sslMode === "disable") return false;
+  if (sslMode === "verify-ca") {
+    return { rejectUnauthorized: true, checkServerIdentity: () => undefined };
+  }
+  if (!tlsOriginHost) return true;
+  const originHost = stripHostBrackets(tlsOriginHost);
+  if (NodeNet.isIP(originHost) !== 0) {
+    return {
+      rejectUnauthorized: true,
+      checkServerIdentity: (_host, cert) => NodeTls.checkServerIdentity(originHost, cert),
+    };
+  }
+  return { rejectUnauthorized: true, servername: originHost };
+}
+
 const validateMigrationHost = Effect.fn("RelayMigrations.validateHost")(function* (
   name: string,
   host: string,
@@ -248,7 +282,47 @@ export const resolveMigrationPgClientConfig = Effect.fn("RelayMigrations.resolve
           detail: "RELAY_DATABASE_URL must use a postgres:// or postgresql:// scheme.",
         });
       }
+      if (parsed.searchParams.has("host")) {
+        return yield* new PostgresMigrationError({
+          operation: "config",
+          detail: "RELAY_DATABASE_URL must not specify a host query parameter.",
+        });
+      }
       yield* validateMigrationHost("RELAY_DATABASE_URL", parsed.hostname);
+      const rawUrlSslModes = parsed.searchParams.getAll("sslmode");
+      if (rawUrlSslModes.length > 1) {
+        return yield* new PostgresMigrationError({
+          operation: "config",
+          detail: "RELAY_DATABASE_URL must not specify duplicate sslmode query parameters.",
+        });
+      }
+      if (rawUrlSslModes.length === 1) {
+        const rawUrlSslMode = rawUrlSslModes[0]!.trim();
+        if (rawUrlSslMode.length === 0) {
+          return yield* new PostgresMigrationError({
+            operation: "config",
+            detail: "RELAY_DATABASE_URL sslmode must not be empty.",
+          });
+        }
+        const urlSslMode = rawUrlSslMode.toLowerCase();
+        if (!VALID_SSLMODES.has(urlSslMode)) {
+          return yield* new PostgresMigrationError({
+            operation: "config",
+            detail: `Unsupported RELAY_DATABASE_URL sslmode "${urlSslMode}". Expected one of disable, allow, prefer, require, verify-ca, verify-full.`,
+          });
+        }
+        parsed.searchParams.set("sslmode", urlSslMode);
+        const normalizedUrl = parsed.toString();
+        if (urlSslMode === "prefer" || urlSslMode === "allow") {
+          return {
+            url: Redacted.make(normalizedUrl),
+          } satisfies PgClient.PgClientConfig;
+        }
+        return {
+          url: Redacted.make(normalizedUrl),
+          ssl: resolveSslForMode(urlSslMode, undefined),
+        } satisfies PgClient.PgClientConfig;
+      }
       return {
         url: Redacted.make(rawUrl),
       } satisfies PgClient.PgClientConfig;
@@ -307,28 +381,19 @@ export const resolveMigrationPgClientConfig = Effect.fn("RelayMigrations.resolve
       const encodedDb = encodeURIComponent(database);
       return {
         url: Redacted.make(
-          `postgresql://${encodedUser}:${encodedPassword}@${validatedTargetHost}:${port}/${encodedDb}?sslmode=${sslMode}`,
+          `postgresql://${encodedUser}:${encodedPassword}@${formatUrlHost(validatedTargetHost)}:${port}/${encodedDb}?sslmode=${sslMode}`,
         ),
       } satisfies PgClient.PgClientConfig;
     }
 
-    const tlsServername =
+    const tlsOriginHost =
       relayDbHost && !isLoopbackHost(relayDbHost) && isLoopbackHost(validatedTargetHost)
         ? relayDbHost
         : undefined;
-    const ssl: PgClient.PgClientConfig["ssl"] =
-      sslMode === "disable"
-        ? false
-        : sslMode === "require"
-          ? { rejectUnauthorized: false }
-          : sslMode === "verify-ca"
-            ? { rejectUnauthorized: true, checkServerIdentity: () => undefined }
-            : tlsServername
-              ? { rejectUnauthorized: true, servername: tlsServername }
-              : true;
+    const ssl = resolveSslForMode(sslMode, tlsOriginHost);
 
     return {
-      host: validatedTargetHost,
+      host: stripHostBrackets(validatedTargetHost),
       port,
       database,
       username,

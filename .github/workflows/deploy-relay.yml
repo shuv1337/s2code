@@ -182,14 +182,27 @@ jobs:
             import * as util from "node:util";
             const file = process.env.CLIENT_CONFIG_ENV;
             const summary = process.env.GITHUB_STEP_SUMMARY;
-            if (!file || !summary) process.exit(0);
+            if (!file) process.exit(0);
             if (!fs.existsSync(file)) {
-              fs.appendFileSync(summary, "### Public relay outputs\n\nUnchanged since previous deploy.\n");
+              console.log("Public relay outputs unchanged since previous deploy.");
+              if (summary) {
+                fs.appendFileSync(summary, "### Public relay outputs\n\nUnchanged since previous deploy.\n");
+              }
               process.exit(0);
             }
             const parsed = util.parseEnv(fs.readFileSync(file, "utf8"));
-            const lines = ["### Public relay outputs", ""];
-            if (parsed.T3CODE_RELAY_URL) lines.push(`- \`T3CODE_RELAY_URL\`: \`${parsed.T3CODE_RELAY_URL}\``);
-            if (parsed.T3CODE_CLOUD_MINT_PUBLIC_KEY) lines.push(`- \`T3CODE_CLOUD_MINT_PUBLIC_KEY\`: \`${parsed.T3CODE_CLOUD_MINT_PUBLIC_KEY}\``);
-            fs.appendFileSync(summary, `${lines.join("\n")}\n`);
+            const publicOutputs = [
+              ["T3CODE_RELAY_URL", parsed.T3CODE_RELAY_URL],
+              ["T3CODE_CLOUD_MINT_PUBLIC_KEY", parsed.T3CODE_CLOUD_MINT_PUBLIC_KEY],
+            ].filter((entry) => Boolean(entry[1]));
+            for (const [key, value] of publicOutputs) {
+              console.log(`${key}=${value}`);
+            }
+            if (summary) {
+              const lines = ["### Public relay outputs", ""];
+              for (const [key, value] of publicOutputs) {
+                lines.push(`- \`${key}\`: \`${value}\``);
+              }
+              fs.appendFileSync(summary, `${lines.join("\n")}\n`);
+            }
           '
