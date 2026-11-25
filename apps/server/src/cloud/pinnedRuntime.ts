@@ -723,6 +723,8 @@ export function launcherOwnsVersionsDir(
  * When the target exists, its resolved `realPath` decides ownership so a symlinked version dir
  * or junction pointing into another home is never treated as owned.
  */
+const MAX_CANONICALIZE_HOPS = 32;
+
 export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_versions_target")(
   function* (input: {
     readonly versionsDir: string;
@@ -733,11 +735,6 @@ export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_ve
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     if (!path.isAbsolute(input.candidate)) return false;
-    const normalize = (value: string) =>
-      input.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
-    const inVersionsDir = (value: string) =>
-      launcherOwnsVersionsDir(path, input.versionsDir, value, input.platform) ||
-      launcherOwnsVersionsDir(path, input.realVersionsDir, value, input.platform);
     const resolveIfPresent = (file: string) =>
       fs.realPath(file).pipe(
         Effect.asSome,
@@ -758,52 +755,52 @@ export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_ve
         ),
       );
 
-    const resolved = yield* resolveIfPresent(input.candidate);
-    if (resolved === undefined) return false;
-    if (Option.isSome(resolved)) {
-      return launcherOwnsVersionsDir(path, input.realVersionsDir, resolved.value, input.platform);
-    }
-    if (!inVersionsDir(input.candidate)) return false;
-    // Target does not exist: walk candidate and every ancestor inside versionsDir to ensure no
-    // dangling symlink or symlinked ancestor escapes to a foreign path.
-    let component = input.candidate;
-    while (inVersionsDir(component)) {
-      let linkCursor = component;
-      const visited = new Set<string>();
-      let exhausted = true;
-      for (let depth = 0; depth < 16; depth += 1) {
-        const key = normalize(linkCursor);
-        if (visited.has(key)) return false;
-        visited.add(key);
-        const link = yield* readLinkStatus(linkCursor);
-        if (link === undefined) return false;
-        if (Option.isNone(link)) {
-          exhausted = false;
-          break;
+    // Untraced helper inside `is_owned_versions_target`: canonicalizes an absolute path even when
+    // tail components do not exist, following intermediate and final symlinks with a hop bound.
+    const canonicalizePath = Effect.fnUntraced(function* (target: string) {
+      let current = path.resolve(target);
+      let hops = 0;
+      while (true) {
+        const resolved = yield* resolveIfPresent(current);
+        if (resolved === undefined) return undefined;
+        if (Option.isSome(resolved)) return resolved.value;
+
+        let probe = current;
+        const suffix: Array<string> = [];
+        let followedLink = false;
+        while (true) {
+          const link = yield* readLinkStatus(probe);
+          if (link === undefined) return undefined;
+          if (Option.isSome(link)) {
+            hops += 1;
+            if (hops > MAX_CANONICALIZE_HOPS) return undefined;
+            const parentReal = yield* fs
+              .realPath(path.dirname(probe))
+              .pipe(Effect.orElseSucceed(() => undefined));
+            if (parentReal === undefined) return undefined;
+            const linked = path.resolve(parentReal, link.value);
+            current = suffix.length === 0 ? linked : path.join(linked, ...suffix);
+            followedLink = true;
+            break;
+          }
+          const realProbe = yield* resolveIfPresent(probe);
+          if (realProbe === undefined) return undefined;
+          if (Option.isSome(realProbe)) {
+            return suffix.length === 0 ? realProbe.value : path.join(realProbe.value, ...suffix);
+          }
+          const parent = path.dirname(probe);
+          if (parent === probe) return current;
+          suffix.unshift(path.basename(probe));
+          probe = parent;
         }
-        const next = path.resolve(path.dirname(linkCursor), link.value);
-        if (!inVersionsDir(next)) return false;
-        linkCursor = next;
+        if (!followedLink) return current;
       }
-      if (exhausted) return false;
-      const resolvedComponent = yield* resolveIfPresent(component);
-      if (resolvedComponent === undefined) return false;
-      if (Option.isSome(resolvedComponent)) {
-        return (
-          normalize(resolvedComponent.value) === normalize(input.realVersionsDir) ||
-          launcherOwnsVersionsDir(
-            path,
-            input.realVersionsDir,
-            resolvedComponent.value,
-            input.platform,
-          )
-        );
-      }
-      const nextComponent = path.dirname(component);
-      if (nextComponent === component) break;
-      component = nextComponent;
-    }
-    return true;
+    });
+
+    const canonicalVersionsDir = yield* canonicalizePath(input.realVersionsDir);
+    const canonicalCandidate = yield* canonicalizePath(input.candidate);
+    if (canonicalVersionsDir === undefined || canonicalCandidate === undefined) return false;
+    return launcherOwnsVersionsDir(path, canonicalVersionsDir, canonicalCandidate, input.platform);
   },
 );
 

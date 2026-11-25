@@ -551,22 +551,37 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
           path.join(foreignBaseDir, "runtime/versions/missing/t3"),
           danglingForeignExe,
         );
+        // Symlink inside versions/ pointing to a missing file whose parent dir is symlinked to a foreign home.
+        const danglingViaForeignParentDir = path.join(
+          baseDir,
+          "runtime/versions/old-dangling-parent",
+        );
+        const danglingViaForeignParentExe = path.join(danglingViaForeignParentDir, "t3");
+        yield* fs.makeDirectory(danglingViaForeignParentDir, { recursive: true });
+        yield* fs.symlink(path.join(escapedDir, "missing-t3"), danglingViaForeignParentExe);
 
         const localBin = path.join(root, ".local/bin");
         yield* fs.makeDirectory(localBin, { recursive: true });
         const linkToEscapedDir = path.join(localBin, "t3");
         const linkToEscapedFile = path.join(localBin, "s2c");
         const linkToDanglingForeign = path.join(localBin, "s2code");
+        const linkToDanglingForeignParent = path.join(localBin, "shuv2code");
         const scriptToEscapedDir = path.join(baseDir, "bin/shuv2code");
         const scriptToDanglingForeign = path.join(baseDir, "bin/s2code");
+        const scriptToDanglingForeignParent = path.join(baseDir, "bin/s2c");
         yield* fs.makeDirectory(path.dirname(scriptToEscapedDir), { recursive: true });
         yield* fs.symlink(escapedDirExe, linkToEscapedDir);
         yield* fs.symlink(escapedFileExe, linkToEscapedFile);
         yield* fs.symlink(danglingForeignExe, linkToDanglingForeign);
+        yield* fs.symlink(danglingViaForeignParentExe, linkToDanglingForeignParent);
         const scriptBody = posixLauncherScript(escapedDirExe);
         const danglingScriptBody = posixLauncherScript(danglingForeignExe);
+        const danglingParentScriptBody = posixLauncherScript(danglingViaForeignParentExe);
         yield* fs.writeFileString(scriptToEscapedDir, scriptBody, { mode: 0o755 });
         yield* fs.writeFileString(scriptToDanglingForeign, danglingScriptBody, { mode: 0o755 });
+        yield* fs.writeFileString(scriptToDanglingForeignParent, danglingParentScriptBody, {
+          mode: 0o755,
+        });
 
         yield* ServiceLauncherClient.repointLaunchers({
           baseDir,
@@ -581,8 +596,13 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
         assert.equal(yield* fs.readLink(linkToEscapedDir), escapedDirExe);
         assert.equal(yield* fs.readLink(linkToEscapedFile), escapedFileExe);
         assert.equal(yield* fs.readLink(linkToDanglingForeign), danglingForeignExe);
+        assert.equal(yield* fs.readLink(linkToDanglingForeignParent), danglingViaForeignParentExe);
         assert.equal(yield* fs.readFileString(scriptToEscapedDir), scriptBody);
         assert.equal(yield* fs.readFileString(scriptToDanglingForeign), danglingScriptBody);
+        assert.equal(
+          yield* fs.readFileString(scriptToDanglingForeignParent),
+          danglingParentScriptBody,
+        );
         assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
       }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
