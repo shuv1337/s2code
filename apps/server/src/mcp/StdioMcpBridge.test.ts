@@ -116,6 +116,99 @@ describe("StdioMcpBridgeCore", () => {
     ]);
     expect(body(a)).toMatchObject({ id: "a", result: { content: [{ text: "one" }], early: 0 } });
     expect(body(b)).toMatchObject({ id: "b", result: { content: [{ text: "two" }], early: 0 } });
+    expect(body(await post(sessionId, { jsonrpc: "2.0", id: 2, method: "skills/list" }))).toEqual({
+      jsonrpc: "2.0",
+      id: 2,
+      error: { code: -32601, message: "not found" },
+    });
+    expect(
+      body(await post(sessionId, { jsonrpc: "2.0", id: 3, method: "tools/list" })),
+    ).toMatchObject({
+      id: 3,
+      result: { tools: expect.arrayContaining([expect.objectContaining({ name: "echo" })]) },
+    });
+  });
+
+  it("relays skill responses with only their IDs restored and safely drops catalog notifications", async () => {
+    const core = makeCore();
+    const { post, initialize } = harness(core, server({ FAKE_MCP_SKILLS: "1" }));
+    const { response, sessionId } = await initialize();
+    expect(body(response)).toMatchObject({
+      id: 0,
+      result: {
+        capabilities: {
+          resources: {},
+          extensions: { "io.modelcontextprotocol/skills": { directoryRead: true } },
+        },
+      },
+    });
+    const uri = "skill://fixture/example/SKILL.md";
+    const text = "---\nname: example\ndescription: An example skill\n---\n\nUse café.\r\n";
+    const skill = {
+      uri,
+      frontmatter: { name: "example", description: "An example skill" },
+      resources: [
+        {
+          uri,
+          digest: `sha256:${NodeCrypto.createHash("sha256").update(text).digest("hex")}`,
+          size: Buffer.byteLength(text),
+        },
+      ],
+    };
+    const send = (id: string | number, method: string, params?: { uri: string }) =>
+      post(sessionId, { jsonrpc: "2.0", id, method, params });
+    for (const [id, method, params, result] of [
+      ["list", "skills/list", undefined, JSON.stringify({ skills: [skill] })],
+      [
+        2,
+        "skills/get",
+        { uri },
+        `{"skill":${JSON.stringify(skill)},"_meta":{"fixture/revision":9007199254740993}}`,
+      ],
+      [
+        3,
+        "resources/read",
+        { uri },
+        JSON.stringify({ contents: [{ uri, mimeType: "text/markdown", text }] }),
+      ],
+      [
+        4,
+        "resources/directory/read",
+        { uri: "skill://fixture/example/" },
+        JSON.stringify({ resources: [{ uri, name: "SKILL.md", mimeType: "text/markdown" }] }),
+      ],
+    ] as const) {
+      const answer = await send(id, method, params);
+      expect(answer.status).toBe(200);
+      expect(answer.body).toBe(`{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":${result}}`);
+    }
+
+    const unpublished = await post(sessionId, {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "unpublish-skill" },
+    });
+    expect(unpublished.body).toBe('{"jsonrpc":"2.0","id":5,"result":{"content":[]}}');
+    expect(body(await send(6, "skills/list"))).toEqual({
+      jsonrpc: "2.0",
+      id: 6,
+      result: { skills: [] },
+    });
+    expect(core.sessionCount).toBe(1);
+  });
+
+  it("answers a sessionless modern discovery probe with an empty 400 without spawning", async () => {
+    const core = makeCore();
+    const { post } = harness(core, server({ FAKE_MCP_SKILLS: "1" }));
+    const response = await post(undefined, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "server/discover",
+      params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } },
+    });
+    expect(response).toMatchObject({ status: 400, body: "" });
+    expect(core.pids()).toEqual([]);
   });
 
   it("answers GET with 405 and unknown, foreign or missing sessions without reaching a process", async () => {

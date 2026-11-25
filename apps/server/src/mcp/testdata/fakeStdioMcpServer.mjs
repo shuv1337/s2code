@@ -1,10 +1,29 @@
 // A stdio MCP server for StdioMcpBridge tests. Like `executor mcp`, it answers 400-style errors to
 // anything sent before it has replied to initialize. Behaviour knobs come from FAKE_MCP_* env vars.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeReadline from "node:readline";
 
 const initDelay = Number(process.env.FAKE_MCP_INIT_DELAY_MS ?? "50");
 const neverInit = process.env.FAKE_MCP_NEVER_INIT === "1";
+const servesSkills = process.env.FAKE_MCP_SKILLS === "1";
+const spawnMarker = process.env.FAKE_MCP_SPAWN_MARKER;
+if (spawnMarker !== undefined) NodeFS.writeFileSync(spawnMarker, "");
+const skillUri = "skill://fixture/example/SKILL.md";
+const skillText = "---\nname: example\ndescription: An example skill\n---\n\nUse café.\r\n";
+const skillEntry = {
+  uri: skillUri,
+  frontmatter: { name: "example", description: "An example skill" },
+  resources: [
+    {
+      uri: skillUri,
+      digest: `sha256:${NodeCrypto.createHash("sha256").update(skillText).digest("hex")}`,
+      size: Buffer.byteLength(skillText),
+    },
+  ],
+};
+let skillPublished = servesSkills;
 if (process.env.FAKE_MCP_IGNORE_SIGTERM === "1") {
   process.on("SIGTERM", () => {});
   // Keep alive until SIGKILL even after stdin closes.
@@ -29,7 +48,13 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
         id: message.id,
         result: {
           protocolVersion: "2025-06-18",
-          capabilities: { tools: {} },
+          capabilities: servesSkills
+            ? {
+                tools: {},
+                resources: { listChanged: true },
+                extensions: { "io.modelcontextprotocol/skills": { directoryRead: true } },
+              }
+            : { tools: {} },
           serverInfo: { name: "fake-stdio", version: "1" },
         },
       });
@@ -71,6 +96,26 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
     process.stderr.write(`client answered ${JSON.stringify(message)}\n`);
     return;
   }
+  if (servesSkills) {
+    const reply = (result) => send({ jsonrpc: "2.0", id: message.id, result });
+    switch (message.method) {
+      case "skills/list":
+        return reply({ skills: skillPublished ? [skillEntry] : [] });
+      case "skills/get":
+        if (!skillPublished) break;
+        return process.stdout.write(
+          `{"jsonrpc":"2.0","id":${JSON.stringify(message.id)},"result":{"skill":${JSON.stringify(skillEntry)},"_meta":{"fixture/revision":9007199254740993}}}\n`,
+        );
+      case "resources/read":
+        if (!skillPublished) break;
+        return reply({ contents: [{ uri: skillUri, mimeType: "text/markdown", text: skillText }] });
+      case "resources/directory/read":
+        if (!skillPublished) break;
+        return reply({
+          resources: [{ uri: skillUri, name: "SKILL.md", mimeType: "text/markdown" }],
+        });
+    }
+  }
   switch (message.method) {
     case "tools/list":
       return send({
@@ -87,6 +132,11 @@ NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
       });
     case "tools/call": {
       const { name, arguments: args } = message.params;
+      if (name === "unpublish-skill" && servesSkills) {
+        skillPublished = false;
+        send({ jsonrpc: "2.0", method: "notifications/resources/list_changed" });
+        return send({ jsonrpc: "2.0", id: message.id, result: { content: [] } });
+      }
       if (name === "echo") {
         const reply = () =>
           send({

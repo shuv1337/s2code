@@ -32,6 +32,9 @@ to manage providers. Full-access agents can also manage shared servers through t
   don't see them, because an agent that can run commands could otherwise call
   the server without asking you. After switching a thread to Full access, use
   **Restart agent**.
+- Skills published by a shared server through the MCP Skills extension are available
+  to agents whose providers support it, under the same Full access, project, and
+  subagent rules.
 - Added or re-enabled servers reach new agent sessions only; use **Restart
   agent** to pick them up. URL and token changes apply immediately.
 - Agents connect through the environment, which adds the saved token. Turning a
