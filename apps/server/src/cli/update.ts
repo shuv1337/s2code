@@ -31,16 +31,19 @@ import * as BootService from "../cloud/bootService.ts";
 import {
   ensurePinnedRuntimeInstalled,
   findPosixLauncher,
-  launcherOwnsVersionsDir,
+  generatedWindowsForwarderTarget,
+  generatedWindowsShimTarget,
+  isOwnedVersionsTarget,
   isUnpublishedRelease,
+  ownedLauncherNames,
   pinnedRuntimePaths,
   PinnedRuntimePreflightBlockedError,
   pinnedRuntimeVersionsDir,
   prunePinnedRuntimes,
   readPinnedRuntimeLaunchers,
+  readPosixLauncher,
   recordPinnedRuntimeLauncher,
   resolveLauncherPath,
-  readPosixLauncherTarget,
   writePosixLauncher,
 } from "../cloud/pinnedRuntime.ts";
 import {
@@ -127,29 +130,14 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const windows = (yield* HostProcess.Platform) === "win32";
-  const readTarget = (file: string) =>
-    (windows
-      ? fs.readFileString(file).pipe(
-          Effect.map((content) =>
-            // Direct shims quote the executable. Forwarders quote the legacy
-            // `.cmd`, including the repaired body whose `for /f` line is not
-            // `call "..."`. Skip option quotes such as "usebackq skip=1 delims=".
-            [...content.matchAll(/"([^"]*)"/g)]
-              .map((match) => match[1])
-              .find(
-                (value) => value !== undefined && (value.includes("\\") || value.includes("/")),
-              ),
-          ),
-        )
-      : fs.readLink(file).pipe(Effect.catch(() => readPosixLauncherTarget(file)))
-    ).pipe(
-      Effect.map((target) =>
-        target === undefined ? undefined : path.resolve(path.dirname(file), target),
-      ),
-      Effect.orElseSucceed(() => undefined),
-    );
-  const target = yield* readTarget(launcher);
-  if (target === undefined) return undefined;
+  // Untraced helper inside the `read_launcher_target` span.
+  const readSmallFile = Effect.fnUntraced(function* (file: string) {
+    const info = yield* fs.stat(file).pipe(Effect.option);
+    if (Option.isNone(info) || info.value.type !== "File" || info.value.size > 4096n) {
+      return undefined;
+    }
+    return yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => undefined));
+  });
   const suffix = windows ? ".cmd" : "";
   const canonical = `${resolveChannelIdentity(version).executableName}${suffix}`;
   const legacy = path.join(
@@ -158,11 +146,51 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
   );
   const samePath = (left: string, right: string) =>
     windows ? left.toLowerCase() === right.toLowerCase() : left === right;
-  if (samePath(path.basename(launcher), canonical) && samePath(target, legacy)) {
-    const forwarded = yield* readTarget(legacy);
-    return forwarded === undefined ? undefined : { target: forwarded, forwarder: true };
+
+  if (windows) {
+    const content = yield* readSmallFile(launcher);
+    if (content === undefined) return undefined;
+    const forwardedCmd = generatedWindowsForwarderTarget(content);
+    if (forwardedCmd !== undefined) {
+      const resolvedForwarded = path.resolve(path.dirname(launcher), forwardedCmd);
+      if (!samePath(path.basename(launcher), canonical) || !samePath(resolvedForwarded, legacy)) {
+        return undefined;
+      }
+      const legacyContent = yield* readSmallFile(legacy);
+      if (legacyContent === undefined) return undefined;
+      const forwardedTarget = generatedWindowsShimTarget(legacyContent);
+      if (forwardedTarget === undefined) return undefined;
+      return { target: path.resolve(path.dirname(legacy), forwardedTarget), forwarder: true };
+    }
+    const directTarget = generatedWindowsShimTarget(content);
+    if (directTarget === undefined) return undefined;
+    return { target: path.resolve(path.dirname(launcher), directTarget), forwarder: false };
   }
-  return { target, forwarder: false };
+
+  const readPosix = Effect.fnUntraced(function* (file: string) {
+    const link = yield* fs.readLink(file).pipe(Effect.option);
+    if (Option.isSome(link)) {
+      return { target: path.resolve(path.dirname(file), link.value) };
+    }
+    const parsed = yield* readPosixLauncher(file);
+    if (parsed === undefined) return undefined;
+    return {
+      target: path.resolve(path.dirname(file), parsed.target),
+      ...(parsed.exportLine !== undefined ? { exportLine: parsed.exportLine } : {}),
+    };
+  });
+
+  const entry = yield* readPosix(launcher);
+  if (entry === undefined) return undefined;
+  if (samePath(path.basename(launcher), canonical) && samePath(entry.target, legacy)) {
+    const forwarded = yield* readPosix(legacy);
+    return forwarded === undefined ? undefined : { target: forwarded.target, forwarder: true };
+  }
+  return {
+    target: entry.target,
+    forwarder: false,
+    ...(entry.exportLine !== undefined ? { exportLine: entry.exportLine } : {}),
+  };
 });
 
 /** The version an update mirror's feed file for this platform offers on `channel`. */
@@ -226,8 +254,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     .realPath(versionsDir)
     .pipe(Effect.orElseSucceed(() => versionsDir));
   const ownsTarget = (candidate: string) =>
-    launcherOwnsVersionsDir(path, versionsDir, candidate, platform) ||
-    launcherOwnsVersionsDir(path, realVersionsDir, candidate, platform);
+    isOwnedVersionsTarget({ versionsDir, realVersionsDir, candidate, platform });
   const remember = (launcher: string) =>
     recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher }).pipe(
       Effect.mapError(
@@ -245,7 +272,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
         });
   if (launcher === undefined) return Option.none<string>();
   const current = yield* readLauncherTarget(launcher, input.currentVersion);
-  if (current === undefined || !ownsTarget(current.target)) return Option.none<string>();
+  if (current === undefined || !(yield* ownsTarget(current.target))) return Option.none<string>();
   if (platform !== "win32" && path.resolve(input.launchedAs) !== path.resolve(launcher)) {
     const launchedAsIsLink = yield* fs.readLink(input.launchedAs).pipe(
       Effect.as(true),
@@ -268,7 +295,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   ]);
   for (const alias of aliases) {
     const existing = yield* readLauncherTarget(alias, version);
-    if (existing === undefined || !ownsTarget(existing.target)) continue;
+    if (existing === undefined || !(yield* ownsTarget(existing.target))) continue;
     yield* remember(alias);
     if (existing.forwarder) {
       // Unix keeps the symlink. Windows rewrites the bytes in place so a shim
@@ -299,12 +326,51 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
             launcher: alias,
             executable: input.targetEntryPath,
             exclusive: false,
+            exportLine: existing.exportLine,
           });
     yield* replacement.pipe(
       Effect.mapError(
         () => new CliUpdateError({ reason: `Could not update the s2code launcher at ${alias}.` }),
       ),
     );
+  }
+  if (platform !== "win32") {
+    const realLauncher = yield* fs.realPath(launcher).pipe(Effect.orElseSucceed(() => undefined));
+    if (realLauncher !== undefined) {
+      const environment = yield* HostProcess.Environment;
+      const home = environment["HOME"]?.trim() || (yield* HostProcess.HomeDirectory);
+      const cwd = yield* HostProcess.WorkingDirectory;
+      const searchPath = environment["PATH"] ?? "";
+      const aliasDirs = new Set<string>([
+        ...[
+          environment["S2CODE_INSTALL_BIN_DIR"]?.trim(),
+          environment["SHUV2CODE_INSTALL_BIN_DIR"]?.trim(),
+          environment["T3CODE_INSTALL_BIN_DIR"]?.trim(),
+        ].filter((entry): entry is string => entry !== undefined && entry.length > 0),
+        path.join(home, ".local", "bin"),
+        ...(searchPath.length === 0
+          ? []
+          : searchPath.split(":").map((directory) => path.resolve(cwd, directory || "."))),
+      ]);
+      const names = ownedLauncherNames(version, "linux");
+      for (const directory of aliasDirs) {
+        for (const name of names) {
+          const candidate = path.join(directory, name);
+          if (path.resolve(candidate) === path.resolve(launcher)) continue;
+          const isLink = yield* fs.readLink(candidate).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!isLink) continue;
+          const resolved = yield* fs
+            .realPath(candidate)
+            .pipe(Effect.orElseSucceed(() => undefined));
+          if (resolved === realLauncher) {
+            yield* remember(candidate);
+          }
+        }
+      }
+    }
   }
   return Option.some(launcher);
 });
@@ -319,12 +385,18 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
   version = packageJson.version,
   versionsDir?: string,
 ) {
+  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const environment = yield* HostProcess.Environment;
-  const identities = [resolveChannelIdentity(version), resolveLegacyChannelIdentity(version)];
-  const shimNames = new Set(
-    identities.map((identity) => `${identity.executableName}.cmd`.toLowerCase()),
+  const channelNames = [
+    `${resolveChannelIdentity(version).executableName}.cmd`,
+    `${resolveLegacyChannelIdentity(version).executableName}.cmd`,
+  ];
+  const channelNameSet = new Set(channelNames.map((name) => name.toLowerCase()));
+  const fallbackNames = ownedLauncherNames(version, "win32").filter(
+    (name) => !channelNameSet.has(name.toLowerCase()),
   );
+  const allNameSet = new Set([...channelNames, ...fallbackNames].map((name) => name.toLowerCase()));
   const directories = [
     ...(environment["S2CODE_INSTALL_BIN_DIR"] ? [environment["S2CODE_INSTALL_BIN_DIR"]] : []),
     ...(environment["SHUV2CODE_INSTALL_BIN_DIR"] ? [environment["SHUV2CODE_INSTALL_BIN_DIR"]] : []),
@@ -334,21 +406,37 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
       : []),
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(";"),
   ].filter((entry) => entry.trim().length > 0);
-  const candidates: Array<string> = [];
+  const primaryCandidates: Array<string> = [];
+  const fallbackCandidates: Array<string> = [];
   for (const directory of directories) {
-    for (const identity of identities) {
-      candidates.push(path.join(directory, `${identity.executableName}.cmd`));
+    let hasChannelShim = false;
+    for (const name of channelNames) {
+      const candidate = path.join(directory, name);
+      primaryCandidates.push(candidate);
+      if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+        hasChannelShim = true;
+      }
+    }
+    // Preserve channel isolation: when a channel-suffixed shim exists in this directory,
+    // do not fall back to un-suffixed command names in the same directory.
+    if (!hasChannelShim) {
+      for (const name of fallbackNames) {
+        fallbackCandidates.push(path.join(directory, name));
+      }
     }
   }
   if (versionsDir !== undefined) {
     const recorded = yield* readPinnedRuntimeLaunchers(path.dirname(path.dirname(versionsDir)));
     for (const shimPath of recorded) {
-      if (shimNames.has(path.basename(shimPath).toLowerCase())) {
-        candidates.push(shimPath);
+      const base = path.basename(shimPath).toLowerCase();
+      if (channelNameSet.has(base)) {
+        primaryCandidates.push(shimPath);
+      } else if (allNameSet.has(base)) {
+        fallbackCandidates.push(shimPath);
       }
     }
   }
-  for (const shimPath of candidates) {
+  for (const shimPath of [...primaryCandidates, ...fallbackCandidates]) {
     const target = (yield* readLauncherTarget(shimPath, version))?.target;
     if (
       target !== undefined &&

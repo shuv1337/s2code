@@ -718,6 +718,63 @@ export function launcherOwnsVersionsDir(
   return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+/**
+ * Whether `candidate` resolves inside this home's `runtime/versions` tree.
+ * When the target exists, its resolved `realPath` decides ownership so a symlinked version dir
+ * or junction pointing into another home is never treated as owned.
+ */
+export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_versions_target")(
+  function* (input: {
+    readonly versionsDir: string;
+    readonly realVersionsDir: string;
+    readonly candidate: string;
+    readonly platform: NodeJS.Platform;
+  }) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    if (!path.isAbsolute(input.candidate)) return false;
+    const normalize = (value: string) =>
+      input.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const inVersionsDir = (value: string) =>
+      launcherOwnsVersionsDir(path, input.versionsDir, value, input.platform) ||
+      launcherOwnsVersionsDir(path, input.realVersionsDir, value, input.platform);
+    const resolveIfPresent = (file: string) =>
+      fs.realPath(file).pipe(
+        Effect.asSome,
+        Effect.catch((error) =>
+          Effect.succeed(error.reason._tag === "NotFound" ? Option.none<string>() : undefined),
+        ),
+      );
+
+    const resolved = yield* resolveIfPresent(input.candidate);
+    if (resolved === undefined) return false;
+    if (Option.isSome(resolved)) {
+      return launcherOwnsVersionsDir(path, input.realVersionsDir, resolved.value, input.platform);
+    }
+    if (!inVersionsDir(input.candidate)) return false;
+    let ancestor = path.dirname(input.candidate);
+    while (inVersionsDir(ancestor)) {
+      const resolvedAncestor = yield* resolveIfPresent(ancestor);
+      if (resolvedAncestor === undefined) return false;
+      if (Option.isSome(resolvedAncestor)) {
+        return (
+          normalize(resolvedAncestor.value) === normalize(input.realVersionsDir) ||
+          launcherOwnsVersionsDir(
+            path,
+            input.realVersionsDir,
+            resolvedAncestor.value,
+            input.platform,
+          )
+        );
+      }
+      const nextAncestor = path.dirname(ancestor);
+      if (nextAncestor === ancestor) break;
+      ancestor = nextAncestor;
+    }
+    return true;
+  },
+);
+
 export const readPinnedRuntimeLaunchers = Effect.fn("cloud.pinned_runtime.read_launchers")(
   function* (baseDir: string) {
     const fs = yield* FileSystem.FileSystem;
@@ -815,23 +872,68 @@ export const generatedWindowsForwarderTarget = (contents: string): string | unde
 /**
  * The `t3` script the install scripts and `t3 update` write on macOS and Linux. Exec by absolute
  * path: through a symlink, argv0 is the link, and the Cursor SDK looks for its helpers beside it.
+ * When `exportLine` is provided, preserves a legacy 3-line wrapper's `export S2CODE_HOME=...` line.
  */
-export const posixLauncherScript = (executable: string) =>
-  `#!/bin/sh\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`;
+export const posixLauncherScript = (executable: string, exportLine?: string) =>
+  exportLine === undefined
+    ? `#!/bin/sh\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`
+    : `#!/bin/sh\n${exportLine}\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`;
 
-/** The executable a script exactly as {@link posixLauncherScript} writes it runs; never a user's wrapper. */
-export const readPosixLauncherTarget = Effect.fn("cloud.pinned_runtime.read_posix_launcher")(
+const LEGACY_HOME_EXPORT_LINE =
+  /^export (?:S2CODE_HOME|SHUV2CODE_HOME)=(?:"(?:[^"`\\;$\r\n]|\$(?!\())+"|'[^'\r\n]+')$/;
+
+function parsePosixExecLine(line: string, homeDir: string | undefined): string | undefined {
+  const singleQuoted = /^exec '((?:[^']|'\\'')*)' "\$@"$/.exec(line)?.[1];
+  if (singleQuoted !== undefined) {
+    return singleQuoted.replaceAll("'\\''", "'");
+  }
+  const homeRelative = /^exec "\$HOME\/([^"`\\$\r\n]+)" "\$@"$/.exec(line)?.[1];
+  if (homeRelative !== undefined) {
+    const trimmedHome = homeDir?.trim();
+    if (!trimmedHome) return undefined;
+    return `${trimmedHome.replace(/\/+$/, "")}/${homeRelative}`;
+  }
+  const doubleQuoted = /^exec "(\/[^"`\\$\r\n]+)" "\$@"$/.exec(line)?.[1];
+  if (doubleQuoted !== undefined) {
+    return doubleQuoted;
+  }
+  return undefined;
+}
+
+/** Parses an unedited 2-line {@link posixLauncherScript} or 3-line legacy home-scoped wrapper; never a user's wrapper. */
+export const readPosixLauncher = Effect.fn("cloud.pinned_runtime.read_posix_launcher")(function* (
+  launcher: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const environment = yield* HostProcess.Environment;
+  const homeDir = environment["HOME"]?.trim() || (yield* HostProcess.HomeDirectory);
+  // Stat first so a runtime binary found the same way is never read whole.
+  const info = yield* fs.stat(launcher).pipe(Effect.option);
+  if (Option.isNone(info) || info.value.type !== "File" || info.value.size > 4096n) {
+    return undefined;
+  }
+  const contents = yield* fs.readFileString(launcher).pipe(Effect.option);
+  if (Option.isNone(contents)) return undefined;
+  const trimmed = contents.value.endsWith("\n") ? contents.value.slice(0, -1) : contents.value;
+  const lines = trimmed.split("\n");
+  if (lines[0] !== "#!/bin/sh") return undefined;
+  if (lines.length === 2 && contents.value.endsWith("\n")) {
+    const quoted = /^exec '((?:[^']|'\\'')*)' "\$@"$/.exec(lines[1]!)?.[1];
+    if (quoted === undefined) return undefined;
+    return { target: quoted.replaceAll("'\\''", "'") };
+  }
+  if (lines.length === 3 && LEGACY_HOME_EXPORT_LINE.test(lines[1]!)) {
+    const target = parsePosixExecLine(lines[2]!, homeDir);
+    if (target === undefined) return undefined;
+    return { target, exportLine: lines[1]! };
+  }
+  return undefined;
+});
+
+/** The executable a script matched by {@link readPosixLauncher} runs; never a user's wrapper. */
+export const readPosixLauncherTarget = Effect.fn("cloud.pinned_runtime.read_posix_launcher_target")(
   function* (launcher: string) {
-    const fs = yield* FileSystem.FileSystem;
-    // Stat first so a runtime binary found the same way is never read whole.
-    const info = yield* fs.stat(launcher).pipe(Effect.option);
-    if (Option.isNone(info) || info.value.type !== "File" || info.value.size > 4096n) {
-      return undefined;
-    }
-    const contents = yield* fs.readFileString(launcher).pipe(Effect.option);
-    if (Option.isNone(contents)) return undefined;
-    const quoted = /^#!\/bin\/sh\nexec '((?:[^']|'\\'')*)' "\$@"\n$/.exec(contents.value)?.[1];
-    return quoted?.replaceAll("'\\''", "'");
+    return (yield* readPosixLauncher(launcher))?.target;
   },
 );
 
@@ -854,19 +956,20 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
       fs.realPath(file).pipe(Effect.orElseSucceed(() => undefined));
     const realVersionsDir = (yield* realPath(input.versionsDir)) ?? input.versionsDir;
     const ownsTarget = (candidate: string) =>
-      launcherOwnsVersionsDir(path, input.versionsDir, candidate) ||
-      launcherOwnsVersionsDir(path, realVersionsDir, candidate);
+      isOwnedVersionsTarget({
+        versionsDir: input.versionsDir,
+        realVersionsDir,
+        candidate,
+        platform: "linux",
+      });
     const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
     if (Option.isSome(linkTarget)) {
       const resolved = path.resolve(path.dirname(input.launchedAs), linkTarget.value);
-      const target = (yield* realPath(resolved)) ?? resolved;
-      if (ownsTarget(target)) return input.launchedAs;
+      if (yield* ownsTarget(resolved)) return input.launchedAs;
       // Symlink alias pointing to an owned POSIX launcher script (e.g. ~/.local/bin/s2code -> <baseDir>/bin/shuv2code).
+      const target = (yield* realPath(resolved)) ?? resolved;
       const scriptTarget = yield* readPosixLauncherTarget(target);
-      if (scriptTarget !== undefined) {
-        const resolvedScriptTarget = (yield* realPath(scriptTarget)) ?? scriptTarget;
-        if (ownsTarget(scriptTarget) || ownsTarget(resolvedScriptTarget)) return target;
-      }
+      if (scriptTarget !== undefined && (yield* ownsTarget(scriptTarget))) return target;
       return undefined;
     }
     const executable = yield* realPath(input.launchedAs);
@@ -916,6 +1019,7 @@ export const writePosixLauncher = Effect.fn("cloud.pinned_runtime.write_posix_la
     readonly executable: string;
     /** Fail instead of replacing a file that is there, even one created after the caller looked. */
     readonly exclusive: boolean;
+    readonly exportLine?: string | undefined;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -923,7 +1027,7 @@ export const writePosixLauncher = Effect.fn("cloud.pinned_runtime.write_posix_la
       directory: path.dirname(input.launcher),
       prefix: ".t3-",
     });
-    yield* fs.writeFileString(staging, posixLauncherScript(input.executable));
+    yield* fs.writeFileString(staging, posixLauncherScript(input.executable, input.exportLine));
     yield* fs.chmod(staging, 0o755);
     yield* input.exclusive ? fs.link(staging, input.launcher) : fs.rename(staging, input.launcher);
   },

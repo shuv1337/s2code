@@ -426,31 +426,46 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
     }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 
-  // regression: #478 background self-update must repoint <baseDir>/bin/shuv2code while keeping ~/.local/bin symlinks
+  // regression: #478 background self-update must repoint 3-line <baseDir>/bin/shuv2code wrapper while preserving export S2CODE_HOME and ~/.local/bin symlinks
   it.effect(
-    "repoints <baseDir>/bin/shuv2code, preserves ~/.local/bin symlinks, and adopts them into runtime/launchers",
+    "repoints the 3-line legacy <baseDir>/bin/shuv2code wrapper, preserves S2CODE_HOME and ~/.local/bin symlinks, and adopts them into runtime/launchers",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-issue478-" });
         const baseDir = path.join(root, ".shuv2code-v2-nightly");
-        const oldVersion = "0.1.11-nightly.20261121.143";
+        const oldVersion = "0.1.7-nightly.20261107.112";
         const newVersion = "0.1.11-nightly.20261122.145";
+        const nextVersion = "0.1.11-nightly.20261123.146";
         const exe = (version: string) => path.join(baseDir, "runtime/versions", version, "t3");
-        for (const file of [exe(oldVersion), exe(newVersion)]) {
+        for (const file of [exe(oldVersion), exe(newVersion), exe(nextVersion)]) {
           yield* fs.makeDirectory(path.dirname(file), { recursive: true });
           yield* fs.writeFileString(file, "", { mode: 0o755 });
         }
         yield* fs.writeFileString(path.join(baseDir, "runtime/launchers"), "");
+        const exportLine =
+          'export S2CODE_HOME="${S2CODE_HOME:-${SHUV2CODE_HOME:-$HOME/.shuv2code-v2-nightly}}"';
+        const legacyWrapper = [
+          "#!/bin/sh",
+          exportLine,
+          `exec "$HOME/.shuv2code-v2-nightly/runtime/versions/${oldVersion}/t3" "$@"`,
+          "",
+        ].join("\n");
         const baseLauncher = path.join(baseDir, "bin/shuv2code");
+        const customMultiLine = [
+          "#!/bin/sh",
+          'export PATH="/custom:$PATH"',
+          `exec '${exe(oldVersion)}' "$@"`,
+          "",
+        ].join("\n");
+        const customLauncher = path.join(baseDir, "bin/s2c");
         const localBin = path.join(root, ".local/bin");
         const legacyAlias = path.join(localBin, "shuv2code");
         const canonicalAlias = path.join(localBin, "s2code");
         yield* fs.makeDirectory(path.dirname(baseLauncher), { recursive: true });
-        yield* fs.writeFileString(baseLauncher, posixLauncherScript(exe(oldVersion)), {
-          mode: 0o755,
-        });
+        yield* fs.writeFileString(baseLauncher, legacyWrapper, { mode: 0o755 });
+        yield* fs.writeFileString(customLauncher, customMultiLine, { mode: 0o755 });
         yield* fs.makeDirectory(localBin, { recursive: true });
         yield* fs.symlink(baseLauncher, legacyAlias);
         yield* fs.symlink(baseLauncher, canonicalAlias);
@@ -465,13 +480,86 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
           }),
         );
 
-        assert.equal(yield* fs.readFileString(baseLauncher), posixLauncherScript(exe(newVersion)));
+        assert.equal(
+          yield* fs.readFileString(baseLauncher),
+          posixLauncherScript(exe(newVersion), exportLine),
+        );
+        assert.equal(yield* fs.readFileString(customLauncher), customMultiLine);
         assert.equal(yield* fs.readLink(legacyAlias), baseLauncher);
         assert.equal(yield* fs.readLink(canonicalAlias), baseLauncher);
         const recorded = yield* readPinnedRuntimeLaunchers(baseDir);
         assert.include(recorded, baseLauncher);
         assert.include(recorded, legacyAlias);
         assert.include(recorded, canonicalAlias);
+        assert.notInclude(recorded, customLauncher);
+
+        // Subsequent self-update keeps the preserved export line and moves to the next version.
+        yield* ServiceLauncherClient.repointLaunchers({
+          baseDir,
+          targetVersion: nextVersion,
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            HOME: root,
+            PATH: "",
+          }),
+        );
+        assert.equal(
+          yield* fs.readFileString(baseLauncher),
+          posixLauncherScript(exe(nextVersion), exportLine),
+        );
+      }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
+  it.effect(
+    "refuses launchers whose target inside runtime/versions resolves to a foreign home",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-symlink-escape-" });
+        const baseDir = path.join(root, ".s2code");
+        const foreignBaseDir = path.join(root, ".other-s2code");
+        const targetExe = path.join(baseDir, "runtime/versions/2.0.0/t3");
+        const foreignDir = path.join(foreignBaseDir, "runtime/versions/1.0.0");
+        const foreignExe = path.join(foreignDir, "t3");
+        for (const file of [targetExe, foreignExe]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+          yield* fs.writeFileString(file, "", { mode: 0o755 });
+        }
+        // Symlinked version dir and symlinked version executable escaping into a foreign home.
+        const escapedDir = path.join(baseDir, "runtime/versions/old");
+        const escapedDirExe = path.join(escapedDir, "t3");
+        yield* fs.symlink(foreignDir, escapedDir);
+        const escapedFileDir = path.join(baseDir, "runtime/versions/old-file");
+        const escapedFileExe = path.join(escapedFileDir, "t3");
+        yield* fs.makeDirectory(escapedFileDir, { recursive: true });
+        yield* fs.symlink(foreignExe, escapedFileExe);
+
+        const localBin = path.join(root, ".local/bin");
+        yield* fs.makeDirectory(localBin, { recursive: true });
+        const linkToEscapedDir = path.join(localBin, "t3");
+        const linkToEscapedFile = path.join(localBin, "s2c");
+        const scriptToEscapedDir = path.join(baseDir, "bin/shuv2code");
+        yield* fs.makeDirectory(path.dirname(scriptToEscapedDir), { recursive: true });
+        yield* fs.symlink(escapedDirExe, linkToEscapedDir);
+        yield* fs.symlink(escapedFileExe, linkToEscapedFile);
+        const scriptBody = posixLauncherScript(escapedDirExe);
+        yield* fs.writeFileString(scriptToEscapedDir, scriptBody, { mode: 0o755 });
+
+        yield* ServiceLauncherClient.repointLaunchers({
+          baseDir,
+          targetVersion: "2.0.0",
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            HOME: root,
+            PATH: localBin,
+          }),
+        );
+
+        assert.equal(yield* fs.readLink(linkToEscapedDir), escapedDirExe);
+        assert.equal(yield* fs.readLink(linkToEscapedFile), escapedFileExe);
+        assert.equal(yield* fs.readFileString(scriptToEscapedDir), scriptBody);
+        assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
       }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 

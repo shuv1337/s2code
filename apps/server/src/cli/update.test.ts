@@ -663,9 +663,9 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
   );
 
-  // regression: #478 manual `s2code update` must also repoint <baseDir>/bin/shuv2code with empty runtime/launchers
+  // regression: #478 manual `s2code update` must also repoint the 3-line <baseDir>/bin/shuv2code wrapper with empty runtime/launchers
   it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "repoints <baseDir>/bin/shuv2code via executable or ~/.local/bin symlink while preserving aliases",
+    "repoints the 3-line legacy <baseDir>/bin/shuv2code wrapper via executable or ~/.local/bin symlink while preserving S2CODE_HOME and adopting aliases",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -674,7 +674,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
           yield* fs.makeTempDirectoryScoped({ prefix: "s2code-issue478-update-" }),
         );
         const baseDir = path.join(root, ".shuv2code-v2-nightly");
-        const oldVersion = "0.1.11-nightly.20261121.143";
+        const oldVersion = "0.1.7-nightly.20261107.112";
         const midVersion = "0.1.11-nightly.20261122.145";
         const newVersion = "0.1.11-nightly.20261123.146";
         const entry = (version: string) => path.join(baseDir, "runtime/versions", version, "t3");
@@ -682,14 +682,20 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
           yield* fs.makeDirectory(path.dirname(entry(version)), { recursive: true });
           yield* fs.writeFileString(entry(version), "", { mode: 0o755 });
         }
+        const exportLine =
+          'export S2CODE_HOME="${S2CODE_HOME:-${SHUV2CODE_HOME:-$HOME/.shuv2code-v2-nightly}}"';
+        const legacyWrapper = [
+          "#!/bin/sh",
+          exportLine,
+          `exec "$HOME/.shuv2code-v2-nightly/runtime/versions/${oldVersion}/t3" "$@"`,
+          "",
+        ].join("\n");
         const baseLauncher = path.join(baseDir, "bin/shuv2code");
         const localBin = path.join(root, ".local/bin");
         const legacyAlias = path.join(localBin, "shuv2code");
         const canonicalAlias = path.join(localBin, "s2code");
         yield* fs.makeDirectory(path.dirname(baseLauncher), { recursive: true });
-        yield* fs.writeFileString(baseLauncher, posixLauncherScript(entry(oldVersion)), {
-          mode: 0o755,
-        });
+        yield* fs.writeFileString(baseLauncher, legacyWrapper, { mode: 0o755 });
         yield* fs.makeDirectory(localBin, { recursive: true });
         yield* fs.symlink(baseLauncher, legacyAlias);
         yield* fs.symlink(baseLauncher, canonicalAlias);
@@ -701,17 +707,20 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
           baseDir,
           targetEntryPath: entry(midVersion),
         }).pipe(
-          Effect.provideService(HostProcess.Environment, { PATH: "" }),
+          Effect.provideService(HostProcess.Environment, { HOME: root, PATH: "" }),
           Effect.provideService(HostProcess.HomeDirectory, root),
         );
         assert.equal(Option.getOrUndefined(viaExec), baseLauncher);
         assert.equal(
           yield* fs.readFileString(baseLauncher),
-          posixLauncherScript(entry(midVersion)),
+          posixLauncherScript(entry(midVersion), exportLine),
         );
         assert.equal(yield* fs.readLink(canonicalAlias), baseLauncher);
         assert.equal(yield* fs.readLink(legacyAlias), baseLauncher);
-        assert.include(yield* readPinnedRuntimeLaunchers(baseDir), baseLauncher);
+        const recordedAfterExec = yield* readPinnedRuntimeLaunchers(baseDir);
+        assert.include(recordedAfterExec, baseLauncher);
+        assert.include(recordedAfterExec, canonicalAlias);
+        assert.include(recordedAfterExec, legacyAlias);
 
         // Started with launchedAs set to the ~/.local/bin/s2code symlink pointing at <baseDir>/bin/shuv2code.
         const viaSymlink = yield* repointLauncher({
@@ -720,20 +729,91 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
           baseDir,
           targetEntryPath: entry(newVersion),
         }).pipe(
-          Effect.provideService(HostProcess.Environment, { PATH: "" }),
+          Effect.provideService(HostProcess.Environment, { HOME: root, PATH: "" }),
           Effect.provideService(HostProcess.HomeDirectory, root),
         );
         assert.equal(Option.getOrUndefined(viaSymlink), baseLauncher);
         assert.equal(
           yield* fs.readFileString(baseLauncher),
-          posixLauncherScript(entry(newVersion)),
+          posixLauncherScript(entry(newVersion), exportLine),
         );
         assert.equal(yield* fs.readLink(canonicalAlias), baseLauncher);
         assert.equal(yield* fs.readLink(legacyAlias), baseLauncher);
         const recorded = yield* readPinnedRuntimeLaunchers(baseDir);
         assert.include(recorded, baseLauncher);
         assert.include(recorded, canonicalAlias);
+        assert.include(recorded, legacyAlias);
       }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
+  it.effect(
+    "leaves a custom Windows .cmd wrapper mentioning the running executable untouched",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-custom-cmd-" });
+        const version = "1.2.3-nightly.20261014.1";
+        const oldExe = path.join(root, "runtime", "versions", version, "t3.exe");
+        const newExe = path.join(root, "runtime", "versions", "1.2.3-nightly.20261015.2", "t3.exe");
+        for (const file of [oldExe, newExe]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+          yield* fs.writeFileString(file, "");
+        }
+        const bin = path.join(root, "bin");
+        yield* fs.makeDirectory(bin, { recursive: true });
+        const customWrapper = [
+          "@echo off",
+          `rem wrapper for "${oldExe}"`,
+          "set MY_CUSTOM_FLAG=1",
+          `"${oldExe}" %*`,
+        ].join("\r\n");
+        const shim = path.join(bin, "s2code-nightly.cmd");
+        yield* fs.writeFileString(shim, customWrapper);
+
+        assert.isUndefined(yield* readLauncherTarget(shim, version));
+        const repointed = yield* repointLauncher({
+          currentVersion: version,
+          launchedAs: oldExe,
+          baseDir: root,
+          targetEntryPath: newExe,
+        }).pipe(Effect.provideService(HostProcess.Environment, { T3CODE_INSTALL_BIN_DIR: bin }));
+
+        assert.equal(repointed._tag, "None");
+        assert.equal(yield* fs.readFileString(shim), customWrapper);
+      }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "win32")),
+  );
+
+  it.effect(
+    "discovers and repoints legacy <baseDir>/bin/shuv2code.cmd on nightly with empty runtime/launchers",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-win-legacy-nightly-" });
+        const version = "0.1.11-nightly.20261121.143";
+        const nextVersion = "0.1.11-nightly.20261122.145";
+        const oldExe = path.join(root, "runtime", "versions", version, "t3.exe");
+        const newExe = path.join(root, "runtime", "versions", nextVersion, "t3.exe");
+        for (const file of [oldExe, newExe]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+          yield* fs.writeFileString(file, "");
+        }
+        const legacyBinShim = path.join(root, "bin", "shuv2code.cmd");
+        yield* fs.makeDirectory(path.dirname(legacyBinShim), { recursive: true });
+        yield* fs.writeFileString(legacyBinShim, `@echo off\r\n"${oldExe}" %*`);
+
+        const repointed = yield* repointLauncher({
+          currentVersion: version,
+          launchedAs: oldExe,
+          baseDir: root,
+          targetEntryPath: newExe,
+        }).pipe(Effect.provideService(HostProcess.Environment, { PATH: "" }));
+
+        assert.equal(Option.getOrUndefined(repointed), legacyBinShim);
+        assert.equal(yield* fs.readFileString(legacyBinShim), `@echo off\r\n"${newExe}" %*`);
+        assert.include(yield* readPinnedRuntimeLaunchers(root), legacyBinShim);
+      }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "win32")),
   );
 
   it.effect.each([

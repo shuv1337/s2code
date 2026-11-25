@@ -15,12 +15,13 @@ import packageJson from "../../package.json" with { type: "json" };
 import {
   generatedWindowsForwarderTarget,
   generatedWindowsShimTarget,
+  isOwnedVersionsTarget,
   launcherOwnsVersionsDir,
   ownedLauncherNames,
   pinnedRuntimePaths,
   pinnedRuntimeVersionsDir,
   readPinnedRuntimeLaunchers,
-  readPosixLauncherTarget,
+  readPosixLauncher,
   recordPinnedRuntimeLauncher,
   writePosixLauncher,
 } from "./pinnedRuntime.ts";
@@ -201,15 +202,6 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
       ? environment["USERPROFILE"]?.trim() || environment["HOME"]?.trim()
       : environment["HOME"]?.trim();
     if (homeDir) installBinDirs.add(path.join(homeDir, ".local", "bin"));
-    if (windows) {
-      const localAppData = environment["LOCALAPPDATA"]?.trim();
-      if (localAppData) {
-        installBinDirs.add(path.join(localAppData, "s2code", "bin"));
-        installBinDirs.add(path.join(localAppData, "shuv2code", "bin"));
-        installBinDirs.add(path.join(localAppData, "t3code", "bin"));
-        installBinDirs.add(path.join(localAppData, "Programs", "s2code"));
-      }
-    }
     for (const directory of installBinDirs) {
       for (const name of launcherNames) {
         addCandidate(path.join(directory, name));
@@ -263,11 +255,8 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
       launcherOwnsVersionsDir(path, versionsDir, candidate, platform) ||
       launcherOwnsVersionsDir(path, realVersionsDir, candidate, platform);
     // Untraced helpers inside the `repoint_launchers` span.
-    const ownsTarget = Effect.fnUntraced(function* (candidate: string) {
-      if (inVersionsDir(candidate)) return true;
-      const resolved = yield* fs.realPath(candidate).pipe(Effect.orElseSucceed(() => undefined));
-      return resolved !== undefined && inVersionsDir(resolved);
-    });
+    const ownsTarget = (candidate: string) =>
+      isOwnedVersionsTarget({ versionsDir, realVersionsDir, candidate, platform });
     const readSmallFile = Effect.fnUntraced(function* (file: string) {
       const info = yield* fs.stat(file).pipe(Effect.option);
       if (Option.isNone(info) || info.value.type !== "File" || info.value.size > 4096n) {
@@ -332,19 +321,24 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
               break;
             }
             const next = path.resolve(path.dirname(cursor), linkTarget.value);
-            if (inVersionsDir(next)) {
+            const nextIsLink = Option.isSome(yield* readLinkOption(next));
+            if (nextIsLink) {
+              if (inVersionsDir(next)) {
+                // Never walk into runtime/versions to rewrite a link there; verify resolved ownership.
+                if (yield* ownsTarget(next)) {
+                  directLegacyLink = cursor;
+                  exhausted = false;
+                  break;
+                }
+                return;
+              }
+              cursor = next;
+              continue;
+            }
+            if (yield* ownsTarget(next)) {
               directLegacyLink = cursor;
               exhausted = false;
               break;
-            }
-            // Handle a symlinked home directory: if `next` itself is not a symlink, check its realPath.
-            if (Option.isNone(yield* readLinkOption(next))) {
-              const realNext = yield* fs.realPath(next).pipe(Effect.orElseSucceed(() => undefined));
-              if (realNext !== undefined && inVersionsDir(realNext)) {
-                directLegacyLink = cursor;
-                exhausted = false;
-                break;
-              }
             }
             cursor = next;
           }
@@ -366,13 +360,14 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
             return;
           }
 
-          const scriptTarget = yield* readPosixLauncherTarget(cursor);
-          if (scriptTarget === undefined || !(yield* ownsTarget(scriptTarget))) return;
-          if (normalizePath(scriptTarget) !== normalizePath(target.entryPath)) {
+          const parsedScript = yield* readPosixLauncher(cursor);
+          if (parsedScript === undefined || !(yield* ownsTarget(parsedScript.target))) return;
+          if (normalizePath(parsedScript.target) !== normalizePath(target.entryPath)) {
             yield* writePosixLauncher({
               launcher: cursor,
               executable: target.entryPath,
               exclusive: false,
+              exportLine: parsedScript.exportLine,
             });
           }
           yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: cursor });
