@@ -756,6 +756,8 @@ function splitAbsoluteRoot(
     }
   | undefined {
   if (windows) {
+    const isInvalidUncComponent = (server: string, share: string) =>
+      server === "." || server === ".." || server === "?" || share === "." || share === "..";
     if (raw.startsWith("\\\\?\\")) {
       const restAfterPrefix = raw.slice(4);
       if (/^[a-zA-Z]:\\/.test(restAfterPrefix)) {
@@ -772,20 +774,25 @@ function splitAbsoluteRoot(
       }
       const verbatimUnc = /^UNC\\([^\\]+)\\([^\\]+)(?:\\|$)/i.exec(restAfterPrefix);
       if (verbatimUnc !== null) {
+        const server = verbatimUnc[1]!;
+        const share = verbatimUnc[2]!;
+        if (isInvalidUncComponent(server, share)) return undefined;
         const rest = restAfterPrefix.slice(verbatimUnc[0].length);
         const rawSegments = rest.length === 0 ? [] : rest.split("\\");
         if (rawSegments.some((segment) => segment === "." || segment === "..")) {
           return undefined;
         }
         return {
-          root: `${sep}${sep}${verbatimUnc[1]}${sep}${verbatimUnc[2]}${sep}`,
+          root: `${sep}${sep}${server}${sep}${share}${sep}`,
           segments: rawSegments,
           trailingSlash: rest.length > 0 && restAfterPrefix.endsWith("\\"),
         };
       }
       return undefined;
     }
-    if (raw.startsWith("\\\\.\\")) return undefined;
+    if (raw.startsWith("\\\\.\\") || raw.startsWith("//?/") || raw.startsWith("//./")) {
+      return undefined;
+    }
     if (/^[a-zA-Z]:[\\/]/.test(raw)) {
       const rest = raw.slice(3);
       const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
@@ -797,10 +804,13 @@ function splitAbsoluteRoot(
     }
     const unc = /^(?:\\\\|\/\/)([^\\/]+)[\\/]([^\\/]+)(?:[\\/]|$)/.exec(raw);
     if (unc !== null) {
+      const server = unc[1]!;
+      const share = unc[2]!;
+      if (isInvalidUncComponent(server, share)) return undefined;
       const rest = raw.slice(unc[0].length);
       const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
       return {
-        root: `${sep}${sep}${unc[1]}${sep}${unc[2]}${sep}`,
+        root: `${sep}${sep}${server}${sep}${share}${sep}`,
         segments: collapseWin32Segments(rawSegments),
         trailingSlash: rest.length > 0 && /[\\/]$/.test(raw),
       };

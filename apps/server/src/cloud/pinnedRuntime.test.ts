@@ -1170,6 +1170,30 @@ it.layer(NodeServices.layer)("launcher lookup on PATH", (it) => {
             platform: "win32",
           }),
         );
+        assert.isUndefined(
+          yield* canonicalizeLauncherPath({
+            target: "\\\\?\\UNC\\.\\share\\versions\\t3",
+            platform: "win32",
+          }),
+        );
+        assert.isUndefined(
+          yield* canonicalizeLauncherPath({
+            target: "\\\\?\\UNC\\server\\..\\versions\\t3",
+            platform: "win32",
+          }),
+        );
+        assert.isUndefined(
+          yield* canonicalizeLauncherPath({
+            target: "//?/C:/s2code/runtime/versions/1.0.0/t3.exe",
+            platform: "win32",
+          }),
+        );
+        assert.isUndefined(
+          yield* canonicalizeLauncherPath({
+            target: "//./C:/s2code/runtime/versions/1.0.0/t3.exe",
+            platform: "win32",
+          }),
+        );
         assert.isTrue(
           yield* isOwnedVersionsTarget({
             versionsDir,
