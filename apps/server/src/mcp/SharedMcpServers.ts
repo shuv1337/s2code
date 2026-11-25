@@ -445,10 +445,7 @@ const proxy = Effect.gen(function* () {
     ? Effect.timeoutOption(Effect.scoped(sent), PROMPT_TIMEOUT)
     : Effect.asSome(sent);
   return Option.getOrElse(outcome, () =>
-    HttpServerResponse.setStatus(
-      unavailable(body, 504, `${label} did not answer within ${PROMPT_TIMEOUT}.`),
-      504,
-    ),
+    unavailable(body, 504, `${label} did not answer within ${PROMPT_TIMEOUT}.`),
   );
 }).pipe(Effect.withSpan("SharedMcpServers.proxy"));
 

@@ -1098,7 +1098,7 @@ it.effect("times out discovery when the upstream sends headers but stalls the bo
     expect(pending.pollUnsafe()).toBeUndefined();
     yield* TestClock.adjust("1 second");
     const response = yield* Fiber.join(pending);
-    expect(response.status).toBe(504);
+    expect(response.status).toBe(200);
     expect(yield* response.json).toMatchObject({
       id: 1,
       error: { code: -32000, message: "Stalled discovery did not answer within 5 seconds." },
