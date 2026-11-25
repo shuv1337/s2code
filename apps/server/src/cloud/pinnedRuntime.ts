@@ -756,28 +756,53 @@ function splitAbsoluteRoot(
     }
   | undefined {
   if (windows) {
-    const isVerbatim = raw.startsWith("\\\\?\\") && /^[a-zA-Z]:[\\/]/.test(raw.slice(4));
-    const unwrapped = isVerbatim ? raw.slice(4) : raw;
-    if (/^[a-zA-Z]:[\\/]/.test(unwrapped)) {
-      const rest = unwrapped.slice(3);
-      const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
-      if (isVerbatim && rawSegments.some((segment) => segment === "." || segment === "..")) {
-        return undefined;
+    if (raw.startsWith("\\\\?\\")) {
+      const restAfterPrefix = raw.slice(4);
+      if (/^[a-zA-Z]:\\/.test(restAfterPrefix)) {
+        const rest = restAfterPrefix.slice(3);
+        const rawSegments = rest.length === 0 ? [] : rest.split("\\");
+        if (rawSegments.some((segment) => segment === "." || segment === "..")) {
+          return undefined;
+        }
+        return {
+          root: `${restAfterPrefix.slice(0, 2)}${sep}`,
+          segments: rawSegments,
+          trailingSlash: rest.length > 0 && restAfterPrefix.endsWith("\\"),
+        };
       }
+      const verbatimUnc = /^UNC\\([^\\]+)\\([^\\]+)(?:\\|$)/i.exec(restAfterPrefix);
+      if (verbatimUnc !== null) {
+        const rest = restAfterPrefix.slice(verbatimUnc[0].length);
+        const rawSegments = rest.length === 0 ? [] : rest.split("\\");
+        if (rawSegments.some((segment) => segment === "." || segment === "..")) {
+          return undefined;
+        }
+        return {
+          root: `${sep}${sep}${verbatimUnc[1]}${sep}${verbatimUnc[2]}${sep}`,
+          segments: rawSegments,
+          trailingSlash: rest.length > 0 && restAfterPrefix.endsWith("\\"),
+        };
+      }
+      return undefined;
+    }
+    if (raw.startsWith("\\\\.\\")) return undefined;
+    if (/^[a-zA-Z]:[\\/]/.test(raw)) {
+      const rest = raw.slice(3);
+      const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
       return {
-        root: `${unwrapped.slice(0, 2)}${sep}`,
-        segments: isVerbatim ? rawSegments : collapseWin32Segments(rawSegments),
-        trailingSlash: rest.length > 0 && /[\\/]$/.test(unwrapped),
+        root: `${raw.slice(0, 2)}${sep}`,
+        segments: collapseWin32Segments(rawSegments),
+        trailingSlash: rest.length > 0 && /[\\/]$/.test(raw),
       };
     }
-    const unc = /^(?:\\\\|\/\/)([^\\/]+)[\\/]([^\\/]+)(?:[\\/]|$)/.exec(unwrapped);
+    const unc = /^(?:\\\\|\/\/)([^\\/]+)[\\/]([^\\/]+)(?:[\\/]|$)/.exec(raw);
     if (unc !== null) {
-      const rest = unwrapped.slice(unc[0].length);
+      const rest = raw.slice(unc[0].length);
       const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
       return {
         root: `${sep}${sep}${unc[1]}${sep}${unc[2]}${sep}`,
         segments: collapseWin32Segments(rawSegments),
-        trailingSlash: rest.length > 0 && /[\\/]$/.test(unwrapped),
+        trailingSlash: rest.length > 0 && /[\\/]$/.test(raw),
       };
     }
   }
@@ -918,7 +943,6 @@ export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_ve
     readonly platform: NodeJS.Platform;
   }) {
     const path = yield* Path.Path;
-    if (!path.isAbsolute(input.candidate)) return false;
     const canonicalVersionsDir = yield* canonicalizeLauncherPath({
       target: input.realVersionsDir,
       platform: input.platform,

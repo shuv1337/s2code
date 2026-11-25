@@ -21,6 +21,7 @@ import packageJson from "../../package.json" with { type: "json" };
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
+  canonicalizeLauncherPath,
   findPosixLauncher,
   isOwnedVersionsTarget,
   isVersionExecutable,
@@ -1142,11 +1143,30 @@ it.layer(NodeServices.layer)("launcher lookup on PATH", (it) => {
             platform: "win32",
           }),
         );
-        assert.isFalse(
-          yield* isOwnedVersionsTarget({
-            versionsDir: "C:\\s2code\\runtime\\versions",
-            realVersionsDir: "C:\\s2code\\runtime\\versions",
-            candidate: "\\\\?\\C:\\s2code\\runtime\\versions\\..\\versions\\1.0.0\\t3.exe",
+        // Exercise canonicalizeLauncherPath directly on verbatim Win32 drive & UNC paths (with and without `..`).
+        assert.equal(
+          yield* canonicalizeLauncherPath({
+            target: "\\\\?\\C:\\s2code\\runtime\\versions\\1.0.0\\t3.exe",
+            platform: "win32",
+          }),
+          ["C:", "s2code", "runtime", "versions", "1.0.0", "t3.exe"].join(path.sep),
+        );
+        assert.isUndefined(
+          yield* canonicalizeLauncherPath({
+            target: "\\\\?\\C:\\s2code\\runtime\\versions\\..\\versions\\1.0.0\\t3.exe",
+            platform: "win32",
+          }),
+        );
+        assert.equal(
+          yield* canonicalizeLauncherPath({
+            target: "\\\\?\\UNC\\server\\share\\runtime\\versions\\1.0.0\\t3.exe",
+            platform: "win32",
+          }),
+          `${path.sep}${path.sep}${["server", "share", "runtime", "versions", "1.0.0", "t3.exe"].join(path.sep)}`,
+        );
+        assert.isUndefined(
+          yield* canonicalizeLauncherPath({
+            target: "\\\\?\\UNC\\server\\share\\runtime\\versions\\..\\versions\\1.0.0\\t3.exe",
             platform: "win32",
           }),
         );
