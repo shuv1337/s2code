@@ -152,7 +152,8 @@ interface Received {
 const upstream = (
   received: Array<Received>,
   hung: Queue.Queue<string>,
-  subscriptionClosed: Deferred.Deferred<void>,
+  upstreamStreamClosed: Deferred.Deferred<void>,
+  releaseStalledBody: Deferred.Deferred<void>,
 ) =>
   HttpRouter.add(
     "*",
@@ -164,6 +165,17 @@ const upstream = (
       received.push({ method: request.method, path, headers: request.headers, body });
       if (path === "/upstream/hang")
         return yield* Queue.offer(hung, body).pipe(Effect.andThen(Effect.never));
+      if (path === "/upstream/stall-body") {
+        return HttpServerResponse.stream(
+          Stream.succeed("{").pipe(
+            Stream.concat(Stream.fromEffect(Queue.offer(hung, body)).pipe(Stream.drain)),
+            Stream.concat(Stream.fromEffect(Deferred.await(releaseStalledBody)).pipe(Stream.drain)),
+            Stream.encodeText,
+            Stream.ensuring(Deferred.succeed(upstreamStreamClosed, undefined)),
+          ),
+          { contentType: "application/json" },
+        );
+      }
       if (path === "/upstream/moved") {
         return HttpServerResponse.empty({ status: 302, headers: { location: "/upstream/mcp" } });
       }
@@ -232,7 +244,7 @@ const upstream = (
             return HttpServerResponse.stream(
               Stream.concat(Stream.succeed(SKILL_CHANGED), Stream.never).pipe(
                 Stream.encodeText,
-                Stream.ensuring(Deferred.succeed(subscriptionClosed, undefined)),
+                Stream.ensuring(Deferred.succeed(upstreamStreamClosed, undefined)),
               ),
               { contentType: "text/event-stream" },
             );
@@ -286,7 +298,8 @@ const makeFixture = (
     const received: Array<Received> = [];
     let bearerTokenReads = 0;
     const hung = yield* Queue.unbounded<string>();
-    const subscriptionClosed = yield* Deferred.make<void>();
+    const upstreamStreamClosed = yield* Deferred.make<void>();
+    const releaseStalledBody = yield* Deferred.make<void>();
     const settings = yield* Ref.make<ServerSettings>(DEFAULT_SERVER_SETTINGS);
     const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
     let streamSubscriptions = 0;
@@ -330,7 +343,7 @@ const makeFixture = (
         HttpRouter.serve(
           Layer.mergeAll(
             SharedMcpServers.layerProxyRoute,
-            upstream(received, hung, subscriptionClosed),
+            upstream(received, hung, upstreamStreamClosed, releaseStalledBody),
             options.realSkills === true ? realSkillsUpstream : Layer.empty,
             HttpRouter.add("*", "/mcp", HttpServerResponse.text("orchestration")),
           ),
@@ -369,6 +382,7 @@ const makeFixture = (
         offline: server("http://127.0.0.1:1/mcp", { label: "Offline" }),
         paused: server(`${origin}/upstream/mcp`, { enabled: false }),
         hang: server(`${origin}/upstream/hang`, { label: "Hang" }),
+        "stall-body": server(`${origin}/upstream/stall-body`, { label: "Stalled discovery" }),
         skills: server(`${origin}/upstream/skills`, { label: "Skills" }),
         "effect-skills": server(`${origin}/effect-skills`),
         local: {
@@ -426,7 +440,8 @@ const makeFixture = (
       received,
       bearerTokenReads: () => bearerTokenReads,
       hung,
-      subscriptionClosed,
+      upstreamStreamClosed,
+      releaseStalledBody,
       runtimeMode,
       threadPlacement,
       saveMcpServers,
@@ -570,11 +585,12 @@ it.effect(
             ...asAgent,
             ...headers,
             "Mcp-Param-X": "opaque",
+            "Mcp-Param-Project_Id": "fixture-project",
+            "Mcp-Param-Region.Code": "test-region",
             cookie: "t3_session=browser-secret",
             "x-forwarded-for": "203.0.113.9",
             origin: "https://agent.example",
             "mcp-param-": "not-a-parameter",
-            "mcp-param-bad_name": "not-a-parameter",
           },
         });
         expect(response.status).toBe(200);
@@ -587,16 +603,12 @@ it.effect(
           headers: {
             ...headers,
             "mcp-param-x": "opaque",
+            "mcp-param-project_id": "fixture-project",
+            "mcp-param-region.code": "test-region",
             authorization: `Bearer ${UPSTREAM_TOKEN}`,
           },
         });
-        for (const stripped of [
-          "cookie",
-          "x-forwarded-for",
-          "origin",
-          "mcp-param-",
-          "mcp-param-bad_name",
-        ]) {
+        for (const stripped of ["cookie", "x-forwarded-for", "origin", "mcp-param-"]) {
           expect(received.at(-1)?.headers).not.toHaveProperty(stripped);
         }
       }
@@ -652,7 +664,7 @@ it.effect("discovers and reads skills against Effect's strict modern HTTP transp
 
 it.effect("relays skill catalog changes on a subscription until the caller disconnects", () =>
   Effect.gen(function* () {
-    const { call, subscriptionClosed } = yield* fixture;
+    const { call, upstreamStreamClosed } = yield* fixture;
     const method = "subscriptions/listen";
     const response = yield* call("/mcp/servers/skills", {
       body: modernRpc(method),
@@ -668,7 +680,7 @@ it.effect("relays skill catalog changes on a subscription until the caller disco
         Stream.runCollect,
       ),
     ).toEqual(SKILL_CHANGED.trimEnd().split("\n").concat(""));
-    yield* Deferred.await(subscriptionClosed);
+    yield* Deferred.await(upstreamStreamClosed);
   }),
 );
 
@@ -741,7 +753,7 @@ it.effect.each(
 it.effect("offers and runs shared tools only for threads in full access", () =>
   Effect.gen(function* () {
     const { call, received, runtimeMode } = yield* fixture;
-    const send = (body: unknown, headers = asAgent) =>
+    const send = (body: unknown, headers: Record<string, string> = asAgent) =>
       call("/mcp/servers/skills", { body, headers }).pipe(
         Effect.flatMap((response) => response.json),
       );
@@ -759,10 +771,19 @@ it.effect("offers and runs shared tools only for threads in full access", () =>
     for (const mode of ["approval-required", "auto-accept-edits", "auto"] as const) {
       yield* Ref.set(runtimeMode, mode);
       expect(
-        yield* send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} }),
+        yield* send(rpc("initialize", {}, 0), {
+          ...asAgent,
+          "Mcp-Method": "tools/call",
+          "Mcp-Name": "danger",
+          "Mcp-Param-Id": "1",
+        }),
       ).toMatchObject({
         result: { capabilities: SKILL_CAPABILITIES, serverInfo: { name: "Fixture" } },
       });
+      expect(received.at(-1)?.headers.authorization).toBe(`Bearer ${UPSTREAM_TOKEN}`);
+      for (const stripped of ["mcp-method", "mcp-name", "mcp-param-id"]) {
+        expect(received.at(-1)?.headers).not.toHaveProperty(stripped);
+      }
       const requestsBeforeListing = received.length;
       for (const [method, field] of Object.entries({
         "tools/list": "tools",
@@ -1058,6 +1079,31 @@ it.effect("gives a hung server a deadline only where harnesses wait to start", (
     const pending = [...onDemand, getStream];
     expect(pending.every((fiber) => fiber.pollUnsafe() === undefined)).toBe(true);
     yield* Fiber.interruptAll(pending);
+  }),
+);
+
+it.effect("times out discovery when the upstream sends headers but stalls the body", () =>
+  Effect.gen(function* () {
+    const { call, hung, upstreamStreamClosed, releaseStalledBody } = yield* fixture;
+    yield* Effect.addFinalizer(() => Deferred.succeed(releaseStalledBody, undefined));
+    const method = "server/discover";
+    const body = modernRpc(method);
+    const pending = yield* call("/mcp/servers/stall-body", {
+      body,
+      headers: { ...asAgent, ...modernHeaders(method) },
+    }).pipe(Effect.forkChild);
+
+    expect(yield* Queue.take(hung)).toBe(JSON.stringify(body));
+    yield* TestClock.adjust("4 seconds");
+    expect(pending.pollUnsafe()).toBeUndefined();
+    yield* TestClock.adjust("1 second");
+    const response = yield* Fiber.join(pending);
+    expect(response.status).toBe(504);
+    expect(yield* response.json).toMatchObject({
+      id: 1,
+      error: { code: -32000, message: "Stalled discovery did not answer within 5 seconds." },
+    });
+    yield* Deferred.await(upstreamStreamClosed);
   }),
 );
 

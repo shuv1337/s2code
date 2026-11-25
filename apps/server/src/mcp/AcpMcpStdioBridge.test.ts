@@ -171,38 +171,28 @@ describe("AcpMcpStdioBridge", () => {
 
   it.effect("relays legacy skills requests and results over the initialized session", () =>
     Effect.gen(function* () {
-      const extension = "io.modelcontextprotocol/skills";
       const uri = "skill://fixture/example/SKILL.md";
       const initialize =
         '{ "jsonrpc":"2.0", "id":"init", "method":"initialize", "params":{"protocolVersion":"2025-06-18","capabilities":{"extensions":{"io.modelcontextprotocol/skills":{}}},"clientInfo":{"name":"fixture-client","version":"1"}} }';
       const list = '{ "jsonrpc":"2.0", "id":"list", "method":"skills/list" }';
       const read = `{ "jsonrpc":"2.0", "id":"read", "method":"resources/read", "params":{"uri":"${uri}"} }`;
-      const results = {
-        init: {
-          protocolVersion: "2025-06-18",
-          capabilities: { resources: {}, extensions: { [extension]: { directoryRead: true } } },
-        },
-        list: {
-          skills: [
-            {
-              uri,
-              frontmatter: { name: "example", description: "An example skill" },
-              resources: "dynamic",
-            },
-          ],
-        },
-        read: { contents: [{ uri, mimeType: "text/markdown", text: "Use café.\r\n" }] },
+      const replies = {
+        init: '{"jsonrpc":"2.0","id":"init","result":{"protocolVersion":"2025-06-18","capabilities":{"resources":{},"extensions":{"io.modelcontextprotocol/skills":{"directoryRead":true}}}}}',
+        list: `{"jsonrpc":"2.0","id":"list","result":{"skills":[{"uri":"${uri}","frontmatter":{"name":"example","description":"An example skill"},"resources":"dynamic"}]}}`,
+        read: String.raw`{"jsonrpc":"2.0","id":"read","result":{"contents":[{"uri":"${uri}","mimeType":"text/markdown","text":"Use café.\r\n"}]}}`,
       };
       const { input, written, requests, bridge } = makeHarness(async (request) => {
-        const { id } = (await request.json()) as { id: keyof typeof results };
+        const { id } = (await request.json()) as { id: keyof typeof replies };
         if (id !== "init") {
           expect(request.headers.get("mcp-session-id")).toBe("skills-42");
           expect(request.headers.get("mcp-protocol-version")).toBe("2025-06-18");
         }
-        return Response.json(
-          { jsonrpc: "2.0", id, result: results[id] },
-          id === "init" ? { headers: { "mcp-session-id": "skills-42" } } : undefined,
-        );
+        return new Response(replies[id], {
+          headers: {
+            "content-type": "application/json",
+            ...(id === "init" ? { "mcp-session-id": "skills-42" } : {}),
+          },
+        });
       });
       const fiber = yield* Effect.forkChild(bridge);
       input.end(`${initialize}\n${list}\n${read}\n`);
@@ -216,8 +206,8 @@ describe("AcpMcpStdioBridge", () => {
           .toSorted(),
       ).toEqual([list, read].toSorted());
       expect(written.toSorted()).toEqual(
-        Object.entries(results)
-          .map(([id, result]) => `${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`)
+        Object.values(replies)
+          .map((line) => `${line}\n`)
           .toSorted(),
       );
     }),
