@@ -371,7 +371,7 @@ it.effect(
       const paddedRequiredUrl = yield* resolveMigrationPgClientConfig().pipe(
         provideEnv({
           RELAY_DATABASE_URL:
-            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=%20REQUIRE%20",
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=%20require%20",
         }),
       );
       assert.equal(paddedRequiredUrl.ssl, true);
@@ -409,6 +409,20 @@ it.effect(
           assert.isUndefined(ipTunnel.ssl.servername);
           assert.isFalse("servername" in ipTunnel.ssl);
           assert.isFunction(ipTunnel.ssl.checkServerIdentity);
+          type PeerCert = Parameters<NonNullable<typeof ipTunnel.ssl.checkServerIdentity>>[1];
+          const originIpCert = {
+            subject: { CN: "203.0.113.10" },
+            subjectaltname: "IP Address:203.0.113.10",
+          } as unknown as PeerCert;
+          const loopbackOnlyCert = {
+            subject: { CN: "127.0.0.1" },
+            subjectaltname: "IP Address:127.0.0.1",
+          } as unknown as PeerCert;
+          assert.isUndefined(ipTunnel.ssl.checkServerIdentity!("127.0.0.1", originIpCert));
+          assert.instanceOf(
+            ipTunnel.ssl.checkServerIdentity!("127.0.0.1", loopbackOnlyCert),
+            Error,
+          );
         }
       }
 
