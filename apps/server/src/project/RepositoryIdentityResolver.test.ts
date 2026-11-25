@@ -82,6 +82,32 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 
+  it.effect.each([
+    { label: "directly", rewrite: false },
+    { label: "via insteadOf", rewrite: true },
+  ])("identifies a bracketed IPv6 SCP remote $label", ({ rewrite }) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-ipv6-test-",
+      });
+      const ipv6Url = "[::1]:team/repo.git";
+      const configuredUrl = "https://github.com/old/project.git";
+      yield* git(cwd, ["init"]);
+      yield* git(cwd, ["remote", "add", "origin", rewrite ? configuredUrl : ipv6Url]);
+      if (rewrite) {
+        yield* git(cwd, ["config", `url.${ipv6Url}.insteadOf`, configuredUrl]);
+      }
+
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect(yield* resolver.resolve(cwd)).toMatchObject({
+        canonicalKey: "[::1]/team/repo",
+        displayName: "team/repo",
+        locator: { source: "git-remote", remoteName: "origin", remoteUrl: ipv6Url },
+      });
+    }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
   it.effect("keys a remote behind an SSH host alias by the host ssh config resolves it to", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
