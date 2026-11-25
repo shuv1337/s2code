@@ -60,6 +60,11 @@ is configured.
   managed tunnel allocations, and DPoP/activity state are lost: every linked
   host must relink, and previously provisioned Cloudflare tunnels and DNS
   records become orphaned until swept (see `vp run --filter t3code-relay tunnels:census`).
+- **First deploy on a new Cloudflare account:** The very first deploy on a fresh
+  Cloudflare account can fail with a transient Alchemy
+  `State store request failed (DecodeError, HTTP 404)` ~3 seconds after creating
+  the state store Worker while its route finishes propagating. Re-running the
+  deploy once resolves it.
 
 ## External Postgres migrations
 
@@ -113,7 +118,8 @@ Self-hosted Postgres mode (recommended for this fork; selected whenever `RELAY_D
   `RELAY_DB_USER`, optional `RELAY_DB_PORT` (public origin only; default `5432`),
   optional `RELAY_DB_CONNECTION_LIMIT` (default `20`), optional
   `RELAY_DB_MIGRATION_SSLMODE` (`disable`, `allow`, `prefer`, `require`, `verify-ca`,
-  or `verify-full`; defaults to `disable` on the Access tunnel path and `require`
+  or `verify-full`; `require` verifies server certificates and hostname to match
+  `@effect/sql-pg`; defaults to `disable` on the Access tunnel path and `require`
   on the public path)
 - Secrets: `RELAY_DB_PASSWORD`, plus `RELAY_DB_ACCESS_CLIENT_ID` and
   `RELAY_DB_ACCESS_CLIENT_SECRET` (set both for Cloudflare Tunnel + Access

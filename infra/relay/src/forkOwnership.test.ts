@@ -251,6 +251,9 @@ describe("hosted workflow guards", () => {
 
     const summaryStep = deploy.split("- name: Publish public relay outputs to summary")[1]!;
     expect(summaryStep).toContain("relay-client-config.env");
+    expect(summaryStep).toContain("T3CODE_RELAY_URL");
+    expect(summaryStep).toContain("T3CODE_CLOUD_MINT_PUBLIC_KEY");
+    expect(summaryStep).toContain("console.log(`${key}=${value}`)");
     expect(summaryStep).not.toContain("npx");
     expect(summaryStep).not.toMatch(
       /CLOUDFLARE_API_TOKEN|Token|token|Credentials|credentials|PASSWORD|FEEDBACK_GITHUB_TOKEN/,
