@@ -1,5 +1,7 @@
-// @effect-diagnostics nodeBuiltinImport:off - sha256 hashes migration SQL deterministically to match Alchemy's bookkeeping.
+// @effect-diagnostics nodeBuiltinImport:off - crypto hashes migration SQL deterministically; net/tls validate IP-literal TLS identity without illegal IP SNI.
 import * as NodeCrypto from "node:crypto";
+import * as NodeNet from "node:net";
+import * as NodeTls from "node:tls";
 import type * as PgClient from "@effect/sql-pg/PgClient";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -207,13 +209,21 @@ function formatUrlHost(host: string): string {
 // verifies server certificates and hostname so the default public-origin path stays verified.
 function resolveSslForMode(
   sslMode: string,
-  tlsServername: string | undefined,
+  tlsOriginHost: string | undefined,
 ): PgClient.PgClientConfig["ssl"] {
   if (sslMode === "disable") return false;
   if (sslMode === "verify-ca") {
     return { rejectUnauthorized: true, checkServerIdentity: () => undefined };
   }
-  return tlsServername ? { rejectUnauthorized: true, servername: tlsServername } : true;
+  if (!tlsOriginHost) return true;
+  const originHost = stripHostBrackets(tlsOriginHost);
+  if (NodeNet.isIP(originHost) !== 0) {
+    return {
+      rejectUnauthorized: true,
+      checkServerIdentity: (_host, cert) => NodeTls.checkServerIdentity(originHost, cert),
+    };
+  }
+  return { rejectUnauthorized: true, servername: originHost };
 }
 
 const validateMigrationHost = Effect.fn("RelayMigrations.validateHost")(function* (
@@ -272,9 +282,28 @@ export const resolveMigrationPgClientConfig = Effect.fn("RelayMigrations.resolve
           detail: "RELAY_DATABASE_URL must use a postgres:// or postgresql:// scheme.",
         });
       }
+      if (parsed.searchParams.has("host")) {
+        return yield* new PostgresMigrationError({
+          operation: "config",
+          detail: "RELAY_DATABASE_URL must not specify a host query parameter.",
+        });
+      }
       yield* validateMigrationHost("RELAY_DATABASE_URL", parsed.hostname);
-      const rawUrlSslMode = parsed.searchParams.get("sslmode")?.trim();
-      if (rawUrlSslMode !== undefined && rawUrlSslMode.length > 0) {
+      const rawUrlSslModes = parsed.searchParams.getAll("sslmode");
+      if (rawUrlSslModes.length > 1) {
+        return yield* new PostgresMigrationError({
+          operation: "config",
+          detail: "RELAY_DATABASE_URL must not specify duplicate sslmode query parameters.",
+        });
+      }
+      if (rawUrlSslModes.length === 1) {
+        const rawUrlSslMode = rawUrlSslModes[0]!.trim();
+        if (rawUrlSslMode.length === 0) {
+          return yield* new PostgresMigrationError({
+            operation: "config",
+            detail: "RELAY_DATABASE_URL sslmode must not be empty.",
+          });
+        }
         const urlSslMode = rawUrlSslMode.toLowerCase();
         if (!VALID_SSLMODES.has(urlSslMode)) {
           return yield* new PostgresMigrationError({
@@ -282,13 +311,8 @@ export const resolveMigrationPgClientConfig = Effect.fn("RelayMigrations.resolve
             detail: `Unsupported RELAY_DATABASE_URL sslmode "${urlSslMode}". Expected one of disable, allow, prefer, require, verify-ca, verify-full.`,
           });
         }
-        const normalizedUrl =
-          rawUrlSslMode === urlSslMode
-            ? rawUrl
-            : (() => {
-                parsed.searchParams.set("sslmode", urlSslMode);
-                return parsed.toString();
-              })();
+        parsed.searchParams.set("sslmode", urlSslMode);
+        const normalizedUrl = parsed.toString();
         if (urlSslMode === "prefer" || urlSslMode === "allow") {
           return {
             url: Redacted.make(normalizedUrl),
@@ -362,11 +386,11 @@ export const resolveMigrationPgClientConfig = Effect.fn("RelayMigrations.resolve
       } satisfies PgClient.PgClientConfig;
     }
 
-    const tlsServername =
+    const tlsOriginHost =
       relayDbHost && !isLoopbackHost(relayDbHost) && isLoopbackHost(validatedTargetHost)
         ? relayDbHost
         : undefined;
-    const ssl = resolveSslForMode(sslMode, tlsServername);
+    const ssl = resolveSslForMode(sslMode, tlsOriginHost);
 
     return {
       host: stripHostBrackets(validatedTargetHost),

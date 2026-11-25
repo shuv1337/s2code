@@ -288,6 +288,24 @@ it.effect(
             "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=bogus",
         },
         {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=disable&sslmode=verify-full",
+        },
+        {
+          RELAY_DATABASE_URL: "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=",
+        },
+        {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=%20%20",
+        },
+        {
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@127.0.0.1:5432/s2coderelay?host=db.t3.codes",
+        },
+        {
+          DATABASE_URL: "postgresql://relay:secret@127.0.0.1:5432/s2coderelay?host=pg.s2code.dev",
+        },
+        {
           RELAY_DB_HOST: "db.t3.codes",
           RELAY_DB_NAME: "s2coderelay",
           RELAY_DB_USER: "relay",
@@ -350,6 +368,18 @@ it.effect(
       assert.equal(requiredFromFields.ssl, true);
       assert.equal(requiredFromUrl.ssl, true);
 
+      const paddedRequiredUrl = yield* resolveMigrationPgClientConfig().pipe(
+        provideEnv({
+          RELAY_DATABASE_URL:
+            "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=%20REQUIRE%20",
+        }),
+      );
+      assert.equal(paddedRequiredUrl.ssl, true);
+      assert.equal(
+        paddedRequiredUrl.url ? Redacted.value(paddedRequiredUrl.url) : undefined,
+        "postgresql://relay:secret@pg.s2code.dev:5432/s2coderelay?sslmode=require",
+      );
+
       const requiredTunnel = yield* resolveMigrationPgClientConfig().pipe(
         provideEnv({
           ...base,
@@ -362,6 +392,25 @@ it.effect(
         rejectUnauthorized: true,
         servername: "pg.s2code.dev",
       });
+
+      for (const ipTunnelMode of ["require", "verify-full"] as const) {
+        const ipTunnel = yield* resolveMigrationPgClientConfig().pipe(
+          provideEnv({
+            ...base,
+            RELAY_DB_HOST: "203.0.113.10",
+            RELAY_DB_MIGRATION_TARGET_HOST: "127.0.0.1",
+            RELAY_DB_MIGRATION_TARGET_PORT: "15432",
+            RELAY_DB_MIGRATION_SSLMODE: ipTunnelMode,
+          }),
+        );
+        assert.isObject(ipTunnel.ssl);
+        if (typeof ipTunnel.ssl === "object") {
+          assert.equal(ipTunnel.ssl.rejectUnauthorized, true);
+          assert.isUndefined(ipTunnel.ssl.servername);
+          assert.isFalse("servername" in ipTunnel.ssl);
+          assert.isFunction(ipTunnel.ssl.checkServerIdentity);
+        }
+      }
 
       const verifyCaFromFields = yield* resolveMigrationPgClientConfig().pipe(
         provideEnv({ ...base, RELAY_DB_MIGRATION_SSLMODE: "verify-ca" }),

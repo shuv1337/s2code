@@ -119,8 +119,8 @@ Self-hosted Postgres mode (recommended for this fork; selected whenever `RELAY_D
   optional `RELAY_DB_CONNECTION_LIMIT` (default `20`), optional
   `RELAY_DB_MIGRATION_SSLMODE` (`disable`, `allow`, `prefer`, `require`, `verify-ca`,
   or `verify-full`; `require` verifies server certificates and hostname to match
-  `@effect/sql-pg`; defaults to `disable` on the Access tunnel path and `require`
-  on the public path)
+  `@effect/sql-pg`—set `NODE_EXTRA_CA_CERTS` for private or self-signed CAs; defaults
+  to `disable` on the Access tunnel path and `require` on the public path)
 - Secrets: `RELAY_DB_PASSWORD`, plus `RELAY_DB_ACCESS_CLIENT_ID` and
   `RELAY_DB_ACCESS_CLIENT_SECRET` (set both for Cloudflare Tunnel + Access
   `AccessOrigin`, or leave both unset for `PublicOrigin`; setting only one fails)

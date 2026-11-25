@@ -222,122 +222,149 @@ describe("RelayWorker plan and runtime isolation", () => {
   test.provider(
     "runtime phase boots full RelayWorker.layer with __ALCHEMY_RUNTIME__ and only runtime bindings",
     () =>
-      Effect.acquireUseRelease(
-        Effect.sync(() => {
-          const previous = globalThis.__ALCHEMY_RUNTIME__;
-          globalThis.__ALCHEMY_RUNTIME__ = true;
-          return previous;
-        }),
-        () =>
-          Effect.gen(function* () {
-            const stack: Omit<Alchemy.StackSpec, "output"> = {
-              name: "T3CodeRelay",
-              stage: "prod",
-              resources: {},
-              bindings: {},
-              actions: {},
-            };
-            // Mirror WorkerBridge: only Worker runtime bindings/vars, never deploy-only credentials.
-            const runtimeBindings: Record<string, unknown> = {
-              ALCHEMY_CLOUDFLARE_ACCOUNT_ID: "771240435fb4f1407f2b4669085dc79d",
-              RELAY_API_ZONE_NAME: packEnvValue(Redacted.make("s2code.dev")),
-              RELAY_TUNNEL_ZONE_NAME: packEnvValue(Redacted.make("s2code.dev")),
-              CLERK_PUBLISHABLE_KEY: packEnvValue(Redacted.make(VALID_CLERK_KEY)),
-              CLERK_SECRET_KEY: packEnvValue(Redacted.make("sk_live_test_secret")),
-              CLERK_JWT_AUDIENCE: packEnvValue(Redacted.make("t3-code-relay")),
-              APNS_ENABLED: packEnvValue(Redacted.make("false")),
-              ApnsDeliveryJobSigningSecret_text: packEnvValue(
-                Redacted.make("test-apns-signing-secret"),
-              ),
-              CloudMintKeyPair_privateKey: packEnvValue(Redacted.make("test-cloud-mint-private")),
-              CloudMintKeyPair_publicKey: packEnvValue("test-cloud-mint-public"),
-              ManagedEndpointZone_zoneId: packEnvValue("zone-id-test"),
-              ManagedEndpointZone_name: packEnvValue("s2code.dev"),
-              RelayHyperdrive: {
-                connectionString: "postgresql://hyperdrive:secret@127.0.0.1:5432/s2coderelay",
-                host: "127.0.0.1",
-                port: 5432,
-                user: "hyperdrive",
-                password: "secret",
-                database: "s2coderelay",
-              },
-              HOOK_RATE_LIMIT: { limit: async () => ({ success: true }) },
-              HOOK_ENDPOINT_RATE_LIMIT: { limit: async () => ({ success: true }) },
-              HookInboxObject: {
-                idFromName: (name: string) => ({ name }),
-                get: () => ({}),
-                getByName: () => ({}),
-              },
-            };
-            for (const forbidden of DEPLOY_ONLY_FORBIDDEN_KEYS) {
-              assert.notProperty(runtimeBindings, forbidden);
-            }
+      Effect.gen(function* () {
+        const { envKeys: plannedEnvKeys } = yield* planWorker(externalDbEnv);
+        // Mirror WorkerBridge: only Worker runtime bindings/vars, never deploy-only credentials.
+        const runtimeEnvBindings: Record<string, string> = {
+          RELAY_API_ZONE_NAME: packEnvValue(Redacted.make("s2code.dev")),
+          RELAY_TUNNEL_ZONE_NAME: packEnvValue(Redacted.make("s2code.dev")),
+          CLERK_PUBLISHABLE_KEY: packEnvValue(Redacted.make(VALID_CLERK_KEY)),
+          CLERK_SECRET_KEY: packEnvValue(Redacted.make("sk_live_test_secret")),
+          CLERK_JWT_AUDIENCE: packEnvValue(Redacted.make("t3-code-relay")),
+          APNS_ENABLED: packEnvValue(Redacted.make("false")),
+          ApnsDeliveryJobSigningSecret_text: packEnvValue(
+            Redacted.make("test-apns-signing-secret"),
+          ),
+          CloudMintKeyPair_privateKey: packEnvValue(Redacted.make("test-cloud-mint-private")),
+          CloudMintKeyPair_publicKey: packEnvValue("test-cloud-mint-public"),
+          ManagedEndpointZone_zoneId: packEnvValue("zone-id-test"),
+          ManagedEndpointZone_name: packEnvValue("s2code.dev"),
+        };
+        for (const key of Object.keys(runtimeEnvBindings)) {
+          assert.include(plannedEnvKeys, key);
+        }
 
-            const runtimeLayer = RelayWorker.layer.pipe(
-              Layer.provide(
-                Layer.mergeAll(
-                  Layer.succeed(Alchemy.Stack, stack),
-                  Layer.succeed(StackContext, stack),
-                  Layer.succeed(Stage, "prod"),
-                  Layer.succeed(Cloudflare.WorkerEnvironment, runtimeBindings),
-                  Layer.succeed(
-                    Cloudflare.CloudflareEnvironment,
-                    Effect.succeed({
-                      account: runtimeBindings.ALCHEMY_CLOUDFLARE_ACCOUNT_ID,
-                    }) as unknown as Cloudflare.CloudflareEnvironment["Service"],
-                  ),
-                  ConfigProvider.layer(
-                    ConfigProvider.orElse(
-                      ConfigProvider.fromUnknown({ ALCHEMY_PHASE: "runtime" }),
-                      reifyBoundConfigProvider(
-                        ConfigProvider.fromUnknown(runtimeBindings),
-                        runtimeBindings,
-                      ),
+        const runtimeServiceBindings: Record<string, unknown> = {
+          ALCHEMY_CLOUDFLARE_ACCOUNT_ID: "771240435fb4f1407f2b4669085dc79d",
+          RelayHyperdrive: {
+            connectionString: "postgresql://hyperdrive:secret@127.0.0.1:5432/s2coderelay",
+            host: "127.0.0.1",
+            port: 5432,
+            user: "hyperdrive",
+            password: "secret",
+            database: "s2coderelay",
+          },
+          HOOK_RATE_LIMIT: { limit: async () => ({ success: true }) },
+          HOOK_ENDPOINT_RATE_LIMIT: { limit: async () => ({ success: true }) },
+          HookInboxObject: {
+            idFromName: (name: string) => ({ name }),
+            get: () => ({}),
+            getByName: () => ({}),
+          },
+        };
+        const runtimeBindings: Record<string, unknown> = {
+          ...runtimeEnvBindings,
+          ...runtimeServiceBindings,
+        };
+        for (const forbidden of DEPLOY_ONLY_FORBIDDEN_KEYS) {
+          assert.notProperty(runtimeBindings, forbidden);
+        }
+
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() => {
+            const previous = globalThis.__ALCHEMY_RUNTIME__;
+            globalThis.__ALCHEMY_RUNTIME__ = true;
+            return previous;
+          }),
+          () =>
+            Effect.gen(function* () {
+              const stack: Omit<Alchemy.StackSpec, "output"> = {
+                name: "T3CodeRelay",
+                stage: "prod",
+                resources: {},
+                bindings: {},
+                actions: {},
+              };
+              const queriedConfigKeys: string[] = [];
+              const baseRuntimeConfigProvider = ConfigProvider.orElse(
+                ConfigProvider.fromUnknown({ ALCHEMY_PHASE: "runtime" }),
+                reifyBoundConfigProvider(
+                  ConfigProvider.fromUnknown(runtimeBindings),
+                  runtimeBindings,
+                ),
+              );
+              const recordingConfigProvider = ConfigProvider.make((path) => {
+                queriedConfigKeys.push(path.map((segment) => segment.toString()).join("_"));
+                return baseRuntimeConfigProvider.load(path);
+              });
+
+              const runtimeLayer = RelayWorker.layer.pipe(
+                Layer.provide(
+                  Layer.mergeAll(
+                    Layer.succeed(Alchemy.Stack, stack),
+                    Layer.succeed(StackContext, stack),
+                    Layer.succeed(Stage, "prod"),
+                    Layer.succeed(Cloudflare.WorkerEnvironment, runtimeBindings),
+                    Layer.succeed(
+                      Cloudflare.CloudflareEnvironment,
+                      Effect.succeed({
+                        account: runtimeBindings.ALCHEMY_CLOUDFLARE_ACCOUNT_ID,
+                      }) as unknown as Cloudflare.CloudflareEnvironment["Service"],
                     ),
+                    ConfigProvider.layer(recordingConfigProvider),
                   ),
                 ),
-              ),
-            );
+              );
 
-            const response = yield* Effect.gen(function* () {
-              const worker = yield* RelayWorker.Api;
-              const runtimeContext = (
-                worker as unknown as {
-                  readonly RuntimeContext: {
-                    readonly exports: Effect.Effect<{
-                      readonly default: {
-                        readonly fetch: (
-                          request: Request,
-                          env: unknown,
-                          ctx: unknown,
-                        ) => readonly [Effect.Effect<Response>, Context.Context<never>];
-                      };
-                    }>;
-                  };
-                }
-              ).RuntimeContext;
-              const exports = yield* runtimeContext.exports;
-              const [metadataEffect, services] = exports.default.fetch(
-                new Request("https://relay.s2code.dev/.well-known/oauth-authorization-server"),
-                runtimeBindings,
-                { waitUntil: () => {}, passThroughOnException: () => {} },
-              );
-              return yield* metadataEffect.pipe(
-                Effect.provideContext(services),
-                Effect.provideService(Cloudflare.WorkerEnvironment, runtimeBindings),
-              );
-            }).pipe(Effect.provide(runtimeLayer), Effect.scoped);
-            assert.equal(response.status, 200);
-            const metadata = (yield* Effect.promise(() => response.json())) as {
-              readonly issuer?: string;
-            };
-            assert.equal(metadata.issuer, "https://relay.s2code.dev");
-          }),
-        (previous) =>
-          Effect.sync(() => {
-            globalThis.__ALCHEMY_RUNTIME__ = previous;
-          }),
-      ),
+              const response = yield* Effect.gen(function* () {
+                const worker = yield* RelayWorker.Api;
+                const runtimeContext = (
+                  worker as unknown as {
+                    readonly RuntimeContext: {
+                      readonly exports: Effect.Effect<{
+                        readonly default: {
+                          readonly fetch: (
+                            request: Request,
+                            env: unknown,
+                            ctx: unknown,
+                          ) => readonly [Effect.Effect<Response>, Context.Context<never>];
+                        };
+                      }>;
+                    };
+                  }
+                ).RuntimeContext;
+                const exports = yield* runtimeContext.exports;
+                const [metadataEffect, services] = exports.default.fetch(
+                  new Request("https://relay.s2code.dev/.well-known/oauth-authorization-server"),
+                  runtimeBindings,
+                  { waitUntil: () => {}, passThroughOnException: () => {} },
+                );
+                return yield* metadataEffect.pipe(
+                  Effect.provideContext(services),
+                  Effect.provideService(Cloudflare.WorkerEnvironment, runtimeBindings),
+                );
+              }).pipe(Effect.provide(runtimeLayer), Effect.scoped);
+              assert.equal(response.status, 200);
+              const metadata = (yield* Effect.promise(() => response.json())) as {
+                readonly issuer?: string;
+              };
+              assert.equal(metadata.issuer, "https://relay.s2code.dev");
+
+              assert.isAbove(queriedConfigKeys.length, 0);
+              for (const forbidden of [
+                ...DEPLOY_ONLY_FORBIDDEN_KEYS,
+                "PLANETSCALE_ORGANIZATION",
+                "CLOUDFLARE_API_TOKEN",
+              ]) {
+                assert.notInclude(queriedConfigKeys, forbidden);
+              }
+            }),
+          (previous) =>
+            Effect.sync(() => {
+              globalThis.__ALCHEMY_RUNTIME__ = previous;
+            }),
+        );
+      }),
   );
 
   test.provider(
