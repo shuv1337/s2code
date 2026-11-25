@@ -35,6 +35,7 @@ import {
   generatedWindowsShimTarget,
   isOwnedVersionsTarget,
   isUnpublishedRelease,
+  joinRawPosixPath,
   ownedLauncherNames,
   pinnedRuntimePaths,
   PinnedRuntimePreflightBlockedError,
@@ -169,21 +170,32 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
   }
 
   const readPosix = Effect.fnUntraced(function* (file: string) {
+    const parentReal = yield* fs
+      .realPath(path.dirname(file))
+      .pipe(Effect.orElseSucceed(() => path.dirname(file)));
     const link = yield* fs.readLink(file).pipe(Effect.option);
     if (Option.isSome(link)) {
-      return { target: path.resolve(path.dirname(file), link.value) };
+      return { target: joinRawPosixPath(parentReal, link.value) };
     }
     const parsed = yield* readPosixLauncher(file, { baseDir });
     if (parsed === undefined) return undefined;
     return {
-      target: path.resolve(path.dirname(file), parsed.target),
+      target: joinRawPosixPath(parentReal, parsed.target),
       ...(parsed.exportLine !== undefined ? { exportLine: parsed.exportLine } : {}),
     };
   });
 
   const entry = yield* readPosix(launcher);
   if (entry === undefined) return undefined;
-  if (samePath(path.basename(launcher), canonical) && samePath(entry.target, legacy)) {
+  const realDir = yield* fs
+    .realPath(path.dirname(launcher))
+    .pipe(Effect.orElseSucceed(() => path.dirname(launcher)));
+  const realLegacy = path.join(realDir, path.basename(legacy));
+  if (
+    samePath(path.basename(launcher), canonical) &&
+    (samePath(path.resolve(entry.target), legacy) ||
+      samePath(path.resolve(entry.target), realLegacy))
+  ) {
     const forwarded = yield* readPosix(legacy);
     return forwarded === undefined ? undefined : { target: forwarded.target, forwarder: true };
   }

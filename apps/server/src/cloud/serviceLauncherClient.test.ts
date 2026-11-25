@@ -608,6 +608,65 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
   );
 
   it.effect(
+    "refuses paths containing `..` after a symlink to a foreign directory (both direct candidates and dangling symlink targets)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-symlink-dotdot-" });
+        const baseDir = path.join(root, ".s2code");
+        const foreignBaseDir = path.join(root, ".other-s2code");
+        const targetExe = path.join(baseDir, "runtime/versions/2.0.0/t3");
+        const foreignSubdir = path.join(foreignBaseDir, "runtime/versions/1.0.0");
+        yield* fs.makeDirectory(path.dirname(targetExe), { recursive: true });
+        yield* fs.writeFileString(targetExe, "", { mode: 0o755 });
+        yield* fs.makeDirectory(foreignSubdir, { recursive: true });
+
+        // Symlink inside versions/ pointing to a foreign directory: `<versions>/escape/../missing-t3`
+        // resolves via POSIX left-to-right semantics to `<foreignBaseDir>/runtime/versions/missing-t3`.
+        const escapeLink = path.join(baseDir, "runtime/versions/escape");
+        yield* fs.symlink(foreignSubdir, escapeLink);
+        const dotDotViaForeign = `${escapeLink}/../missing-t3`;
+
+        // Dangling symlink inside versions/ whose target uses `..` after `escape`.
+        const danglingDotDotDir = path.join(baseDir, "runtime/versions/old-dotdot");
+        const danglingDotDotExe = path.join(danglingDotDotDir, "t3");
+        yield* fs.makeDirectory(danglingDotDotDir, { recursive: true });
+        yield* fs.symlink(dotDotViaForeign, danglingDotDotExe);
+
+        const localBin = path.join(root, ".local/bin");
+        yield* fs.makeDirectory(localBin, { recursive: true });
+        const linkDirectDotDot = path.join(localBin, "t3");
+        const linkDanglingDotDot = path.join(localBin, "s2code");
+        const scriptDirectDotDot = path.join(baseDir, "bin/shuv2code");
+        const scriptDanglingDotDot = path.join(baseDir, "bin/s2c");
+        yield* fs.makeDirectory(path.dirname(scriptDirectDotDot), { recursive: true });
+        yield* fs.symlink(dotDotViaForeign, linkDirectDotDot);
+        yield* fs.symlink(danglingDotDotExe, linkDanglingDotDot);
+        const directScriptBody = posixLauncherScript(dotDotViaForeign);
+        const danglingScriptBody = posixLauncherScript(danglingDotDotExe);
+        yield* fs.writeFileString(scriptDirectDotDot, directScriptBody, { mode: 0o755 });
+        yield* fs.writeFileString(scriptDanglingDotDot, danglingScriptBody, { mode: 0o755 });
+
+        yield* ServiceLauncherClient.repointLaunchers({
+          baseDir,
+          targetVersion: "2.0.0",
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            HOME: root,
+            PATH: localBin,
+          }),
+        );
+
+        assert.equal(yield* fs.readLink(linkDirectDotDot), dotDotViaForeign);
+        assert.equal(yield* fs.readLink(linkDanglingDotDot), danglingDotDotExe);
+        assert.equal(yield* fs.readFileString(scriptDirectDotDot), directScriptBody);
+        assert.equal(yield* fs.readFileString(scriptDanglingDotDot), danglingScriptBody);
+        assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
+      }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
+  it.effect(
     "repoints direct POSIX launcher scripts for s2code, shuv2code, s2c, t3, and recorded off-PATH launchers",
     () =>
       Effect.gen(function* () {

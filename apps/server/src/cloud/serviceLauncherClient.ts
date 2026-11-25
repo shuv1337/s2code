@@ -16,6 +16,7 @@ import {
   generatedWindowsForwarderTarget,
   generatedWindowsShimTarget,
   isOwnedVersionsTarget,
+  joinRawPosixPath,
   launcherOwnsVersionsDir,
   ownedLauncherNames,
   pinnedRuntimePaths,
@@ -320,10 +321,17 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
               exhausted = false;
               break;
             }
-            const next = path.resolve(path.dirname(cursor), linkTarget.value);
+            const cursorParent = yield* fs
+              .realPath(path.dirname(cursor))
+              .pipe(Effect.orElseSucceed(() => path.dirname(cursor)));
+            const next = joinRawPosixPath(cursorParent, linkTarget.value);
             const nextIsLink = Option.isSome(yield* readLinkOption(next));
             if (nextIsLink) {
-              if (inVersionsDir(next)) {
+              const nextParent = yield* fs
+                .realPath(path.dirname(next))
+                .pipe(Effect.orElseSucceed(() => path.dirname(next)));
+              const physicalNext = path.join(nextParent, path.basename(next));
+              if (inVersionsDir(physicalNext)) {
                 // Never walk into runtime/versions to rewrite a link there; verify resolved ownership.
                 if (yield* ownsTarget(next)) {
                   directLegacyLink = cursor;
@@ -332,7 +340,7 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
                 }
                 return;
               }
-              cursor = next;
+              cursor = physicalNext;
               continue;
             }
             if (yield* ownsTarget(next)) {
