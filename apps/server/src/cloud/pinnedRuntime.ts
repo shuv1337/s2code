@@ -690,14 +690,46 @@ const PINNED_RUNTIME_LAUNCHERS_FILE = "launchers";
 const launcherRecords = (launchers: ReadonlyArray<string>) =>
   `\n${launchers.map((launcher) => `${launcher}\n`).join("")}`;
 
+export function ownedLauncherNames(
+  version: string,
+  platform: NodeJS.Platform,
+): ReadonlyArray<string> {
+  const suffix = platform === "win32" ? ".cmd" : "";
+  const names = new Set([
+    resolveChannelIdentity(version).executableName,
+    resolveLegacyChannelIdentity(version).executableName,
+    "s2code",
+    "shuv2code",
+    "s2c",
+    "t3",
+  ]);
+  return Array.from(names, (name) => `${name}${suffix}`);
+}
+
 export function launcherOwnsVersionsDir(
   path: Path.Path,
   versionsDir: string,
   candidate: string,
+  platform?: NodeJS.Platform,
 ): boolean {
-  const relative = path.relative(versionsDir, path.resolve(candidate));
+  const normalize = (value: string) =>
+    platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
+  const relative = path.relative(normalize(versionsDir), normalize(candidate));
   return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
+
+export const readPinnedRuntimeLaunchers = Effect.fn("cloud.pinned_runtime.read_launchers")(
+  function* (baseDir: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const launchersFile = path.join(baseDir, PINNED_RUNTIME_DIR, PINNED_RUNTIME_LAUNCHERS_FILE);
+    const recorded = yield* fs.readFileString(launchersFile).pipe(Effect.orElseSucceed(() => ""));
+    return recorded
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0 && path.isAbsolute(entry));
+  },
+);
 
 /** Node preserves argv0's spelling; resolve bare names on PATH to find the launcher symlink. */
 export const resolveLauncherPath = Effect.gen(function* () {
@@ -746,6 +778,7 @@ export const recordPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.recor
     const launcher = path.resolve(input.launcher);
     const recorded = yield* fs.readFileString(launchersFile).pipe(Effect.orElseSucceed(() => ""));
     if (recorded.split(/\r?\n/).includes(launcher)) return;
+    yield* fs.makeDirectory(path.dirname(launchersFile), { recursive: true });
     yield* fs.writeFileString(launchersFile, launcherRecords([launcher]), { flag: "a" });
   },
 );
@@ -768,6 +801,16 @@ export const windowsShimTarget = (contents: string) => /^"([^"]+)"/m.exec(conten
 /** Like {@link windowsShimTarget}, but only for a shim exactly as written; never a user's wrapper. */
 export const generatedWindowsShimTarget = (contents: string) =>
   /^@echo off\r?\n"([^"]+)" %\*\s*$/.exec(contents)?.[1];
+
+/** Target `.cmd` of an owned Windows forwarder shim written by `install.ps1` or `update`. */
+export const generatedWindowsForwarderTarget = (contents: string): string | undefined => {
+  const trimmed = contents.replace(/(?:\r?\n)+$/, "");
+  const direct = /^@echo off\r?\n(?:call )?"([^"]+\.cmd)" %\*$/i.exec(trimmed)?.[1];
+  if (direct !== undefined) return direct;
+  return /^@echo off\r?\nsetlocal DisableDelayedExpansion\r?\nset "s2_line="\r?\nfor \/f "usebackq skip=1 delims=" %%L in \("([^"]+\.cmd)"\) do set "s2_line=%%L"\r?\nif not defined s2_line exit \/b 1\r?\nset "s2_exe=%s2_line:~1,-4%"\r?\nif not defined s2_exe exit \/b 1\r?\nendlocal & "%s2_exe%" %\*\r?\nexit \/b %ERRORLEVEL%$/.exec(
+    trimmed,
+  )?.[1];
+};
 
 /**
  * The `t3` script the install scripts and `t3 update` write on macOS and Linux. Exec by absolute
@@ -806,46 +849,51 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const environment = yield* HostProcess.Environment;
-    const names = [
-      resolveChannelIdentity(input.version ?? packageJson.version).executableName,
-      resolveLegacyChannelIdentity(input.version ?? packageJson.version).executableName,
-      "s2c",
-    ];
+    const names = ownedLauncherNames(input.version ?? packageJson.version, "linux");
+    const realPath = (file: string) =>
+      fs.realPath(file).pipe(Effect.orElseSucceed(() => undefined));
+    const realVersionsDir = (yield* realPath(input.versionsDir)) ?? input.versionsDir;
+    const ownsTarget = (candidate: string) =>
+      launcherOwnsVersionsDir(path, input.versionsDir, candidate) ||
+      launcherOwnsVersionsDir(path, realVersionsDir, candidate);
     const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
     if (Option.isSome(linkTarget)) {
       const resolved = path.resolve(path.dirname(input.launchedAs), linkTarget.value);
-      const target = yield* fs.realPath(resolved).pipe(Effect.orElseSucceed(() => resolved));
-      return launcherOwnsVersionsDir(path, input.versionsDir, target)
-        ? input.launchedAs
-        : undefined;
-    }
-    const realPath = (file: string) =>
-      fs.realPath(file).pipe(Effect.orElseSucceed(() => undefined));
-    const executable = yield* realPath(input.launchedAs);
-    const realVersionsDir = yield* realPath(input.versionsDir);
-    if (
-      executable === undefined ||
-      realVersionsDir === undefined ||
-      !isVersionExecutable(path, realVersionsDir, executable)
-    ) {
+      const target = (yield* realPath(resolved)) ?? resolved;
+      if (ownsTarget(target)) return input.launchedAs;
+      // Symlink alias pointing to an owned POSIX launcher script (e.g. ~/.local/bin/s2code -> <baseDir>/bin/shuv2code).
+      const scriptTarget = yield* readPosixLauncherTarget(target);
+      if (scriptTarget !== undefined) {
+        const resolvedScriptTarget = (yield* realPath(scriptTarget)) ?? scriptTarget;
+        if (ownsTarget(scriptTarget) || ownsTarget(resolvedScriptTarget)) return target;
+      }
       return undefined;
     }
-    const recorded = yield* fs
-      .readFileString(path.join(path.dirname(input.versionsDir), "launchers"))
-      .pipe(Effect.orElseSucceed(() => ""));
+    const executable = yield* realPath(input.launchedAs);
+    if (executable === undefined || !isVersionExecutable(path, realVersionsDir, executable)) {
+      return undefined;
+    }
+    const baseDir = path.dirname(path.dirname(input.versionsDir));
+    const recorded = yield* readPinnedRuntimeLaunchers(baseDir);
     const cwd = yield* HostProcess.WorkingDirectory;
     const home = yield* HostProcess.HomeDirectory;
     const searchPath = environment["PATH"] ?? "";
+    const configuredInstallDirs = [
+      environment["S2CODE_INSTALL_BIN_DIR"]?.trim(),
+      environment["SHUV2CODE_INSTALL_BIN_DIR"]?.trim(),
+      environment["T3CODE_INSTALL_BIN_DIR"]?.trim(),
+    ].filter((entry): entry is string => entry !== undefined && entry.length > 0);
+    const installDirs =
+      configuredInstallDirs.length > 0 ? configuredInstallDirs : [path.join(home, ".local", "bin")];
     const candidates = [
       // PATH first, resolved like the shell does: it decides which launcher the user runs. An empty
       // entry of a nonempty PATH is the working directory; an empty PATH searches nothing.
       ...(searchPath.length === 0 ? [] : searchPath.split(":")).flatMap((directory) =>
         names.map((name) => path.resolve(cwd, directory || ".", name)),
       ),
-      ...names.map((name) =>
-        path.join(environment["T3CODE_INSTALL_BIN_DIR"] || path.join(home, ".local", "bin"), name),
-      ),
-      ...recorded.split(/\r?\n/),
+      ...installDirs.flatMap((directory) => names.map((name) => path.join(directory, name))),
+      ...names.map((name) => path.join(baseDir, "bin", name)),
+      ...recorded,
     ].filter((candidate) => path.isAbsolute(candidate));
     for (const candidate of candidates) {
       // The script itself, so an alias that links to it keeps working.

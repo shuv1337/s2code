@@ -23,6 +23,7 @@ import {
   pinnedRuntimePaths,
   posixLauncherScript,
   prunePinnedRuntimes,
+  readPinnedRuntimeLaunchers,
   readPosixLauncherTarget,
   resolveLauncherPath,
 } from "../cloud/pinnedRuntime.ts";
@@ -659,6 +660,79 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
         yield* fs.writeFileString(launcher, edited);
         assert.isTrue(Option.isNone(yield* repoint({ PATH: path.dirname(launcher) })));
         assert.equal(yield* fs.readFileString(launcher), edited);
+      }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
+  // regression: #478 manual `s2code update` must also repoint <baseDir>/bin/shuv2code with empty runtime/launchers
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "repoints <baseDir>/bin/shuv2code via executable or ~/.local/bin symlink while preserving aliases",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "s2code-issue478-update-" }),
+        );
+        const baseDir = path.join(root, ".shuv2code-v2-nightly");
+        const oldVersion = "0.1.11-nightly.20261121.143";
+        const midVersion = "0.1.11-nightly.20261122.145";
+        const newVersion = "0.1.11-nightly.20261123.146";
+        const entry = (version: string) => path.join(baseDir, "runtime/versions", version, "t3");
+        for (const version of [oldVersion, midVersion, newVersion]) {
+          yield* fs.makeDirectory(path.dirname(entry(version)), { recursive: true });
+          yield* fs.writeFileString(entry(version), "", { mode: 0o755 });
+        }
+        const baseLauncher = path.join(baseDir, "bin/shuv2code");
+        const localBin = path.join(root, ".local/bin");
+        const legacyAlias = path.join(localBin, "shuv2code");
+        const canonicalAlias = path.join(localBin, "s2code");
+        yield* fs.makeDirectory(path.dirname(baseLauncher), { recursive: true });
+        yield* fs.writeFileString(baseLauncher, posixLauncherScript(entry(oldVersion)), {
+          mode: 0o755,
+        });
+        yield* fs.makeDirectory(localBin, { recursive: true });
+        yield* fs.symlink(baseLauncher, legacyAlias);
+        yield* fs.symlink(baseLauncher, canonicalAlias);
+
+        // Started via the script, argv0 is the version executable, and runtime/launchers is empty.
+        const viaExec = yield* repointLauncher({
+          launchedAs: entry(oldVersion),
+          currentVersion: oldVersion,
+          baseDir,
+          targetEntryPath: entry(midVersion),
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, { PATH: "" }),
+          Effect.provideService(HostProcess.HomeDirectory, root),
+        );
+        assert.equal(Option.getOrUndefined(viaExec), baseLauncher);
+        assert.equal(
+          yield* fs.readFileString(baseLauncher),
+          posixLauncherScript(entry(midVersion)),
+        );
+        assert.equal(yield* fs.readLink(canonicalAlias), baseLauncher);
+        assert.equal(yield* fs.readLink(legacyAlias), baseLauncher);
+        assert.include(yield* readPinnedRuntimeLaunchers(baseDir), baseLauncher);
+
+        // Started with launchedAs set to the ~/.local/bin/s2code symlink pointing at <baseDir>/bin/shuv2code.
+        const viaSymlink = yield* repointLauncher({
+          launchedAs: canonicalAlias,
+          currentVersion: midVersion,
+          baseDir,
+          targetEntryPath: entry(newVersion),
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, { PATH: "" }),
+          Effect.provideService(HostProcess.HomeDirectory, root),
+        );
+        assert.equal(Option.getOrUndefined(viaSymlink), baseLauncher);
+        assert.equal(
+          yield* fs.readFileString(baseLauncher),
+          posixLauncherScript(entry(newVersion)),
+        );
+        assert.equal(yield* fs.readLink(canonicalAlias), baseLauncher);
+        assert.equal(yield* fs.readLink(legacyAlias), baseLauncher);
+        const recorded = yield* readPinnedRuntimeLaunchers(baseDir);
+        assert.include(recorded, baseLauncher);
+        assert.include(recorded, canonicalAlias);
       }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
   );
 

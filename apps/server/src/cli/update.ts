@@ -37,6 +37,7 @@ import {
   PinnedRuntimePreflightBlockedError,
   pinnedRuntimeVersionsDir,
   prunePinnedRuntimes,
+  readPinnedRuntimeLaunchers,
   recordPinnedRuntimeLauncher,
   resolveLauncherPath,
   readPosixLauncherTarget,
@@ -221,7 +222,12 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
   const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
-  const ownsTarget = (candidate: string) => launcherOwnsVersionsDir(path, versionsDir, candidate);
+  const realVersionsDir = yield* fs
+    .realPath(versionsDir)
+    .pipe(Effect.orElseSucceed(() => versionsDir));
+  const ownsTarget = (candidate: string) =>
+    launcherOwnsVersionsDir(path, versionsDir, candidate, platform) ||
+    launcherOwnsVersionsDir(path, realVersionsDir, candidate, platform);
   const remember = (launcher: string) =>
     recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher }).pipe(
       Effect.mapError(
@@ -240,6 +246,15 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   if (launcher === undefined) return Option.none<string>();
   const current = yield* readLauncherTarget(launcher, input.currentVersion);
   if (current === undefined || !ownsTarget(current.target)) return Option.none<string>();
+  if (platform !== "win32" && path.resolve(input.launchedAs) !== path.resolve(launcher)) {
+    const launchedAsIsLink = yield* fs.readLink(input.launchedAs).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+    if (launchedAsIsLink) {
+      yield* remember(input.launchedAs);
+    }
+  }
   const version = input.currentVersion ?? packageJson.version;
   const aliases = new Set([
     launcher,
@@ -304,7 +319,6 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
   version = packageJson.version,
   versionsDir?: string,
 ) {
-  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const environment = yield* HostProcess.Environment;
   const identities = [resolveChannelIdentity(version), resolveLegacyChannelIdentity(version)];
@@ -312,7 +326,12 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
     identities.map((identity) => `${identity.executableName}.cmd`.toLowerCase()),
   );
   const directories = [
+    ...(environment["S2CODE_INSTALL_BIN_DIR"] ? [environment["S2CODE_INSTALL_BIN_DIR"]] : []),
+    ...(environment["SHUV2CODE_INSTALL_BIN_DIR"] ? [environment["SHUV2CODE_INSTALL_BIN_DIR"]] : []),
     ...(environment["T3CODE_INSTALL_BIN_DIR"] ? [environment["T3CODE_INSTALL_BIN_DIR"]] : []),
+    ...(versionsDir !== undefined
+      ? [path.join(path.dirname(path.dirname(versionsDir)), "bin")]
+      : []),
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(";"),
   ].filter((entry) => entry.trim().length > 0);
   const candidates: Array<string> = [];
@@ -322,11 +341,9 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
     }
   }
   if (versionsDir !== undefined) {
-    const recorded = yield* fs
-      .readFileString(path.join(path.dirname(versionsDir), "launchers"))
-      .pipe(Effect.orElseSucceed(() => ""));
-    for (const shimPath of recorded.split(/\r?\n/)) {
-      if (path.isAbsolute(shimPath) && shimNames.has(path.basename(shimPath).toLowerCase())) {
+    const recorded = yield* readPinnedRuntimeLaunchers(path.dirname(path.dirname(versionsDir)));
+    for (const shimPath of recorded) {
+      if (shimNames.has(path.basename(shimPath).toLowerCase())) {
         candidates.push(shimPath);
       }
     }
