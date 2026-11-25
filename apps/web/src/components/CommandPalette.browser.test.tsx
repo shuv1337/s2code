@@ -338,7 +338,11 @@ describe("CommandPalette open intents", () => {
 
   it("leaves a submenu only on a fresh, unmodified Backspace", async () => {
     setup({ projects: [makeProject("Acme"), makeProject("Beta")] });
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({});
     const rootInput = page.getByPlaceholder("Search commands, projects, and threads...");
@@ -374,7 +378,11 @@ describe("CommandPalette open intents", () => {
 
   it("ignores repeated Escape keydowns after stepping back from file search", async () => {
     setup();
-    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+    await using _screen = await render(
+      <VoiceProvider>
+        <CommandPalette>{null}</CommandPalette>
+      </VoiceProvider>,
+    );
 
     openCommandPalette({});
     const palette = page.getByTestId("command-palette");

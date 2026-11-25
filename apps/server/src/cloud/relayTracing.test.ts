@@ -65,11 +65,12 @@ it.effect("relay tracing waits for the desktop shell's telemetry opt-out", () =>
   );
 });
 
+// s2code fork: relay tracing is always off (zero telemetry), whatever the environment says.
 it("reports the server's relay tracing policy to clients", () => {
-  assert.isTrue(allowedFor({}, undefined));
+  assert.isFalse(allowedFor({}, undefined));
   assert.isFalse(allowedFor({ T3CODE_TELEMETRY_ENABLED: "false" }, undefined));
   assert.isFalse(allowedFor({ CI: "true" }, undefined));
-  assert.isTrue(allowedFor({ CI: "true", T3CODE_TELEMETRY_ENABLED: "true" }, undefined));
+  assert.isFalse(allowedFor({ CI: "true", T3CODE_TELEMETRY_ENABLED: "true" }, undefined));
   assert.isFalse(
     allowedFor(
       { T3CODE_TELEMETRY_ENABLED: "true" },
