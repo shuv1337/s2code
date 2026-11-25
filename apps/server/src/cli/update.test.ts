@@ -820,6 +820,54 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "win32")),
   );
 
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "does not treat a foreign alias with `..` after a symlink as a local legacy forwarder",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "s2code-foreign-forwarder-" });
+        const version = "1.0.0-nightly.1";
+        const oldExe = path.join(root, "runtime/versions", version, "t3");
+        const newExe = path.join(root, "runtime/versions", "1.0.0-nightly.2", "t3");
+        const foreignDir = path.join(root, "foreign");
+        const foreignSub = path.join(foreignDir, "sub");
+        const foreignLegacy = path.join(foreignDir, "shuv2code-nightly");
+        const foreignExe = path.join(foreignDir, "runtime/versions/1.0.0/t3");
+        yield* fs.makeDirectory(foreignSub, { recursive: true });
+        for (const file of [oldExe, newExe, foreignExe]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+          yield* fs.writeFileString(file, "", { mode: 0o755 });
+        }
+        yield* fs.symlink(foreignExe, foreignLegacy);
+
+        const bin = path.join(root, "bin");
+        yield* fs.makeDirectory(bin, { recursive: true });
+        const legacy = path.join(bin, "shuv2code-nightly");
+        const canonical = path.join(bin, "s2code-nightly");
+        const foreignLink = path.join(bin, "foreign-link");
+        yield* fs.symlink(oldExe, legacy);
+        yield* fs.symlink(foreignSub, foreignLink);
+        // Lexically collapses to `<bin>/shuv2code-nightly`, but physically resolves to `<foreign>/shuv2code-nightly`.
+        const trickyTarget = `${foreignLink}/../shuv2code-nightly`;
+        yield* fs.symlink(trickyTarget, canonical);
+
+        const read = yield* readLauncherTarget(canonical, version, root);
+        assert.isFalse(read?.forwarder);
+
+        const repointed = yield* repointLauncher({
+          launchedAs: legacy,
+          currentVersion: version,
+          baseDir: root,
+          targetEntryPath: newExe,
+        }).pipe(Effect.provideService(HostProcess.Environment, { PATH: bin }));
+
+        assert.equal(Option.getOrUndefined(repointed), legacy);
+        assert.equal(yield* fs.readLink(canonical), trickyTarget);
+        assert.notInclude(yield* readPinnedRuntimeLaunchers(root), canonical);
+      }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
   it.effect.each([
     { name: "no launcher records", recorded: undefined },
     { name: "an empty launcher record", recorded: "" },

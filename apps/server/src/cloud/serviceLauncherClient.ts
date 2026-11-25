@@ -13,6 +13,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import packageJson from "../../package.json" with { type: "json" };
 import {
+  canonicalizeLauncherPath,
   generatedWindowsForwarderTarget,
   generatedWindowsShimTarget,
   isOwnedVersionsTarget,
@@ -321,16 +322,20 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
               exhausted = false;
               break;
             }
-            const cursorParent = yield* fs
-              .realPath(path.dirname(cursor))
-              .pipe(Effect.orElseSucceed(() => path.dirname(cursor)));
+            const cursorParent =
+              (yield* canonicalizeLauncherPath({
+                target: path.dirname(cursor),
+                platform,
+              })) ?? path.dirname(cursor);
             const next = joinRawPosixPath(cursorParent, linkTarget.value);
             const nextIsLink = Option.isSome(yield* readLinkOption(next));
             if (nextIsLink) {
-              const nextParent = yield* fs
-                .realPath(path.dirname(next))
-                .pipe(Effect.orElseSucceed(() => path.dirname(next)));
-              const physicalNext = path.join(nextParent, path.basename(next));
+              const physicalNext = yield* canonicalizeLauncherPath({
+                target: next,
+                platform,
+                followLastSymlink: false,
+              });
+              if (physicalNext === undefined) return;
               if (inVersionsDir(physicalNext)) {
                 // Never walk into runtime/versions to rewrite a link there; verify resolved ownership.
                 if (yield* ownsTarget(next)) {
@@ -370,7 +375,19 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
 
           const parsedScript = yield* readPosixLauncher(cursor, { baseDir: input.baseDir });
           if (parsedScript === undefined || !(yield* ownsTarget(parsedScript.target))) return;
-          if (normalizePath(parsedScript.target) !== normalizePath(target.entryPath)) {
+          const canonicalScriptTarget = yield* canonicalizeLauncherPath({
+            target: parsedScript.target,
+            platform,
+          });
+          const canonicalTargetEntry = yield* canonicalizeLauncherPath({
+            target: target.entryPath,
+            platform,
+          });
+          if (
+            canonicalScriptTarget === undefined ||
+            canonicalTargetEntry === undefined ||
+            normalizePath(canonicalScriptTarget) !== normalizePath(canonicalTargetEntry)
+          ) {
             yield* writePosixLauncher({
               launcher: cursor,
               executable: target.entryPath,

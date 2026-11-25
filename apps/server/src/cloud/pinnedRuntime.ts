@@ -731,6 +731,157 @@ export function joinRawPosixPath(dir: string, target: string): string {
   return dir === "/" ? `/${target}` : `${dir.replace(/\/+$/, "")}/${target}`;
 }
 
+function splitAbsoluteRoot(
+  raw: string,
+  sep: string,
+  windows: boolean,
+):
+  | {
+      readonly root: string;
+      readonly segments: Array<string>;
+      readonly trailingSlash: boolean;
+    }
+  | undefined {
+  if (windows) {
+    const unwrapped =
+      raw.startsWith("\\\\?\\") && /^[a-zA-Z]:[\\/]/.test(raw.slice(4)) ? raw.slice(4) : raw;
+    if (/^[a-zA-Z]:[\\/]/.test(unwrapped)) {
+      const rest = unwrapped.slice(3);
+      return {
+        root: `${unwrapped.slice(0, 2)}${sep}`,
+        segments: rest.length === 0 ? [] : rest.split(/[\\/]/),
+        trailingSlash: rest.length > 0 && /[\\/]$/.test(unwrapped),
+      };
+    }
+    const unc = /^(?:\\\\|\/\/)([^\\/]+)[\\/]([^\\/]+)(?:[\\/]|$)/.exec(unwrapped);
+    if (unc !== null) {
+      const rest = unwrapped.slice(unc[0].length);
+      return {
+        root: `${sep}${sep}${unc[1]}${sep}${unc[2]}${sep}`,
+        segments: rest.length === 0 ? [] : rest.split(/[\\/]/),
+        trailingSlash: rest.length > 0 && /[\\/]$/.test(unwrapped),
+      };
+    }
+  }
+  if (!raw.startsWith("/")) return undefined;
+  const rest = raw.slice(1);
+  return {
+    root: "/",
+    segments: rest.length === 0 ? [] : rest.split(windows ? /[\\/]/ : "/"),
+    trailingSlash: rest.length > 0 && (windows ? /[\\/]$/.test(raw) : raw.endsWith("/")),
+  };
+}
+
+function joinRootSegments(root: string, segments: ReadonlyArray<string>, sep: string): string {
+  return segments.length === 0 ? root : `${root}${segments.join(sep)}`;
+}
+
+/**
+ * Canonicalizes an absolute path left-to-right without calling Node's `fs.realpath` (which
+ * lexically collapses `..` before following symlinks). Follows symlinks/junctions even when tail
+ * components are missing, bounded by {@link MAX_CANONICALIZE_HOPS}.
+ */
+export const canonicalizeLauncherPath = Effect.fn(
+  "cloud.pinned_runtime.canonicalize_launcher_path",
+)(function* (input: {
+  readonly target: string;
+  readonly platform: NodeJS.Platform;
+  readonly followLastSymlink?: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const windows = input.platform === "win32";
+  const followLastSymlink = input.followLastSymlink ?? true;
+  const initial = splitAbsoluteRoot(input.target, path.sep, windows);
+  if (initial === undefined) return undefined;
+
+  const readLinkStatus = (file: string) =>
+    fs.readLink(file).pipe(
+      Effect.asSome,
+      Effect.catch((error) =>
+        Effect.succeed(
+          error.reason._tag === "NotFound" ||
+            (error.reason.cause as NodeJS.ErrnoException | undefined)?.code === "EINVAL"
+            ? Option.none<string>()
+            : undefined,
+        ),
+      ),
+    );
+
+  let root = initial.root;
+  let trailingSlash = initial.trailingSlash;
+  const queue = [...initial.segments];
+  const prefix: Array<string> = [];
+  let hops = 0;
+  let missing = false;
+  let lastType: FileSystem.File.Type | undefined;
+
+  while (queue.length > 0) {
+    const segment = queue.shift()!;
+    if (segment === "" || segment === ".") continue;
+    const hasMore = queue.some((rest) => rest !== "" && rest !== ".");
+    if (segment === "..") {
+      // `..` cannot safely traverse through a missing component; decline ownership.
+      if (missing) return undefined;
+      prefix.pop();
+      lastType = "Directory";
+      continue;
+    }
+    if (missing) {
+      prefix.push(segment);
+      lastType = undefined;
+      continue;
+    }
+    const nextPath = joinRootSegments(root, [...prefix, segment], path.sep);
+    if (hasMore || followLastSymlink) {
+      const link = yield* readLinkStatus(nextPath);
+      if (link === undefined) return undefined;
+      if (Option.isSome(link)) {
+        hops += 1;
+        if (hops > MAX_CANONICALIZE_HOPS) return undefined;
+        const linkRaw = link.value;
+        const linkRoot = splitAbsoluteRoot(linkRaw, path.sep, windows);
+        if (linkRoot !== undefined) {
+          root = linkRoot.root;
+          prefix.length = 0;
+          if (!hasMore && linkRoot.trailingSlash) trailingSlash = true;
+          queue.unshift(...linkRoot.segments);
+        } else {
+          const linkHasTrailing = windows ? /[\\/]$/.test(linkRaw) : linkRaw.endsWith("/");
+          if (!hasMore && linkHasTrailing) trailingSlash = true;
+          queue.unshift(...linkRaw.split(windows ? /[\\/]/ : "/"));
+        }
+        lastType = undefined;
+        continue;
+      }
+    }
+    const info = yield* fs.stat(nextPath).pipe(
+      Effect.asSome,
+      Effect.catch((error) =>
+        Effect.succeed(error.reason._tag === "NotFound" ? Option.none() : undefined),
+      ),
+    );
+    if (info === undefined) return undefined;
+    if (Option.isNone(info)) {
+      prefix.push(segment);
+      missing = true;
+      lastType = undefined;
+      continue;
+    }
+    if (info.value.type !== "Directory" && hasMore) {
+      return undefined;
+    }
+    prefix.push(segment);
+    lastType = info.value.type;
+  }
+
+  // A trailing slash on an existing non-directory is invalid (`ENOTDIR`); decline safely.
+  if (trailingSlash && lastType !== undefined && lastType !== "Directory") {
+    return undefined;
+  }
+  return joinRootSegments(root, prefix, path.sep);
+});
+
 export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_versions_target")(
   function* (input: {
     readonly versionsDir: string;
@@ -738,110 +889,16 @@ export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_ve
     readonly candidate: string;
     readonly platform: NodeJS.Platform;
   }) {
-    const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     if (!path.isAbsolute(input.candidate)) return false;
-    const resolveIfPresent = (file: string) =>
-      fs.realPath(file).pipe(
-        Effect.asSome,
-        Effect.catch((error) =>
-          Effect.succeed(error.reason._tag === "NotFound" ? Option.none<string>() : undefined),
-        ),
-      );
-    const readLinkStatus = (file: string) =>
-      fs.readLink(file).pipe(
-        Effect.asSome,
-        Effect.catch((error) =>
-          Effect.succeed(
-            error.reason._tag === "NotFound" ||
-              (error.reason.cause as NodeJS.ErrnoException | undefined)?.code === "EINVAL"
-              ? Option.none<string>()
-              : undefined,
-          ),
-        ),
-      );
-
-    // Untraced helpers inside `is_owned_versions_target`: canonicalize absolute paths even when
-    // tail components are missing, preserving POSIX left-to-right symlink-before-`..` order.
-    const canonicalizePosixPath = Effect.fnUntraced(function* (target: string) {
-      const resolved = yield* resolveIfPresent(target);
-      if (resolved === undefined) return undefined;
-      if (Option.isSome(resolved)) return resolved.value;
-
-      const queue = target.split("/");
-      const prefix: Array<string> = [];
-      let hops = 0;
-      let missing = false;
-
-      while (queue.length > 0) {
-        const segment = queue.shift()!;
-        if (segment === "" || segment === ".") continue;
-        if (segment === "..") {
-          // On POSIX, `..` cannot traverse through a non-existent directory; decline safely.
-          if (missing) return undefined;
-          prefix.pop();
-          continue;
-        }
-        if (missing) {
-          prefix.push(segment);
-          continue;
-        }
-        const nextPath = `/${[...prefix, segment].join("/")}`;
-        const link = yield* readLinkStatus(nextPath);
-        if (link === undefined) return undefined;
-        if (Option.isSome(link)) {
-          hops += 1;
-          if (hops > MAX_CANONICALIZE_HOPS) return undefined;
-          if (link.value.startsWith("/")) {
-            prefix.length = 0;
-          }
-          // Prepend symlink target segments ahead of remaining queue so later `..` applies after the link.
-          queue.unshift(...link.value.split("/"));
-          continue;
-        }
-        const info = yield* fs.stat(nextPath).pipe(
-          Effect.asSome,
-          Effect.catch((error) =>
-            Effect.succeed(error.reason._tag === "NotFound" ? Option.none() : undefined),
-          ),
-        );
-        if (info === undefined) return undefined;
-        if (Option.isNone(info)) {
-          prefix.push(segment);
-          missing = true;
-          continue;
-        }
-        if (info.value.type !== "Directory" && queue.some((rest) => rest !== "" && rest !== ".")) {
-          return undefined;
-        }
-        prefix.push(segment);
-      }
-      return `/${prefix.join("/")}`;
+    const canonicalVersionsDir = yield* canonicalizeLauncherPath({
+      target: input.realVersionsDir,
+      platform: input.platform,
     });
-
-    const canonicalizeWindowsPath = Effect.fnUntraced(function* (target: string) {
-      const resolved = yield* resolveIfPresent(target);
-      if (resolved === undefined) return undefined;
-      if (Option.isSome(resolved)) return resolved.value;
-      let probe = path.resolve(target);
-      const suffix: Array<string> = [];
-      while (true) {
-        const realProbe = yield* resolveIfPresent(probe);
-        if (realProbe === undefined) return undefined;
-        if (Option.isSome(realProbe)) {
-          return suffix.length === 0 ? realProbe.value : path.join(realProbe.value, ...suffix);
-        }
-        const parent = path.dirname(probe);
-        if (parent === probe) return path.resolve(target);
-        suffix.unshift(path.basename(probe));
-        probe = parent;
-      }
+    const canonicalCandidate = yield* canonicalizeLauncherPath({
+      target: input.candidate,
+      platform: input.platform,
     });
-
-    const canonicalize =
-      input.platform === "win32" ? canonicalizeWindowsPath : canonicalizePosixPath;
-    const canonicalVersionsDir = yield* canonicalize(input.realVersionsDir);
-    const canonicalCandidate = yield* canonicalize(input.candidate);
     if (canonicalVersionsDir === undefined || canonicalCandidate === undefined) return false;
     return launcherOwnsVersionsDir(path, canonicalVersionsDir, canonicalCandidate, input.platform);
   },
@@ -1065,9 +1122,9 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
     const path = yield* Path.Path;
     const environment = yield* HostProcess.Environment;
     const names = ownedLauncherNames(input.version ?? packageJson.version, "linux");
-    const realPath = (file: string) =>
-      fs.realPath(file).pipe(Effect.orElseSucceed(() => undefined));
-    const realVersionsDir = (yield* realPath(input.versionsDir)) ?? input.versionsDir;
+    const canonicalPath = (file: string) =>
+      canonicalizeLauncherPath({ target: file, platform: "linux" });
+    const realVersionsDir = (yield* canonicalPath(input.versionsDir)) ?? input.versionsDir;
     const ownsTarget = (candidate: string) =>
       isOwnedVersionsTarget({
         versionsDir: input.versionsDir,
@@ -1079,16 +1136,16 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
     const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
     if (Option.isSome(linkTarget)) {
       const parentReal =
-        (yield* realPath(path.dirname(input.launchedAs))) ?? path.dirname(input.launchedAs);
+        (yield* canonicalPath(path.dirname(input.launchedAs))) ?? path.dirname(input.launchedAs);
       const unresolved = joinRawPosixPath(parentReal, linkTarget.value);
       if (yield* ownsTarget(unresolved)) return input.launchedAs;
       // Symlink alias pointing to an owned POSIX launcher script (e.g. ~/.local/bin/s2code -> <baseDir>/bin/shuv2code).
-      const target = (yield* realPath(unresolved)) ?? unresolved;
+      const target = (yield* canonicalPath(unresolved)) ?? unresolved;
       const scriptTarget = yield* readPosixLauncherTarget(target, { baseDir });
       if (scriptTarget !== undefined && (yield* ownsTarget(scriptTarget))) return target;
       return undefined;
     }
-    const executable = yield* realPath(input.launchedAs);
+    const executable = yield* canonicalPath(input.launchedAs);
     if (executable === undefined || !isVersionExecutable(path, realVersionsDir, executable)) {
       return undefined;
     }
@@ -1115,13 +1172,13 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
     ].filter((candidate) => path.isAbsolute(candidate));
     for (const candidate of candidates) {
       // The script itself, so an alias that links to it keeps working.
-      const script = yield* realPath(candidate);
+      const script = yield* canonicalPath(candidate);
       if (script === undefined) continue;
       // Like the shell, pass over a script nobody can execute.
       const info = yield* fs.stat(script).pipe(Effect.option);
       if (Option.isNone(info) || (info.value.mode & 0o111) === 0) continue;
       const target = yield* readPosixLauncherTarget(script, { baseDir });
-      if (target !== undefined && (yield* realPath(target)) === executable) return script;
+      if (target !== undefined && (yield* canonicalPath(target)) === executable) return script;
     }
     return undefined;
   },

@@ -29,6 +29,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import {
+  canonicalizeLauncherPath,
   ensurePinnedRuntimeInstalled,
   findPosixLauncher,
   generatedWindowsForwarderTarget,
@@ -169,10 +170,13 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
     return { target: path.resolve(path.dirname(launcher), directTarget), forwarder: false };
   }
 
+  const platform = yield* HostProcess.Platform;
   const readPosix = Effect.fnUntraced(function* (file: string) {
-    const parentReal = yield* fs
-      .realPath(path.dirname(file))
-      .pipe(Effect.orElseSucceed(() => path.dirname(file)));
+    const parentReal =
+      (yield* canonicalizeLauncherPath({
+        target: path.dirname(file),
+        platform,
+      })) ?? path.dirname(file);
     const link = yield* fs.readLink(file).pipe(Effect.option);
     if (Option.isSome(link)) {
       return { target: joinRawPosixPath(parentReal, link.value) };
@@ -187,14 +191,21 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
 
   const entry = yield* readPosix(launcher);
   if (entry === undefined) return undefined;
-  const realDir = yield* fs
-    .realPath(path.dirname(launcher))
-    .pipe(Effect.orElseSucceed(() => path.dirname(launcher)));
-  const realLegacy = path.join(realDir, path.basename(legacy));
+  const canonicalEntryLocation = yield* canonicalizeLauncherPath({
+    target: entry.target,
+    platform,
+    followLastSymlink: false,
+  });
+  const canonicalLegacyLocation = yield* canonicalizeLauncherPath({
+    target: legacy,
+    platform,
+    followLastSymlink: false,
+  });
   if (
     samePath(path.basename(launcher), canonical) &&
-    (samePath(path.resolve(entry.target), legacy) ||
-      samePath(path.resolve(entry.target), realLegacy))
+    canonicalEntryLocation !== undefined &&
+    canonicalLegacyLocation !== undefined &&
+    samePath(canonicalEntryLocation, canonicalLegacyLocation)
   ) {
     const forwarded = yield* readPosix(legacy);
     return forwarded === undefined ? undefined : { target: forwarded.target, forwarder: true };
@@ -348,7 +359,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     );
   }
   if (platform !== "win32") {
-    const realLauncher = yield* fs.realPath(launcher).pipe(Effect.orElseSucceed(() => undefined));
+    const realLauncher = yield* canonicalizeLauncherPath({ target: launcher, platform });
     if (realLauncher !== undefined) {
       const environment = yield* HostProcess.Environment;
       const home = environment["HOME"]?.trim() || (yield* HostProcess.HomeDirectory);
@@ -375,9 +386,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
             Effect.orElseSucceed(() => false),
           );
           if (!isLink) continue;
-          const resolved = yield* fs
-            .realPath(candidate)
-            .pipe(Effect.orElseSucceed(() => undefined));
+          const resolved = yield* canonicalizeLauncherPath({ target: candidate, platform });
           if (resolved === realLauncher) {
             yield* remember(candidate);
           }

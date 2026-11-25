@@ -663,6 +663,76 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
         assert.equal(yield* fs.readFileString(scriptDirectDotDot), directScriptBody);
         assert.equal(yield* fs.readFileString(scriptDanglingDotDot), danglingScriptBody);
         assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
+
+        // Even when the lexically normalized path `<versions>/existing-t3` actually exists,
+        // `<versions>/escape/../existing-t3` physically traverses to `<foreign>/runtime/versions/existing-t3`
+        // and must NOT be treated as owned. Trailing slashes on regular files are also refused.
+        const existingLocal = path.join(baseDir, "runtime/versions/existing-t3");
+        const existingForeign = path.join(foreignBaseDir, "runtime/versions/existing-t3");
+        yield* fs.writeFileString(existingLocal, "", { mode: 0o755 });
+        yield* fs.writeFileString(existingForeign, "", { mode: 0o755 });
+        const existingDotDotViaForeign = `${escapeLink}/../existing-t3`;
+        const trailingSlashTarget = `${targetExe}/`;
+        const scriptExistingDotDot = path.join(baseDir, "bin/s2code");
+        const scriptTrailingSlash = path.join(baseDir, "bin/t3");
+        const existingDotDotBody = posixLauncherScript(existingDotDotViaForeign);
+        const trailingSlashBody = posixLauncherScript(trailingSlashTarget);
+        yield* fs.writeFileString(scriptExistingDotDot, existingDotDotBody, { mode: 0o755 });
+        yield* fs.writeFileString(scriptTrailingSlash, trailingSlashBody, { mode: 0o755 });
+
+        yield* ServiceLauncherClient.repointLaunchers({
+          baseDir,
+          targetVersion: "2.0.0",
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            HOME: root,
+            PATH: localBin,
+          }),
+        );
+
+        assert.equal(yield* fs.readFileString(scriptExistingDotDot), existingDotDotBody);
+        assert.equal(yield* fs.readFileString(scriptTrailingSlash), trailingSlashBody);
+        assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
+      }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
+  it.effect(
+    "rewrites an owned script whose target lexically matches target.entryPath but physically resolves to an older runtime",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-canonical-rewrite-" });
+        const baseDir = path.join(root, ".s2code");
+        const oldNested = path.join(baseDir, "runtime/versions/1.0.0/nested");
+        const oldTarget = path.join(baseDir, "runtime/versions/1.0.0/2.0.0/t3");
+        const newTarget = path.join(baseDir, "runtime/versions/2.0.0/t3");
+        yield* fs.makeDirectory(oldNested, { recursive: true });
+        for (const file of [oldTarget, newTarget]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+          yield* fs.writeFileString(file, "", { mode: 0o755 });
+        }
+        // `<versions>/old-link/../2.0.0/t3` lexically equals `<versions>/2.0.0/t3`,
+        // but physically resolves through `old-link -> 1.0.0/nested` to `1.0.0/2.0.0/t3`.
+        const oldLink = path.join(baseDir, "runtime/versions/old-link");
+        yield* fs.symlink(oldNested, oldLink);
+        const launcher = path.join(baseDir, "bin/shuv2code");
+        yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
+        yield* fs.writeFileString(launcher, posixLauncherScript(`${oldLink}/../2.0.0/t3`), {
+          mode: 0o755,
+        });
+
+        yield* ServiceLauncherClient.repointLaunchers({
+          baseDir,
+          targetVersion: "2.0.0",
+        }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            HOME: root,
+            PATH: "",
+          }),
+        );
+
+        assert.equal(yield* fs.readFileString(launcher), posixLauncherScript(newTarget));
       }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 

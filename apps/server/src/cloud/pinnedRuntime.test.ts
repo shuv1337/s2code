@@ -22,6 +22,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ProcessRunner from "../processRunner.ts";
 import {
   findPosixLauncher,
+  isOwnedVersionsTarget,
   isVersionExecutable,
   ensurePinnedRuntimeInstalled,
   isUnpublishedRelease,
@@ -1099,5 +1100,56 @@ it.layer(NodeServices.layer)("launcher lookup on PATH", (it) => {
       // An empty PATH searches nothing, not even the working directory.
       assert.isUndefined(yield* lookup(""));
     }),
+  );
+
+  it.effect.skipIf(!posixHost)(
+    "rejects dangling foreign symlinks under versions on the win32 ownership path",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-win-dangling-" });
+        const versionsDir = path.join(root, ".s2code", "runtime", "versions");
+        const foreignVersionsDir = path.join(root, ".other-s2code", "runtime", "versions");
+        yield* fs.makeDirectory(versionsDir, { recursive: true });
+        yield* fs.makeDirectory(foreignVersionsDir, { recursive: true });
+        const realVersionsDir = yield* fs.realPath(versionsDir);
+
+        // Dangling symlink under versions/ pointing to a missing foreign target.
+        const danglingDir = path.join(versionsDir, "old");
+        const danglingLink = path.join(danglingDir, "t3.exe");
+        yield* fs.makeDirectory(danglingDir, { recursive: true });
+        yield* fs.symlink(path.join(foreignVersionsDir, "missing", "t3.exe"), danglingLink);
+
+        // Symlinked version dir pointing to a foreign dir with a missing child.
+        const escapeDir = path.join(versionsDir, "escape");
+        yield* fs.symlink(foreignVersionsDir, escapeDir);
+
+        assert.isFalse(
+          yield* isOwnedVersionsTarget({
+            versionsDir,
+            realVersionsDir,
+            candidate: danglingLink,
+            platform: "win32",
+          }),
+        );
+        assert.isFalse(
+          yield* isOwnedVersionsTarget({
+            versionsDir,
+            realVersionsDir,
+            candidate: path.join(escapeDir, "missing", "t3.exe"),
+            platform: "win32",
+          }),
+        );
+        // Genuine missing pruned local runtime stays owned.
+        assert.isTrue(
+          yield* isOwnedVersionsTarget({
+            versionsDir,
+            realVersionsDir,
+            candidate: path.join(versionsDir, "0.9.0", "t3.exe"),
+            platform: "win32",
+          }),
+        );
+      }),
   );
 });
