@@ -62,6 +62,8 @@ import type {
   SourceControlRefSelector,
 } from "@t3tools/source-control-core/server/SourceControlProvider";
 import { ChangeRequestRepository } from "@t3tools/source-control-core/server/SourceControlProvider";
+import type { SourceControlManagedCliDiscoverySpec } from "@t3tools/source-control-core/server/discovery";
+import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -69,6 +71,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
@@ -695,6 +698,7 @@ function makeManager(input?: {
   providerScenario?: FakeProviderScenario;
   pullRequests?: Partial<PullRequestService.PullRequestService["Service"]>;
   sourceControlProvider?: SourceControlProvider["Service"];
+  providerDiscovery?: SourceControlManagedCliDiscoverySpec;
   textGeneration?: Partial<FakeGitTextGeneration>;
   providers?: ReadonlyArray<ServerProvider>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
@@ -781,24 +785,32 @@ function makeManager(input?: {
     SourceControlProviderRegistry.SourceControlProviderRegistry,
     Effect.gen(function* () {
       const context = yield* Effect.context<GitVcsDriver.GitVcsDriver>();
-      return (
-        input?.sourceControlProvider ?? {
-          ...fakeProvider,
-          readChangeRequestTemplate: (template: { cwd: string; treeish: string }) =>
-            readFakeChangeRequestTemplate(template).pipe(Effect.provideContext(context)),
-        }
-      );
-    }).pipe(
-      Effect.map((provider) =>
-        SourceControlProviderRegistry.SourceControlProviderRegistry.of({
-          resolveLink: (input) => provider.resolveLink?.(input),
-          get: () => Effect.succeed(provider),
-          resolveHandle: () => Effect.succeed({ provider, context: null }),
-          resolve: () => Effect.succeed(provider),
-          discover: Effect.succeed([]),
-        }),
-      ),
-    ),
+      const provider = input?.sourceControlProvider ?? {
+        ...fakeProvider,
+        readChangeRequestTemplate: (template: { cwd: string; treeish: string }) =>
+          readFakeChangeRequestTemplate(template).pipe(Effect.provideContext(context)),
+      };
+      if (input?.providerDiscovery !== undefined) {
+        return yield* SourceControlProviderRegistry.makeWithProviders([
+          { kind: provider.kind, provider, discovery: input.providerDiscovery },
+        ]).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              TestSourceControlHost.layer(),
+              layerServerSettings,
+              VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
+            ),
+          ),
+        );
+      }
+      return SourceControlProviderRegistry.SourceControlProviderRegistry.of({
+        resolveLink: (input) => provider.resolveLink?.(input),
+        get: () => Effect.succeed(provider),
+        resolveHandle: () => Effect.succeed({ provider, context: null }),
+        resolve: () => Effect.succeed(provider),
+        discover: Effect.succeed([]),
+      });
+    }),
   );
 
   const layerManager = Layer.mergeAll(
@@ -834,6 +846,23 @@ function makeManager(input?: {
     );
     return { manager, providerCalls };
   });
+}
+
+function testGitHubDiscovery(customHost?: string): SourceControlManagedCliDiscoverySpec {
+  const kind = SourceControlProviderKind.make("github");
+  return {
+    type: "managed-cli",
+    kind,
+    label: "GitHub",
+    installHint: "unused",
+    probe: () => Effect.die("Unexpected GitHub discovery probe"),
+    refineUnknownRemote: ({ context }) =>
+      Effect.succeed(
+        customHost !== undefined && context.provider.baseUrl === `https://${customHost}`
+          ? { ...context.provider, kind }
+          : null,
+      ),
+  };
 }
 
 const asThreadId = (threadId: string) => threadId as ThreadId;
@@ -5446,6 +5475,116 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       ).toEqual([true]);
       expect(newActions).toEqual([]);
     }),
+  );
+
+  it.effect("createPullRequest never pushes if a local rewrite leaves no recognized forge", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(cwd);
+      const remote = yield* createBareRemote();
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        cwd,
+        "origin",
+        "git@github.com:acme/web.git",
+        remote,
+      );
+      yield* runGit(cwd, ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+      yield* runGit(cwd, ["checkout", "-b", "topic"]);
+      const { manager } = yield* makeManager({ providerDiscovery: testGitHubDiscovery() });
+      const result = yield* manager
+        .createPullRequest({
+          cwd,
+          projectId: ProjectId.make("project-1"),
+          title: "Feature",
+          body: "Body",
+        })
+        .pipe(Effect.result);
+      expect((yield* runGit(cwd, ["ls-remote", "origin", "refs/heads/topic"])).stdout).toBe("");
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "GitManagerError", detail: expect.stringContaining("Nothing was pushed") },
+      });
+    }),
+  );
+
+  it.effect("createPullRequest pins the provider's web host for an SSH alias", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(cwd);
+      const bare = yield* createBareRemote();
+      const alias = "git@github:acme/web.git";
+      yield* runGit(cwd, ["remote", "add", "origin", bare]);
+      yield* runGit(cwd, ["checkout", "-b", "topic"]);
+      yield* runGit(cwd, ["push", "-u", "origin", "topic"]);
+      yield* runGit(cwd, ["remote", "set-url", "origin", alias]);
+      const { service } = createFakeSourceControlProvider();
+      const pins: Array<string | null> = [];
+      const { manager } = yield* makeManager({
+        providerDiscovery: testGitHubDiscovery(),
+        sourceControlProvider: {
+          ...service,
+          resolveRemoteWebHost: ({ context }) =>
+            Effect.succeed(context.remoteUrl === alias ? "github.com" : null),
+          createChangeRequest: (input) =>
+            ChangeRequestRepository.pipe(
+              Effect.tap((pin) => Effect.sync(() => void pins.push(pin))),
+              Effect.andThen(service.createChangeRequest(input)),
+            ),
+        },
+      });
+      yield* manager.createPullRequest({
+        cwd,
+        projectId: ProjectId.make("project-1"),
+        title: "Feature",
+        body: "Body",
+      });
+      expect(pins).toEqual(["github.com/acme/web"]);
+    }),
+  );
+
+  it.effect(
+    "createPullRequest and project identity agree on a custom GitHub insteadOf destination",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(cwd);
+        const bare = yield* createBareRemote();
+        const host = "code.example.test";
+        const expanded = `ssh://git@${host}/acme/web.git`;
+        const raw = "git@github.com:old/project.git";
+        yield* configureHostedTestRemotes(cwd, [["origin", expanded, bare]]);
+        yield* runGit(cwd, ["remote", "set-url", "origin", raw]);
+        yield* runGit(cwd, ["config", `url.${expanded}.insteadOf`, raw]);
+        yield* runGit(cwd, ["checkout", "-b", "topic"]);
+        const identity = yield* Effect.flatMap(
+          RepositoryIdentityResolver.RepositoryIdentityResolver,
+          (resolver) => resolver.resolve(cwd),
+        ).pipe(Effect.provide(RepositoryIdentityResolver.layer));
+        const { service } = createFakeSourceControlProvider();
+        const pins: Array<string | null> = [];
+        const { manager } = yield* makeManager({
+          providerDiscovery: testGitHubDiscovery(host),
+          sourceControlProvider: {
+            ...service,
+            createChangeRequest: (input) =>
+              ChangeRequestRepository.pipe(
+                Effect.tap((pin) => Effect.sync(() => void pins.push(pin))),
+                Effect.andThen(service.createChangeRequest(input)),
+              ),
+          },
+        });
+        yield* manager.createPullRequest({
+          cwd,
+          projectId: ProjectId.make("project-1"),
+          title: "Feature",
+          body: "Body",
+        });
+        expect(identity?.locator.remoteUrl).toBe(expanded);
+        expect(pins).toEqual([identity?.canonicalKey]);
+        expect((yield* runGit(cwd, ["ls-remote", "origin", "refs/heads/topic"])).stdout).toContain(
+          "refs/heads/topic",
+        );
+      }),
   );
 
   it.effect(

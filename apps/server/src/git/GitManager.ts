@@ -68,6 +68,7 @@ import {
   threadPullRequestKeyOf,
 } from "../sourceControl/threadPullRequests.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
+import { hostedRemoteUrl } from "../sourceControl/hostedRemoteUrl.ts";
 
 import {
   GitManagerError,
@@ -3039,10 +3040,10 @@ export const make = Effect.gen(function* () {
       provider: SourceControlProvider.SourceControlProvider["Service"],
     ) {
       const [expandedUrl = null] = yield* readExpandedRemoteUrls(cwd, remoteName);
-      return (
-        parseGitHubUrl(expandedUrl, provider) ??
-        parseGitHubUrl(yield* readRemoteUrlNullable(cwd, remoteName), provider)
-      );
+      const url =
+        hostedRemoteUrl(expandedUrl) ??
+        hostedRemoteUrl(yield* readRemoteUrlNullable(cwd, remoteName));
+      return parseGitHubUrl(url, provider);
     },
   );
 
@@ -3070,6 +3071,13 @@ export const make = Effect.gen(function* () {
   )(function* (cwd: string, requestedRepository: string | undefined) {
     const { provider, context } = yield* sourceControlProviders.resolveHandle({ cwd });
     const requested = requestedRepository?.trim();
+    if (provider.kind === "unknown") {
+      return yield* new GitManagerError({
+        operation: "createPullRequest",
+        cwd,
+        detail: "No supported forge could be resolved for this checkout. Nothing was pushed.",
+      });
+    }
     if (provider.kind !== "github") {
       if (requested !== undefined) {
         return yield* new GitManagerError({
@@ -3117,8 +3125,35 @@ export const make = Effect.gen(function* () {
     if (repository === undefined) return yield* missingOriginError();
     const contextAuthority = context ? gitRemoteAuthority(context.remoteUrl) : undefined;
     const authority = remote?.authority ?? contextAuthority ?? "github.com";
-    // The provider may resolve the SSH transport's alias to its canonical API host.
+    const webContext =
+      remote !== null &&
+      remoteName !== undefined &&
+      (context?.remoteName !== remoteName || context.remoteUrl !== remote.url)
+        ? {
+            remoteName,
+            remoteUrl: remote.url,
+            provider: {
+              kind: provider.kind,
+              name: remote.forgeHost,
+              baseUrl: `https://${remote.forgeHost}`,
+            },
+          }
+        : context;
+    const webHost =
+      webContext === null
+        ? null
+        : yield* (
+            provider.resolveRemoteWebHost?.({
+              cwd,
+              context: webContext,
+              resolveContext: (input) =>
+                sourceControlProviders
+                  .resolveHandle(input)
+                  .pipe(Effect.map((handle) => handle.context)),
+            }) ?? Effect.succeed(null)
+          );
     const forgeHost =
+      webHost ??
       (context && contextAuthority === authority
         ? URL.parse(context.provider.baseUrl)?.host
         : undefined) ??

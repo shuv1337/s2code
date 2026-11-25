@@ -128,7 +128,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(ProcessRunner.layer)),
   );
 
-  it.effect("prefers recognized insteadOf destinations over the configured repository", () =>
+  it.effect("prefers hosted insteadOf destinations over the configured repository", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
@@ -145,13 +145,13 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const identity = yield* resolver.resolve(cwd);
 
-      expect(identity?.canonicalKey).toBe("github.com/t3tools/t3code");
-      expect(identity?.provider).toBe("github");
+      expect(identity?.canonicalKey).toBe("proxy.example/t3tools/t3code");
+      expect(identity?.provider).toBe("unknown");
       expect(identity?.displayName).toBe("T3Tools/t3code");
       expect(identity?.locator).toEqual({
         source: "git-remote",
         remoteName: "origin",
-        remoteUrl: "https://github.com/T3Tools/t3code.git",
+        remoteUrl: "https://proxy.example/T3Tools/t3code.git",
       });
 
       yield* git(cwd, ["config", "--unset", "url.https://proxy.example/.insteadOf"]);
