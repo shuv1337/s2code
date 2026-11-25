@@ -32,6 +32,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
@@ -350,6 +351,7 @@ const runPool = <A, E, R>(
   boot: Boot = {},
 ) =>
   Effect.gen(function* () {
+    const workspaceScope = yield* Effect.scope;
     const startedTurns =
       boot.startedTurns ?? (yield* Ref.make<ReadonlyArray<ProviderInstanceId>>([]));
     const deliveries = yield* Ref.make<ReadonlyArray<ProviderAdapter.ProviderAdapterV2TurnInput>>(
@@ -459,11 +461,16 @@ const runPool = <A, E, R>(
       Layer.provide(layerPlatform),
       Layer.provideMerge(layerProviders.pipe(Layer.provideMerge(layerSettings))),
     );
-    return yield* Effect.gen(function* () {
-      // Production starts the daemon from server startup, not from the runtime layer.
-      if (boot.effectWorker !== false) yield* EffectWorker.runDaemon.pipe(Effect.forkScoped);
-      return yield* body({ startedTurns, deliveries, resumes });
-    }).pipe(Effect.provide(layerRuntime));
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        // Production starts the daemon from server startup, not from the runtime layer.
+        if (boot.effectWorker !== false) yield* EffectWorker.runDaemon.pipe(Effect.forkScoped);
+        // Checkpoint capture can still be writing Git objects when the body sees a completed run.
+        return yield* body({ startedTurns, deliveries, resumes }).pipe(
+          Scope.provide(workspaceScope),
+        );
+      }).pipe(Effect.provide(layerRuntime)),
+    );
   }).pipe(Effect.scoped);
 
 const send = (

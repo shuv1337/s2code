@@ -104,18 +104,16 @@ const NODE_SCRIPT = {
   nodeScriptPath: "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs",
 } as const;
 
-// Emulates `t3 serve`: it takes the home owner lock at startup, then binds
-// once a second server has tried the same home (or after 2s), so a concurrent
-// launch always sees the home still unclaimed. Like the real server, it
-// publishes server-runtime.json after it starts answering HTTP, if at all.
-const fakeT3Serve = (publishDelayMs: number | null) => `const fs = require("node:fs");
+// The launcher fixture signals publication after readiness, a missed lookup, and lock contention.
+const fakeT3Serve = (publishRuntime: boolean) => `const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const args = process.argv.slice(2);
 const port = Number(args[args.indexOf("--port") + 1]);
 const userdata = path.join(args[args.indexOf("--base-dir") + 1], "userdata");
 const servers = path.join(process.env.HOME, "servers");
-fs.mkdirSync(userdata, { recursive: true });
+// A killed test worker cannot reap this nohup'd process.
+setTimeout(() => process.exit(0), 60_000).unref();
 fs.appendFileSync(servers, process.pid + "\\n");
 try {
   fs.writeFileSync(path.join(userdata, "server.lock"), String(process.pid), { flag: "wx" });
@@ -123,21 +121,15 @@ try {
   console.error("ServerAlreadyRunningError: another server owns " + userdata);
   process.exit(1);
 }
-setTimeout(() => process.exit(0), 60_000);
-const serve = (tries) => {
-  if (tries > 0 && fs.readFileSync(servers, "utf8").trim().split("\\n").length < 2) {
-    setTimeout(() => serve(tries - 1), 50);
-    return;
-  }
-  http.createServer((_, response) => response.end()).listen(port, "127.0.0.1", () => {
+if (${publishRuntime}) {
+  process.once("SIGUSR2", () => {
     const origin = "http://127.0.0.1:" + port;
-    ${publishDelayMs === null ? "return;" : ""}
-    setTimeout(() => {
-      fs.writeFileSync(path.join(userdata, "server-runtime.json"), JSON.stringify({ pid: process.pid, port, origin }));
-    }, ${publishDelayMs});
+    const runtime = path.join(userdata, "server-runtime.json");
+    fs.writeFileSync(runtime + ".next", JSON.stringify({ pid: process.pid, port, origin }));
+    fs.renameSync(runtime + ".next", runtime);
   });
-};
-serve(40);
+}
+http.createServer((_, response) => response.end()).listen(port, "127.0.0.1");
 `;
 
 // The launch's POSIX bootstrap without the account login shell around it, so the
@@ -145,32 +137,90 @@ serve(40);
 const launchStateKey = (command: ChildProcess.Command) =>
   /exec sh -s -- ([^"]+)"/u.exec(commandArgs(command).join(" "))?.[1];
 
-// Runs the remote half of an SSH launch as a local shell
-// whose HOME is the given directory. Every launch after the first starts once
-// a server is running (or after 10s), which lines up the race deterministically.
-const localRemoteShellLayer = (home: string) =>
+// Start the contender only once the owner has missed its first post-readiness lookup.
+// Keep the owner in that wait until the contender enters the launch lock's wait.
+const concurrentLaunchGate = `test_missed=0
+test_elapsed=0
+date() {
+  if [ "$TEST_MISSING_RECORD" = 1 ]; then printf '%s\\n' "$test_elapsed"; else command date "$@"; fi
+}
+sleep() {
+  case "$TEST_CONTENDER:$1" in
+    1:1)
+      if [ ! -f "$HOME/launch-contended" ]; then
+        : >"$HOME/launch-contended"
+        printf 'contended\\n' >"$HOME/contended"
+      fi
+      command sleep "$@" ;;
+    0:*)
+      if [ "$1" = 1 ] || [ -z "\${RECORD_DEADLINE:-}" ]; then
+        command sleep "$@"
+        return
+      fi
+      if [ "$test_missed" = 0 ]; then
+        test_missed=1
+        printf 'missed\\n' >"$HOME/missed"
+        read -r signal <"$HOME/contended"
+        if [ "$TEST_MISSING_RECORD" = 0 ]; then
+          kill -USR2 "$(cat "$DEFAULT_SERVER_HOME/userdata/server.lock")"
+        fi
+      fi
+      if [ "$TEST_MISSING_RECORD" = 1 ]; then
+        test_elapsed=$((test_elapsed + 10))
+      else
+        command sleep "$@"
+      fi ;;
+    *) command sleep "$@" ;;
+  esac
+}
+`;
+
+const localRemoteShellLayer = (home: string, contenderKey: string, missingRecord: boolean) =>
   Layer.effect(
     ChildProcessSpawner.ChildProcessSpawner,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      let launches = 0;
       return ChildProcessSpawner.make((command) => {
         if (command._tag !== "StandardCommand") return spawner.spawn(command);
-        const gate =
-          launches++ === 0
-            ? ""
-            : 'i=0; while [ ! -s "$HOME/servers" ] && [ "$i" -lt 200 ]; do sleep 0.05; i=$((i+1)); done; ';
+        const key = launchStateKey(command) ?? "";
+        const contender = key === contenderKey;
+        const stdin = command.options.stdin;
+        const gatedStdin =
+          typeof stdin === "object" && "stream" in stdin && Stream.isStream(stdin.stream)
+            ? {
+                ...stdin,
+                stream: Stream.concat(
+                  Stream.make(new TextEncoder().encode(concurrentLaunchGate)),
+                  stdin.stream,
+                ),
+              }
+            : stdin;
+        const args = contender
+          ? [
+              "-ec",
+              `read -r signal <"$HOME/missed"
+sh -s -- "$1"
+if [ ! -f "$HOME/launch-contended" ]; then
+  echo 'Concurrent launch finished without waiting for the home lock' >&2
+  exit 1
+fi`,
+              "sh",
+              key,
+            ]
+          : ["-s", "--", key];
         return spawner.spawn(
-          ChildProcess.make(
-            "sh",
-            ["-c", `${gate}exec sh -s -- "$1"`, "sh", launchStateKey(command) ?? ""],
-            {
-              ...command.options,
-              env: { ...command.options.env, HOME: home },
-              // Like an SSH session ending, the shell's exit leaves its nohup'd server running.
-              detached: false,
+          ChildProcess.make("sh", args, {
+            ...command.options,
+            stdin: gatedStdin,
+            env: {
+              ...command.options.env,
+              HOME: home,
+              TEST_CONTENDER: contender ? "1" : "0",
+              TEST_MISSING_RECORD: missingRecord ? "1" : "0",
             },
-          ),
+            // Like an SSH session ending, the shell's exit leaves its nohup'd server running.
+            detached: false,
+          }),
         );
       });
     }),
@@ -1384,14 +1434,25 @@ describe("ssh tunnel scripts", () => {
     }),
   );
 
-  it.live("concurrent launches on one remote home record the server that owns it", () =>
-    // The second row's server never publishes server-runtime.json.
-    Effect.forEach([1_500, null, "wrapper"] as const, (variant) =>
+  it.live.each(["runtime record", "missing record", "wrapper"] as const)(
+    "concurrent launches on one remote home record the server that owns it (%s)",
+    (variant) =>
       Effect.gen(function* () {
-        const publishDelayMs = variant === "wrapper" ? 0 : variant;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ssh-launch-" });
+        assert.equal(
+          Number(
+            yield* spawner.exitCode(
+              ChildProcess.make("mkfifo", [
+                path.join(home, "missed"),
+                path.join(home, "contended"),
+              ]),
+            ),
+          ),
+          0,
+        );
         const serversFile = path.join(home, "servers");
         yield* Effect.addFinalizer(() =>
           fs.readFileString(serversFile).pipe(
@@ -1406,7 +1467,7 @@ describe("ssh tunnel scripts", () => {
           ),
         );
         const serverScript = path.join(home, "fake-t3.cjs");
-        yield* fs.writeFileString(serverScript, fakeT3Serve(publishDelayMs));
+        yield* fs.writeFileString(serverScript, fakeT3Serve(variant !== "missing record"));
         const wrapperScript = path.join(home, "wrapper.cjs");
         yield* fs.writeFileString(
           wrapperScript,
@@ -1416,12 +1477,14 @@ child.on("exit", (code) => process.exit(code ?? 1));`,
         // A launch that died holding the lock must not block or double-admit later ones.
         const launchLock = path.join(home, ".s2code-v2", "ssh-launch", ".launch.lock");
         yield* fs.makeDirectory(path.dirname(launchLock), { recursive: true });
+        yield* fs.makeDirectory(path.join(home, ".s2code-v2", "userdata"));
         yield* fs.writeFileString(path.join(home, ".s2code-v2", ".product-identity"), "s2code\n");
         yield* fs.writeFileString(launchLock, "999999999\n");
         const targets = [
           { alias: "devbox", hostname: "devbox", username: null, port: null },
           { alias: "devbox-tailnet", hostname: "devbox-tailnet", username: null, port: null },
-        ];
+        ] as const;
+        const contenderKey = yield* remoteStateKey(targets[1]);
 
         const launches = yield* Effect.forEach(
           targets,
@@ -1430,7 +1493,9 @@ child.on("exit", (code) => process.exit(code ?? 1));`,
               nodeScriptPath: variant === "wrapper" ? wrapperScript : serverScript,
             }),
           { concurrency: "unbounded" },
-        ).pipe(Effect.provide(localRemoteShellLayer(home)));
+        ).pipe(
+          Effect.provide(localRemoteShellLayer(home, contenderKey, variant === "missing record")),
+        );
 
         const ownerPid = Number(
           yield* fs.readFileString(path.join(home, ".s2code-v2", "userdata", "server.lock")),
@@ -1456,8 +1521,7 @@ child.on("exit", (code) => process.exit(code ?? 1));`,
           );
         }
         assert.isFalse(yield* fs.exists(launchLock));
-      }).pipe(Effect.scoped),
-    ).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 });
 

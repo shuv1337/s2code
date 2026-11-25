@@ -24,7 +24,7 @@ No guaranteed background streaming, offline dictation, phone VPN inheritance, or
 
 2. Verified upstream foundation
 
-The review read the following files at the pinned commit, not just current default-branch search snippets:
+The sources below pin the implementation files to the research baseline and the architecture and authentication docs to the `cd128e7774` upstream sync:
 
 | Existing location                                         | Verified relevance                                                                                                                                                                                                              |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -38,7 +38,7 @@ The review read the following files at the pinned commit, not just current defau
 
 Sources: [S4–S10].
 
-Important: docs/internals/01_architecture.md supersedes the removed `docs/orchestration-v2/feature-lifecycles.md` target-behavior notes. Do not copy illustrative `thread.message.send` shapes as the current wire API; use current contracts and `message.dispatch` in the implementation. [S7, S11]
+Use the current contracts and `message.dispatch` in the implementation, not illustrative `thread.message.send` examples. [S6, S7]
 
 The earlier investigation found a closed, unmerged PR concerning Apple Watch Smart Stack Live Activities, not a confirmed standalone Watch client. This RFC does not depend on that PR and does not claim an exhaustive renewed audit of every active upstream branch. [S12]
 
@@ -309,13 +309,12 @@ All repository source links below are pinned unless a live release/issue is the 
 • S2 — Resolved baseline tag: https://api.github.com/repos/pingdotgg/t3code/git/ref/tags/v0.0.46-nightly.20261010.2948
 • S3 — Official V1-to-V2 migration announcement: https://github.com/pingdotgg/t3code/issues/14871
 • S4 — Mobile package: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/mobile/package.json
-• S5 — Architecture: https://github.com/pingdotgg/t3code/blob/main/docs/internals/01_architecture.md
+• S5 — Architecture: https://github.com/pingdotgg/t3code/blob/cd128e7774/docs/internals/01_architecture.md
 • S6 — V2 contracts: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/packages/contracts/src/orchestrationV2.ts
 • S7 — Actual dispatch policy: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/server/src/orchestration-v2/CommandPolicy.ts
 • S8 — Orchestrator integration: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/server/src/orchestration-v2/Orchestrator.ts
 • S9 — Existing command receipts: https://github.com/pingdotgg/t3code/blob/4f63275ac7885281d245022e65f1e9e8816b1382/apps/server/src/orchestration-v2/CommandReceiptStore.ts
-• S10 — Environment authentication: https://github.com/pingdotgg/t3code/blob/main/docs/internals/04_environment-auth.md
-• S11 — Architecture (supersedes removed feature-lifecycles.md): https://github.com/pingdotgg/t3code/blob/main/docs/internals/01_architecture.md
+• S10 — Environment authentication: https://github.com/pingdotgg/t3code/blob/cd128e7774/docs/internals/04_environment-auth.md
 • S12 — Earlier Live Activities PR, closed unmerged: https://github.com/pingdotgg/t3code/pull/4978
 • S13 — Apple system Watch text input: https://developer.apple.com/documentation/watchkit/wkinterfacecontroller/presenttextinputcontroller(withsuggestions:allowedinputmode:completion:)
 • S14 — SwiftUI text input: https://developer.apple.com/documentation/swiftui/text-input-and-output

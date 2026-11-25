@@ -345,7 +345,7 @@ it.effect("rejects a selection-forced restart and provider mismatch without rest
   ),
 );
 
-it.effect("rejects the planner's completed-turn fallback for a strict steer", () =>
+it.effect("holds watch admission until a completed run's turn-end capture drains", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const h = yield* makeHarness("watch-completed-before-dispatch");
@@ -353,10 +353,19 @@ it.effect("rejects the planner's completed-turn fallback for a strict steer", ()
         const s = yield* h.setup;
         const first = yield* s.start;
         yield* s.complete;
+        yield* s.reject(s.command("capture-send", "send"), "thread_busy");
         yield* s.reject(s.command("late-steer", "steer", first.runId), "steering_would_restart");
-        yield* s.worker.drain();
+        yield* s.orchestrator.dispatch(s.command("capture-queue", "queue"));
+        assert.equal((yield* s.receipt("capture-queue")).status, "accepted");
+        assert.deepEqual(
+          (yield* s.orchestrator.getThreadProjection(threadId)).runs.map((run) => run.status),
+          ["completed", "queued"],
+        );
         assert.equal(h.started.length, 1);
-        assert.equal((yield* s.orchestrator.getThreadProjection(threadId)).runs.length, 1);
+        yield* s.worker.drain();
+        yield* s.orchestrator.resumeQueuedRuns;
+        yield* s.worker.drain();
+        assert.equal(h.started.length, 2);
       }).pipe(Effect.provide(h.layer));
     }),
   ),
