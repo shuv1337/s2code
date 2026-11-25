@@ -460,12 +460,20 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
           "",
         ].join("\n");
         const customLauncher = path.join(baseDir, "bin/s2c");
+        const customProfileWrapper = [
+          "#!/bin/sh",
+          'export S2CODE_HOME="/srv/another-profile"',
+          `exec '${exe(oldVersion)}' "$@"`,
+          "",
+        ].join("\n");
+        const customProfileLauncher = path.join(baseDir, "bin/t3");
         const localBin = path.join(root, ".local/bin");
         const legacyAlias = path.join(localBin, "shuv2code");
         const canonicalAlias = path.join(localBin, "s2code");
         yield* fs.makeDirectory(path.dirname(baseLauncher), { recursive: true });
         yield* fs.writeFileString(baseLauncher, legacyWrapper, { mode: 0o755 });
         yield* fs.writeFileString(customLauncher, customMultiLine, { mode: 0o755 });
+        yield* fs.writeFileString(customProfileLauncher, customProfileWrapper, { mode: 0o755 });
         yield* fs.makeDirectory(localBin, { recursive: true });
         yield* fs.symlink(baseLauncher, legacyAlias);
         yield* fs.symlink(baseLauncher, canonicalAlias);
@@ -485,6 +493,7 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
           posixLauncherScript(exe(newVersion), exportLine),
         );
         assert.equal(yield* fs.readFileString(customLauncher), customMultiLine);
+        assert.equal(yield* fs.readFileString(customProfileLauncher), customProfileWrapper);
         assert.equal(yield* fs.readLink(legacyAlias), baseLauncher);
         assert.equal(yield* fs.readLink(canonicalAlias), baseLauncher);
         const recorded = yield* readPinnedRuntimeLaunchers(baseDir);
@@ -492,6 +501,7 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
         assert.include(recorded, legacyAlias);
         assert.include(recorded, canonicalAlias);
         assert.notInclude(recorded, customLauncher);
+        assert.notInclude(recorded, customProfileLauncher);
 
         // Subsequent self-update keeps the preserved export line and moves to the next version.
         yield* ServiceLauncherClient.repointLaunchers({
@@ -526,7 +536,7 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
           yield* fs.makeDirectory(path.dirname(file), { recursive: true });
           yield* fs.writeFileString(file, "", { mode: 0o755 });
         }
-        // Symlinked version dir and symlinked version executable escaping into a foreign home.
+        // Symlinked version dir, symlinked version executable, and dangling foreign symlink under versions/.
         const escapedDir = path.join(baseDir, "runtime/versions/old");
         const escapedDirExe = path.join(escapedDir, "t3");
         yield* fs.symlink(foreignDir, escapedDir);
@@ -534,17 +544,29 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
         const escapedFileExe = path.join(escapedFileDir, "t3");
         yield* fs.makeDirectory(escapedFileDir, { recursive: true });
         yield* fs.symlink(foreignExe, escapedFileExe);
+        const danglingForeignDir = path.join(baseDir, "runtime/versions/old-dangling");
+        const danglingForeignExe = path.join(danglingForeignDir, "t3");
+        yield* fs.makeDirectory(danglingForeignDir, { recursive: true });
+        yield* fs.symlink(
+          path.join(foreignBaseDir, "runtime/versions/missing/t3"),
+          danglingForeignExe,
+        );
 
         const localBin = path.join(root, ".local/bin");
         yield* fs.makeDirectory(localBin, { recursive: true });
         const linkToEscapedDir = path.join(localBin, "t3");
         const linkToEscapedFile = path.join(localBin, "s2c");
+        const linkToDanglingForeign = path.join(localBin, "s2code");
         const scriptToEscapedDir = path.join(baseDir, "bin/shuv2code");
+        const scriptToDanglingForeign = path.join(baseDir, "bin/s2code");
         yield* fs.makeDirectory(path.dirname(scriptToEscapedDir), { recursive: true });
         yield* fs.symlink(escapedDirExe, linkToEscapedDir);
         yield* fs.symlink(escapedFileExe, linkToEscapedFile);
+        yield* fs.symlink(danglingForeignExe, linkToDanglingForeign);
         const scriptBody = posixLauncherScript(escapedDirExe);
+        const danglingScriptBody = posixLauncherScript(danglingForeignExe);
         yield* fs.writeFileString(scriptToEscapedDir, scriptBody, { mode: 0o755 });
+        yield* fs.writeFileString(scriptToDanglingForeign, danglingScriptBody, { mode: 0o755 });
 
         yield* ServiceLauncherClient.repointLaunchers({
           baseDir,
@@ -558,7 +580,9 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
 
         assert.equal(yield* fs.readLink(linkToEscapedDir), escapedDirExe);
         assert.equal(yield* fs.readLink(linkToEscapedFile), escapedFileExe);
+        assert.equal(yield* fs.readLink(linkToDanglingForeign), danglingForeignExe);
         assert.equal(yield* fs.readFileString(scriptToEscapedDir), scriptBody);
+        assert.equal(yield* fs.readFileString(scriptToDanglingForeign), danglingScriptBody);
         assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
       }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );

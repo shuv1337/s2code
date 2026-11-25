@@ -524,6 +524,9 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       assert.equal(yield* fs.readFileString(stableShim), content);
       const foreign = `@echo off\r\n"${path.join(root, "other-home", "t3.exe")}" %*`;
       yield* fs.writeFileString(shim, foreign);
+      // Even when s2code.cmd is recorded in runtime/launchers, channel isolation keeps it untouched
+      // while the channel's own shim exists in the same directory.
+      yield* fs.writeFileString(path.join(root, "runtime", "launchers"), `${stableShim}\r\n`);
       const ignored = yield* repointLauncher({
         currentVersion: version,
         launchedAs: oldExe,
@@ -532,6 +535,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       }).pipe(Effect.provideService(HostProcess.Environment, { T3CODE_INSTALL_BIN_DIR: bin }));
       assert.equal(ignored._tag, "None");
       assert.equal(yield* fs.readFileString(shim), foreign);
+      assert.equal(yield* fs.readFileString(stableShim), content);
     }).pipe(Effect.provideService(HostProcess.Platform, "win32")),
   );
   it.effect("repoints a symlink that lives in a runtime versions tree", () =>

@@ -360,7 +360,7 @@ export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint
             return;
           }
 
-          const parsedScript = yield* readPosixLauncher(cursor);
+          const parsedScript = yield* readPosixLauncher(cursor, { baseDir: input.baseDir });
           if (parsedScript === undefined || !(yield* ownsTarget(parsedScript.target))) return;
           if (normalizePath(parsedScript.target) !== normalizePath(target.entryPath)) {
             yield* writePosixLauncher({

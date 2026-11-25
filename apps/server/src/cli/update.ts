@@ -126,6 +126,7 @@ export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(funct
 export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(function* (
   launcher: string,
   version = packageJson.version,
+  baseDir?: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -172,7 +173,7 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
     if (Option.isSome(link)) {
       return { target: path.resolve(path.dirname(file), link.value) };
     }
-    const parsed = yield* readPosixLauncher(file);
+    const parsed = yield* readPosixLauncher(file, { baseDir });
     if (parsed === undefined) return undefined;
     return {
       target: path.resolve(path.dirname(file), parsed.target),
@@ -271,7 +272,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
           version: input.currentVersion,
         });
   if (launcher === undefined) return Option.none<string>();
-  const current = yield* readLauncherTarget(launcher, input.currentVersion);
+  const current = yield* readLauncherTarget(launcher, input.currentVersion, input.baseDir);
   if (current === undefined || !(yield* ownsTarget(current.target))) return Option.none<string>();
   if (platform !== "win32" && path.resolve(input.launchedAs) !== path.resolve(launcher)) {
     const launchedAsIsLink = yield* fs.readLink(input.launchedAs).pipe(
@@ -294,7 +295,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     ),
   ]);
   for (const alias of aliases) {
-    const existing = yield* readLauncherTarget(alias, version);
+    const existing = yield* readLauncherTarget(alias, version, input.baseDir);
     if (existing === undefined || !(yield* ownsTarget(existing.target))) continue;
     yield* remember(alias);
     if (existing.forwarder) {
@@ -408,18 +409,27 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
   ].filter((entry) => entry.trim().length > 0);
   const primaryCandidates: Array<string> = [];
   const fallbackCandidates: Array<string> = [];
-  for (const directory of directories) {
-    let hasChannelShim = false;
+  const channelOwnedDirs = new Set<string>();
+  // Untraced helper inside the `find_windows_shim` span.
+  const dirHasChannelShim = Effect.fnUntraced(function* (directory: string) {
+    const key = path.resolve(directory).toLowerCase();
+    if (channelOwnedDirs.has(key)) return true;
     for (const name of channelNames) {
       const candidate = path.join(directory, name);
-      primaryCandidates.push(candidate);
       if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
-        hasChannelShim = true;
+        channelOwnedDirs.add(key);
+        return true;
       }
+    }
+    return false;
+  });
+  for (const directory of directories) {
+    for (const name of channelNames) {
+      primaryCandidates.push(path.join(directory, name));
     }
     // Preserve channel isolation: when a channel-suffixed shim exists in this directory,
     // do not fall back to un-suffixed command names in the same directory.
-    if (!hasChannelShim) {
+    if (!(yield* dirHasChannelShim(directory))) {
       for (const name of fallbackNames) {
         fallbackCandidates.push(path.join(directory, name));
       }
@@ -431,7 +441,7 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
       const base = path.basename(shimPath).toLowerCase();
       if (channelNameSet.has(base)) {
         primaryCandidates.push(shimPath);
-      } else if (allNameSet.has(base)) {
+      } else if (allNameSet.has(base) && !(yield* dirHasChannelShim(path.dirname(shimPath)))) {
         fallbackCandidates.push(shimPath);
       }
     }

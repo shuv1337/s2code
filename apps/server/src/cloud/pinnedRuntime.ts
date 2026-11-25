@@ -745,6 +745,18 @@ export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_ve
           Effect.succeed(error.reason._tag === "NotFound" ? Option.none<string>() : undefined),
         ),
       );
+    const readLinkStatus = (file: string) =>
+      fs.readLink(file).pipe(
+        Effect.asSome,
+        Effect.catch((error) =>
+          Effect.succeed(
+            error.reason._tag === "NotFound" ||
+              (error.reason.cause as NodeJS.ErrnoException | undefined)?.code === "EINVAL"
+              ? Option.none<string>()
+              : undefined,
+          ),
+        ),
+      );
 
     const resolved = yield* resolveIfPresent(input.candidate);
     if (resolved === undefined) return false;
@@ -752,24 +764,44 @@ export const isOwnedVersionsTarget = Effect.fn("cloud.pinned_runtime.is_owned_ve
       return launcherOwnsVersionsDir(path, input.realVersionsDir, resolved.value, input.platform);
     }
     if (!inVersionsDir(input.candidate)) return false;
-    let ancestor = path.dirname(input.candidate);
-    while (inVersionsDir(ancestor)) {
-      const resolvedAncestor = yield* resolveIfPresent(ancestor);
-      if (resolvedAncestor === undefined) return false;
-      if (Option.isSome(resolvedAncestor)) {
+    // Target does not exist: walk candidate and every ancestor inside versionsDir to ensure no
+    // dangling symlink or symlinked ancestor escapes to a foreign path.
+    let component = input.candidate;
+    while (inVersionsDir(component)) {
+      let linkCursor = component;
+      const visited = new Set<string>();
+      let exhausted = true;
+      for (let depth = 0; depth < 16; depth += 1) {
+        const key = normalize(linkCursor);
+        if (visited.has(key)) return false;
+        visited.add(key);
+        const link = yield* readLinkStatus(linkCursor);
+        if (link === undefined) return false;
+        if (Option.isNone(link)) {
+          exhausted = false;
+          break;
+        }
+        const next = path.resolve(path.dirname(linkCursor), link.value);
+        if (!inVersionsDir(next)) return false;
+        linkCursor = next;
+      }
+      if (exhausted) return false;
+      const resolvedComponent = yield* resolveIfPresent(component);
+      if (resolvedComponent === undefined) return false;
+      if (Option.isSome(resolvedComponent)) {
         return (
-          normalize(resolvedAncestor.value) === normalize(input.realVersionsDir) ||
+          normalize(resolvedComponent.value) === normalize(input.realVersionsDir) ||
           launcherOwnsVersionsDir(
             path,
             input.realVersionsDir,
-            resolvedAncestor.value,
+            resolvedComponent.value,
             input.platform,
           )
         );
       }
-      const nextAncestor = path.dirname(ancestor);
-      if (nextAncestor === ancestor) break;
-      ancestor = nextAncestor;
+      const nextComponent = path.dirname(component);
+      if (nextComponent === component) break;
+      component = nextComponent;
     }
     return true;
   },
@@ -879,23 +911,39 @@ export const posixLauncherScript = (executable: string, exportLine?: string) =>
     ? `#!/bin/sh\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`
     : `#!/bin/sh\n${exportLine}\nexec '${executable.replaceAll("'", "'\\''")}' "$@"\n`;
 
-const LEGACY_HOME_EXPORT_LINE =
-  /^export (?:S2CODE_HOME|SHUV2CODE_HOME)=(?:"(?:[^"`\\;$\r\n]|\$(?!\())+"|'[^'\r\n]+')$/;
+function expandLegacyPosixPath(raw: string, homeDir: string | undefined): string | undefined {
+  if (raw.startsWith("$HOME/")) {
+    const trimmedHome = homeDir?.trim();
+    if (!trimmedHome) return undefined;
+    const rel = raw.slice("$HOME/".length);
+    if (rel.length === 0 || /["`\\$\r\n]/.test(rel)) return undefined;
+    return `${trimmedHome.replace(/\/+$/, "")}/${rel}`;
+  }
+  if (raw.startsWith("/") && !/["`\\$\r\n]/.test(raw)) {
+    return raw;
+  }
+  return undefined;
+}
+
+function parseLegacyHomeExportLine(line: string, homeDir: string | undefined): string | undefined {
+  const nested =
+    /^export S2CODE_HOME="\$\{S2CODE_HOME:-\$\{SHUV2CODE_HOME:-([^}"`\\;\r\n]+)\}\}"$/.exec(
+      line,
+    )?.[1];
+  if (nested !== undefined) return expandLegacyPosixPath(nested, homeDir);
+  const direct = /^export (S2CODE_HOME|SHUV2CODE_HOME)="\$\{\1:-([^}"`\\;\r\n]+)\}"$/.exec(line);
+  if (direct?.[2] !== undefined) return expandLegacyPosixPath(direct[2], homeDir);
+  return undefined;
+}
 
 function parsePosixExecLine(line: string, homeDir: string | undefined): string | undefined {
   const singleQuoted = /^exec '((?:[^']|'\\'')*)' "\$@"$/.exec(line)?.[1];
   if (singleQuoted !== undefined) {
     return singleQuoted.replaceAll("'\\''", "'");
   }
-  const homeRelative = /^exec "\$HOME\/([^"`\\$\r\n]+)" "\$@"$/.exec(line)?.[1];
-  if (homeRelative !== undefined) {
-    const trimmedHome = homeDir?.trim();
-    if (!trimmedHome) return undefined;
-    return `${trimmedHome.replace(/\/+$/, "")}/${homeRelative}`;
-  }
-  const doubleQuoted = /^exec "(\/[^"`\\$\r\n]+)" "\$@"$/.exec(line)?.[1];
+  const doubleQuoted = /^exec "([^"`\\;\r\n]+)" "\$@"$/.exec(line)?.[1];
   if (doubleQuoted !== undefined) {
-    return doubleQuoted;
+    return expandLegacyPosixPath(doubleQuoted, homeDir);
   }
   return undefined;
 }
@@ -903,6 +951,7 @@ function parsePosixExecLine(line: string, homeDir: string | undefined): string |
 /** Parses an unedited 2-line {@link posixLauncherScript} or 3-line legacy home-scoped wrapper; never a user's wrapper. */
 export const readPosixLauncher = Effect.fn("cloud.pinned_runtime.read_posix_launcher")(function* (
   launcher: string,
+  options?: { readonly baseDir?: string | undefined },
 ) {
   const fs = yield* FileSystem.FileSystem;
   const environment = yield* HostProcess.Environment;
@@ -922,9 +971,33 @@ export const readPosixLauncher = Effect.fn("cloud.pinned_runtime.read_posix_laun
     if (quoted === undefined) return undefined;
     return { target: quoted.replaceAll("'\\''", "'") };
   }
-  if (lines.length === 3 && LEGACY_HOME_EXPORT_LINE.test(lines[1]!)) {
+  if (lines.length === 3) {
+    const exportHome = parseLegacyHomeExportLine(lines[1]!, homeDir);
+    if (exportHome === undefined) return undefined;
     const target = parsePosixExecLine(lines[2]!, homeDir);
     if (target === undefined) return undefined;
+    const normalizePosix = (value: string) => value.replace(/\/+$/, "");
+    const normalizedExportHome = normalizePosix(exportHome);
+    const resolvedExportHome = yield* fs
+      .realPath(exportHome)
+      .pipe(Effect.orElseSucceed(() => normalizedExportHome));
+    if (options?.baseDir !== undefined) {
+      const normalizedBaseDir = normalizePosix(options.baseDir);
+      const resolvedBaseDir = yield* fs
+        .realPath(options.baseDir)
+        .pipe(Effect.orElseSucceed(() => normalizedBaseDir));
+      if (
+        normalizedExportHome !== normalizedBaseDir &&
+        normalizePosix(resolvedExportHome) !== normalizePosix(resolvedBaseDir)
+      ) {
+        return undefined;
+      }
+    }
+    const resolvedTarget = yield* fs.realPath(target).pipe(Effect.orElseSucceed(() => target));
+    const matchesHomeVersions =
+      target.startsWith(`${normalizedExportHome}/runtime/versions/`) ||
+      resolvedTarget.startsWith(`${normalizePosix(resolvedExportHome)}/runtime/versions/`);
+    if (!matchesHomeVersions) return undefined;
     return { target, exportLine: lines[1]! };
   }
   return undefined;
@@ -932,8 +1005,8 @@ export const readPosixLauncher = Effect.fn("cloud.pinned_runtime.read_posix_laun
 
 /** The executable a script matched by {@link readPosixLauncher} runs; never a user's wrapper. */
 export const readPosixLauncherTarget = Effect.fn("cloud.pinned_runtime.read_posix_launcher_target")(
-  function* (launcher: string) {
-    return (yield* readPosixLauncher(launcher))?.target;
+  function* (launcher: string, options?: { readonly baseDir?: string | undefined }) {
+    return (yield* readPosixLauncher(launcher, options))?.target;
   },
 );
 
@@ -962,13 +1035,14 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
         candidate,
         platform: "linux",
       });
+    const baseDir = path.dirname(path.dirname(input.versionsDir));
     const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
     if (Option.isSome(linkTarget)) {
       const resolved = path.resolve(path.dirname(input.launchedAs), linkTarget.value);
       if (yield* ownsTarget(resolved)) return input.launchedAs;
       // Symlink alias pointing to an owned POSIX launcher script (e.g. ~/.local/bin/s2code -> <baseDir>/bin/shuv2code).
       const target = (yield* realPath(resolved)) ?? resolved;
-      const scriptTarget = yield* readPosixLauncherTarget(target);
+      const scriptTarget = yield* readPosixLauncherTarget(target, { baseDir });
       if (scriptTarget !== undefined && (yield* ownsTarget(scriptTarget))) return target;
       return undefined;
     }
@@ -976,7 +1050,6 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
     if (executable === undefined || !isVersionExecutable(path, realVersionsDir, executable)) {
       return undefined;
     }
-    const baseDir = path.dirname(path.dirname(input.versionsDir));
     const recorded = yield* readPinnedRuntimeLaunchers(baseDir);
     const cwd = yield* HostProcess.WorkingDirectory;
     const home = yield* HostProcess.HomeDirectory;
@@ -1005,7 +1078,7 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
       // Like the shell, pass over a script nobody can execute.
       const info = yield* fs.stat(script).pipe(Effect.option);
       if (Option.isNone(info) || (info.value.mode & 0o111) === 0) continue;
-      const target = yield* readPosixLauncherTarget(script);
+      const target = yield* readPosixLauncherTarget(script, { baseDir });
       if (target !== undefined && (yield* realPath(target)) === executable) return script;
     }
     return undefined;
