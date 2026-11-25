@@ -1335,6 +1335,10 @@ const RelayFeedbackGroup = HttpApiGroup.make("feedback")
   )
   .annotate(OpenApi.Description, "Environment-authenticated agent feedback ingestion.")
   .middleware(RelayEnvironmentAuth);
+// Clerk signs with Svix headers; the handler reads raw bytes to verify the signature.
+const RelayAccountWebhooksGroup = HttpApiGroup.make("accountWebhooks")
+  .add(HttpApiEndpoint.post("clerk", "/v1/webhooks/clerk"))
+  .annotate(OpenApi.Description, "Receive Clerk account lifecycle events.");
 
 export const RelayApi = HttpApi.make("RelayApi")
   .add(
@@ -1348,6 +1352,7 @@ export const RelayApi = HttpApi.make("RelayApi")
     RelayHooksGroup,
     RelayMobileTelemetryGroup,
     RelayFeedbackGroup,
+    RelayAccountWebhooksGroup,
   )
   .annotate(OpenApi.Title, "T3 Code Relay API")
   .annotate(OpenApi.Version, "1.0.0")

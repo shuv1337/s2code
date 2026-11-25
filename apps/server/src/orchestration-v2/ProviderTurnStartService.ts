@@ -1527,6 +1527,7 @@ export const layer: Layer.Layer<
             projectionStore,
             sourceProjection,
             sourceRun,
+            projection.thread,
           );
           const createdAt = yield* DateTime.now;
           const handoff = yield* contextHandoffService.prepareProviderHandoff({

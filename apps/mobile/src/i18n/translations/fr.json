@@ -25,6 +25,7 @@
   "986b0873f913a840": "La politique de {organization} n’autorise pas les tâches webhook.",
   "eebc538e25b09fe2": "La politique de {organization} n’autorise pas l’import des cookies du navigateur.",
   "7642a133db05f164": "La stratégie de {organization} n’autorise pas l’ouverture des serveurs locaux de cette machine sur d’autres appareils.",
+  "e0856d6a402ad821": "La politique de {organization} n’autorise pas les commandes de disposition des worktrees des projets.",
   "39f6771b49f9b3b6": "Utiliser la valeur par défaut",
   "45bb0e90e1c42046": "À votre retour",
   "d8fa0a55446bbb0d": "Avant l’expiration du cache (bêta)",
@@ -506,7 +507,7 @@
   "bc24c300d53d61c5": "{host} n’a répondu sur aucune route enregistrée.",
   "b0dd3cd876937ca8": "Le profil de connexion {connectionId} n’est pas disponible.",
   "5ce46783e79ca9d1": "Les identifiants de connexion {connectionId} ne sont pas disponibles.",
-  "0bda0cac7f5acc20": "L’environnement connecté {actual} ne correspond pas à {expected}.",
+  "b39d1428ec8b23f5": "Cette adresse exécute désormais une autre installation de T3 Code ({actual}, et non {expected}). Supprimez cette connexion et ajoutez-la à nouveau.",
   "ea0d3e4e51d5706f": "Les identifiants de l’environnement ne sont pas valides.",
   "7283ebfd16d09677": "Les identifiants de l’environnement n’accordent pas l’accès requis.",
   "d3e9a9cb543b4b7b": "L’environnement a rejeté la demande d’authentification.",
@@ -826,6 +827,7 @@
   "21872f69ccbc711d": "Démarrage des serveurs MCP de {provider}",
   "fedaa29ff8815a77": "Chargement des hooks de {provider}",
   "57025ae4de5beb57": "Chargement des règles et des skills de {provider}",
+  "1cbfbcad9f0d04fe": "Reprise de la session de {provider}",
   "4729a188600f1501": "Connexion à {provider}",
   "8c8977097681630f": "Démarrage de {provider}",
   "f1d27d127ab27ac6": "Démarrage",
@@ -1927,6 +1929,7 @@
   "69c659d8b6e271cc": "La page demande un fichier.",
   "a6efeb99b479990a": "Choisir des fichiers",
   "59c87648d44b958c": "Choisir un fichier",
+  "6f321f153b8711bb": "Choisir une option",
   "61a552a67e9e3eac": "Réponse à la boîte de dialogue",
   "1d9bd868fafea18a": "Refuser",
   "1d0a7acef4a95536": "Accepter",
@@ -2021,6 +2024,9 @@
   "782a518513f0777a": "Activer {environment}",
   "a35685d9ad9de747": "Chargement des environnements cloud associés.",
   "91ca3ba7b2f9d6b6": "Aucun autre environnement cloud associé.",
+  "89bf40eb2503b6c5": "Nouvel appareil connecté à {environment}",
+  "c94b5fe9ef372bc0": "{device} s’est connecté via {product}. Si ce n’était pas vous, supprimez-le dans Paramètres → Accès de T3 Code sur cet ordinateur.",
+  "bec67d0ed485f885": "{count, plural, one {{count} appareil s’est connecté} other {{count} appareils se sont connectés}} via {product}. Si ce n’était pas vous, supprimez-les dans Paramètres → Accès de T3 Code sur cet ordinateur.",
   "190165d4fad2f072": "La demande n’est plus en attente",
   "c403db0535205f50": "Elle a expiré ou a reçu une réponse ailleurs.",
   "4e3abf0ba32ed1d6": "La demande est toujours en attente. Réessayez.",
@@ -2843,6 +2849,7 @@
   "dff9e061996e7b1d": "Activer la fusion automatique ?",
   "dafc4bac6e5e37b0": "Désactiver la fusion automatique ?",
   "88c7a80c40bbfe56": "Fusionner {layers} dans {base} avec {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}. Les couches au-dessus de #{number} restent ouvertes.",
+  "892f08d21b8e48a9": "Fusionner {layers} dans {base} avec {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} dès que leurs conditions sont remplies. Cela peut se produire immédiatement.",
   "700223fdcaa96bb7": "Fusionner #{number} avec {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} dès que ses conditions sont remplies. Cela peut se produire immédiatement.",
   "de93a05a4db7ab76": "Empêcher le fournisseur de fusionner automatiquement cette {term, select, mr {merge request} cr {demande de modification} other {pull request}}.",
   "385ba70d2783260b": "Fusionner #{number} dans {branch} avec {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}.",
@@ -4385,6 +4392,21 @@
     },
     " a été fermée"
   ],
+  "796b81c4875c4feb": [
+    "L’app ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " a besoin d’un serveur ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " plus récent sur cet environnement. Mettez à jour le serveur pour l’utiliser."
+  ],
   "705cf2b2ee4e0e42": [
     "L’app ",
     {
@@ -4957,6 +4979,7 @@
   "306a6f95ad9d52f7": "Non envoyées",
   "11276ab6c58b7a25": "Ouvre le brouillon dans la zone de saisie de nouvelle tâche. Balayez vers la gauche pour le supprimer.",
   "99950f3a28d425fa": "Envoyée dès que l’environnement se reconnecte. Ouvre la tâche pour la modifier. Balayez vers la gauche pour la supprimer.",
+  "d71048f4fb9cf44a": "En attente de synchronisation",
   "0a260c7744afd0be": "En attente",
   "ad78fae7d373cf21": "En cours",
   "be451f475c514b37": "Ignorer la notification Réveillé",
@@ -5014,6 +5037,7 @@
   "5a2d803b3ea43f18": "Limite d’utilisation atteinte.",
   "d5365c5e28a18442": "{summary} : {message}",
   "bff5692f10fc10b0": "Appuyez longuement pour copier.",
+  "1a1beecff68a6e61": "Vérifier le compte Google",
   "a1984c617f973156": "{preview}, échec de l’appel d’outil",
   "38574c0d1e49b278": "{preview}, connecté",
   "fd0d04d5a6627f70": "Ouvre le fil de cet agent. Appuyez longuement pour copier.",
@@ -5351,6 +5375,8 @@
   "cd5d90cbbfae32f6": "Enregistrement {time}",
   "6236e2f587bc4eb4": "Transcription",
   "4e430d5ea01c249b": "Impossible d’envoyer la réponse",
+  "a3c43735e1a81498": "Raison pour {title}",
+  "bfad234f016cfa3f": "Pourquoi, en une phrase. Elle accompagne la réponse que vous choisissez.",
   "e721a8b98f44d5f7": "Demander d’abord à l’agent",
   "e39f89c909df4db0": "Impossible de reprendre l’exécution",
   "28c9dd162825c117": "Annuler cette exécution ?",
@@ -5377,6 +5403,14 @@
       "v": "v"
     }
   ],
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " nécessite une raison."
+  ],
   "9de4e24c9273b496": "Cette connexion peut lire les exécutions, mais pas y répondre.",
   "6dac41769b114edf": [
     {
@@ -5397,16 +5431,54 @@
   "59a3213338779c6e": "Terminé",
   "5a3b1fe78182d8dc": "A répondu {choice}",
   "b17bd06e3b1ec0d2": "A répondu {choice} : {reason}",
+  "99451a5d2d40440f": "Retirée par {by}.",
+  "3ee30a50b70fffab": "Retirée par {by} : {reason}",
   "89102905bf09b0e8": "Suivre en direct",
   "eea0013efc9e4339": "Transcription",
   "ba8337dca3232880": "Ouvrir l’exécution",
+  "235902a19e95833b": [
+    "par vous,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "3759768c5d342c22": [
+    "répondue",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "8afa4fbe16f95bcf": [
+    "par ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
   "cab70ed0237438ef": "Chargement de l’étape…",
   "30a5be40eb956663": "en cours",
   "edc8f6e9720f4eda": "en veille",
   "0684698b49273da5": "en attente",
   "063173aa16052cb9": "en cours",
   "3ba4cf953dd20f22": "échec",
+  "0f93532dd76391fc": "Vous avez répondu {choice}",
+  "7e1fd2eb570a372b": "{who} a répondu {choice}",
   "e777db2880f53a46": "personne n’a répondu",
+  "201490988858b511": "retirée par {by}",
   "34f59bbbead0b97f": "{names} et {count} de plus",
   "ac1556f6ce89a5ea": "{count} en parallèle",
   "e197c4963bacc746": "{count} en cours",
@@ -5419,12 +5491,15 @@
   "f25af5332ffc3734": "Rien n’attend votre réponse.",
   "c3f0119b8d6231f8": "Rien n’est en cours.",
   "33028dfc1229eaa6": "Aucune exécution pour l’instant.",
+  "e4d1316c85ed7066": "Aucune question de ce type ne vous attend.",
   "156ff7b625287a1e": "Masquer les éléments ignorés",
   "69b985b97ab45e6b": "Afficher {count} ignorés",
   "8f6589c9e0ac5d4e": "Aucun environnement connecté",
   "744127f8dfad7d22": "Connectez un environnement pour voir ses exécutions de workflow.",
   "b9aae2f7cdb1a379": "Aucune exécution de workflow pour l’instant",
   "ace8fc1c643cf9f6": "Un workflow réunit agents, code, planifications et questions qui vous sont posées en une seule exécution qui survit aux redémarrages. Écrivez-en un sur votre ordinateur, dans Workflows, puis Définitions.",
+  "fc9c3a00cfc18b55": "Tous les types",
+  "45a94c724845ec1d": "Autres",
   "fceb81aa6685fb47": "Discussions",
   "86798f07ba2d7f4d": "Rechercher des tickets",
   "484cd83bb303bab8": "Rechercher des pull requests",

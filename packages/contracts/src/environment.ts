@@ -21,6 +21,8 @@ export const CLIENT_CAPABILITIES_QUERY_PARAM = "clientCapabilities";
 export const SETTINGS_SECRET_REFERENCES_CAPABILITY = "settingsSecretReferences";
 /** mcpServers may hold `transport: "stdio"` entries; older clients fail to decode the whole settings. */
 export const STDIO_MCP_SERVERS_CAPABILITY = "stdioMcpServers";
+/** Usage limit sources may be of kind "http", not only "cliproxy". */
+export const HTTP_USAGE_LIMIT_SOURCES_CAPABILITY = "httpUsageLimitSources";
 
 export const ExecutionEnvironmentPlatformOs = Schema.Literals([
   "darwin",

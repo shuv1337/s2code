@@ -79,7 +79,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
   it.effect("publishes proven install ownership only for manually updated servers", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const baseDir = yield* fs.makeTempDirectoryScoped();
+      const platform = yield* HostProcess.Platform;
+      const baseDir = yield* fs.realPath(yield* fs.makeTempDirectoryScoped());
       const prefix = `${baseDir}/node`;
       const entry = `${prefix}/lib/node_modules/shuv2code/bin/shuv2code.mjs`;
       yield* fs.makeDirectory(`${prefix}/lib/node_modules/shuv2code/bin`, { recursive: true });
@@ -105,11 +106,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
           ),
           Effect.provideService(HostProcess.Arguments, ["node", entry]),
           Effect.provideService(HostProcess.IsExecutable, false),
-          Effect.provideService(HostProcess.Platform, "linux"),
           Effect.provideService(HostProcess.Environment, {}),
         );
         expect(descriptor.capabilities.serverInstallation).toEqual(
-          mode === "web"
+          mode === "web" && platform !== "win32"
             ? { kind: "npm-global", prefix: yield* fs.realPath(prefix), packageName: "shuv2code" }
             : undefined,
         );

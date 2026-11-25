@@ -384,21 +384,30 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           workspaceStrategy?.type === "existing_worktree"
             ? workspaceStrategy.worktreePath
             : project?.workspaceRoot;
+        let validatedModelSelection = input.modelSelection;
         if (!replaying && input.modelSelection !== undefined) {
-          const { instanceId, model } = input.modelSelection;
+          const requestedSelection = input.modelSelection;
+          const { instanceId, model } = requestedSelection;
           const registry = yield* ProviderRegistry.ProviderRegistry;
-          const requireModel = (
+          const validateSelection = Effect.fn("mcp.validateLaunchModelSelection")(function* (
             providers: ReadonlyArray<ServerProvider>,
-          ): Effect.Effect<void, OrchestratorMcpFailure> => {
+          ): Effect.fn.Return<ModelSelection, OrchestratorMcpFailure> {
             const provider = OrchestrationMcp.withWorkspaceModels(providers, cwd).find(
               (candidate) => candidate.instanceId === instanceId,
             );
-            return provider === undefined
-              ? Effect.void
-              : OrchestrationMcp.requireAdvertisedModel(provider, model);
-          };
-          const checked = requireModel(yield* registry.getProviders);
-          yield* cwd === undefined
+            if (provider === undefined) return requestedSelection;
+            yield* OrchestrationMcp.requireAdvertisedModel(provider, model);
+            const options = yield* OrchestrationMcp.validateModelOptions(
+              provider,
+              model,
+              requestedSelection.options,
+            );
+            return options === undefined || options === requestedSelection.options
+              ? requestedSelection
+              : { ...requestedSelection, options };
+          });
+          const checked = validateSelection(yield* registry.getProviders);
+          validatedModelSelection = yield* cwd === undefined
             ? checked
             : checked.pipe(
                 Effect.catchIf(
@@ -409,7 +418,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                       Effect.flatMap((scanCwd) =>
                         registry.refreshWorkspaceSnapshot({ instanceId, cwd, scanCwd }),
                       ),
-                      Effect.flatMap(requireModel),
+                      Effect.flatMap(validateSelection),
                     ),
                 ),
               );
@@ -474,7 +483,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             message: "Pass pool with model, or modelSelection, not both.",
           });
         const modelSelection =
-          input.modelSelection ??
+          validatedModelSelection ??
           launchedModel ??
           (input.pool === undefined
             ? undefined

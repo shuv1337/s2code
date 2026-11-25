@@ -2,6 +2,7 @@ import { msg } from "gt-i18n";
 import { translatableDetail } from "../errors/translatable.ts";
 import {
   CLIENT_CAPABILITIES_QUERY_PARAM,
+  HTTP_USAGE_LIMIT_SOURCES_CAPABILITY,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   SETTINGS_SECRET_REFERENCES_CAPABILITY,
@@ -53,7 +54,11 @@ export function appendOrchestrationProtocol(socketUrl: string): string {
   url.searchParams.set(ORCHESTRATION_PROTOCOL_QUERY_PARAM, String(ORCHESTRATION_PROTOCOL_VERSION));
   url.searchParams.set(
     CLIENT_CAPABILITIES_QUERY_PARAM,
-    [SETTINGS_SECRET_REFERENCES_CAPABILITY, STDIO_MCP_SERVERS_CAPABILITY].join(","),
+    [
+      SETTINGS_SECRET_REFERENCES_CAPABILITY,
+      STDIO_MCP_SERVERS_CAPABILITY,
+      HTTP_USAGE_LIMIT_SOURCES_CAPABILITY,
+    ].join(","),
   );
   return url.toString();
 }

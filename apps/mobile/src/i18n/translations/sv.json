@@ -25,6 +25,7 @@
   "986b0873f913a840": "Policyn för {organization} tillåter inte webhook-uppgifter.",
   "eebc538e25b09fe2": "Policyn för {organization} tillåter inte import av cookies från webbläsare.",
   "7642a133db05f164": "{organization}s policy tillåter inte att den här datorns lokala servrar öppnas på andra enheter.",
+  "e0856d6a402ad821": "Policyn för {organization} tillåter inte projekts layoutkommandon för worktrees.",
   "39f6771b49f9b3b6": "Använd standard",
   "45bb0e90e1c42046": "När du kommer tillbaka",
   "d8fa0a55446bbb0d": "Innan cachen går ut (beta)",
@@ -506,7 +507,7 @@
   "bc24c300d53d61c5": "{host} svarade inte på någon sparad rutt.",
   "b0dd3cd876937ca8": "Anslutningsprofilen {connectionId} är inte tillgänglig.",
   "5ce46783e79ca9d1": "Autentiseringsuppgiften för anslutningen {connectionId} är inte tillgänglig.",
-  "0bda0cac7f5acc20": "Den anslutna miljön {actual} matchar inte {expected}.",
+  "b39d1428ec8b23f5": "Den här adressen kör nu en annan T3 Code-installation ({actual}, inte {expected}). Ta bort anslutningen och lägg till den igen.",
   "ea0d3e4e51d5706f": "Miljöns autentiseringsuppgift är ogiltig.",
   "7283ebfd16d09677": "Miljöns autentiseringsuppgift ger inte den åtkomst som krävs.",
   "d3e9a9cb543b4b7b": "Miljön avvisade autentiseringsbegäran.",
@@ -826,6 +827,7 @@
   "21872f69ccbc711d": "Startar MCP-servrar för {provider}",
   "fedaa29ff8815a77": "Läser in hooks för {provider}",
   "57025ae4de5beb57": "Läser in regler och färdigheter för {provider}",
+  "1cbfbcad9f0d04fe": "Återupptar sessionen för {provider}",
   "4729a188600f1501": "Ansluter till {provider}",
   "8c8977097681630f": "Startar {provider}",
   "f1d27d127ab27ac6": "Startar",
@@ -1927,6 +1929,7 @@
   "69c659d8b6e271cc": "Sidan ber om en fil.",
   "a6efeb99b479990a": "Välj filer",
   "59c87648d44b958c": "Välj fil",
+  "6f321f153b8711bb": "Välj ett alternativ",
   "61a552a67e9e3eac": "Dialogsvar",
   "1d9bd868fafea18a": "Avvisa",
   "1d0a7acef4a95536": "Godkänn",
@@ -2021,6 +2024,9 @@
   "782a518513f0777a": "Aktivera {environment}",
   "a35685d9ad9de747": "Läser in länkade molnmiljöer.",
   "91ca3ba7b2f9d6b6": "Inga ytterligare länkade molnmiljöer.",
+  "89bf40eb2503b6c5": "Ny enhet inloggad på {environment}",
+  "c94b5fe9ef372bc0": "{device} anslöt via {product}. Om det inte var du, ta bort den under Inställningar → Åtkomst i T3 Code på den datorn.",
+  "bec67d0ed485f885": "{count, plural, one {{count} enhet} other {{count} enheter}} anslöt via {product}. Om det inte var du, ta bort dem under Inställningar → Åtkomst i T3 Code på den datorn.",
   "190165d4fad2f072": "Begäran väntar inte längre",
   "c403db0535205f50": "Den har gått ut eller besvarats någon annanstans.",
   "4e3abf0ba32ed1d6": "Begäran väntar fortfarande. Försök igen.",
@@ -2847,6 +2853,7 @@
   "dff9e061996e7b1d": "Aktivera automatisk merge?",
   "dafc4bac6e5e37b0": "Inaktivera automatisk merge?",
   "88c7a80c40bbfe56": "Merga {layers} in i {base} med {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}. Lager ovanför #{number} förblir öppna.",
+  "892f08d21b8e48a9": "Merga {layers} in i {base} med {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} när kraven är uppfyllda. Det kan ske direkt.",
   "700223fdcaa96bb7": "Merga #{number} med {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} när kraven är uppfyllda. Det kan ske direkt.",
   "de93a05a4db7ab76": "Hindra leverantören från att automatiskt merga den här {term, select, mr {merge requesten} cr {ändringsbegäran} other {pull requesten}}.",
   "385ba70d2783260b": "Merga #{number} in i {branch} med {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}.",
@@ -4391,6 +4398,21 @@
     },
     " stängdes"
   ],
+  "796b81c4875c4feb": [
+    "Appen ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " behöver en nyare ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    "-server i den här miljön. Uppdatera servern för att använda den."
+  ],
   "705cf2b2ee4e0e42": [
     "Appen ",
     {
@@ -4963,6 +4985,7 @@
   "306a6f95ad9d52f7": "Ej skickade",
   "11276ab6c58b7a25": "Öppnar utkastet i inmatningsfältet för ny uppgift. Svep åt vänster för att kasta.",
   "99950f3a28d425fa": "Skickas när miljön återansluter. Öppnar uppgiften för redigering. Svep åt vänster för att ta bort.",
+  "d71048f4fb9cf44a": "Väntar på synkronisering",
   "0a260c7744afd0be": "Väntar",
   "ad78fae7d373cf21": "Arbetar",
   "be451f475c514b37": "Stäng aviseringen Väckt",
@@ -5020,6 +5043,7 @@
   "5a2d803b3ea43f18": "Användningsgränsen har nåtts.",
   "d5365c5e28a18442": "{summary}: {message}",
   "bff5692f10fc10b0": "Tryck länge för att kopiera.",
+  "1a1beecff68a6e61": "Verifiera Google-konto",
   "a1984c617f973156": "{preview}, verktygsanropet misslyckades",
   "38574c0d1e49b278": "{preview}, inloggad",
   "fd0d04d5a6627f70": "Öppnar agentens tråd. Tryck länge för att kopiera.",
@@ -5357,6 +5381,8 @@
   "cd5d90cbbfae32f6": "Spelar in {time}",
   "6236e2f587bc4eb4": "Transkriberar",
   "4e430d5ea01c249b": "Kunde inte skicka svaret",
+  "a3c43735e1a81498": "Skäl för {title}",
+  "bfad234f016cfa3f": "Varför, i en mening. Det följer med vilket svar du än väljer.",
   "e721a8b98f44d5f7": "Fråga agenten först",
   "e39f89c909df4db0": "Kunde inte återuppta körningen",
   "28c9dd162825c117": "Avbryta den här körningen?",
@@ -5383,6 +5409,14 @@
       "v": "v"
     }
   ],
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " kräver en anledning."
+  ],
   "9de4e24c9273b496": "Den här anslutningen kan läsa körningar men inte svara på dem.",
   "6dac41769b114edf": [
     {
@@ -5403,16 +5437,54 @@
   "59a3213338779c6e": "Klar",
   "5a3b1fe78182d8dc": "Svarade {choice}",
   "b17bd06e3b1ec0d2": "Svarade {choice}: {reason}",
+  "99451a5d2d40440f": "Återkallad av {by}.",
+  "3ee30a50b70fffab": "Återkallad av {by}: {reason}",
   "89102905bf09b0e8": "Följ live",
   "eea0013efc9e4339": "Transkript",
   "ba8337dca3232880": "Öppna körning",
+  "235902a19e95833b": [
+    "av dig,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "3759768c5d342c22": [
+    "besvarad",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "8afa4fbe16f95bcf": [
+    "av ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
   "cab70ed0237438ef": "Läser in steget…",
   "30a5be40eb956663": "arbetar",
   "edc8f6e9720f4eda": "sover",
   "0684698b49273da5": "väntar",
   "063173aa16052cb9": "pågår",
   "3ba4cf953dd20f22": "misslyckades",
+  "0f93532dd76391fc": "Du svarade {choice}",
+  "7e1fd2eb570a372b": "{who} svarade {choice}",
   "e777db2880f53a46": "ingen svarade",
+  "201490988858b511": "återkallad av {by}",
   "34f59bbbead0b97f": "{names} och {count} till",
   "ac1556f6ce89a5ea": "{count} parallellt",
   "e197c4963bacc746": "{count} körs",
@@ -5425,12 +5497,15 @@
   "f25af5332ffc3734": "Inget väntar på dig.",
   "c3f0119b8d6231f8": "Inget körs.",
   "33028dfc1229eaa6": "Inga körningar än.",
+  "e4d1316c85ed7066": "Inga frågor av den här typen väntar på dig.",
   "156ff7b625287a1e": "Dölj överhoppade",
   "69b985b97ab45e6b": "Visa överhoppade ({count})",
   "8f6589c9e0ac5d4e": "Ingen miljö ansluten",
   "744127f8dfad7d22": "Anslut en miljö för att se dess arbetsflödeskörningar.",
   "b9aae2f7cdb1a379": "Inga arbetsflödeskörningar än",
   "ace8fc1c643cf9f6": "Ett arbetsflöde knyter ihop agenter, kod, scheman och frågor till dig i en enda körning som överlever omstarter. Skriv ett på din dator, under Arbetsflöden och sedan Definitioner.",
+  "fc9c3a00cfc18b55": "Alla typer",
+  "45a94c724845ec1d": "Övrigt",
   "fceb81aa6685fb47": "Chattar",
   "86798f07ba2d7f4d": "Sök ärenden",
   "484cd83bb303bab8": "Sök pull requests",

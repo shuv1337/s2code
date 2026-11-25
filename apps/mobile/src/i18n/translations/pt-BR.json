@@ -25,6 +25,7 @@
   "986b0873f913a840": "A política de {organization} não permite tarefas de webhook.",
   "eebc538e25b09fe2": "A política de {organization} não permite importar cookies do navegador.",
   "7642a133db05f164": "A política de {organization} não permite abrir os servidores locais desta máquina em outros dispositivos.",
+  "e0856d6a402ad821": "A política de {organization} não permite comandos de layout de worktree de projetos.",
   "39f6771b49f9b3b6": "Usar padrão",
   "45bb0e90e1c42046": "Quando você voltar",
   "d8fa0a55446bbb0d": "Antes de o cache expirar (beta)",
@@ -506,7 +507,7 @@
   "bc24c300d53d61c5": "{host} não respondeu em nenhuma rota salva.",
   "b0dd3cd876937ca8": "O perfil de conexão {connectionId} não está disponível.",
   "5ce46783e79ca9d1": "A credencial de conexão {connectionId} não está disponível.",
-  "0bda0cac7f5acc20": "O ambiente conectado {actual} não corresponde a {expected}.",
+  "b39d1428ec8b23f5": "Este endereço agora executa outra instalação do T3 Code ({actual}, não {expected}). Remova esta conexão e adicione-a novamente.",
   "ea0d3e4e51d5706f": "A credencial do ambiente é inválida.",
   "7283ebfd16d09677": "A credencial do ambiente não concede o acesso necessário.",
   "d3e9a9cb543b4b7b": "O ambiente rejeitou a solicitação de autenticação.",
@@ -826,6 +827,7 @@
   "21872f69ccbc711d": "Iniciando servidores MCP do {provider}",
   "fedaa29ff8815a77": "Carregando hooks do {provider}",
   "57025ae4de5beb57": "Carregando regras e skills do {provider}",
+  "1cbfbcad9f0d04fe": "Retomando a sessão do {provider}",
   "4729a188600f1501": "Conectando ao {provider}",
   "8c8977097681630f": "Iniciando {provider}",
   "f1d27d127ab27ac6": "Iniciando",
@@ -1927,6 +1929,7 @@
   "69c659d8b6e271cc": "A página está pedindo um arquivo.",
   "a6efeb99b479990a": "Escolher arquivos",
   "59c87648d44b958c": "Escolher arquivo",
+  "6f321f153b8711bb": "Escolha uma opção",
   "61a552a67e9e3eac": "Resposta da caixa de diálogo",
   "1d9bd868fafea18a": "Dispensar",
   "1d0a7acef4a95536": "Aceitar",
@@ -2021,6 +2024,9 @@
   "782a518513f0777a": "Ativar {environment}",
   "a35685d9ad9de747": "Carregando ambientes na nuvem vinculados.",
   "91ca3ba7b2f9d6b6": "Nenhum outro ambiente na nuvem vinculado.",
+  "89bf40eb2503b6c5": "Novo dispositivo conectado a {environment}",
+  "c94b5fe9ef372bc0": "{device} se conectou pelo {product}. Se não foi você, remova-o em Configurações → Acesso no T3 Code desse computador.",
+  "bec67d0ed485f885": "{count, plural, one {{count} dispositivo se conectou} other {{count} dispositivos se conectaram}} pelo {product}. Se não foi você, remova-os em Configurações → Acesso no T3 Code desse computador.",
   "190165d4fad2f072": "A solicitação não está mais aguardando",
   "c403db0535205f50": "Ela expirou ou foi respondida em outro lugar.",
   "4e3abf0ba32ed1d6": "A solicitação ainda está aguardando. Tente novamente.",
@@ -2843,6 +2849,7 @@
   "dff9e061996e7b1d": "Ativar o merge automático?",
   "dafc4bac6e5e37b0": "Desativar o merge automático?",
   "88c7a80c40bbfe56": "Mesclar {layers} em {base} usando {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}. As camadas acima de #{number} continuam abertas.",
+  "892f08d21b8e48a9": "Mesclar {layers} em {base} usando {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} quando os requisitos forem atendidos. Isso pode acontecer imediatamente.",
   "700223fdcaa96bb7": "Mesclar #{number} usando {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}} quando os requisitos forem atendidos. Isso pode acontecer imediatamente.",
   "de93a05a4db7ab76": "Impede que o provedor mescle {term, select, mr {este merge request} cr {esta solicitação de alteração} other {este pull request}} automaticamente.",
   "385ba70d2783260b": "Mesclar #{number} em {branch} usando {kind, select, squash {squash} merge {merge} rebase {rebase} fastForward {fast-forward} other {{method}}}.",
@@ -4385,6 +4392,21 @@
     },
     " foi fechado"
   ],
+  "796b81c4875c4feb": [
+    "O app ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " precisa de um servidor ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    " mais recente neste ambiente. Atualize o servidor para usá-lo."
+  ],
   "705cf2b2ee4e0e42": [
     "O app ",
     {
@@ -4957,6 +4979,7 @@
   "306a6f95ad9d52f7": "Não enviadas",
   "11276ab6c58b7a25": "Abre o rascunho no editor de nova tarefa. Deslize para a esquerda para descartar.",
   "99950f3a28d425fa": "Envia quando o ambiente se reconectar. Abre a tarefa para edição. Deslize para a esquerda para excluir.",
+  "d71048f4fb9cf44a": "Aguardando sincronização",
   "0a260c7744afd0be": "Aguardando",
   "ad78fae7d373cf21": "Trabalhando",
   "be451f475c514b37": "Dispensar notificação de despertar",
@@ -5014,6 +5037,7 @@
   "5a2d803b3ea43f18": "Limite de uso atingido.",
   "d5365c5e28a18442": "{summary}: {message}",
   "bff5692f10fc10b0": "Mantenha pressionado para copiar.",
+  "1a1beecff68a6e61": "Verificar conta Google",
   "a1984c617f973156": "{preview}, a chamada de ferramenta falhou",
   "38574c0d1e49b278": "{preview}, conectado",
   "fd0d04d5a6627f70": "Abre a thread deste agente. Mantenha pressionado para copiar.",
@@ -5351,6 +5375,8 @@
   "cd5d90cbbfae32f6": "Gravando {time}",
   "6236e2f587bc4eb4": "Transcrevendo",
   "4e430d5ea01c249b": "Não foi possível enviar a resposta",
+  "a3c43735e1a81498": "Motivo para {title}",
+  "bfad234f016cfa3f": "O motivo, em uma frase. Ele acompanha a resposta que você escolher.",
   "e721a8b98f44d5f7": "Perguntar ao agente primeiro",
   "e39f89c909df4db0": "Não foi possível retomar a execução",
   "28c9dd162825c117": "Cancelar esta execução?",
@@ -5377,6 +5403,14 @@
       "v": "v"
     }
   ],
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " precisa de um motivo."
+  ],
   "9de4e24c9273b496": "Esta conexão pode ler execuções, mas não respondê-las.",
   "6dac41769b114edf": [
     {
@@ -5397,16 +5431,54 @@
   "59a3213338779c6e": "Concluída",
   "5a3b1fe78182d8dc": "Respondeu {choice}",
   "b17bd06e3b1ec0d2": "Respondeu {choice}: {reason}",
+  "99451a5d2d40440f": "Retirada por {by}.",
+  "3ee30a50b70fffab": "Retirada por {by}: {reason}",
   "89102905bf09b0e8": "Assistir ao vivo",
   "eea0013efc9e4339": "Transcrição",
   "ba8337dca3232880": "Abrir execução",
+  "235902a19e95833b": [
+    "por você,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "3759768c5d342c22": [
+    "respondida",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "8afa4fbe16f95bcf": [
+    "por ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
   "cab70ed0237438ef": "Carregando a etapa…",
   "30a5be40eb956663": "trabalhando",
   "edc8f6e9720f4eda": "em espera",
   "0684698b49273da5": "aguardando",
   "063173aa16052cb9": "em andamento",
   "3ba4cf953dd20f22": "falhou",
+  "0f93532dd76391fc": "Você respondeu {choice}",
+  "7e1fd2eb570a372b": "{who} respondeu {choice}",
   "e777db2880f53a46": "ninguém respondeu",
+  "201490988858b511": "retirada por {by}",
   "34f59bbbead0b97f": "{names} e mais {count}",
   "ac1556f6ce89a5ea": "{count} em paralelo",
   "e197c4963bacc746": "{count} em execução",
@@ -5419,12 +5491,15 @@
   "f25af5332ffc3734": "Nada aguarda você.",
   "c3f0119b8d6231f8": "Nada em execução.",
   "33028dfc1229eaa6": "Nenhuma execução ainda.",
+  "e4d1316c85ed7066": "Nenhuma pergunta desse tipo aguarda você.",
   "156ff7b625287a1e": "Ocultar puladas",
   "69b985b97ab45e6b": "Mostrar puladas ({count})",
   "8f6589c9e0ac5d4e": "Nenhum ambiente conectado",
   "744127f8dfad7d22": "Conecte um ambiente para ver as execuções de workflow dele.",
   "b9aae2f7cdb1a379": "Nenhuma execução de workflow ainda",
   "ace8fc1c643cf9f6": "Um workflow reúne agentes, código, agendamentos e perguntas para você em uma única execução que sobrevive a reinicializações. Escreva um no seu computador, em Workflows e depois Definições.",
+  "fc9c3a00cfc18b55": "Todos os tipos",
+  "45a94c724845ec1d": "Outras",
   "fceb81aa6685fb47": "Chats",
   "86798f07ba2d7f4d": "Pesquisar issues",
   "484cd83bb303bab8": "Pesquisar pull requests",

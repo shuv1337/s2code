@@ -121,7 +121,11 @@ function parseSkillFrontmatter(contents: string, fileName: string) {
   if (end === -1) return undefined;
   try {
     const frontmatter = decodeSkillFrontmatter(
-      parseYamlDocument(contents.slice(start + 3, end).trim()) ?? {},
+      // Antigravity reads plain scalar names and descriptions as text.
+      parseYamlDocument(contents.slice(start + 3, end).trim(), {
+        schema: "failsafe",
+        customTags: ["null"],
+      }) ?? {},
     );
     const name = frontmatter.name || fileName.slice(0, -3);
     const description = frontmatter.description?.trim();
@@ -394,6 +398,7 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
   const addSkillFile = Effect.fn("addAntigravitySkillFile")(function* (
     skillPath: string,
     scope: string,
+    pluginName?: string,
   ) {
     const fileName = path.basename(skillPath);
     if (fileName.toLowerCase() !== "skill.md" || !fileName.endsWith(".md")) return;
@@ -406,18 +411,19 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
       path: skillPath,
       scope,
       enabled: true,
+      ...(pluginName === undefined ? {} : { displayName: `${pluginName}:${skill.name}` }),
     });
   });
 
   const scanDirectory = Effect.fn("scanAntigravitySkillDirectory")(function* (
     directory: string,
     scope: string,
-    scanChildren: boolean,
+    mode: "directory" | "agent-root" | "child" | "manifest",
     filter: SkillEntryFilter = EMPTY_SKILL_FILTER,
-    acceptSkillFile = false,
+    pluginName?: string,
   ): Effect.fn.Return<void, AntigravitySkillsProbeError, FileSystem.FileSystem> {
     const info = yield* readIfPresent(fileSystem.stat(directory), directory);
-    if (info?.type === "File" && acceptSkillFile) {
+    if (info?.type === "File" && mode === "manifest") {
       if (budget.remainingEntries === 0) {
         return yield* new AntigravitySkillsProbeError({
           reason: "scan-budget-exhausted",
@@ -426,13 +432,13 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
       }
       budget.remainingEntries -= 1;
       if (matchesSkillFilter(path.basename(path.dirname(directory)), filter)) {
-        yield* addSkillFile(directory, scope);
+        yield* addSkillFile(directory, scope, pluginName);
       }
       return;
     }
     if (info?.type !== "Directory") return;
     const isUnfilteredRoot =
-      scanChildren && filter.includeGroups.length === 0 && filter.excludeNames.length === 0;
+      mode !== "child" && filter.includeGroups.length === 0 && filter.excludeNames.length === 0;
     if (isUnfilteredRoot) {
       const canonicalDirKey = yield* canonicalSkillPathKey(fileSystem, path, directory);
       if (scannedUnfilteredDirs.has(canonicalDirKey)) return;
@@ -450,11 +456,13 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
 
     const sortedEntries = entries.toSorted();
     const skillFileName = sortedEntries.find((entry) => entry.toLowerCase() === "skill.md");
-    if (skillFileName !== undefined) {
-      yield* addSkillFile(path.join(directory, skillFileName), scope);
+    if (skillFileName !== undefined && (mode !== "agent-root" || skillFileName.endsWith(".md"))) {
+      if (matchesSkillFilter(path.basename(directory), filter)) {
+        yield* addSkillFile(path.join(directory, skillFileName), scope, pluginName);
+      }
       return;
     }
-    if (scanChildren) {
+    if (mode !== "child") {
       const children = sortedEntries
         .filter((entry) => matchesSkillFilter(entry, filter))
         .map((entry) => ({ entry, sortKey: skillPathSortKey(entry) }))
@@ -462,7 +470,13 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
           left.sortKey < right.sortKey ? -1 : left.sortKey > right.sortKey ? 1 : 0,
         );
       for (const { entry } of children) {
-        yield* scanDirectory(path.join(directory, entry), scope, false);
+        yield* scanDirectory(
+          path.join(directory, entry),
+          scope,
+          "child",
+          EMPTY_SKILL_FILTER,
+          pluginName,
+        );
       }
     }
   });
@@ -539,16 +553,16 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
       if (declaredPaths !== undefined) {
         yield* recordNormalizedPathKeys(fileSystem, path, entryDirectory, declaredPaths);
       }
-      yield* scanDirectory(entryDirectory, scope, true, narrowSkillFilter(filter, entry), true);
+      yield* scanDirectory(entryDirectory, scope, "manifest", narrowSkillFilter(filter, entry));
     }
   });
 
   if (input.cwd !== undefined) {
     const { ancestors, repositoryRoot } = yield* resolveWorkspaceAncestors(input.cwd);
     for (const ancestor of ancestors) {
-      yield* scanDirectory(path.resolve(ancestor, ".gemini", "skills"), "project", true);
-      yield* scanDirectory(path.resolve(ancestor, ".agents", "skills"), "project", true);
-      yield* scanDirectory(path.resolve(ancestor, ".agent", "skills"), "project", true);
+      yield* scanDirectory(path.resolve(ancestor, ".gemini", "skills"), "project", "directory");
+      yield* scanDirectory(path.resolve(ancestor, ".agents", "skills"), "project", "agent-root");
+      yield* scanDirectory(path.resolve(ancestor, ".agent", "skills"), "project", "agent-root");
     }
     for (const ancestor of ancestors) {
       yield* scanSkillsConfig(
@@ -572,8 +586,8 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
     }
   }
 
-  yield* scanDirectory(configSkills, "user", true);
-  yield* scanDirectory(cliSkills, "user", true);
+  yield* scanDirectory(configSkills, "user", "directory");
+  yield* scanDirectory(cliSkills, "user", "directory");
 
   const declaredUserSkillPaths = new Set<string>();
   const userGeminiConfig = path.join(input.userHome, ".gemini", "config");
@@ -593,7 +607,7 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
     if (declaredUserSkillPaths.has(lexicalKey) || declaredUserSkillPaths.has(canonicalKey)) {
       continue;
     }
-    yield* scanDirectory(compatDir, "user", true);
+    yield* scanDirectory(compatDir, "user", "directory");
   }
 
   const pluginsDirectory = path.join(input.profileDirectory, "config", "plugins");
@@ -625,7 +639,13 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
       const pluginDirectory = path.join(pluginsDirectory, plugin);
       const info = yield* readIfPresent(fileSystem.stat(pluginDirectory), pluginDirectory);
       if (info?.type !== "Directory") continue;
-      yield* scanDirectory(path.join(pluginDirectory, "skills"), "user", true);
+      yield* scanDirectory(
+        path.join(pluginDirectory, "skills"),
+        "user",
+        "directory",
+        EMPTY_SKILL_FILTER,
+        plugin,
+      );
     }
   }
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));

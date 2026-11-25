@@ -1,5 +1,5 @@
 import { AVAILABLE_CONNECTION_STATE } from "@t3tools/client-runtime/connection";
-import { EnvironmentId, type ServerConfig } from "@t3tools/contracts";
+import { EnvironmentId, type ServerConfig, type ServerSelfUpdateOutcome } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -7,15 +7,16 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { environmentCatalog } from "~/connection/catalog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { serverEnvironment } from "~/state/server";
+import { toastManager } from "../ui/toast";
 import type { ServerUpdateOutcome, ServerUpdateTarget } from "../ServerUpdateAction";
-import type { UpdateEverythingRun } from "./updateEverything.logic";
+import type { RestoredRetry, UpdateEverythingRun } from "./updateEverything.logic";
 import {
   retryFailedUpdateRunServers,
   setUpdateEverythingRun,
   startDesktopUpdateLaunchNotice,
 } from "./updateEverythingRun";
 
-function relaunchWhileRestarting(environmentId: EnvironmentId) {
+function relaunchWhileRestarting(environmentId: EnvironmentId, updateId?: string) {
   const now = 1_800_000_000_000;
   vi.useFakeTimers({ now });
   const store = new Map([
@@ -27,7 +28,15 @@ function relaunchWhileRestarting(environmentId: EnvironmentId) {
         updatedServers: 0,
         updatedProviders: 0,
         failures: [],
-        handedOff: [{ environmentId, label: "Slow", targetVersion: "9.9.9", startedAt: now }],
+        handedOff: [
+          {
+            environmentId,
+            label: "Slow",
+            targetVersion: "9.9.9",
+            startedAt: now,
+            ...(updateId === undefined ? {} : { updateId }),
+          },
+        ],
       }),
     ],
   ]);
@@ -97,6 +106,48 @@ describe("startDesktopUpdateLaunchNotice", () => {
       stop();
     }
   });
+
+  it("reports this update's rollback instead of restarting until the timeout", async () => {
+    const environmentId = EnvironmentId.make("rolled-back-machine");
+    const stateAtom = serverEnvironment.updateStateAtom(environmentId);
+    const outcomeAtom = Atom.make<AsyncResult.AsyncResult<ServerSelfUpdateOutcome>>(
+      AsyncResult.initial(),
+    );
+    using _outcome = vi.spyOn(serverEnvironment, "updateOutcome").mockReturnValue(outcomeAtom);
+    using addToast = vi.spyOn(toastManager, "add");
+    const stop = relaunchWhileRestarting(environmentId, "update-2");
+    const release = appAtomRegistry.mount(stateAtom);
+    const outcome = (id: string, reason: string) =>
+      AsyncResult.success<ServerSelfUpdateOutcome>({
+        id,
+        fromVersion: "9.9.8",
+        targetVersion: "9.9.9",
+        status: "rolled-back",
+        reason,
+      });
+    try {
+      expect(appAtomRegistry.get(stateAtom)).toMatchObject({
+        status: "running",
+        updateId: "update-2",
+      });
+      appAtomRegistry.set(outcomeAtom, outcome("update-1", "an earlier attempt"));
+      expect(appAtomRegistry.get(stateAtom)).toMatchObject({ status: "running" });
+
+      appAtomRegistry.set(outcomeAtom, outcome("update-2", "candidate-exited:1"));
+      expect(appAtomRegistry.get(stateAtom)).toEqual({ status: "idle" });
+      expect(addToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "error",
+          description: expect.objectContaining({
+            props: expect.objectContaining({ children: "Slow: candidate-exited:1" }),
+          }),
+        }),
+      );
+    } finally {
+      release();
+      stop();
+    }
+  });
 });
 
 describe("retryFailedUpdateRunServers", () => {
@@ -157,6 +208,89 @@ describe("retryFailedUpdateRunServers", () => {
     ).toEqual([
       { environmentId: "already-updated", result: "done", retryable: false },
       { environmentId: "behind", result: null, retryable: true },
+    ]);
+  });
+
+  it("retries a row restored after a relaunch with the target it is given", () => {
+    const environmentId = EnvironmentId.make("restored");
+    const currentId = EnvironmentId.make("restored-current");
+    // Rendered as current, but the server went back to the old version before the click.
+    const staleId = EnvironmentId.make("restored-stale");
+    using _config = vi.spyOn(serverEnvironment, "configValueAtom").mockImplementation((id) =>
+      Atom.make({
+        environment: { serverVersion: id === currentId ? "9.9.9" : "9.9.8" },
+      } as unknown as ServerConfig),
+    );
+    setUpdateEverythingRun(() => ({
+      localVersion: null,
+      phase: "servers",
+      restartAt: null,
+      machines: [
+        {
+          environmentId,
+          label: "restored",
+          updatesProviders: false,
+          server: null,
+          handedOffVersion: "9.9.9",
+          startedAt: 0,
+          result: "failed",
+          failure: "Not back after 32 minutes",
+          providerFailure: null,
+        },
+        {
+          environmentId: currentId,
+          label: "restored-current",
+          updatesProviders: false,
+          server: null,
+          handedOffVersion: "9.9.9",
+          startedAt: 0,
+          result: "failed",
+          failure: "Not back after 32 minutes",
+          providerFailure: null,
+        },
+        {
+          environmentId: staleId,
+          label: "restored-stale",
+          updatesProviders: false,
+          server: null,
+          handedOffVersion: "9.9.9",
+          startedAt: 0,
+          result: "failed",
+          failure: "Not back after 32 minutes",
+          providerFailure: null,
+        },
+      ],
+    }));
+    const target: ServerUpdateTarget = {
+      environmentId,
+      serverLabel: "restored",
+      selfUpdate: "boot-service",
+      targetVersion: "9.9.9",
+    };
+    const update = vi.fn(
+      (_target: ServerUpdateTarget) => new Promise<ServerUpdateOutcome>(() => {}),
+    );
+
+    retryFailedUpdateRunServers(
+      update,
+      new Map<EnvironmentId, RestoredRetry>([
+        [environmentId, target],
+        [currentId, "current"],
+        [staleId, "current"],
+      ]),
+    );
+
+    let run: UpdateEverythingRun | null = null;
+    setUpdateEverythingRun((current) => {
+      run = current;
+      return null;
+    });
+    expect(update.mock.calls.map(([called]) => called)).toEqual([target]);
+    // Downloading again, not "restarting" from the old handoff, and retryable if it fails again.
+    expect((run as UpdateEverythingRun | null)?.machines).toMatchObject([
+      { result: null, server: target, handedOffVersion: null },
+      { result: "done", failure: null },
+      { result: "failed", failure: "Not back after 32 minutes" },
     ]);
   });
 });
