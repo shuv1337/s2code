@@ -29,7 +29,7 @@ interface Attempt {
 function loadRetryLoop(format: "cjs" | "esm") {
   const require = NodeModule.createRequire(import.meta.url);
   const directory = NodePath.dirname(require.resolve("@cursor/sdk"));
-  const source = NodeFS.readFileSync(NodePath.join(directory, "..", format, "977.js"), "utf8");
+  const source = NodeFS.readFileSync(NodePath.join(directory, "..", format, "242.js"), "utf8");
   const marker = source.indexOf(
     "checkpointHandler:r,runOptions:n,requestId:o,hooks:s,cancellation:",
   );
@@ -71,6 +71,13 @@ function loadRetryLoop(format: "cjs" | "esm") {
   const proto = /new ([\w$]+)\.QFf/.exec(loop)![1]!;
   const sameState = /([\w$]+)\(\(\w+=\w+\)\.turns/.exec(loop)![1]!;
   const errorClass = /error:new ([\w$]+)\("Agent turn stopped/.exec(loop)![1]!;
+  // SDK 1.5.0 tracks retry progress for its own diagnostics; the guard does not depend on it.
+  const progressTracker = /new ([\w$]+)\(\{path:"retry"/.exec(loop)?.[1];
+  // It also counts retries by reason and attempt bucket.
+  const retryMetric =
+    /const \w+=([\w$]+)\(\w+\);try\{([\w$]+)\.increment\(\w+,1,\{attempt:([\w$]+)\(/.exec(loop);
+  // And it may move a stalled stream to another transport path; these fixtures never change paths.
+  const streamPathChange = /\}catch\{\}const \w+=([\w$]+)\(\w+,\w+\);if\(void 0!==/.exec(loop)?.[1];
   const guardPath = NodePath.join(directory, "..", "s2code-retry.cjs");
   const globals = {
     [initialDelay]: 0,
@@ -84,6 +91,22 @@ function loadRetryLoop(format: "cjs" | "esm") {
     [sameState]: () => true,
     [errorClass]: Error,
     s2codeRetryGuard: NodeFS.existsSync(guardPath) ? require(guardPath) : undefined,
+    ...(progressTracker === undefined
+      ? {}
+      : {
+          [progressTracker]: class RetryProgress {
+            noteModelOutput() {}
+            noteDrop() {}
+          },
+        }),
+    ...(retryMetric === null
+      ? {}
+      : {
+          [retryMetric[1]!]: () => "retry",
+          [retryMetric[2]!]: { increment() {} },
+          [retryMetric[3]!]: () => "0",
+        }),
+    ...(streamPathChange === undefined ? {} : { [streamPathChange]: () => undefined }),
   };
   return NodeVM.runInNewContext(`${loop}; ${name}`, globals) as (input: object) => Promise<void>;
 }

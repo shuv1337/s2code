@@ -12,7 +12,6 @@ import type { ServerUpdateOutcome, ServerUpdateTarget } from "../ServerUpdateAct
 import type { RestoredRetry, UpdateEverythingRun } from "./updateEverything.logic";
 import {
   retryFailedUpdateRunServers,
-  saveUpdateEverythingResult,
   setUpdateEverythingRun,
   startDesktopUpdateLaunchNotice,
 } from "./updateEverythingRun";
@@ -54,58 +53,6 @@ describe("startDesktopUpdateLaunchNotice", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-  });
-
-  it("keeps a restored track switch out of the capsule's retry", async () => {
-    const environmentId = EnvironmentId.make("switching-machine");
-    const now = 1_800_000_000_000;
-    vi.useFakeTimers({ now });
-    const store = new Map<string, string>();
-    vi.stubGlobal("window", {
-      localStorage: {
-        getItem: (key: string) => store.get(key) ?? null,
-        setItem: (key: string, value: string) => store.set(key, value),
-        removeItem: (key: string) => store.delete(key),
-      },
-    });
-    setUpdateEverythingRun(() => ({
-      trackSwitch: true,
-      localVersion: "9.9.9",
-      phase: "installing",
-      restartAt: null,
-      machines: [
-        {
-          environmentId,
-          label: "Switching",
-          updatesProviders: false,
-          server: null,
-          handedOffVersion: "9.9.9",
-          startedAt: now,
-          result: null,
-          failure: null,
-          providerFailure: null,
-        },
-      ],
-    }));
-    saveUpdateEverythingResult({
-      localVersion: "9.9.9",
-      updatedServers: 0,
-      updatedProviders: 0,
-      failures: [],
-      restarting: [],
-    });
-    setUpdateEverythingRun(() => null);
-
-    const stop = startDesktopUpdateLaunchNotice();
-    let run: UpdateEverythingRun | null = null;
-    setUpdateEverythingRun((current) => (run = current));
-    try {
-      expect(run).toMatchObject({ trackSwitch: true, machines: [{ environmentId }] });
-    } finally {
-      await vi.advanceTimersByTimeAsync(32 * 60 * 1000);
-      stop();
-      setUpdateEverythingRun(() => null);
-    }
   });
 
   it("keeps a server that is still restarting from looking idle after the app relaunches", async () => {

@@ -225,7 +225,17 @@ describe("DesktopClerk", () => {
       ]);
     }).pipe(
       Effect.provide(
-        layerDesktopClerk(true, [], "darwin", undefined, undefined, undefined, "relative-state"),
+        layerDesktopClerk(
+          true,
+          [],
+          "darwin",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          "relative-state",
+        ),
       ),
     );
   });
