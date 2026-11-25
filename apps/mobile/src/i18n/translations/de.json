@@ -25,6 +25,7 @@
   "986b0873f913a840": "Die Richtlinie von {organization} erlaubt keine Webhook-Aufgaben.",
   "eebc538e25b09fe2": "Die Richtlinie von {organization} erlaubt keinen Import von Browser-Cookies.",
   "7642a133db05f164": "Die Richtlinie von {organization} erlaubt nicht, die lokalen Server dieses Rechners auf anderen Geräten zu öffnen.",
+  "e0856d6a402ad821": "Die Richtlinie von {organization} erlaubt keine Worktree-Layout-Befehle von Projekten.",
   "39f6771b49f9b3b6": "Standard verwenden",
   "45bb0e90e1c42046": "Wenn du zurückkommst",
   "d8fa0a55446bbb0d": "Bevor der Cache abläuft (Beta)",
@@ -506,7 +507,7 @@
   "bc24c300d53d61c5": "{host} hat auf keiner gespeicherten Route geantwortet.",
   "b0dd3cd876937ca8": "Verbindungsprofil {connectionId} ist nicht verfügbar.",
   "5ce46783e79ca9d1": "Zugangsdaten der Verbindung {connectionId} sind nicht verfügbar.",
-  "0bda0cac7f5acc20": "Die verbundene Umgebung {actual} stimmt nicht mit {expected} überein.",
+  "b39d1428ec8b23f5": "Unter dieser Adresse läuft jetzt eine andere T3 Code-Installation ({actual}, nicht {expected}). Entferne diese Verbindung und füge sie erneut hinzu.",
   "ea0d3e4e51d5706f": "Die Zugangsdaten der Umgebung sind ungültig.",
   "7283ebfd16d09677": "Die Zugangsdaten der Umgebung gewähren nicht den erforderlichen Zugriff.",
   "d3e9a9cb543b4b7b": "Die Umgebung hat die Authentifizierungsanfrage abgelehnt.",
@@ -826,6 +827,7 @@
   "21872f69ccbc711d": "{provider}-MCP-Server werden gestartet",
   "fedaa29ff8815a77": "{provider}-Hooks werden geladen",
   "57025ae4de5beb57": "{provider}-Regeln und -Skills werden geladen",
+  "1cbfbcad9f0d04fe": "{provider}-Sitzung wird fortgesetzt",
   "4729a188600f1501": "Verbindung zu {provider} wird hergestellt",
   "8c8977097681630f": "{provider} wird gestartet",
   "f1d27d127ab27ac6": "Wird gestartet",
@@ -1927,6 +1929,7 @@
   "69c659d8b6e271cc": "Die Seite fordert eine Datei an.",
   "a6efeb99b479990a": "Dateien auswählen",
   "59c87648d44b958c": "Datei auswählen",
+  "6f321f153b8711bb": "Option auswählen",
   "61a552a67e9e3eac": "Antwort auf Dialog",
   "1d9bd868fafea18a": "Ablehnen",
   "1d0a7acef4a95536": "Akzeptieren",
@@ -2021,6 +2024,9 @@
   "782a518513f0777a": "{environment} aktivieren",
   "a35685d9ad9de747": "Verknüpfte Cloud-Umgebungen werden geladen.",
   "91ca3ba7b2f9d6b6": "Keine weiteren verknüpften Cloud-Umgebungen.",
+  "89bf40eb2503b6c5": "Neues Gerät bei {environment} angemeldet",
+  "c94b5fe9ef372bc0": "{device} hat sich über {product} verbunden. Warst du das nicht, entferne es in T3 Code auf diesem Computer unter Einstellungen → Zugriff.",
+  "bec67d0ed485f885": "{count, plural, one {{count} Gerät hat} other {{count} Geräte haben}} sich über {product} verbunden. Warst du das nicht, entferne sie in T3 Code auf diesem Computer unter Einstellungen → Zugriff.",
   "190165d4fad2f072": "Anfrage wartet nicht mehr",
   "c403db0535205f50": "Sie ist abgelaufen oder wurde anderswo beantwortet.",
   "4e3abf0ba32ed1d6": "Die Anfrage wartet noch. Versuch es erneut.",
@@ -2847,6 +2853,7 @@
   "dff9e061996e7b1d": "Auto-Merge aktivieren?",
   "dafc4bac6e5e37b0": "Auto-Merge deaktivieren?",
   "88c7a80c40bbfe56": "{layers} per {kind, select, squash {Squash} merge {Merge} rebase {Rebase} fastForward {Fast-Forward} other {{method}}} in {base} mergen. Ebenen über #{number} bleiben offen.",
+  "892f08d21b8e48a9": "{layers} per {kind, select, squash {Squash} merge {Merge} rebase {Rebase} fastForward {Fast-Forward} other {{method}}} in {base} mergen, sobald die Anforderungen erfüllt sind. Das kann sofort passieren.",
   "700223fdcaa96bb7": "#{number} per {kind, select, squash {Squash} merge {Merge} rebase {Rebase} fastForward {Fast-Forward} other {{method}}} mergen, sobald die Anforderungen erfüllt sind. Das kann sofort passieren.",
   "de93a05a4db7ab76": "{term, select, mr {Verhindern, dass der Anbieter diesen Merge Request automatisch mergt.} cr {Verhindern, dass der Anbieter diese Änderungsanfrage automatisch mergt.} other {Verhindern, dass der Anbieter diesen Pull Request automatisch mergt.}}",
   "385ba70d2783260b": "#{number} per {kind, select, squash {Squash} merge {Merge} rebase {Rebase} fastForward {Fast-Forward} other {{method}}} in {branch} mergen.",
@@ -4390,6 +4397,21 @@
     },
     " wurde geschlossen"
   ],
+  "796b81c4875c4feb": [
+    "Die App ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " benötigt einen neueren ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    "-Server in dieser Umgebung. Aktualisiere den Server, um sie zu nutzen."
+  ],
   "705cf2b2ee4e0e42": [
     "Die App ",
     {
@@ -4963,6 +4985,7 @@
   "306a6f95ad9d52f7": "Nicht gesendet",
   "11276ab6c58b7a25": "Öffnet den Entwurf im Eingabefeld für neue Aufgaben. Nach links wischen zum Verwerfen.",
   "99950f3a28d425fa": "Wird gesendet, sobald die Umgebung wieder verbunden ist. Öffnet die Aufgabe zum Bearbeiten. Nach links wischen zum Löschen.",
+  "d71048f4fb9cf44a": "Wartet auf Synchronisierung",
   "0a260c7744afd0be": "Wartet",
   "ad78fae7d373cf21": "Arbeitet",
   "be451f475c514b37": "Aufgeweckt-Hinweis schließen",
@@ -5020,6 +5043,7 @@
   "5a2d803b3ea43f18": "Nutzungslimit erreicht.",
   "d5365c5e28a18442": "{summary}: {message}",
   "bff5692f10fc10b0": "Lange drücken zum Kopieren.",
+  "1a1beecff68a6e61": "Google-Konto bestätigen",
   "a1984c617f973156": "{preview}, Tool-Aufruf fehlgeschlagen",
   "38574c0d1e49b278": "{preview}, angemeldet",
   "fd0d04d5a6627f70": "Öffnet den Thread dieses Agenten. Lange drücken zum Kopieren.",
@@ -5357,6 +5381,8 @@
   "cd5d90cbbfae32f6": "Aufnahme {time}",
   "6236e2f587bc4eb4": "Wird transkribiert",
   "4e430d5ea01c249b": "Die Antwort konnte nicht gesendet werden",
+  "a3c43735e1a81498": "Begründung für {title}",
+  "bfad234f016cfa3f": "Warum, in einem Satz. Gilt für die Antwort, die du wählst.",
   "e721a8b98f44d5f7": "Erst den Agenten fragen",
   "e39f89c909df4db0": "Die Ausführung konnte nicht fortgesetzt werden",
   "28c9dd162825c117": "Diese Ausführung abbrechen?",
@@ -5383,6 +5409,14 @@
       "v": "v"
     }
   ],
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " braucht eine Begründung."
+  ],
   "9de4e24c9273b496": "Diese Verbindung kann Ausführungen lesen, aber nicht beantworten.",
   "6dac41769b114edf": [
     {
@@ -5403,16 +5437,54 @@
   "59a3213338779c6e": "Fertig",
   "5a3b1fe78182d8dc": "{choice} geantwortet",
   "b17bd06e3b1ec0d2": "{choice} geantwortet: {reason}",
+  "99451a5d2d40440f": "Zurückgezogen von {by}.",
+  "3ee30a50b70fffab": "Zurückgezogen von {by}: {reason}",
   "89102905bf09b0e8": "Live ansehen",
   "eea0013efc9e4339": "Transkript",
   "ba8337dca3232880": "Ausführung öffnen",
+  "235902a19e95833b": [
+    "von dir,",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "3759768c5d342c22": [
+    "beantwortet",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "8afa4fbe16f95bcf": [
+    "von ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ",",
+    " ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
   "cab70ed0237438ef": "Schritt wird geladen…",
   "30a5be40eb956663": "arbeitet",
   "edc8f6e9720f4eda": "schläft",
   "0684698b49273da5": "wartet",
   "063173aa16052cb9": "läuft",
   "3ba4cf953dd20f22": "fehlgeschlagen",
+  "0f93532dd76391fc": "Du hast {choice} geantwortet",
+  "7e1fd2eb570a372b": "{who} hat {choice} geantwortet",
   "e777db2880f53a46": "niemand hat geantwortet",
+  "201490988858b511": "zurückgezogen von {by}",
   "34f59bbbead0b97f": "{names} und {count} weitere",
   "ac1556f6ce89a5ea": "{count} parallel",
   "e197c4963bacc746": "{count} laufen",
@@ -5425,12 +5497,15 @@
   "f25af5332ffc3734": "Nichts wartet auf dich.",
   "c3f0119b8d6231f8": "Es läuft nichts.",
   "33028dfc1229eaa6": "Noch keine Ausführungen.",
+  "e4d1316c85ed7066": "Keine Fragen dieser Art warten auf dich.",
   "156ff7b625287a1e": "Übersprungene ausblenden",
   "69b985b97ab45e6b": "{count} übersprungene anzeigen",
   "8f6589c9e0ac5d4e": "Keine Umgebung verbunden",
   "744127f8dfad7d22": "Verbinde eine Umgebung, um ihre Workflow-Ausführungen zu sehen.",
   "b9aae2f7cdb1a379": "Noch keine Workflow-Ausführungen",
   "ace8fc1c643cf9f6": "Ein Workflow verbindet Agenten, Code, Zeitpläne und Fragen an dich zu einer Ausführung, die Neustarts übersteht. Schreib einen auf deinem Computer, unter Workflows, dann Definitionen.",
+  "fc9c3a00cfc18b55": "Alle Arten",
+  "45a94c724845ec1d": "Sonstige",
   "fceb81aa6685fb47": "Chats",
   "86798f07ba2d7f4d": "Issues durchsuchen",
   "484cd83bb303bab8": "Pull Requests durchsuchen",

@@ -80,6 +80,9 @@ concurrency:
   group: mobile-eas-production
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   production:
     name: EAS ${{ inputs.profile || 'production' }} ${{ github.event_name == 'push' && 'auto' || inputs.mode }}
