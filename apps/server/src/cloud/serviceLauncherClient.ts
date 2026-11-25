@@ -13,9 +13,18 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import packageJson from "../../package.json" with { type: "json" };
 import {
+  canonicalizeLauncherPath,
+  generatedWindowsForwarderTarget,
+  generatedWindowsShimTarget,
+  isOwnedVersionsTarget,
+  joinRawPosixPath,
+  launcherOwnsVersionsDir,
+  ownedLauncherNames,
   pinnedRuntimePaths,
   pinnedRuntimeVersionsDir,
-  readPosixLauncherTarget,
+  readPinnedRuntimeLaunchers,
+  readPosixLauncher,
+  recordPinnedRuntimeLauncher,
   writePosixLauncher,
 } from "./pinnedRuntime.ts";
 import {
@@ -154,79 +163,242 @@ export const resolveServiceLauncherMode = Effect.fn("cloud.service_launcher_clie
   },
 );
 
+const MAX_SYMLINK_CHAIN_DEPTH = 16;
+
 export const repointLaunchers = Effect.fn("cloud.service_launcher_client.repoint_launchers")(
   function* (input: { readonly baseDir: string; readonly targetVersion: string }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const environment = yield* HostProcess.Environment;
     const platform = yield* HostProcess.Platform;
-    if (platform !== "linux" && platform !== "darwin") return;
-    const installBinDir =
-      environment["T3CODE_INSTALL_BIN_DIR"] ||
-      (environment["HOME"] ? path.join(environment["HOME"], ".local", "bin") : undefined);
-    const candidates = new Set<string>();
-    if (installBinDir !== undefined) candidates.add(path.join(installBinDir, "t3"));
-    const searchPath = environment["PATH"] ?? "";
-    const cwd = yield* HostProcess.WorkingDirectory;
-    for (const directory of searchPath.split(":")) {
-      // Like the shell, an empty entry of a nonempty PATH is the working directory.
-      if (directory.length === 0 && searchPath.length === 0) continue;
-      const candidate = path.join(directory || cwd, "t3");
-      if (directory.length === 0) {
-        // The shell passes over a working-directory entry it cannot run and keeps searching.
-        const info = yield* fs.stat(candidate).pipe(Effect.option);
-        if (Option.isNone(info) || info.value.type !== "File" || (info.value.mode & 0o111) === 0) {
-          continue;
-        }
-        candidates.add(candidate);
-        break;
-      }
-      if (
-        yield* fs.exists(candidate).pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("Could not check the t3 command on PATH", {
-              launchedAs: candidate,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
-        )
-      ) {
-        candidates.add(candidate);
-        break;
+    if (platform !== "linux" && platform !== "darwin" && platform !== "win32") return;
+    const windows = platform === "win32";
+    const launcherNames = ownedLauncherNames(input.targetVersion, platform);
+    const normalizePath = (value: string) =>
+      windows ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const candidates = new Map<string, string>();
+    const addCandidate = (candidate: string) => {
+      const key = normalizePath(candidate);
+      if (!candidates.has(key)) candidates.set(key, candidate);
+    };
+
+    for (const recorded of yield* readPinnedRuntimeLaunchers(input.baseDir)) {
+      addCandidate(recorded);
+    }
+
+    const baseBinDir = path.join(input.baseDir, "bin");
+    for (const name of launcherNames) {
+      addCandidate(path.join(baseBinDir, name));
+    }
+
+    const installBinDirs = new Set<string>();
+    for (const envKey of [
+      "S2CODE_INSTALL_BIN_DIR",
+      "SHUV2CODE_INSTALL_BIN_DIR",
+      "T3CODE_INSTALL_BIN_DIR",
+    ] as const) {
+      const value = environment[envKey]?.trim();
+      if (value) installBinDirs.add(value);
+    }
+    const homeDir = windows
+      ? environment["USERPROFILE"]?.trim() || environment["HOME"]?.trim()
+      : environment["HOME"]?.trim();
+    if (homeDir) installBinDirs.add(path.join(homeDir, ".local", "bin"));
+    for (const directory of installBinDirs) {
+      for (const name of launcherNames) {
+        addCandidate(path.join(directory, name));
       }
     }
+
+    const searchPath = windows
+      ? (environment["PATH"] ?? environment["Path"] ?? "")
+      : (environment["PATH"] ?? "");
+    const cwd = yield* HostProcess.WorkingDirectory;
+    if (searchPath.length > 0) {
+      for (const directory of searchPath.split(windows ? ";" : ":")) {
+        if (windows && directory.trim().length === 0) continue;
+        for (const name of launcherNames) {
+          const candidate = path.join(directory || cwd, name);
+          if (!windows && directory.length === 0) {
+            // The shell passes over a working-directory entry it cannot run and keeps searching.
+            const info = yield* fs.stat(candidate).pipe(Effect.option);
+            if (
+              Option.isNone(info) ||
+              info.value.type !== "File" ||
+              (info.value.mode & 0o111) === 0
+            ) {
+              continue;
+            }
+            addCandidate(candidate);
+            continue;
+          }
+          if (
+            yield* fs.exists(candidate).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Could not check the s2code command on PATH", {
+                  launchedAs: candidate,
+                  cause,
+                }).pipe(Effect.as(false)),
+              ),
+            )
+          ) {
+            addCandidate(candidate);
+          }
+        }
+      }
+    }
+
     const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
+    const realVersionsDir = yield* fs
+      .realPath(versionsDir)
+      .pipe(Effect.orElseSucceed(() => versionsDir));
     const target = pinnedRuntimePaths(path, input.baseDir, input.targetVersion, platform);
-    for (const launchedAs of candidates) {
+    const inVersionsDir = (candidate: string) =>
+      launcherOwnsVersionsDir(path, versionsDir, candidate, platform) ||
+      launcherOwnsVersionsDir(path, realVersionsDir, candidate, platform);
+    // Untraced helpers inside the `repoint_launchers` span.
+    const ownsTarget = (candidate: string) =>
+      isOwnedVersionsTarget({ versionsDir, realVersionsDir, candidate, platform });
+    const readSmallFile = Effect.fnUntraced(function* (file: string) {
+      const info = yield* fs.stat(file).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "File" || info.value.size > 4096n) {
+        return undefined;
+      }
+      return yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => undefined));
+    });
+    const readLinkOption = (file: string) =>
+      fs.readLink(file).pipe(
+        Effect.asSome,
+        Effect.catchIf(
+          (error) =>
+            error.reason._tag === "NotFound" ||
+            (error.reason.cause as NodeJS.ErrnoException | undefined)?.code === "EINVAL",
+          () => Effect.succeedNone,
+        ),
+      );
+
+    for (const launchedAs of candidates.values()) {
       yield* Effect.scoped(
         Effect.gen(function* () {
-          const linkTarget = yield* fs.readLink(launchedAs).pipe(
-            Effect.asSome,
-            Effect.catchIf(
-              (error) =>
-                error.reason._tag === "NotFound" ||
-                (error.reason.cause as NodeJS.ErrnoException | undefined)?.code === "EINVAL",
-              () => Effect.succeedNone,
-            ),
-          );
-          // A legacy symlink, or the script install.sh and `t3 update` write.
-          const current = Option.isSome(linkTarget)
-            ? path.resolve(path.dirname(launchedAs), linkTarget.value)
-            : yield* readPosixLauncherTarget(launchedAs);
-          if (current === undefined) return;
-          const relative = path.relative(versionsDir, current);
-          if (
-            relative.length === 0 ||
-            relative === ".." ||
-            relative.startsWith(`..${path.sep}`) ||
-            path.isAbsolute(relative)
-          )
+          if (windows) {
+            const expectedShim = `@echo off\r\n"${target.entryPath}" %*`;
+            const contents = yield* readSmallFile(launchedAs);
+            if (contents === undefined) return;
+            const directTarget = generatedWindowsShimTarget(contents);
+            if (directTarget !== undefined && (yield* ownsTarget(directTarget))) {
+              if (contents !== expectedShim) {
+                yield* fs.writeFileString(launchedAs, expectedShim);
+              }
+              yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: launchedAs });
+              return;
+            }
+            const forwardedCmd = generatedWindowsForwarderTarget(contents);
+            if (forwardedCmd === undefined) return;
+            const underlying = path.resolve(path.dirname(launchedAs), forwardedCmd);
+            const underlyingContents = yield* readSmallFile(underlying);
+            if (underlyingContents === undefined) return;
+            const underlyingTarget = generatedWindowsShimTarget(underlyingContents);
+            if (underlyingTarget === undefined || !(yield* ownsTarget(underlyingTarget))) return;
+            if (underlyingContents !== expectedShim) {
+              yield* fs.writeFileString(underlying, expectedShim);
+            }
+            yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: underlying });
+            if (normalizePath(launchedAs) !== normalizePath(underlying)) {
+              yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: launchedAs });
+            }
             return;
-          yield* writePosixLauncher({
-            launcher: launchedAs,
-            executable: target.entryPath,
-            exclusive: false,
+          }
+
+          const visited = new Set<string>();
+          let cursor = launchedAs;
+          let directLegacyLink: string | undefined;
+          let exhausted = true;
+          for (let depth = 0; depth < MAX_SYMLINK_CHAIN_DEPTH; depth += 1) {
+            const key = normalizePath(cursor);
+            if (visited.has(key)) return;
+            visited.add(key);
+            const linkTarget = yield* readLinkOption(cursor);
+            if (Option.isNone(linkTarget)) {
+              exhausted = false;
+              break;
+            }
+            const cursorParent =
+              (yield* canonicalizeLauncherPath({
+                target: path.dirname(cursor),
+                platform,
+              })) ?? path.dirname(cursor);
+            const next = joinRawPosixPath(cursorParent, linkTarget.value);
+            const nextIsLink = Option.isSome(yield* readLinkOption(next));
+            if (nextIsLink) {
+              const physicalNext = yield* canonicalizeLauncherPath({
+                target: next,
+                platform,
+                followLastSymlink: false,
+              });
+              if (physicalNext === undefined) return;
+              if (inVersionsDir(physicalNext)) {
+                // Never walk into runtime/versions to rewrite a link there; verify resolved ownership.
+                if (yield* ownsTarget(next)) {
+                  directLegacyLink = cursor;
+                  exhausted = false;
+                  break;
+                }
+                return;
+              }
+              cursor = physicalNext;
+              continue;
+            }
+            if (yield* ownsTarget(next)) {
+              directLegacyLink = cursor;
+              exhausted = false;
+              break;
+            }
+            cursor = next;
+          }
+          if (exhausted) return;
+
+          if (directLegacyLink !== undefined) {
+            yield* writePosixLauncher({
+              launcher: directLegacyLink,
+              executable: target.entryPath,
+              exclusive: false,
+            });
+            yield* recordPinnedRuntimeLauncher({
+              baseDir: input.baseDir,
+              launcher: directLegacyLink,
+            });
+            if (normalizePath(launchedAs) !== normalizePath(directLegacyLink)) {
+              yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: launchedAs });
+            }
+            return;
+          }
+
+          const parsedScript = yield* readPosixLauncher(cursor, { baseDir: input.baseDir });
+          if (parsedScript === undefined || !(yield* ownsTarget(parsedScript.target))) return;
+          const canonicalScriptTarget = yield* canonicalizeLauncherPath({
+            target: parsedScript.target,
+            platform,
           });
+          const canonicalTargetEntry = yield* canonicalizeLauncherPath({
+            target: target.entryPath,
+            platform,
+          });
+          if (
+            canonicalScriptTarget === undefined ||
+            canonicalTargetEntry === undefined ||
+            normalizePath(canonicalScriptTarget) !== normalizePath(canonicalTargetEntry)
+          ) {
+            yield* writePosixLauncher({
+              launcher: cursor,
+              executable: target.entryPath,
+              exclusive: false,
+              exportLine: parsedScript.exportLine,
+            });
+          }
+          yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: cursor });
+          if (normalizePath(launchedAs) !== normalizePath(cursor)) {
+            yield* recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher: launchedAs });
+          }
         }),
       ).pipe(
         Effect.catchCause((cause) =>
@@ -267,6 +439,7 @@ export const make = Effect.fn("cloud.service_launcher_client.make")(function* (o
   const path = yield* Path.Path;
   const environment = yield* HostProcess.Environment;
   const platform = yield* HostProcess.Platform;
+  const cwd = yield* HostProcess.WorkingDirectory;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   // The launcher that commits a remote update is the old one; its reload after commit
   // keeps oomd's watch only if the policy is mirrored before it.
@@ -379,6 +552,7 @@ export const make = Effect.fn("cloud.service_launcher_client.make")(function* (o
                     Effect.provideService(Path.Path, path),
                     Effect.provideService(HostProcess.Environment, environment),
                     Effect.provideService(HostProcess.Platform, platform),
+                    Effect.provideService(HostProcess.WorkingDirectory, cwd),
                     Effect.as({
                       id: pending.id,
                       fromVersion: pending.fromVersion,

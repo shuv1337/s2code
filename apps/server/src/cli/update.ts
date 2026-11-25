@@ -29,17 +29,23 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import {
+  canonicalizeLauncherPath,
   ensurePinnedRuntimeInstalled,
   findPosixLauncher,
-  launcherOwnsVersionsDir,
+  generatedWindowsForwarderTarget,
+  generatedWindowsShimTarget,
+  isOwnedVersionsTarget,
   isUnpublishedRelease,
+  joinRawPosixPath,
+  ownedLauncherNames,
   pinnedRuntimePaths,
   PinnedRuntimePreflightBlockedError,
   pinnedRuntimeVersionsDir,
   prunePinnedRuntimes,
+  readPinnedRuntimeLaunchers,
+  readPosixLauncher,
   recordPinnedRuntimeLauncher,
   resolveLauncherPath,
-  readPosixLauncherTarget,
   writePosixLauncher,
 } from "../cloud/pinnedRuntime.ts";
 import {
@@ -122,33 +128,19 @@ export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(funct
 export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(function* (
   launcher: string,
   version = packageJson.version,
+  baseDir?: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const windows = (yield* HostProcess.Platform) === "win32";
-  const readTarget = (file: string) =>
-    (windows
-      ? fs.readFileString(file).pipe(
-          Effect.map((content) =>
-            // Direct shims quote the executable. Forwarders quote the legacy
-            // `.cmd`, including the repaired body whose `for /f` line is not
-            // `call "..."`. Skip option quotes such as "usebackq skip=1 delims=".
-            [...content.matchAll(/"([^"]*)"/g)]
-              .map((match) => match[1])
-              .find(
-                (value) => value !== undefined && (value.includes("\\") || value.includes("/")),
-              ),
-          ),
-        )
-      : fs.readLink(file).pipe(Effect.catch(() => readPosixLauncherTarget(file)))
-    ).pipe(
-      Effect.map((target) =>
-        target === undefined ? undefined : path.resolve(path.dirname(file), target),
-      ),
-      Effect.orElseSucceed(() => undefined),
-    );
-  const target = yield* readTarget(launcher);
-  if (target === undefined) return undefined;
+  // Untraced helper inside the `read_launcher_target` span.
+  const readSmallFile = Effect.fnUntraced(function* (file: string) {
+    const info = yield* fs.stat(file).pipe(Effect.option);
+    if (Option.isNone(info) || info.value.type !== "File" || info.value.size > 4096n) {
+      return undefined;
+    }
+    return yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => undefined));
+  });
   const suffix = windows ? ".cmd" : "";
   const canonical = `${resolveChannelIdentity(version).executableName}${suffix}`;
   const legacy = path.join(
@@ -157,11 +149,72 @@ export const readLauncherTarget = Effect.fn("cli.update.read_launcher_target")(f
   );
   const samePath = (left: string, right: string) =>
     windows ? left.toLowerCase() === right.toLowerCase() : left === right;
-  if (samePath(path.basename(launcher), canonical) && samePath(target, legacy)) {
-    const forwarded = yield* readTarget(legacy);
-    return forwarded === undefined ? undefined : { target: forwarded, forwarder: true };
+
+  if (windows) {
+    const content = yield* readSmallFile(launcher);
+    if (content === undefined) return undefined;
+    const forwardedCmd = generatedWindowsForwarderTarget(content);
+    if (forwardedCmd !== undefined) {
+      const resolvedForwarded = path.resolve(path.dirname(launcher), forwardedCmd);
+      if (!samePath(path.basename(launcher), canonical) || !samePath(resolvedForwarded, legacy)) {
+        return undefined;
+      }
+      const legacyContent = yield* readSmallFile(legacy);
+      if (legacyContent === undefined) return undefined;
+      const forwardedTarget = generatedWindowsShimTarget(legacyContent);
+      if (forwardedTarget === undefined) return undefined;
+      return { target: path.resolve(path.dirname(legacy), forwardedTarget), forwarder: true };
+    }
+    const directTarget = generatedWindowsShimTarget(content);
+    if (directTarget === undefined) return undefined;
+    return { target: path.resolve(path.dirname(launcher), directTarget), forwarder: false };
   }
-  return { target, forwarder: false };
+
+  const platform = yield* HostProcess.Platform;
+  const readPosix = Effect.fnUntraced(function* (file: string) {
+    const parentReal =
+      (yield* canonicalizeLauncherPath({
+        target: path.dirname(file),
+        platform,
+      })) ?? path.dirname(file);
+    const link = yield* fs.readLink(file).pipe(Effect.option);
+    if (Option.isSome(link)) {
+      return { target: joinRawPosixPath(parentReal, link.value) };
+    }
+    const parsed = yield* readPosixLauncher(file, { baseDir });
+    if (parsed === undefined) return undefined;
+    return {
+      target: joinRawPosixPath(parentReal, parsed.target),
+      ...(parsed.exportLine !== undefined ? { exportLine: parsed.exportLine } : {}),
+    };
+  });
+
+  const entry = yield* readPosix(launcher);
+  if (entry === undefined) return undefined;
+  const canonicalEntryLocation = yield* canonicalizeLauncherPath({
+    target: entry.target,
+    platform,
+    followLastSymlink: false,
+  });
+  const canonicalLegacyLocation = yield* canonicalizeLauncherPath({
+    target: legacy,
+    platform,
+    followLastSymlink: false,
+  });
+  if (
+    samePath(path.basename(launcher), canonical) &&
+    canonicalEntryLocation !== undefined &&
+    canonicalLegacyLocation !== undefined &&
+    samePath(canonicalEntryLocation, canonicalLegacyLocation)
+  ) {
+    const forwarded = yield* readPosix(legacy);
+    return forwarded === undefined ? undefined : { target: forwarded.target, forwarder: true };
+  }
+  return {
+    target: entry.target,
+    forwarder: false,
+    ...(entry.exportLine !== undefined ? { exportLine: entry.exportLine } : {}),
+  };
 });
 
 /** The version an update mirror's feed file for this platform offers on `channel`. */
@@ -221,7 +274,11 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
   const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
-  const ownsTarget = (candidate: string) => launcherOwnsVersionsDir(path, versionsDir, candidate);
+  const realVersionsDir = yield* fs
+    .realPath(versionsDir)
+    .pipe(Effect.orElseSucceed(() => versionsDir));
+  const ownsTarget = (candidate: string) =>
+    isOwnedVersionsTarget({ versionsDir, realVersionsDir, candidate, platform });
   const remember = (launcher: string) =>
     recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher }).pipe(
       Effect.mapError(
@@ -238,8 +295,17 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
           version: input.currentVersion,
         });
   if (launcher === undefined) return Option.none<string>();
-  const current = yield* readLauncherTarget(launcher, input.currentVersion);
-  if (current === undefined || !ownsTarget(current.target)) return Option.none<string>();
+  const current = yield* readLauncherTarget(launcher, input.currentVersion, input.baseDir);
+  if (current === undefined || !(yield* ownsTarget(current.target))) return Option.none<string>();
+  if (platform !== "win32" && path.resolve(input.launchedAs) !== path.resolve(launcher)) {
+    const launchedAsIsLink = yield* fs.readLink(input.launchedAs).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+    if (launchedAsIsLink) {
+      yield* remember(input.launchedAs);
+    }
+  }
   const version = input.currentVersion ?? packageJson.version;
   const aliases = new Set([
     launcher,
@@ -252,8 +318,8 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     ),
   ]);
   for (const alias of aliases) {
-    const existing = yield* readLauncherTarget(alias, version);
-    if (existing === undefined || !ownsTarget(existing.target)) continue;
+    const existing = yield* readLauncherTarget(alias, version, input.baseDir);
+    if (existing === undefined || !(yield* ownsTarget(existing.target))) continue;
     yield* remember(alias);
     if (existing.forwarder) {
       // Unix keeps the symlink. Windows rewrites the bytes in place so a shim
@@ -284,12 +350,49 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
             launcher: alias,
             executable: input.targetEntryPath,
             exclusive: false,
+            exportLine: existing.exportLine,
           });
     yield* replacement.pipe(
       Effect.mapError(
         () => new CliUpdateError({ reason: `Could not update the s2code launcher at ${alias}.` }),
       ),
     );
+  }
+  if (platform !== "win32") {
+    const realLauncher = yield* canonicalizeLauncherPath({ target: launcher, platform });
+    if (realLauncher !== undefined) {
+      const environment = yield* HostProcess.Environment;
+      const home = environment["HOME"]?.trim() || (yield* HostProcess.HomeDirectory);
+      const cwd = yield* HostProcess.WorkingDirectory;
+      const searchPath = environment["PATH"] ?? "";
+      const aliasDirs = new Set<string>([
+        ...[
+          environment["S2CODE_INSTALL_BIN_DIR"]?.trim(),
+          environment["SHUV2CODE_INSTALL_BIN_DIR"]?.trim(),
+          environment["T3CODE_INSTALL_BIN_DIR"]?.trim(),
+        ].filter((entry): entry is string => entry !== undefined && entry.length > 0),
+        path.join(home, ".local", "bin"),
+        ...(searchPath.length === 0
+          ? []
+          : searchPath.split(":").map((directory) => path.resolve(cwd, directory || "."))),
+      ]);
+      const names = ownedLauncherNames(version, "linux");
+      for (const directory of aliasDirs) {
+        for (const name of names) {
+          const candidate = path.join(directory, name);
+          if (path.resolve(candidate) === path.resolve(launcher)) continue;
+          const isLink = yield* fs.readLink(candidate).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!isLink) continue;
+          const resolved = yield* canonicalizeLauncherPath({ target: candidate, platform });
+          if (resolved === realLauncher) {
+            yield* remember(candidate);
+          }
+        }
+      }
+    }
   }
   return Option.some(launcher);
 });
@@ -307,31 +410,64 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const environment = yield* HostProcess.Environment;
-  const identities = [resolveChannelIdentity(version), resolveLegacyChannelIdentity(version)];
-  const shimNames = new Set(
-    identities.map((identity) => `${identity.executableName}.cmd`.toLowerCase()),
+  const channelNames = [
+    `${resolveChannelIdentity(version).executableName}.cmd`,
+    `${resolveLegacyChannelIdentity(version).executableName}.cmd`,
+  ];
+  const channelNameSet = new Set(channelNames.map((name) => name.toLowerCase()));
+  const fallbackNames = ownedLauncherNames(version, "win32").filter(
+    (name) => !channelNameSet.has(name.toLowerCase()),
   );
+  const allNameSet = new Set([...channelNames, ...fallbackNames].map((name) => name.toLowerCase()));
   const directories = [
+    ...(environment["S2CODE_INSTALL_BIN_DIR"] ? [environment["S2CODE_INSTALL_BIN_DIR"]] : []),
+    ...(environment["SHUV2CODE_INSTALL_BIN_DIR"] ? [environment["SHUV2CODE_INSTALL_BIN_DIR"]] : []),
     ...(environment["T3CODE_INSTALL_BIN_DIR"] ? [environment["T3CODE_INSTALL_BIN_DIR"]] : []),
+    ...(versionsDir !== undefined
+      ? [path.join(path.dirname(path.dirname(versionsDir)), "bin")]
+      : []),
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(";"),
   ].filter((entry) => entry.trim().length > 0);
-  const candidates: Array<string> = [];
-  for (const directory of directories) {
-    for (const identity of identities) {
-      candidates.push(path.join(directory, `${identity.executableName}.cmd`));
+  const primaryCandidates: Array<string> = [];
+  const fallbackCandidates: Array<string> = [];
+  const channelOwnedDirs = new Set<string>();
+  // Untraced helper inside the `find_windows_shim` span.
+  const dirHasChannelShim = Effect.fnUntraced(function* (directory: string) {
+    const key = path.resolve(directory).toLowerCase();
+    if (channelOwnedDirs.has(key)) return true;
+    for (const name of channelNames) {
+      const candidate = path.join(directory, name);
+      if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+        channelOwnedDirs.add(key);
+        return true;
+      }
     }
-  }
-  if (versionsDir !== undefined) {
-    const recorded = yield* fs
-      .readFileString(path.join(path.dirname(versionsDir), "launchers"))
-      .pipe(Effect.orElseSucceed(() => ""));
-    for (const shimPath of recorded.split(/\r?\n/)) {
-      if (path.isAbsolute(shimPath) && shimNames.has(path.basename(shimPath).toLowerCase())) {
-        candidates.push(shimPath);
+    return false;
+  });
+  for (const directory of directories) {
+    for (const name of channelNames) {
+      primaryCandidates.push(path.join(directory, name));
+    }
+    // Preserve channel isolation: when a channel-suffixed shim exists in this directory,
+    // do not fall back to un-suffixed command names in the same directory.
+    if (!(yield* dirHasChannelShim(directory))) {
+      for (const name of fallbackNames) {
+        fallbackCandidates.push(path.join(directory, name));
       }
     }
   }
-  for (const shimPath of candidates) {
+  if (versionsDir !== undefined) {
+    const recorded = yield* readPinnedRuntimeLaunchers(path.dirname(path.dirname(versionsDir)));
+    for (const shimPath of recorded) {
+      const base = path.basename(shimPath).toLowerCase();
+      if (channelNameSet.has(base)) {
+        primaryCandidates.push(shimPath);
+      } else if (allNameSet.has(base) && !(yield* dirHasChannelShim(path.dirname(shimPath)))) {
+        fallbackCandidates.push(shimPath);
+      }
+    }
+  }
+  for (const shimPath of [...primaryCandidates, ...fallbackCandidates]) {
     const target = (yield* readLauncherTarget(shimPath, version))?.target;
     if (
       target !== undefined &&
