@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { hostedRemoteUrl } from "../sourceControl/hostedRemoteUrl.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import { explicitBareRepositoryEnv, unsetInheritedRepositoryEnv } from "../vcs/VcsProcess.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -41,19 +42,7 @@ export class RepositoryIdentityResolver extends Context.Service<
   }
 >()("t3/project/RepositoryIdentityResolver") {}
 
-// Local paths such as GitButler's gb-local=. would give unrelated repos the same identity.
-function isLocalRemoteUrl(url: string): boolean {
-  if (/^file:/i.test(url)) return true;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return false;
-  if (/^[a-z]:[\\/]/i.test(url)) return true;
-  // Git treats `host:path` as scp-style only when the colon precedes any slash.
-  const colonIndex = url.indexOf(":");
-  const slashIndex = url.search(/[\\/]/);
-  return colonIndex === -1 || (slashIndex !== -1 && slashIndex < colonIndex);
-}
-
-// `git remote -v` applies url.*.insteadOf, which can point a GitHub remote at a proxy or mirror.
-// A configured URL that names a forge wins; a shorthand like `gh:` is known only once rewritten.
+// Git expands insteadOf in `remote -v`; configured URLs are a fallback for hostless rewrites.
 function parseConfiguredRemoteUrls(config: string): Map<string, string> {
   const urls = new Map<string, string>();
   for (const line of config.split("\n")) {
@@ -75,20 +64,10 @@ function parseRemoteFetchUrls(
     const match = /^(\S+)\t(.+) \((fetch|push)\)(?:\s+\[[^\]]+\])?$/.exec(line);
     if (!match) continue;
     const [, remoteName = "", fetchUrl = "", direction = ""] = match;
-    const configuredUrl = configuredUrls.get(remoteName);
+    if (direction !== "fetch" || remoteName.length === 0) continue;
     const remoteUrl =
-      configuredUrl !== undefined &&
-      (sourceControlDefinitions.recognizeRemote(configuredUrl)?.kind ?? "unknown") !== "unknown"
-        ? configuredUrl
-        : fetchUrl;
-    if (
-      direction !== "fetch" ||
-      remoteName.length === 0 ||
-      remoteUrl.length === 0 ||
-      isLocalRemoteUrl(remoteUrl)
-    ) {
-      continue;
-    }
+      hostedRemoteUrl(fetchUrl) ?? hostedRemoteUrl(configuredUrls.get(remoteName) ?? null);
+    if (remoteUrl === null) continue;
     // The identity names the remote, not the login used to reach it.
     remotes.set(remoteName, withoutRemoteUrlCredentials(remoteUrl));
   }

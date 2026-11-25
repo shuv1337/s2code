@@ -34,7 +34,7 @@ import {
   ownPullRequestRepositories,
   pullRequestSyncKey,
 } from "../../../pullRequest/pullRequestSyncKey.ts";
-import { projectChangeRequestHost } from "@t3tools/source-control-core/shared/definition";
+import { parseGitRemoteHost } from "@t3tools/source-control-core/shared/definition";
 import { sourceControlDefinitions } from "../../../sourceControl/sourceControlDefinitions.ts";
 import {
   normalizeThreadPullRequestKey,
@@ -512,16 +512,19 @@ const make = Effect.gen(function* () {
     return comments.map((comment) => placed.get(comment)!);
   });
 
-  const defaultRepositoryFor = (
+  const originRepositoryFor = (
     identity: OrchestrationProjectShell["repositoryIdentity"],
   ): string | undefined => {
     if (identity == null) return undefined;
+    const identityHost = parseGitRemoteHost(identity.locator.remoteUrl)?.host;
+    if (identityHost === undefined) return undefined;
+    if (identity.locator.remoteName === "origin") {
+      return sourceControlDefinitions.repositorySelector(identity) ?? undefined;
+    }
     const origin = identity.origin;
-    const originHost = projectChangeRequestHost(origin, undefined);
     if (
-      origin !== undefined &&
-      originHost !== undefined &&
-      originHost === projectChangeRequestHost(identity, undefined)
+      origin?.remoteUrl !== undefined &&
+      parseGitRemoteHost(origin.remoteUrl)?.host === identityHost
     ) {
       const originPath = origin.displayName ?? origin.canonicalKey.split("/").slice(1).join("/");
       const selector = sourceControlDefinitions.repositorySelector({
@@ -530,11 +533,14 @@ const make = Effect.gen(function* () {
       });
       if (selector !== null) return selector;
     }
-    return sourceControlDefinitions.repositorySelector(identity) ?? undefined;
+    return undefined;
   };
 
   /** The thread's checkout, its project, and the PR the input names (default: the branch's). */
-  const locate = Effect.fn("PullRequestsToolkit.locate")(function* (input: ThreadPullRequestInput) {
+  const locate = Effect.fn("PullRequestsToolkit.locate")(function* (
+    input: ThreadPullRequestInput,
+    mode: "read" | "write",
+  ) {
     const thread = yield* requireThread(PullRequestForgeError, undefined);
     const project = yield* projectOf(thread, PullRequestForgeError);
     if (project === undefined) {
@@ -551,10 +557,31 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     const branchPullRequest = thread.branchPullRequest ?? opened ?? null;
-    const branchRepository = defaultRepositoryFor(project.repositoryIdentity);
+    const originRepository =
+      input.number !== undefined && input.repository === undefined
+        ? originRepositoryFor(project.repositoryIdentity)
+        : undefined;
+    if (
+      mode === "write" &&
+      input.number !== undefined &&
+      input.repository === undefined &&
+      originRepository === undefined
+    ) {
+      return yield* new PullRequestForgeError({
+        detail:
+          "No usable origin on the project's forge. Pass repository explicitly for a numbered write.",
+      });
+    }
     const named =
       input.number !== undefined
-        ? { number: input.number, repository: input.repository ?? branchRepository }
+        ? {
+            number: input.number,
+            repository:
+              input.repository ??
+              originRepository ??
+              sourceControlDefinitions.repositorySelector(project.repositoryIdentity) ??
+              undefined,
+          }
         : branchPullRequest === null
           ? null
           : { number: branchPullRequest.number, repository: branchPullRequest.repository };
@@ -1002,7 +1029,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const cursor =
           input.cursor === undefined ? undefined : yield* readCursors.decode(input.cursor);
-        const { target, ref } = yield* locate(input);
+        const { target, ref } = yield* locate(input, "read");
         // A cursor continues the one section it came from, with that read's options.
         const sections: ReadonlyArray<PullRequestReadSection> =
           cursor === undefined
@@ -1115,7 +1142,7 @@ const make = Effect.gen(function* () {
             detail: "Pass title, body, ready, state, addLabels, removeLabels, or requestReviewers.",
           });
         }
-        const { target, ref } = yield* locate(input);
+        const { target, ref } = yield* locate(input, "write");
         if (input.title !== undefined || input.body !== undefined) {
           yield* pullRequests
             .update({
@@ -1171,7 +1198,7 @@ const make = Effect.gen(function* () {
             detail: "resolved needs reviewThreadId.",
           });
         }
-        const { target, ref } = yield* locate(input);
+        const { target, ref } = yield* locate(input, "write");
         const reviewThreadId = input.reviewThreadId;
         if (input.body !== undefined) {
           yield* (
@@ -1204,7 +1231,7 @@ const make = Effect.gen(function* () {
     ),
     pull_request_review: McpToolAccess.writesWithCapability((input) =>
       Effect.gen(function* () {
-        const { target, ref } = yield* locate(input);
+        const { target, ref } = yield* locate(input, "write");
         const comments = yield* reviewComments(ref, input.comments ?? []);
         yield* pullRequests
           .submitReview({ ...ref, verdict: input.verdict, body: input.body ?? "", comments })
@@ -1214,7 +1241,7 @@ const make = Effect.gen(function* () {
     ),
     pull_request_merge: McpToolAccess.writesWithCapability((input) =>
       Effect.gen(function* () {
-        const { target, ref } = yield* locate(input);
+        const { target, ref } = yield* locate(input, "write");
         const stack = input.stack === true ? yield* stackMergeScope(ref, input) : {};
         yield* pullRequests
           .runAction({
@@ -1233,7 +1260,7 @@ const make = Effect.gen(function* () {
     ),
     ci_logs: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
-        const { target, ref } = yield* locate(input);
+        const { target, ref } = yield* locate(input, "read");
         const checks = yield* pullRequests
           .checkLogs({
             ...ref,
@@ -1246,7 +1273,7 @@ const make = Effect.gen(function* () {
     ),
     ci_rerun: McpToolAccess.writesWithCapability((input) =>
       Effect.gen(function* () {
-        const { thread, target, ref } = yield* locate(input);
+        const { thread, target, ref } = yield* locate(input, "write");
         const checks = yield* pullRequests
           .rerunChecks({ ...ref, ...(input.check === undefined ? {} : { check: input.check }) })
           .pipe(Effect.mapError(forgeFailure));

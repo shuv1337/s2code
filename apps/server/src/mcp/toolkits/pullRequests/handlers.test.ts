@@ -1308,6 +1308,23 @@ describe("source control tools", () => {
     }),
   );
 
+  it.effect("updates a numbered PR in a plain origin checkout", () =>
+    Effect.gen(function* () {
+      const writes: Array<string> = [];
+      const harness = yield* makeHarness({
+        project: makeProject(),
+        thread: branchThread,
+        pullRequests: {
+          update: (input) =>
+            Effect.sync(() => void writes.push(`${input.repository}#${input.number}`)),
+        },
+      });
+      const result = yield* harness.call("pull_request_update", { number: 42, title: "New title" });
+      expect(result.repository).toBe("t3tools/t3code");
+      expect(writes).toEqual(["t3tools/t3code#42"]);
+    }),
+  );
+
   it.effect("defaults numbered PR operations to origin when the identity tracks upstream", () =>
     Effect.gen(function* () {
       const updated: Array<string> = [];
@@ -1345,37 +1362,72 @@ describe("source control tools", () => {
       expect(onOrigin.repository).toBe("shuv1337/s2code");
       expect(onUpstream.repository).toBe("pingdotgg/t3code");
       expect(updated).toEqual(["shuv1337/s2code#42", "pingdotgg/t3code#42"]);
+    }),
+  );
 
-      // An origin on a different host falls back to the primary identity.
-      const crossHost = yield* makeHarness({
+  it.effect.each([
+    { label: "no origin", origin: undefined },
+    { label: "local origin", origin: { canonicalKey: "local/fork", remoteUrl: "/tmp/fork" } },
+    {
+      label: "different host",
+      origin: { canonicalKey: "gitlab.com/owner/fork", remoteUrl: "git@gitlab.com:owner/fork.git" },
+    },
+    {
+      label: "different HTTP port",
+      origin: {
+        canonicalKey: "ghe.local/owner/fork",
+        remoteUrl: "http://ghe.local:9090/owner/fork.git",
+      },
+    },
+  ])("requires an explicit repository for numbered writes with $label", ({ origin }) =>
+    Effect.gen(function* () {
+      const writes: Array<string> = [];
+      const write = (operation: string) => Effect.sync(() => void writes.push(operation));
+      const harness = yield* makeHarness({
         project: makeProject({
-          canonicalKey: "github.com/pingdotgg/t3code",
+          canonicalKey: "ghe.local/owner/upstream",
           locator: {
             source: "git-remote",
             remoteName: "upstream",
-            remoteUrl: "git@github.com:pingdotgg/t3code.git",
+            remoteUrl: "http://ghe.local:8080/owner/upstream.git",
           },
           provider: SourceControlProviderKind.make("github"),
-          displayName: "pingdotgg/t3code",
-          owner: "pingdotgg",
-          name: "t3code",
-          origin: {
-            canonicalKey: "gitlab.com/shuv1337/s2code",
-            remoteUrl: "git@gitlab.com:shuv1337/s2code.git",
-            displayName: "shuv1337/s2code",
-          },
+          displayName: "owner/upstream",
+          ...(origin === undefined ? {} : { origin }),
         }),
         thread: branchThread,
         pullRequests: {
-          update: (input) =>
-            Effect.sync(() => void updated.push(`${input.repository}#${input.number}`)),
+          update: () => write("update"),
+          comment: () => write("comment"),
+          submitReview: () => write("review"),
+          runAction: () => write("merge").pipe(Effect.as(undefined)),
+          rerunChecks: () => write("rerun").pipe(Effect.as([])),
+          checkLogs: () => Effect.succeed([]),
         },
       });
-      const fallback = yield* crossHost.call("pull_request_update", {
+      const failures = yield* Effect.all([
+        harness.call("pull_request_update", { number: 42, title: "Edit" }).pipe(Effect.flip),
+        harness.call("pull_request_respond", { number: 42, body: "Reply" }).pipe(Effect.flip),
+        harness.call("pull_request_review", { number: 42, verdict: "comment" }).pipe(Effect.flip),
+        harness
+          .call("pull_request_merge", { number: 42, expectedHeadSha: "abc123" })
+          .pipe(Effect.flip),
+        harness.call("ci_rerun", { number: 42 }).pipe(Effect.flip),
+      ]);
+      for (const failure of failures) {
+        expect(failure.message).toContain("Pass repository explicitly");
+      }
+      expect(writes).toEqual([]);
+
+      const read = yield* harness.call("ci_logs", { number: 42 });
+      expect(read.repository).toBe("owner/upstream");
+      const explicit = yield* harness.call("pull_request_update", {
         number: 42,
-        title: "Cross-host",
+        repository: "owner/upstream",
+        title: "Edit",
       });
-      expect(fallback.repository).toBe("pingdotgg/t3code");
+      expect(explicit.repository).toBe("owner/upstream");
+      expect(writes).toEqual(["update"]);
     }),
   );
 

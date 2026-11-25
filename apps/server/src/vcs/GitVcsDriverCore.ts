@@ -3641,6 +3641,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     cwd: string,
     branch: string,
     hasUpstream: boolean,
+    defaultRemoteName?: string,
   ) {
     if (!hasUpstream) {
       // A deleted upstream keeps its config: republish to it when it was this branch's own,
@@ -3664,7 +3665,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           };
         }
       }
-      const remoteName = yield* resolvePushRemoteName(cwd, branch, goneUpstream?.remoteName);
+      const remoteName = yield* resolvePushRemoteName(
+        cwd,
+        branch,
+        goneUpstream?.remoteName ?? defaultRemoteName,
+      );
       if (!remoteName) return null;
       // A gone local upstream still gets the full local name, as below.
       const branchName =
@@ -3732,8 +3737,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const resolvePushTarget: GitVcsDriver.GitVcsDriver["Service"]["resolvePushTarget"] = Effect.fn(
     "resolvePushTarget",
-  )(function* (cwd, current) {
-    const destination = yield* resolvePushDestination(cwd, current.branch, current.hasUpstream);
+  )(function* (cwd, current, defaultRemoteName) {
+    const destination = yield* resolvePushDestination(
+      cwd,
+      current.branch,
+      current.hasUpstream,
+      defaultRemoteName,
+    );
     return destination
       ? {
           remoteName: destination.remoteName,
@@ -3779,7 +3789,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     const hasNoLocalDelta = details.aheadCount === 0 && details.behindCount === 0;
-    const destination = yield* resolvePushDestination(cwd, branch, details.hasUpstream);
+    const destination = yield* resolvePushDestination(
+      cwd,
+      branch,
+      details.hasUpstream,
+      options?.defaultRemoteName,
+    );
+    if (
+      options?.requiredRemoteName !== undefined &&
+      destination?.remoteName !== options.requiredRemoteName
+    ) {
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: "GitVcsDriver.pushCurrentBranch",
+          cwd,
+          args: ["push"],
+        }),
+        detail: `The branch no longer pushes to ${options.requiredRemoteName}. Nothing was pushed.`,
+      });
+    }
     if (hasNoLocalDelta && details.hasUpstream) {
       if (!destination?.pushRemote) {
         // A local upstream and a separate push URL both leave the publish destination unchecked.

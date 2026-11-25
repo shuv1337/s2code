@@ -62,6 +62,8 @@ import type {
   SourceControlRefSelector,
 } from "@t3tools/source-control-core/server/SourceControlProvider";
 import { ChangeRequestRepository } from "@t3tools/source-control-core/server/SourceControlProvider";
+import type { SourceControlManagedCliDiscoverySpec } from "@t3tools/source-control-core/server/discovery";
+import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -69,6 +71,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitManager from "./GitManager.ts";
@@ -301,6 +304,53 @@ function configureVisibleRemoteUrlWithLocalRewrite(
   return Effect.gen(function* () {
     yield* runGit(cwd, ["config", `remote.${remoteName}.url`, visibleUrl]);
     yield* runGit(cwd, ["config", `url.${localRemotePath}.insteadOf`, visibleUrl]);
+  });
+}
+
+// Keep the real SSH URLs visible to Git's destination checks, but serve Git objects from bare repos.
+function configureHostedTestRemotes(
+  cwd: string,
+  remotes: ReadonlyArray<readonly [name: string, url: string, bareRepo: string]>,
+) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const script = NodePath.join(cwd, ".git", "test-ssh.cjs");
+    const repositories = Object.fromEntries(
+      remotes.map(([, url, bareRepo]) => {
+        const remote = new URL(url);
+        return [`${remote.host}${remote.pathname}`, bareRepo];
+      }),
+    );
+    yield* fs.writeFileString(
+      script,
+      `
+const { spawnSync } = require("node:child_process");
+const args = process.argv.slice(2);
+const [userHost, request] = args.slice(-2);
+const host = userHost.split("@").at(-1);
+const port = args.indexOf("-p");
+const authority = port < 0 ? host : host + ":" + args[port + 1];
+const match = /^(git-(?:upload|receive)-pack) '\\/?([^']+)'$/.exec(request);
+const repo = match && ${JSON.stringify(repositories)}[authority + "/" + match[2]];
+if (!repo) process.exit(1);
+process.exit(spawnSync("git", [match[1].slice(4), repo], { stdio: "inherit" }).status ?? 1);
+`,
+    );
+    const quote = (path: string) => `'${path.replaceAll("'", "'\\''")}'`;
+    yield* runGit(cwd, [
+      "config",
+      "core.sshCommand",
+      `${quote(process.execPath)} ${quote(script)}`,
+    ]);
+    yield* runGit(cwd, ["config", "ssh.variant", "ssh"]);
+    for (const [name, url] of remotes) {
+      yield* runGit(cwd, ["config", `remote.${name}.url`, url]);
+      yield* runGit(cwd, [
+        "config",
+        `remote.${name}.fetch`,
+        `+refs/heads/*:refs/remotes/${name}/*`,
+      ]);
+    }
   });
 }
 
@@ -648,6 +698,7 @@ function makeManager(input?: {
   providerScenario?: FakeProviderScenario;
   pullRequests?: Partial<PullRequestService.PullRequestService["Service"]>;
   sourceControlProvider?: SourceControlProvider["Service"];
+  providerDiscovery?: SourceControlManagedCliDiscoverySpec;
   textGeneration?: Partial<FakeGitTextGeneration>;
   providers?: ReadonlyArray<ServerProvider>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
@@ -734,24 +785,32 @@ function makeManager(input?: {
     SourceControlProviderRegistry.SourceControlProviderRegistry,
     Effect.gen(function* () {
       const context = yield* Effect.context<GitVcsDriver.GitVcsDriver>();
-      return (
-        input?.sourceControlProvider ?? {
-          ...fakeProvider,
-          readChangeRequestTemplate: (template: { cwd: string; treeish: string }) =>
-            readFakeChangeRequestTemplate(template).pipe(Effect.provideContext(context)),
-        }
-      );
-    }).pipe(
-      Effect.map((provider) =>
-        SourceControlProviderRegistry.SourceControlProviderRegistry.of({
-          resolveLink: (input) => provider.resolveLink?.(input),
-          get: () => Effect.succeed(provider),
-          resolveHandle: () => Effect.succeed({ provider, context: null }),
-          resolve: () => Effect.succeed(provider),
-          discover: Effect.succeed([]),
-        }),
-      ),
-    ),
+      const provider = input?.sourceControlProvider ?? {
+        ...fakeProvider,
+        readChangeRequestTemplate: (template: { cwd: string; treeish: string }) =>
+          readFakeChangeRequestTemplate(template).pipe(Effect.provideContext(context)),
+      };
+      if (input?.providerDiscovery !== undefined) {
+        return yield* SourceControlProviderRegistry.makeWithProviders([
+          { kind: provider.kind, provider, discovery: input.providerDiscovery },
+        ]).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              TestSourceControlHost.layer(),
+              layerServerSettings,
+              VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
+            ),
+          ),
+        );
+      }
+      return SourceControlProviderRegistry.SourceControlProviderRegistry.of({
+        resolveLink: (input) => provider.resolveLink?.(input),
+        get: () => Effect.succeed(provider),
+        resolveHandle: () => Effect.succeed({ provider, context: null }),
+        resolve: () => Effect.succeed(provider),
+        discover: Effect.succeed([]),
+      });
+    }),
   );
 
   const layerManager = Layer.mergeAll(
@@ -787,6 +846,23 @@ function makeManager(input?: {
     );
     return { manager, providerCalls };
   });
+}
+
+function testGitHubDiscovery(customHost?: string): SourceControlManagedCliDiscoverySpec {
+  const kind = SourceControlProviderKind.make("github");
+  return {
+    type: "managed-cli",
+    kind,
+    label: "GitHub",
+    installHint: "unused",
+    probe: () => Effect.die("Unexpected GitHub discovery probe"),
+    refineUnknownRemote: ({ context }) =>
+      Effect.succeed(
+        customHost !== undefined && context.provider.baseUrl === `https://${customHost}`
+          ? { ...context.provider, kind }
+          : null,
+      ),
+  };
 }
 
 const asThreadId = (threadId: string) => threadId as ThreadId;
@@ -5220,6 +5296,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
       yield* runGit(repoDir, ["checkout", "-b", "feature/unpushed"]);
+      yield* configureHostedTestRemotes(repoDir, [
+        ["origin", "ssh://git@github.com/pingdotgg/codething-mvp.git", remoteDir],
+      ]);
+      const upstreamDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "upstream", upstreamDir]);
       NodeFS.writeFileSync(NodePath.join(repoDir, "first.txt"), "first\n");
       yield* runGit(repoDir, ["add", "first.txt"]);
       yield* runGit(repoDir, ["commit", "-m", "First commit"]);
@@ -5239,6 +5320,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         body: "Body",
       });
       expect(yield* remoteHead("feature/unpushed")).toBe(yield* localHead());
+      expect(
+        (yield* runGit(repoDir, ["ls-remote", "upstream", "refs/heads/feature/unpushed"])).stdout,
+      ).toBe("");
       expect(created(unpublished.providerCalls)).toMatchObject([
         { headSelector: "feature/unpushed" },
       ]);
@@ -5393,6 +5477,116 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect("createPullRequest never pushes if a local rewrite leaves no recognized forge", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(cwd);
+      const remote = yield* createBareRemote();
+      yield* configureVisibleRemoteUrlWithLocalRewrite(
+        cwd,
+        "origin",
+        "git@github.com:acme/web.git",
+        remote,
+      );
+      yield* runGit(cwd, ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+      yield* runGit(cwd, ["checkout", "-b", "topic"]);
+      const { manager } = yield* makeManager({ providerDiscovery: testGitHubDiscovery() });
+      const result = yield* manager
+        .createPullRequest({
+          cwd,
+          projectId: ProjectId.make("project-1"),
+          title: "Feature",
+          body: "Body",
+        })
+        .pipe(Effect.result);
+      expect((yield* runGit(cwd, ["ls-remote", "origin", "refs/heads/topic"])).stdout).toBe("");
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "GitManagerError", detail: expect.stringContaining("Nothing was pushed") },
+      });
+    }),
+  );
+
+  it.effect("createPullRequest pins the provider's web host for an SSH alias", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(cwd);
+      const bare = yield* createBareRemote();
+      const alias = "git@github:acme/web.git";
+      yield* runGit(cwd, ["remote", "add", "origin", bare]);
+      yield* runGit(cwd, ["checkout", "-b", "topic"]);
+      yield* runGit(cwd, ["push", "-u", "origin", "topic"]);
+      yield* runGit(cwd, ["remote", "set-url", "origin", alias]);
+      const { service } = createFakeSourceControlProvider();
+      const pins: Array<string | null> = [];
+      const { manager } = yield* makeManager({
+        providerDiscovery: testGitHubDiscovery(),
+        sourceControlProvider: {
+          ...service,
+          resolveRemoteWebHost: ({ context }) =>
+            Effect.succeed(context.remoteUrl === alias ? "github.com" : null),
+          createChangeRequest: (input) =>
+            ChangeRequestRepository.pipe(
+              Effect.tap((pin) => Effect.sync(() => void pins.push(pin))),
+              Effect.andThen(service.createChangeRequest(input)),
+            ),
+        },
+      });
+      yield* manager.createPullRequest({
+        cwd,
+        projectId: ProjectId.make("project-1"),
+        title: "Feature",
+        body: "Body",
+      });
+      expect(pins).toEqual(["github.com/acme/web"]);
+    }),
+  );
+
+  it.effect(
+    "createPullRequest and project identity agree on a custom GitHub insteadOf destination",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(cwd);
+        const bare = yield* createBareRemote();
+        const host = "code.example.test";
+        const expanded = `ssh://git@${host}/acme/web.git`;
+        const raw = "git@github.com:old/project.git";
+        yield* configureHostedTestRemotes(cwd, [["origin", expanded, bare]]);
+        yield* runGit(cwd, ["remote", "set-url", "origin", raw]);
+        yield* runGit(cwd, ["config", `url.${expanded}.insteadOf`, raw]);
+        yield* runGit(cwd, ["checkout", "-b", "topic"]);
+        const identity = yield* Effect.flatMap(
+          RepositoryIdentityResolver.RepositoryIdentityResolver,
+          (resolver) => resolver.resolve(cwd),
+        ).pipe(Effect.provide(RepositoryIdentityResolver.layer));
+        const { service } = createFakeSourceControlProvider();
+        const pins: Array<string | null> = [];
+        const { manager } = yield* makeManager({
+          providerDiscovery: testGitHubDiscovery(host),
+          sourceControlProvider: {
+            ...service,
+            createChangeRequest: (input) =>
+              ChangeRequestRepository.pipe(
+                Effect.tap((pin) => Effect.sync(() => void pins.push(pin))),
+                Effect.andThen(service.createChangeRequest(input)),
+              ),
+          },
+        });
+        yield* manager.createPullRequest({
+          cwd,
+          projectId: ProjectId.make("project-1"),
+          title: "Feature",
+          body: "Body",
+        });
+        expect(identity?.locator.remoteUrl).toBe(expanded);
+        expect(pins).toEqual([identity?.canonicalKey]);
+        expect((yield* runGit(cwd, ["ls-remote", "origin", "refs/heads/topic"])).stdout).toContain(
+          "refs/heads/topic",
+        );
+      }),
+  );
+
   it.effect(
     "createPullRequest opens a private PR from the companion and never pushes to origin",
     () =>
@@ -5519,7 +5713,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       }),
   );
 
-  it.effect("createPullRequest pushes to the push remote and never to the base branch", () =>
+  it.effect("createPullRequest pushes a named upstream PR from origin and reuses it on retry", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -5528,12 +5722,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["remote", "add", "origin", originDir]);
       yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
       yield* runGit(repoDir, ["remote", "add", "fork", forkDir]);
-      yield* configureVisibleRemoteUrlWithLocalRewrite(
-        repoDir,
-        "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
-        originDir,
-      );
+      yield* configureHostedTestRemotes(repoDir, [
+        ["origin", "ssh://git@github.com/pingdotgg/codething-mvp.git", originDir],
+      ]);
       const readOrigin = (branch: string) =>
         runGit(repoDir, ["ls-remote", "origin", `refs/heads/${branch}`]).pipe(
           Effect.map((result) => result.stdout),
@@ -5562,31 +5753,240 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       expect(created(onBase.providerCalls)).toEqual([]);
       yield* runGit(repoDir, ["reset", "--hard", "origin/main"]);
 
-      // A push to a separate push remote leaves the upstream behind, and still opens the PR.
+      // A push to origin leaves the tracked upstream behind and still opens the upstream PR.
       yield* runGit(repoDir, ["checkout", "-b", "topic"]);
       yield* commit("topic.txt");
       yield* runGit(repoDir, ["push", "-u", "origin", "topic"]);
       yield* commit("late.txt");
-      yield* configureVisibleRemoteUrlWithLocalRewrite(
-        repoDir,
-        "origin",
-        "git@github.com:pingdotgg/codething-mvp.git",
-        originDir,
+      yield* runGit(repoDir, ["remote", "rename", "origin", "upstream"]);
+      yield* runGit(repoDir, ["remote", "rename", "fork", "origin"]);
+      yield* configureHostedTestRemotes(repoDir, [
+        ["upstream", "ssh://git@github.com/pingdotgg/codething-mvp.git", originDir],
+        ["origin", "ssh://git@github.com/octocat/codething-mvp.git", forkDir],
+      ]);
+      const trackedHead = (yield* runGit(repoDir, ["ls-remote", "upstream", "refs/heads/topic"]))
+        .stdout;
+      const onUpstream = yield* makeManager();
+      const refused = yield* createPr(onUpstream.manager).pipe(Effect.flip);
+      expect(refused).toMatchObject({
+        _tag: "GitManagerError",
+        detail: expect.stringMatching(/upstream.*octocat\/codething-mvp.*Nothing was pushed/u),
+      });
+      expect((yield* runGit(repoDir, ["ls-remote", "upstream", "refs/heads/topic"])).stdout).toBe(
+        trackedHead,
       );
-      yield* configureVisibleRemoteUrlWithLocalRewrite(
-        repoDir,
-        "fork",
-        "git@github.com:octocat/codething-mvp.git",
-        forkDir,
-      );
-      yield* runGit(repoDir, ["config", "remote.pushDefault", "fork"]);
-      const viaFork = yield* makeManager();
-      const result = yield* createPr(viaFork.manager);
-      expect(result.status).toBe("created");
+      expect(yield* readOrigin("topic")).toBe("");
+      expect(created(onUpstream.providerCalls)).toEqual([]);
+
+      yield* runGit(repoDir, ["config", "branch.topic.pushRemote", "origin"]);
+      const pr = {
+        number: 55,
+        url: "https://github.com/pingdotgg/codething-mvp/pull/55",
+        title: "Feature",
+        baseRefName: "main",
+        headRefName: "topic",
+        isCrossRepository: true,
+        headRepositoryNameWithOwner: "octocat/codething-mvp",
+        headRepositoryOwnerLogin: "octocat",
+      };
+      const { manager, providerCalls } = yield* makeManager({
+        providerScenario: { prListSequence: [[], [pr], [pr]] },
+      });
+      const input = {
+        cwd: repoDir,
+        projectId: ProjectId.make("project-1"),
+        title: "Feature",
+        body: "Body",
+        repository: "pingdotgg/codething-mvp",
+      };
+      expect(yield* manager.createPullRequest(input)).toMatchObject({
+        status: "created",
+        number: 55,
+      });
+      expect(yield* manager.createPullRequest(input)).toMatchObject({
+        status: "opened_existing",
+        number: 55,
+        url: pr.url,
+      });
       expect(
         yield* runGit(forkDir, ["--git-dir=.", "log", "-1", "--pretty=%s", "topic"]),
       ).toMatchObject({ stdout: "late.txt\n" });
-      expect(created(viaFork.providerCalls)).toEqual([
+      expect((yield* runGit(repoDir, ["ls-remote", "upstream", "refs/heads/topic"])).stdout).toBe(
+        trackedHead,
+      );
+      expect(created(providerCalls)).toEqual([
+        { baseRefName: "main", headSelector: "octocat:topic" },
+      ]);
+    }),
+  );
+
+  it.effect("createPullRequest refuses to publish a new ref to a different repository", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const origin = yield* createBareRemote();
+      const upstream = yield* createBareRemote();
+      const foreign = yield* createBareRemote();
+      const otherPort = yield* createBareRemote();
+      const originUrl = "ssh://git@github.com:2222/octocat/codething-mvp.git";
+      const upstreamUrl = "ssh://git@github.com:2222/pingdotgg/codething-mvp.git";
+      const foreignUrl = "ssh://git@github.com:2223/pingdotgg/codething-mvp.git";
+      const otherPortUrl = "ssh://git@github.com:2223/octocat/codething-mvp.git";
+      yield* configureHostedTestRemotes(repoDir, [
+        ["origin", originUrl, origin],
+        ["upstream", upstreamUrl, upstream],
+        ["foreign", foreignUrl, foreign],
+        ["other-port", otherPortUrl, otherPort],
+      ]);
+      yield* runGit(repoDir, ["checkout", "-b", "topic"]);
+      // A tracked branch may have been deleted remotely since the last fetch.
+      yield* runGit(repoDir, ["update-ref", "refs/remotes/upstream/topic", "HEAD"]);
+      yield* runGit(repoDir, ["branch", "--set-upstream-to=upstream/topic"]);
+      yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Topic"]);
+      const { manager, providerCalls } = yield* makeManager();
+      const input = {
+        cwd: repoDir,
+        projectId: ProjectId.make("project-1"),
+        title: "Feature",
+        body: "Body",
+      };
+      const upstreamHead = () => runGit(repoDir, ["ls-remote", "upstream", "refs/heads/topic"]);
+      const mismatch = yield* manager.createPullRequest(input).pipe(Effect.flip);
+      expect(mismatch.message).toContain("Nothing was pushed");
+      expect((yield* upstreamHead()).stdout).toBe("");
+      const namedMismatch = yield* manager
+        .createPullRequest({ ...input, repository: "other/codething-mvp" })
+        .pipe(Effect.flip);
+      expect(namedMismatch.message).toContain("Nothing was pushed");
+      expect((yield* upstreamHead()).stdout).toBe("");
+
+      // The same owner/name on another SSH service is not the explicitly named base.
+      yield* runGit(repoDir, ["config", "branch.topic.pushRemote", "foreign"]);
+      const wrongForge = yield* manager
+        .createPullRequest({ ...input, repository: "pingdotgg/codething-mvp" })
+        .pipe(Effect.flip);
+      expect(wrongForge.message).toMatch(/push destination foreign.*Nothing was pushed/u);
+      expect((yield* runGit(repoDir, ["ls-remote", "foreign", "refs/heads/topic"])).stdout).toBe(
+        "",
+      );
+
+      // Git pushes to every push URL, not just the first one.
+      yield* runGit(repoDir, ["config", "branch.topic.pushRemote", "origin"]);
+      yield* runGit(repoDir, ["config", "--add", "remote.origin.pushurl", originUrl]);
+      yield* runGit(repoDir, ["config", "--add", "remote.origin.pushurl", upstreamUrl]);
+      const pushUrlMismatch = yield* manager.createPullRequest(input).pipe(Effect.flip);
+      expect(pushUrlMismatch.message).toContain("Nothing was pushed");
+      expect((yield* upstreamHead()).stdout).toBe("");
+      expect((yield* runGit(repoDir, ["ls-remote", "origin", "refs/heads/topic"])).stdout).toBe("");
+
+      yield* runGit(repoDir, ["config", "--replace-all", "remote.origin.pushurl", otherPortUrl]);
+      const portMismatch = yield* manager.createPullRequest(input).pipe(Effect.flip);
+      expect(portMismatch.message).toMatch(/push URLs for origin.*Nothing was pushed/u);
+      expect((yield* runGit(repoDir, ["ls-remote", "other-port", "refs/heads/topic"])).stdout).toBe(
+        "",
+      );
+
+      yield* runGit(repoDir, ["config", "--unset-all", "remote.origin.pushurl"]);
+      yield* runGit(repoDir, ["config", `url.${origin}.insteadOf`, originUrl]);
+      const hostless = yield* manager.createPullRequest(input).pipe(Effect.flip);
+      expect(hostless.message).toMatch(/push URLs for origin.*Nothing was pushed/u);
+      expect((yield* runGit(repoDir, ["ls-remote", "origin", "refs/heads/topic"])).stdout).toBe("");
+      expect(created(providerCalls)).toEqual([]);
+
+      yield* runGit(repoDir, ["config", "--unset", "branch.topic.pushRemote"]);
+      yield* manager.createPullRequest({ ...input, repository: "pingdotgg/codething-mvp" });
+      expect((yield* upstreamHead()).stdout).toContain("refs/heads/topic");
+      expect(created(providerCalls)).toEqual([{ baseRefName: "main", headSelector: "topic" }]);
+    }),
+  );
+
+  it.effect(
+    "createPullRequest uses the pinned remote HEAD when the forge has no default branch",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const fork = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", fork]);
+        yield* runGit(repoDir, ["checkout", "-b", "topic"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "topic"]);
+        yield* runGit(repoDir, [
+          "remote",
+          "set-url",
+          "origin",
+          "https://github.example.com:8443/octocat/codething-mvp.git",
+        ]);
+        yield* runGit(repoDir, [
+          "remote",
+          "add",
+          "upstream",
+          "https://github.example.com:8443/pingdotgg/codething-mvp.git",
+        ]);
+        yield* runGit(repoDir, [
+          "remote",
+          "add",
+          "foreign",
+          "https://github.other.example:8443/pingdotgg/codething-mvp.git",
+        ]);
+        for (const [remote, base] of [
+          ["foreign", "foreign-default"],
+          ["origin", "fork-default"],
+          ["upstream", "upstream-default"],
+        ]) {
+          yield* runGit(repoDir, ["update-ref", `refs/remotes/${remote}/${base}`, "HEAD"]);
+          yield* runGit(repoDir, [
+            "symbolic-ref",
+            `refs/remotes/${remote}/HEAD`,
+            `refs/remotes/${remote}/${base}`,
+          ]);
+        }
+        const { service, calls } = createFakeSourceControlProvider({ defaultBranch: "" });
+        const pins: Array<string | null> = [];
+        const { manager } = yield* makeManager({
+          sourceControlProvider: {
+            ...service,
+            getDefaultBranch: (input) =>
+              ChangeRequestRepository.pipe(
+                Effect.tap((pin) => Effect.sync(() => void pins.push(pin))),
+                Effect.andThen(service.getDefaultBranch(input)),
+              ),
+          },
+        });
+        yield* manager.createPullRequest({
+          cwd: repoDir,
+          projectId: ProjectId.make("project-1"),
+          title: "Feature",
+          body: "Body",
+          repository: "pingdotgg/codething-mvp",
+        });
+        expect(pins).toEqual(["github.example.com:8443/pingdotgg/codething-mvp"]);
+        expect(created(calls)).toEqual([
+          { baseRefName: "upstream-default", headSelector: "octocat:topic" },
+        ]);
+      }),
+  );
+
+  it.effect("createPullRequest publishes from a sole non-origin remote to a named base", () =>
+    Effect.gen(function* () {
+      const cwd = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(cwd);
+      const fork = yield* createBareRemote();
+      yield* configureHostedTestRemotes(cwd, [
+        ["fork", "ssh://git@github.com/octocat/codething-mvp.git", fork],
+      ]);
+      yield* runGit(cwd, ["checkout", "-b", "topic"]);
+      const { manager, providerCalls } = yield* makeManager();
+      yield* manager.createPullRequest({
+        cwd,
+        projectId: ProjectId.make("project-1"),
+        title: "Feature",
+        body: "Body",
+        repository: "pingdotgg/codething-mvp",
+      });
+      expect((yield* runGit(cwd, ["ls-remote", "fork", "refs/heads/topic"])).stdout).toContain(
+        "refs/heads/topic",
+      );
+      expect(created(providerCalls)).toEqual([
         { baseRefName: "main", headSelector: "octocat:topic" },
       ]);
     }),
@@ -6118,7 +6518,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           repository: "pingdotgg/codething-mvp",
         });
 
-        expect(pins).toEqual(["octocat/codething-mvp", "pingdotgg/codething-mvp"]);
+        expect(pins).toEqual([
+          "github.com/octocat/codething-mvp",
+          "github.com/pingdotgg/codething-mvp",
+        ]);
         expect(created(calls)).toEqual([
           { baseRefName: "main", headSelector: "feature/fork-only" },
           { baseRefName: "main", headSelector: "octocat:feature/fork-only" },
@@ -6163,7 +6566,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         });
         expect(created(calls)).toHaveLength(2);
 
-        // No usable origin on an unpushed branch fails before auto-pushing anything.
+        // Even a sole local-path origin must not be pushed before the repository is resolved.
+        yield* runGit(bareOriginDir, ["remote", "remove", "upstream"]);
         yield* runGit(bareOriginDir, ["checkout", "-b", "feature/unpushed-bare-origin"]);
         NodeFS.writeFileSync(NodePath.join(bareOriginDir, "unpushed.txt"), "unpushed\n");
         yield* runGit(bareOriginDir, ["add", "unpushed.txt"]);
@@ -6188,6 +6592,28 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         expect(pushedRef.stdout.trim()).toBe("");
         expect(created(calls)).toHaveLength(2);
 
+        // The push would succeed against a usable origin if repository validation ran afterward.
+        yield* configureHostedTestRemotes(bareOriginDir, [
+          ["origin", "ssh://git@github.com/octocat/codething-mvp.git", forkDir],
+        ]);
+        const invalidBeforePush = yield* manager
+          .createPullRequest({
+            cwd: bareOriginDir,
+            projectId: ProjectId.make("project-1"),
+            title: "Malformed",
+            body: "Body",
+            repository: "not-a-repo",
+          })
+          .pipe(Effect.flip);
+        expect(invalidBeforePush.message).toContain("Repository must be named owner/name");
+        expect(
+          (yield* runGit(bareOriginDir, [
+            "ls-remote",
+            "origin",
+            "refs/heads/feature/unpushed-bare-origin",
+          ])).stdout,
+        ).toBe("");
+
         // Base-branch protection runs under the pinned origin repository even when upstream has gh-resolved=base.
         const baseCheckDir = yield* makeTempDir("t3code-git-manager-");
         yield* initRepo(baseCheckDir);
@@ -6201,12 +6627,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           "git@github.com:pingdotgg/codething-mvp.git",
         ]);
         yield* runGit(baseCheckDir, ["config", "remote.upstream.gh-resolved", "base"]);
-        yield* configureVisibleRemoteUrlWithLocalRewrite(
-          baseCheckDir,
-          "origin",
-          "git@github.com:octocat/codething-mvp.git",
-          baseForkDir,
-        );
+        yield* configureHostedTestRemotes(baseCheckDir, [
+          ["origin", "ssh://git@github.com/octocat/codething-mvp.git", baseForkDir],
+        ]);
         NodeFS.writeFileSync(NodePath.join(baseCheckDir, "on-main.txt"), "on main\n");
         yield* runGit(baseCheckDir, ["add", "on-main.txt"]);
         yield* runGit(baseCheckDir, ["commit", "-m", "Commit on main"]);
@@ -6236,7 +6659,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           }),
         );
         expect(baseCheckError.message).toContain("main is the base branch");
-        expect(baseCheckPins).toContain("octocat/codething-mvp");
+        expect(baseCheckPins).toContain("github.com/octocat/codething-mvp");
         expect(baseCheckPins).not.toContain(null);
         expect(
           (yield* runGit(baseCheckDir, ["ls-remote", "origin", "refs/heads/main"])).stdout,
@@ -6255,15 +6678,24 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         ]);
         yield* runGit(insteadOfDir, ["checkout", "-b", "feature/insteadof"]);
         yield* runGit(insteadOfDir, ["push", "-u", "origin", "feature/insteadof"]);
-        yield* runGit(insteadOfDir, ["config", "remote.origin.url", "me:codething-mvp.git"]);
-        yield* runGit(insteadOfDir, ["config", "url.git@github.com:octocat/.insteadOf", "me:"]);
+        yield* runGit(insteadOfDir, [
+          "config",
+          "remote.origin.url",
+          "git@github.com:other/codething-mvp.git",
+        ]);
+        yield* runGit(insteadOfDir, [
+          "config",
+          "url.git@github.com:octocat/.insteadOf",
+          "git@github.com:other/",
+        ]);
         yield* manager.createPullRequest({
           cwd: insteadOfDir,
           projectId: ProjectId.make("project-1"),
           title: "InsteadOf PR",
           body: "Body",
         });
-        expect(pins.at(-1)).toBe("octocat/codething-mvp");
+        expect(pins.at(-1)).toBe("github.com/octocat/codething-mvp");
+        expect(created(calls).at(-1)?.headSelector).toBe("feature/insteadof");
 
         // Without origin and with several remotes, refuse before calling create.
         const ambiguousDir = yield* makeTempDir("t3code-git-manager-");
@@ -6337,7 +6769,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           body: "Body",
           repository: "octocat/codething-mvp",
         });
-        expect(sameRepoPins).toEqual(["octocat/codething-mvp"]);
+        expect(sameRepoPins).toEqual(["github.com/octocat/codething-mvp"]);
         expect(created(sameRepoProvider.calls)).toEqual([
           { baseRefName: "main", headSelector: "feature/ambiguous" },
         ]);
@@ -6370,7 +6802,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           title: "Sole remote PR",
           body: "Body",
         });
-        expect(pins.at(-1)).toBe("pingdotgg/codething-mvp");
+        expect(pins.at(-1)).toBe("github.com/pingdotgg/codething-mvp");
 
         // Passing repository on a non-GitHub host fails before calling create.
         const gitlab = yield* makeManager({
