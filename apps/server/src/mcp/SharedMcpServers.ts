@@ -18,6 +18,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
@@ -95,6 +96,23 @@ const decodeJsonRpcRequest = Schema.decodeUnknownOption(
 const decodeJsonRpcMethod = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ method: Schema.String })),
 );
+const isModernRequest = (body: string) => {
+  if (body.length === 0) return false;
+  try {
+    const request: unknown = JSON.parse(body);
+    return (
+      Predicate.isReadonlyObject(request) &&
+      Predicate.isReadonlyObject(request.params) &&
+      Predicate.isReadonlyObject(request.params._meta) &&
+      Object.hasOwn(request.params._meta, "io.modelcontextprotocol/protocolVersion")
+    );
+  } catch {
+    return false;
+  }
+};
+
+// Always signal legacy fallback with an empty 400, even if access narrows mid-session.
+const modernFallback = HttpServerResponse.empty({ status: 400, headers: NO_STORE });
 
 /** Harnesses wait on these before a session or turn can start, so a hung server must not hold them. */
 const PROMPT_METHODS = new Set([
@@ -104,6 +122,8 @@ const PROMPT_METHODS = new Set([
   "prompts/list",
   "resources/list",
   "resources/templates/list",
+  "server/discover",
+  "skills/list",
 ]);
 const PROMPT_TIMEOUT = "5 seconds";
 
@@ -116,6 +136,7 @@ const SUPERVISED_LISTINGS: Readonly<Record<string, string>> = {
   "prompts/list": "prompts",
   "resources/list": "resources",
   "resources/templates/list": "resourceTemplates",
+  "skills/list": "skills",
 };
 
 const answersPromptly = (method: string, body: string) => {
@@ -293,6 +314,7 @@ const proxy = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
   if (thread === null) {
+    if (isModernRequest(body)) return modernFallback;
     return (
       emptyListing(body) ??
       unavailable(
@@ -305,9 +327,12 @@ const proxy = Effect.gen(function* () {
   if (
     !sharedMcpServerAdmits(server, sharedMcpServerAudience(thread, caller.thread.subagent === true))
   ) {
+    if (isModernRequest(body)) return modernFallback;
     return unboundAnswer(body, displayName(name, server));
   }
-  if (thread.runtimeMode !== "full-access") {
+  const fullAccess = thread.runtimeMode === "full-access";
+  if (!fullAccess) {
+    if (isModernRequest(body)) return modernFallback;
     const answer = isStdioMcpServer(server)
       ? supervisedStdioAnswer(request.method, body, displayName(name, server))
       : supervisedAnswer(body, displayName(name, server));
@@ -350,6 +375,18 @@ const proxy = Effect.gen(function* () {
     const value = request.headers[header];
     if (value !== undefined) headers[header] = value;
   }
+  // Only allow caller-supplied routing hints when forwarding arbitrary methods is already allowed.
+  if (fullAccess) {
+    for (const [header, value] of Object.entries(request.headers)) {
+      if (
+        header === "mcp-method" ||
+        header === "mcp-name" ||
+        /^mcp-param-[!#$%&'*+\-.^_`|~0-9a-z]+$/i.test(header)
+      ) {
+        headers[header] = value;
+      }
+    }
+  }
   const upstreamRequest = HttpClientRequest.make(request.method)(server.url).pipe(
     HttpClientRequest.setHeaders({ ...headers, ...upstreamHeaders(server) }),
     request.method === "POST"
@@ -359,48 +396,57 @@ const proxy = Effect.gen(function* () {
       : (self) => self,
   );
   const httpClient = yield* HttpClient.HttpClient;
+  const label = displayName(name, server);
+  const prompt = answersPromptly(request.method, body);
   // Never retried: a call that may have reached the server could have changed something.
-  const sent = sendUpstream(httpClient, upstreamRequest).pipe(Effect.option);
-  const outcome = yield* answersPromptly(request.method, body)
-    ? Effect.timeoutOption(sent, PROMPT_TIMEOUT)
+  const sent = sendUpstream(httpClient, upstreamRequest).pipe(
+    Effect.flatMap((response) => {
+      const { status } = response;
+      if (status === 401 || status === 403) {
+        return Effect.logWarning("shared MCP server rejected its saved credential", {
+          name,
+          status,
+        }).pipe(
+          Effect.as(
+            unavailable(
+              body,
+              502,
+              `${label} rejected the token saved for it (HTTP ${status}). Update it in Settings → MCP servers.`,
+            ),
+          ),
+        );
+      }
+      if (status >= 300 && status < 400) {
+        return Effect.succeed(
+          unavailable(
+            body,
+            502,
+            `${label} redirected (HTTP ${status}); save its final URL in Settings → MCP servers.`,
+          ),
+        );
+      }
+      const headers: Record<string, string> = { ...NO_STORE };
+      for (const header of FORWARDED_RESPONSE_HEADERS) {
+        const value = response.headers[header];
+        if (value !== undefined) headers[header] = value;
+      }
+      const options = { status, headers };
+      return prompt
+        ? Effect.map(response.arrayBuffer, (bytes) =>
+            bytes.byteLength === 0
+              ? HttpServerResponse.empty(options)
+              : HttpServerResponse.uint8Array(new Uint8Array(bytes), options),
+          )
+        : Effect.succeed(HttpServerResponse.stream(response.stream, options));
+    }),
+    Effect.orElseSucceed(() => unavailable(body, 502, `Could not reach ${label}.`)),
+  );
+  const outcome = yield* prompt
+    ? Effect.timeoutOption(Effect.scoped(sent), PROMPT_TIMEOUT)
     : Effect.asSome(sent);
-  if (Option.isNone(outcome)) {
-    return unavailable(
-      body,
-      504,
-      `${displayName(name, server)} did not answer within ${PROMPT_TIMEOUT}.`,
-    );
-  }
-  const response = outcome.value;
-  if (Option.isNone(response)) {
-    return unavailable(body, 502, `Could not reach ${displayName(name, server)}.`);
-  }
-  const { status } = response.value;
-  if (status === 401 || status === 403) {
-    yield* Effect.logWarning("shared MCP server rejected its saved credential", { name, status });
-    return unavailable(
-      body,
-      502,
-      `${displayName(name, server)} rejected the token saved for it (HTTP ${status}). Update it in Settings → MCP servers.`,
-    );
-  }
-  if (status >= 300 && status < 400) {
-    return unavailable(
-      body,
-      502,
-      `${displayName(name, server)} redirected (HTTP ${status}); save its final URL in Settings → MCP servers.`,
-    );
-  }
-  const responseHeaders: Record<string, string> = { ...NO_STORE };
-  for (const header of FORWARDED_RESPONSE_HEADERS) {
-    const value = response.value.headers[header];
-    if (value !== undefined) responseHeaders[header] = value;
-  }
-  return HttpServerResponse.stream(response.value.stream, {
-    status,
-    headers: responseHeaders,
-    ...(responseHeaders["content-type"] ? { contentType: responseHeaders["content-type"] } : {}),
-  });
+  return Option.getOrElse(outcome, () =>
+    unavailable(body, 504, `${label} did not answer within ${PROMPT_TIMEOUT}.`),
+  );
 }).pipe(Effect.withSpan("SharedMcpServers.proxy"));
 
 const RETIRE_WATCHER_RESTART_DELAY = "1 second";

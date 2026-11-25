@@ -12,6 +12,7 @@ import { mcpToolSession, runAcpMcpCliFastPath, runAcpMcpStdioBridge } from "./Ac
 function makeHarness(
   responder: (request: Request) => Promise<Response> | Response,
   input = new NodeStream.PassThrough(),
+  onWrite?: (chunk: string) => void,
 ) {
   const written: Array<string> = [];
   const requests: Array<{ readonly headers: Headers; readonly body: string }> = [];
@@ -22,6 +23,7 @@ function makeHarness(
     output: {
       write: (chunk: string) => {
         written.push(chunk);
+        onWrite?.(chunk);
       },
     },
     fetchImplementation: async (_url, init) => {
@@ -164,6 +166,88 @@ describe("AcpMcpStdioBridge", () => {
       expect(requests[0]?.headers.get("authorization")).toBe("Bearer bridge-test");
       expect(requests[1]?.headers.get("mcp-session-id")).toBe("session-42");
       expect(requests[1]?.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+    }),
+  );
+
+  it.effect("relays legacy skills requests and results over the initialized session", () =>
+    Effect.gen(function* () {
+      const uri = "skill://fixture/example/SKILL.md";
+      const initialize =
+        '{ "jsonrpc":"2.0", "id":"init", "method":"initialize", "params":{"protocolVersion":"2025-06-18","capabilities":{"extensions":{"io.modelcontextprotocol/skills":{}}},"clientInfo":{"name":"fixture-client","version":"1"}} }';
+      const list = '{ "jsonrpc":"2.0", "id":"list", "method":"skills/list" }';
+      const read = `{ "jsonrpc":"2.0", "id":"read", "method":"resources/read", "params":{"uri":"${uri}"} }`;
+      const replies = {
+        init: '{"jsonrpc":"2.0","id":"init","result":{"protocolVersion":"2025-06-18","capabilities":{"resources":{},"extensions":{"io.modelcontextprotocol/skills":{"directoryRead":true}}}}}',
+        list: `{"jsonrpc":"2.0","id":"list","result":{"skills":[{"uri":"${uri}","frontmatter":{"name":"example","description":"An example skill"},"resources":"dynamic"}]}}`,
+        read: String.raw`{"jsonrpc":"2.0","id":"read","result":{"contents":[{"uri":"${uri}","mimeType":"text/markdown","text":"Use café.\r\n"}]}}`,
+      };
+      const { input, written, requests, bridge } = makeHarness(async (request) => {
+        const { id } = (await request.json()) as { id: keyof typeof replies };
+        if (id !== "init") {
+          expect(request.headers.get("mcp-session-id")).toBe("skills-42");
+          expect(request.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+        }
+        return new Response(replies[id], {
+          headers: {
+            "content-type": "application/json",
+            ...(id === "init" ? { "mcp-session-id": "skills-42" } : {}),
+          },
+        });
+      });
+      const fiber = yield* Effect.forkChild(bridge);
+      input.end(`${initialize}\n${list}\n${read}\n`);
+      yield* Fiber.join(fiber);
+
+      expect(requests[0]?.body).toBe(initialize);
+      expect(
+        requests
+          .slice(1)
+          .map(({ body }) => body)
+          .toSorted(),
+      ).toEqual([list, read].toSorted());
+      expect(written.toSorted()).toEqual(
+        Object.values(replies)
+          .map((line) => `${line}\n`)
+          .toSorted(),
+      );
+    }),
+  );
+
+  it.effect("lets a modern ACP client fall back to initialize after a strict HTTP rejection", () =>
+    Effect.gen(function* () {
+      const firstWrite = yield* Deferred.make<void>();
+      const { input, written, requests, bridge } = makeHarness(
+        async (request) => {
+          const { id, method } = (await request.json()) as { id: string; method: string };
+          if (method === "server/discover" && request.headers.get("mcp-method") !== method) {
+            return Response.json(
+              { jsonrpc: "2.0", id, error: { code: -32020, message: "Mcp-Method is required" } },
+              { status: 400 },
+            );
+          }
+          expect(method).toBe("initialize");
+          return Response.json({ jsonrpc: "2.0", id, result: { protocolVersion: "2025-06-18" } });
+        },
+        undefined,
+        () => Deferred.doneUnsafe(firstWrite, Effect.void),
+      );
+      const fiber = yield* Effect.forkChild(bridge);
+      const probe =
+        '{"jsonrpc":"2.0","id":"probe","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}';
+      input.write(`${probe}\n`);
+      yield* Deferred.await(firstWrite);
+      expect(JSON.parse(written[0]!)).toMatchObject({ id: "probe", error: { code: -32603 } });
+      expect(requests[0]?.body).toBe(probe);
+
+      input.end(
+        '{"jsonrpc":"2.0","id":"fallback","method":"initialize","params":{"protocolVersion":"2025-06-18"}}\n',
+      );
+      yield* Fiber.join(fiber);
+      expect(written).toHaveLength(2);
+      expect(JSON.parse(written[1]!)).toMatchObject({
+        id: "fallback",
+        result: { protocolVersion: "2025-06-18" },
+      });
     }),
   );
 
