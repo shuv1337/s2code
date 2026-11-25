@@ -1125,6 +1125,39 @@ it.layer(NodeServices.layer)("launcher lookup on PATH", (it) => {
         const escapeDir = path.join(versionsDir, "escape");
         yield* fs.symlink(foreignVersionsDir, escapeDir);
 
+        // Ordinary Win32 paths collapse `..` lexically before crossing junctions:
+        // `<foreignDir>/junction-to-owned-versions/../t3` resolves to `<foreignDir>/t3`, NOT owned.
+        const ownedVersionExe = path.join(versionsDir, "1.0.0", "t3");
+        const ownedSubDir = path.join(versionsDir, "1.0.0", "sub");
+        yield* fs.makeDirectory(ownedSubDir, { recursive: true });
+        yield* fs.writeFileString(ownedVersionExe, "");
+        const foreignJunction = path.join(foreignVersionsDir, "junction-to-owned");
+        yield* fs.symlink(ownedSubDir, foreignJunction);
+
+        assert.isFalse(
+          yield* isOwnedVersionsTarget({
+            versionsDir,
+            realVersionsDir,
+            candidate: `${foreignJunction}/../t3`,
+            platform: "win32",
+          }),
+        );
+        assert.isFalse(
+          yield* isOwnedVersionsTarget({
+            versionsDir: "C:\\s2code\\runtime\\versions",
+            realVersionsDir: "C:\\s2code\\runtime\\versions",
+            candidate: "\\\\?\\C:\\s2code\\runtime\\versions\\..\\versions\\1.0.0\\t3.exe",
+            platform: "win32",
+          }),
+        );
+        assert.isTrue(
+          yield* isOwnedVersionsTarget({
+            versionsDir,
+            realVersionsDir,
+            candidate: ownedVersionExe,
+            platform: "win32",
+          }),
+        );
         assert.isFalse(
           yield* isOwnedVersionsTarget({
             versionsDir,

@@ -731,6 +731,19 @@ export function joinRawPosixPath(dir: string, target: string): string {
   return dir === "/" ? `/${target}` : `${dir.replace(/\/+$/, "")}/${target}`;
 }
 
+function collapseWin32Segments(segments: ReadonlyArray<string>): Array<string> {
+  const collapsed: Array<string> = [];
+  for (const segment of segments) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      collapsed.pop();
+    } else {
+      collapsed.push(segment);
+    }
+  }
+  return collapsed;
+}
+
 function splitAbsoluteRoot(
   raw: string,
   sep: string,
@@ -743,31 +756,37 @@ function splitAbsoluteRoot(
     }
   | undefined {
   if (windows) {
-    const unwrapped =
-      raw.startsWith("\\\\?\\") && /^[a-zA-Z]:[\\/]/.test(raw.slice(4)) ? raw.slice(4) : raw;
+    const isVerbatim = raw.startsWith("\\\\?\\") && /^[a-zA-Z]:[\\/]/.test(raw.slice(4));
+    const unwrapped = isVerbatim ? raw.slice(4) : raw;
     if (/^[a-zA-Z]:[\\/]/.test(unwrapped)) {
       const rest = unwrapped.slice(3);
+      const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
+      if (isVerbatim && rawSegments.some((segment) => segment === "." || segment === "..")) {
+        return undefined;
+      }
       return {
         root: `${unwrapped.slice(0, 2)}${sep}`,
-        segments: rest.length === 0 ? [] : rest.split(/[\\/]/),
+        segments: isVerbatim ? rawSegments : collapseWin32Segments(rawSegments),
         trailingSlash: rest.length > 0 && /[\\/]$/.test(unwrapped),
       };
     }
     const unc = /^(?:\\\\|\/\/)([^\\/]+)[\\/]([^\\/]+)(?:[\\/]|$)/.exec(unwrapped);
     if (unc !== null) {
       const rest = unwrapped.slice(unc[0].length);
+      const rawSegments = rest.length === 0 ? [] : rest.split(/[\\/]/);
       return {
         root: `${sep}${sep}${unc[1]}${sep}${unc[2]}${sep}`,
-        segments: rest.length === 0 ? [] : rest.split(/[\\/]/),
+        segments: collapseWin32Segments(rawSegments),
         trailingSlash: rest.length > 0 && /[\\/]$/.test(unwrapped),
       };
     }
   }
   if (!raw.startsWith("/")) return undefined;
   const rest = raw.slice(1);
+  const rawSegments = rest.length === 0 ? [] : rest.split(windows ? /[\\/]/ : "/");
   return {
     root: "/",
-    segments: rest.length === 0 ? [] : rest.split(windows ? /[\\/]/ : "/"),
+    segments: windows ? collapseWin32Segments(rawSegments) : rawSegments,
     trailingSlash: rest.length > 0 && (windows ? /[\\/]$/.test(raw) : raw.endsWith("/")),
   };
 }
@@ -818,11 +837,16 @@ export const canonicalizeLauncherPath = Effect.fn(
 
   while (queue.length > 0) {
     const segment = queue.shift()!;
-    if (segment === "" || segment === ".") continue;
-    const hasMore = queue.some((rest) => rest !== "" && rest !== ".");
+    if (segment === "") continue;
+    if (segment === ".") {
+      // On POSIX, `file/.` fails with ENOTDIR just like `file/`; decline when not a directory.
+      if (missing || (lastType !== undefined && lastType !== "Directory")) return undefined;
+      continue;
+    }
+    const hasMore = queue.some((rest) => rest !== "");
     if (segment === "..") {
-      // `..` cannot safely traverse through a missing component; decline ownership.
-      if (missing) return undefined;
+      // `..` cannot safely traverse through a missing component or non-directory; decline ownership.
+      if (missing || (lastType !== undefined && lastType !== "Directory")) return undefined;
       prefix.pop();
       lastType = "Directory";
       continue;
@@ -847,9 +871,13 @@ export const canonicalizeLauncherPath = Effect.fn(
           if (!hasMore && linkRoot.trailingSlash) trailingSlash = true;
           queue.unshift(...linkRoot.segments);
         } else {
+          const relSegments = linkRaw.split(windows ? /[\\/]/ : "/");
+          if (windows && (linkRaw.startsWith("\\\\?\\") || relSegments.includes(".."))) {
+            return undefined;
+          }
           const linkHasTrailing = windows ? /[\\/]$/.test(linkRaw) : linkRaw.endsWith("/");
           if (!hasMore && linkHasTrailing) trailingSlash = true;
-          queue.unshift(...linkRaw.split(windows ? /[\\/]/ : "/"));
+          queue.unshift(...relSegments);
         }
         lastType = undefined;
         continue;

@@ -673,12 +673,16 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
         yield* fs.writeFileString(existingForeign, "", { mode: 0o755 });
         const existingDotDotViaForeign = `${escapeLink}/../existing-t3`;
         const trailingSlashTarget = `${targetExe}/`;
+        const trailingDotTarget = `${targetExe}/.`;
         const scriptExistingDotDot = path.join(baseDir, "bin/s2code");
         const scriptTrailingSlash = path.join(baseDir, "bin/t3");
+        const scriptTrailingDot = path.join(localBin, "shuv2code");
         const existingDotDotBody = posixLauncherScript(existingDotDotViaForeign);
         const trailingSlashBody = posixLauncherScript(trailingSlashTarget);
+        const trailingDotBody = posixLauncherScript(trailingDotTarget);
         yield* fs.writeFileString(scriptExistingDotDot, existingDotDotBody, { mode: 0o755 });
         yield* fs.writeFileString(scriptTrailingSlash, trailingSlashBody, { mode: 0o755 });
+        yield* fs.writeFileString(scriptTrailingDot, trailingDotBody, { mode: 0o755 });
 
         yield* ServiceLauncherClient.repointLaunchers({
           baseDir,
@@ -692,6 +696,7 @@ it.layer(NodeServices.layer)("self-update launchers", (it) => {
 
         assert.equal(yield* fs.readFileString(scriptExistingDotDot), existingDotDotBody);
         assert.equal(yield* fs.readFileString(scriptTrailingSlash), trailingSlashBody);
+        assert.equal(yield* fs.readFileString(scriptTrailingDot), trailingDotBody);
         assert.deepStrictEqual(yield* readPinnedRuntimeLaunchers(baseDir), []);
       }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
