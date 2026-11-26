@@ -116,11 +116,9 @@ const compact = (schema: Json, optional: boolean): Json => {
       .flatMap((branch) => (isBareAnyOf(branch) ? branch.anyOf : [branch]))
       .filter((branch) => !(optional && isNullSchema(branch)) && !isJsonStringSchema(branch));
     const { anyOf: _anyOf, ...rest } = result;
+    if (branches.length === 0) return rest;
     if (branches.length === 1 && Predicate.isObject(branches[0])) {
       return { ...branches[0], ...rest };
-    }
-    if (branches.some((branch) => Predicate.isObject(branch) && branch.type === "null")) {
-      return { ...rest, anyOf: branches };
     }
     if (branches.length > 1 && branches.every(Predicate.isObject)) {
       const scalars = mergeScalars(branches);
@@ -128,16 +126,15 @@ const compact = (schema: Json, optional: boolean): Json => {
       const tagged = mergeTaggedObjects(branches);
       if (tagged !== undefined) return compact({ ...tagged, ...rest }, optional);
     }
-    return rest;
+    return { ...rest, anyOf: branches };
   }
   return result;
 };
 
 /**
- * The input schema T3 advertises for a tool. Drops JSON noise that every thread pays for:
- * `additionalProperties: true`, safe-integer bounds, JSON-string fallbacks, and the `null` branch
- * of optional properties. Merge scalar and tagged object unions; leave other non-null unions
- * untyped for Gemini. Decoding still uses the full schema, including each branch's constraints.
+ * Drops redundant JSON keywords, JSON-string fallbacks, and optional null branches from what T3
+ * advertises. Merges compatible scalar and disjoint tagged object unions but keeps heterogeneous
+ * and required nullable unions. Decoding still uses the full schema.
  */
 export const advertisedJsonSchema = (tool: Tool.Any) =>
   compact(Tool.getJsonSchema(tool), false) as ReturnType<typeof Tool.getJsonSchema>;

@@ -152,18 +152,6 @@ it.effect("only request_secret and send_to_user ask Claude Code to load them up 
   }).pipe(Effect.provide(layerAdvertisedTools)),
 );
 
-it.effect("advertises no anyOf in registered MCP tool inputs", () =>
-  Effect.gen(function* () {
-    const mcp = yield* McpServer.McpServer;
-    const toolsWithAnyOf = mcp.tools
-      .filter(({ tool }) => /"anyOf":/.test(JSON.stringify(tool.inputSchema)))
-      .map(({ tool }) => tool.name);
-    expect(toolsWithAnyOf).toEqual([]);
-  }).pipe(
-    Effect.provide(McpHttpServer.layerToolSearch.pipe(Layer.provideMerge(layerAdvertisedTools))),
-  ),
-);
-
 // CI rejects a PR that raises any value above main's agentContextBudget.json, so growth
 // needs the agent-context-increase label. Lower the values when the text shrinks.
 it.effect("agent context matches the committed budget", () =>
