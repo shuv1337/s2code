@@ -19,6 +19,7 @@ import { GitManager } from "../git/GitManager.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { TaskFolders } from "../workspace/TaskFolders.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
+import * as McpToolExposure from "../mcp/McpToolExposure.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
 import {
   CLAUDE_PROVIDER,
@@ -138,6 +139,14 @@ const layerAdvertisedTools = McpHttpServer.layerTools.pipe(
   Layer.provide(toolHandlerServices),
 );
 
+const layerAdvertisedToolsWithSearch = Layer.mergeAll(
+  McpHttpServer.layerTools,
+  McpHttpServer.layerToolSearch,
+).pipe(
+  Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+  Layer.provide(toolHandlerServices),
+);
+
 // Claude Code loads these tools up front instead of behind ToolSearch, outside this budget.
 it.effect("only request_secret and send_to_user ask Claude Code to load them up front", () =>
   Effect.gen(function* () {
@@ -188,4 +197,55 @@ it.effect("agent context matches the committed budget", () =>
       "Set agentContextBudget.json to the measured values. Before you cut text to fit, run the evals that cover it (evals/README.md).",
     ).toEqual(budget);
   }).pipe(Effect.provide(layerAdvertisedTools)),
+);
+
+it.effect("compact eager MCP toolset stays valid and within the agy schema budget", () =>
+  Effect.gen(function* () {
+    const mcp = yield* McpServer.McpServer;
+    const agentTools = mcp.tools.filter(
+      ({ annotations }) =>
+        Context.getOrUndefined(
+          annotations,
+          McpSchema.EnabledWhen,
+        )?.({
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+        }) ?? true,
+    );
+    const agentToolsByName = new Map(agentTools.map(({ tool }) => [tool.name, tool]));
+    const unknownTools = [...McpToolExposure.COMPACT_EAGER_TOOLS].filter(
+      (name) => !agentToolsByName.has(name),
+    );
+    expect(unknownTools).toEqual([]);
+
+    const requiredCoreTools = [
+      "delegate_task",
+      "create_threads",
+      "schedule_task",
+      "t3_thread_launch",
+      "request_secret",
+      "html_render",
+      "html_preview",
+      "send_to_user",
+      "task_status",
+      "task_cancel",
+      "orchestrator_capabilities",
+      "orchestrator_usage_limits",
+      "tool_search",
+    ];
+    for (const toolName of requiredCoreTools) {
+      expect(McpToolExposure.COMPACT_EAGER_TOOLS.has(toolName), toolName).toBe(true);
+    }
+
+    const compactTools = agentTools
+      .filter(({ tool }) => McpToolExposure.COMPACT_EAGER_TOOLS.has(tool.name))
+      .map(({ tool }) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      }));
+    expect(compactTools).toHaveLength(McpToolExposure.COMPACT_EAGER_TOOLS.size);
+    const compactBytes = utf8Bytes(JSON.stringify(compactTools));
+    expect(compactBytes).toBeLessThanOrEqual(38_000);
+  }).pipe(Effect.provide(layerAdvertisedToolsWithSearch)),
 );

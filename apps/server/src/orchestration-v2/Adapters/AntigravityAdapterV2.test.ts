@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
   ChatFileAttachment,
+  EnvironmentId,
   MessageId,
   NodeId,
   ProjectId,
@@ -3114,6 +3115,102 @@ describe("AntigravityAdapterV2 update_steps checklist", () => {
       assert.deepEqual(plans.at(-1), [
         ["Create a.txt", "completed"],
         ["Create b.txt", "running"],
+      ]);
+    }).pipe(Effect.provide(layerSession)),
+  );
+});
+
+describe("AntigravityAdapterV2 HTTP MCP exposure", () => {
+  it.effect("sends compact tool exposure on t3-code HTTP MCP only, never on shared servers", () =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const crypto = yield* SecureRandom.SecureRandom;
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const logs = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-ag-mcp-exposure-" });
+      const requestLog = path.join(logs, "requests.ndjson");
+      const instanceId = ProviderInstanceId.make("antigravity-mcp-exposure-test");
+      const threadId = ThreadId.make("thread-antigravity-mcp-exposure");
+      const t3Endpoint = "http://127.0.0.1:43123/mcp";
+      const sharedEndpoint = "http://127.0.0.1:43123/mcp/shared/executor";
+      yield* mcpSessions.set({
+        environmentId: EnvironmentId.make("environment-antigravity-mcp-exposure"),
+        threadId,
+        providerSessionId: "mcp-session-antigravity-exposure",
+        providerInstanceId: instanceId,
+        endpoint: t3Endpoint,
+        authorizationHeader: "Bearer antigravity-token",
+        browserToolsAvailable: true,
+        sharedMcpServers: [{ name: "shared-executor", endpoint: sharedEndpoint }],
+      });
+
+      const adapter = yield* makeAntigravityAdapterV2({
+        instanceId,
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: (input) =>
+          makeAntigravityAcpRuntime({
+            ...input,
+            childProcessSpawner,
+            spawn: {
+              command: process.execPath,
+              args: [mockAgentPath],
+              cwd: input.cwd,
+              env: {
+                T3_ACP_ANTIGRAVITY: "1",
+                T3_ACP_MCP_HTTP: "1",
+                T3_ACP_REQUEST_LOG_PATH: requestLog,
+              },
+            },
+          }).pipe(Effect.provideService(SecureRandom.SecureRandom, crypto)),
+        withProcess: (_stop, task) => task,
+        defaultModel: Effect.undefined,
+      });
+
+      const modelSelection = { instanceId, model: "gemini-test-low" } as const;
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: process.cwd(),
+      });
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-antigravity-mcp-exposure"),
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* session.ensureThread({ threadId, modelSelection, runtimePolicy });
+
+      const requests = (yield* fileSystem.readFileString(requestLog))
+        .trim()
+        .split("\n")
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              method?: string;
+              params?: { mcpServers?: ReadonlyArray<unknown> };
+            },
+        );
+      const sessionNew = requests.find((request) => request.method === "session/new");
+      assert.deepEqual(sessionNew?.params?.mcpServers, [
+        {
+          type: "http",
+          name: "t3-code",
+          url: t3Endpoint,
+          headers: [
+            { name: "Authorization", value: "Bearer antigravity-token" },
+            { name: "t3-tool-exposure", value: "compact" },
+          ],
+        },
+        {
+          type: "http",
+          name: "shared-executor",
+          url: sharedEndpoint,
+          headers: [{ name: "Authorization", value: "Bearer antigravity-token" }],
+        },
       ]);
     }).pipe(Effect.provide(layerSession)),
   );

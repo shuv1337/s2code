@@ -2356,7 +2356,7 @@ it.effect("exchanges account states only with a full-access peer link", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-it.effect("lists optional tools to a deferring client only after tool_search loads them", () =>
+it.effect("lists optional tools per exposure mode only after tool_search loads them", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const scopeFor = (token: string): McpInvocationContext.McpThreadInvocationScope => ({
@@ -2373,7 +2373,10 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
       });
       const scopes = new Map([
         ["deferringToken", scopeFor("deferringToken")],
+        ["compactToken", scopeFor("compactToken")],
+        ["compactOtherToken", scopeFor("compactOtherToken")],
         ["otherToken", scopeFor("otherToken")],
+        ["unknownExposureToken", scopeFor("unknownExposureToken")],
       ]);
       const tool = (name: string, description: string) =>
         Tool.make(name, {
@@ -2413,12 +2416,12 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
         Layer.build,
       );
       const httpClient = yield* HttpClient.HttpClient;
-      const session = (token: string, deferred: boolean) =>
+      const session = (token: string, exposureHeader?: string) =>
         Effect.gen(function* () {
           const headers = {
             accept: "application/json, text/event-stream",
             authorization: `Bearer ${token}`,
-            ...(deferred ? { "t3-tool-exposure": "deferred" } : {}),
+            ...(exposureHeader === undefined ? {} : { "t3-tool-exposure": exposureHeader }),
           };
           const initialize = yield* httpClient.post("/mcp", {
             headers,
@@ -2466,18 +2469,44 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
           };
         });
 
-      const deferring = yield* session("deferringToken", true);
-      const other = yield* session("otherToken", false);
+      const deferring = yield* session("deferringToken", "deferred");
+      const compact = yield* session("compactToken", "compact");
+      const compactOther = yield* session("compactOtherToken", "compact");
+      const other = yield* session("otherToken");
+      const unknownExposure = yield* session("unknownExposureToken", "unknown");
+
       expect(yield* deferring.listed).toEqual(["delegate_task", "tool_search"]);
+      expect(yield* compact.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
+      expect(yield* compactOther.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
       expect(yield* other.listed).toEqual(["delegate_task", "preview_open", "schedule_task"]);
-      // Unlisted tools stay callable.
+      expect(yield* unknownExposure.listed).toEqual([
+        "delegate_task",
+        "preview_open",
+        "schedule_task",
+      ]);
+
+      // Unlisted tools stay directly callable in both deferred and compact modes.
       expect((yield* deferring.call("schedule_task", {})).structuredContent).toEqual({});
+      expect((yield* compact.call("preview_open", {})).structuredContent).toEqual({});
 
       expect(
         (yield* deferring.call("tool_search", { query: "browser" })).structuredContent,
       ).toEqual({ tools: [{ name: "preview_open", description: "Opens a browser preview." }] });
       expect(yield* deferring.listed).toEqual(["delegate_task", "preview_open", "tool_search"]);
+      // Loading a tool in one session never leaks into compact or default sessions.
+      expect(yield* compact.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
       expect(yield* other.listed).toEqual(["delegate_task", "preview_open", "schedule_task"]);
+
+      expect((yield* compact.call("tool_search", { query: "browser" })).structuredContent).toEqual({
+        tools: [{ name: "preview_open", description: "Opens a browser preview." }],
+      });
+      expect(yield* compact.listed).toEqual([
+        "delegate_task",
+        "preview_open",
+        "schedule_task",
+        "tool_search",
+      ]);
+      expect(yield* compactOther.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

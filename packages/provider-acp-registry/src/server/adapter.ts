@@ -274,7 +274,13 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       : AcpProviderCapabilitiesV2,
     customModels: readCustomModelEntries(options.settings.customModels).map((entry) => entry.slug),
     compactViaAdvertisedCommand: true,
-    ...(isAntigravityCli ? { wakeOnDetachedRequest: true, replyEndsWithUsageUpdate: true } : {}),
+    ...(isAntigravityCli
+      ? {
+          wakeOnDetachedRequest: true,
+          replyEndsWithUsageUpdate: true,
+          ...(useHttpMcpServers ? { mcpToolExposure: "compact" as const } : {}),
+        }
+      : {}),
     promptFailure: (cause) =>
       acpRegistryPromptFailure(isVibe ? "mistral-vibe" : registryAgentId, cause),
     ...(isDroid
@@ -333,7 +339,7 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       ? {}
       : {
           clientCapabilitiesMeta: copilotClientCapabilitiesMeta,
-          deferMcpTools: true,
+          mcpToolExposure: "deferred",
           registerExtensions: copilotRouting.registerExtensions,
           normalizeSessionUpdate: copilotRouting.normalizeSessionUpdate,
           extractSubagentUpdate: extractCopilotSubagentUpdate,

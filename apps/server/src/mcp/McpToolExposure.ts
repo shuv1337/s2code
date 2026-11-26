@@ -1,3 +1,4 @@
+import type { McpToolExposureMode } from "@t3tools/provider-core/server/mcpSession";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
@@ -10,6 +11,76 @@ const DIRECT_TOOLS: ReadonlySet<string> = new Set([
   "task_status",
   TOOL_SEARCH,
 ]);
+
+/**
+ * Curated eager core set for clients with an eager MCP schema cap (e.g. agy ~45 KB)
+ * that only register tools loaded via `notifications/tools/list_changed` on the next turn.
+ */
+export const COMPACT_EAGER_TOOLS: ReadonlySet<string> = new Set([
+  // Orchestration, tasks, scheduling, and secrets
+  "orchestrator_capabilities",
+  "orchestrator_usage_limits",
+  "delegate_task",
+  "create_threads",
+  "task_status",
+  "task_cancel",
+  "schedule_task",
+  "list_scheduled_tasks",
+  "delete_scheduled_task",
+  "run_scheduled_task_now",
+  "request_secret",
+  "t3_thread_launch",
+  // Threads
+  "t3_thread_list",
+  "t3_thread_read",
+  "t3_thread_update",
+  "t3_thread_send",
+  "t3_thread_wait",
+  "t3_thread_interrupt",
+  "t3_thread_search",
+  "t3_thread_configure",
+  "t3_thread_transfer",
+  "t3_thread_organize",
+  "t3_pending_request",
+  "t3_queue",
+  "t3_submit_output",
+  // Pull requests and CI
+  "pull_request_read",
+  "pull_request_list",
+  "pull_request_create",
+  "pull_request_update",
+  "pull_request_respond",
+  "pull_request_review",
+  "pull_request_merge",
+  "link_pull_request",
+  "link_pull_requests",
+  "unlink_pull_request",
+  "unlink_pull_requests",
+  "list_thread_pull_requests",
+  "watch_pull_request",
+  "unwatch_pull_request",
+  "ci_logs",
+  "ci_rerun",
+  // Issues
+  "list_issues",
+  "read_issue",
+  "create_issue",
+  "comment_on_issue",
+  "set_issue_state",
+  "link_issue",
+  "unlink_issue",
+  "list_thread_issues",
+  // User output, HTML, and discovery
+  "send_to_user",
+  "html_preview",
+  "html_render",
+  TOOL_SEARCH,
+]);
+
+export const parseExposureMode = (
+  value: string | ReadonlyArray<string> | undefined,
+): McpToolExposureMode | undefined =>
+  value === "deferred" || value === "compact" ? value : undefined;
 
 const MAX_RESULTS = 10;
 // Sessions that ended are never reported here, so keep only the newest.
@@ -28,7 +99,11 @@ export class McpToolExposure extends Context.Service<
       providerSessionId: string,
       query: string,
     ) => Effect.Effect<ReadonlyArray<ListedTool>>;
-    readonly isListed: (providerSessionId: string, tool: string) => boolean;
+    readonly isListed: (
+      providerSessionId: string,
+      tool: string,
+      mode?: McpToolExposureMode,
+    ) => boolean;
   }
 >()("t3/mcp/McpToolExposure") {}
 
@@ -81,7 +156,8 @@ export const make = (
       }
       return found;
     }),
-    isListed: (providerSessionId, tool) =>
-      DIRECT_TOOLS.has(tool) || loaded.get(providerSessionId)?.has(tool) === true,
+    isListed: (providerSessionId, tool, mode = "deferred") =>
+      (mode === "compact" ? COMPACT_EAGER_TOOLS : DIRECT_TOOLS).has(tool) ||
+      loaded.get(providerSessionId)?.has(tool) === true,
   });
 };
