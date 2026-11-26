@@ -92,6 +92,10 @@ const layerThreadToolkit = McpHttpServer.layerThreadToolkit.pipe(
   Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
   Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
   Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
+  // Tool analytics read the registry whenever one is present.
+  Layer.provide(
+    Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+  ),
 );
 
 const threadId = ThreadId.make("mcp-core-thread");
@@ -935,6 +939,7 @@ it.effect("search names the calling thread, so an agent can tell its own match a
   }).pipe(
     Effect.provide(
       McpHttpServer.layerThreadToolkit.pipe(
+        Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
@@ -1031,6 +1036,73 @@ it.effect("a read-only client reads threads and is refused every write before it
   ),
 );
 const dispatched: Array<string> = [];
+
+it.effect("only a full-access client may change a thread's own agent mode", () => {
+  const picks: Array<unknown> = [];
+  const instanceId = ProviderInstanceId.make("acp-agent");
+  const thread = {
+    ...McpToolAccessTestkit.liveThreadShell(ThreadId.make("agent-thread"), {
+      runtimeMode: "approval-required",
+    }),
+    providerInstanceId: instanceId,
+    modelSelection: {
+      instanceId,
+      model: "default",
+      options: [{ id: "_t3/session-mode", value: "ask" }],
+    },
+  };
+  return Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const configure = (access: "approval-required" | "full-access", mode: string) =>
+      server
+        .callTool({
+          name: "t3_thread_configure",
+          arguments: {
+            threadId: "agent-thread",
+            modelSelection: {
+              instanceId: "acp-agent",
+              model: "default",
+              options: [{ id: "_t3/session-mode", value: mode }],
+            },
+          },
+        })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope(access)),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+
+    expect(declaredFailure(yield* configure("approval-required", "yolo"))).toMatchObject({
+      code: "runtime_mode_escalation_denied",
+    });
+    expect(picks).toEqual([]);
+
+    // The mode the thread already runs in can be sent again.
+    expect((yield* configure("approval-required", "ask")).isError).toBe(false);
+    expect((yield* configure("full-access", "yolo")).isError).toBe(false);
+    expect(picks).toHaveLength(2);
+  }).pipe(
+    Effect.provide(
+      layerThreadToolkit.pipe(
+        Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: () => Effect.succeed(thread),
+            getProjectThreadRecords: () =>
+              Effect.succeed(McpToolAccessTestkit.idleThreadProjection(thread)),
+            dispatch: (command) =>
+              Effect.sync(() => {
+                if (command.type === "thread.model-selection.set") {
+                  picks.push(command.modelSelection);
+                }
+                return { sequence: 7, storedEvents: [] };
+              }),
+          }),
+        ),
+      ),
+    ),
+  );
+});
 
 it.effect("hides act-as-caller tools from a client caller", () =>
   Effect.gen(function* () {
@@ -1176,6 +1248,7 @@ it.effect.each([
   }).pipe(
     Effect.provide(
       McpHttpServer.layerThreadToolkit.pipe(
+        Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
@@ -1215,6 +1288,7 @@ it.effect("run_scheduled_task_now reports why a started run failed to dispatch",
   }).pipe(
     Effect.provide(
       McpHttpServer.layerThreadToolkit.pipe(
+        Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),

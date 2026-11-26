@@ -3,6 +3,7 @@ import "./src/features/development/render-counter-entry";
 import "./src/features/development/behavior-probe-entry";
 // Load Intl polyfills before GT captures Hermes's Intl constructors.
 import "./src/i18n/intl-polyfills";
+import "./src/features/files/text-decoder-polyfill";
 import { registerRootComponent } from "expo";
 import "react-native-gesture-handler";
 import { LogBox } from "react-native";

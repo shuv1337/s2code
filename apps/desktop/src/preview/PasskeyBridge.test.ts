@@ -129,6 +129,18 @@ describe("installPasskeyBridge", () => {
     });
   });
 
+  it("returns null and omits the serialized field when the authenticator has no user handle", async () => {
+    const { credentials } = install(() => ({
+      success: true,
+      data: { ...assertionData, userHandle: null },
+    }));
+    const credential = (await credentials.get({
+      publicKey: { challenge: new Uint8Array([1]) },
+    })) as PublicKeyCredential;
+    assert.isNull((credential.response as AuthenticatorAssertionResponse).userHandle);
+    assert.notProperty(credential.toJSON().response, "userHandle");
+  });
+
   it("rejects with the WebAuthn error the ceremony ended with", async () => {
     const { credentials } = install((channel) => ({
       success: false,

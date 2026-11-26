@@ -113,6 +113,7 @@ import {
   compatibleRuntimeModeForChoices,
   runtimeModeChoicesForSupportedModes,
   withManagedRuntimeModeLimits,
+  withProviderRuntimeModeLimits,
   type RuntimeModeChoice,
   selectableChoices,
 } from "./thread-settings-options";
@@ -536,9 +537,22 @@ function ThreadSettingsSessionProvider(
     pendingModel ??
     props.providerGroups.flatMap((group) => group.models).find((option) => isApplied(option)) ??
     null;
-  const runtimeModeChoices = withManagedRuntimeModeLimits(
-    runtimeModeChoicesForSupportedModes(displayedModel?.supportedRuntimeModes),
-    [config?.managedPolicy],
+  // The sheet mounts when it opens, which asks again once the last answer is a few seconds old.
+  const runtimeModeLimits = useEnvironmentQuery(
+    props.environmentId && props.cwd && displayedModel
+      ? serverEnvironment.providerRuntimeModeLimits({
+          environmentId: props.environmentId,
+          input: { instanceId: displayedModel.selection.instanceId, cwd: props.cwd },
+        })
+      : null,
+  ).data?.limits;
+  const runtimeModeChoices = withProviderRuntimeModeLimits(
+    withManagedRuntimeModeLimits(
+      runtimeModeChoicesForSupportedModes(displayedModel?.supportedRuntimeModes),
+      [config?.managedPolicy],
+      messages,
+    ),
+    runtimeModeLimits,
     messages,
   );
   const compatibleRuntimeMode = compatibleRuntimeModeForChoices(

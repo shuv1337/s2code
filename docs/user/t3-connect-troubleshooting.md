@@ -1,170 +1,85 @@
 # S2 Connect troubleshooting
 
-An S2 Connect connection goes through four parts, in this order:
+These steps apply if your installation is configured to use a fork-owned S2 Connect relay. An S2 Connect connection passes through four stages:
 
 1. **This device** reaches S2 Connect over the internet.
-2. **S2 Connect** checks your sign-in and the host's link.
-3. **The host's tunnel** (cloudflared on the host) carries the request to the host.
-4. **T3 Code on the host** answers.
+2. **S2 Connect** verifies your sign-in and host link.
+3. **The host's tunnel** (`cloudflared`) forwards the request to the host.
+4. **S2Code on the host** answers.
 
-When a connection fails, open **Settings > Environments**, find the environment,
-and select **Details**. The first part marked as failed is the cause. Find its
-section below.
-
-To see the host's side, run `s2code-nightly connect status` on the host, or open
-**Settings > Sharing & access** on the host. Both check the host's S2 Connect
-address from the host, and say why it fails. `s2code-nightly connect` runs the same check
-when it finishes setup. This check cannot test another device's network. For a
-problem on one device, use **Details** on that device.
+When a connection fails, open **Settings → Environments**, select the environment, and choose **Details**—the first failed stage identifies the cause below. On the host itself, run `s2code-nightly connect status` or check **Settings → Sharing & access**.
 
 ## The host's tunnel is offline
 
-S2 Connect could not reach the host's tunnel. This means one of these:
+S2 Connect could not reach the host's tunnel (host is asleep/offline, S2Code isn't running, or outbound port 7844 is blocked).
 
-- The host is asleep, turned off, or offline.
-- S2Code is not running on the host.
-- The host's network blocks the tunnel. See
-  [Port 7844 is blocked on the host](#port-7844-is-blocked-on-the-host).
-
-Fix:
-
-1. Make sure the host is awake and S2Code runs on it.
-2. On the host, run `s2code-nightly connect status`. It names the problem on the host's side.
-3. If the host was offline for a long time, S2 Connect removes its tunnel. Start
-   S2Code on the host and update it to the latest version. It gets a new tunnel.
+1. Confirm the host is awake and running S2Code.
+2. Run `s2code-nightly connect status` on the host.
+3. If the host was offline for 7+ days on an older version, start and update S2Code on the host to recreate its tunnel.
 
 ## Port 7844 is blocked on the host
 
-The tunnel on the host connects out to Cloudflare on port 7844, with TCP and
-UDP. Both tunnel protocols (QUIC and HTTP/2) use this port. When the host's
-network blocks it, the tunnel cannot start, but normal web traffic still works.
-The host looks online, so this problem is easy to miss.
+`cloudflared` connects outbound to Cloudflare on **TCP and UDP port 7844** (normal web traffic still works when 7844 is blocked).
 
-Common causes:
-
-- **A Tailscale exit node on the host.** All of the host's internet traffic goes
-  through the exit node, and that network blocks port 7844. Turn off the exit
-  node on the host with `tailscale set --exit-node=`, or allow outbound port
-  7844 on the exit node's network.
-- **A VPN on the host.** Work VPNs often block unknown ports. Ask for port 7844
-  to be allowed, or use a direct route instead (see below).
-- **A firewall or strict network.** Allow outbound TCP and UDP port 7844.
-
-If you cannot unblock the port, you can connect without S2 Connect. When the
-host and this device are on the same Tailscale network, add the host's
-Tailscale address as a direct route. See
-[Reach one machine several ways](./remote-access.md#reach-one-machine-several-ways).
+- **Tailscale exit node**: Run `tailscale set --exit-node=` on the host or allow outbound 7844 on the exit node.
+- **Work VPN / firewall**: Allow outbound TCP/UDP 7844, or bypass S2 Connect by adding a direct Tailscale route ([Reach one machine several ways](./remote-access.md#reach-one-machine-several-ways)).
 
 ## The tunnel works, but T3 Code does not answer
 
-The host's tunnel is up, but it cannot reach S2Code on the host. Common causes:
+The tunnel is up, but S2Code didn't respond on `127.0.0.1` (crashed, starting up, port changed, or `S2CODE_HOST` bound only a non-loopback IP).
 
-- S2Code on the host stopped, crashed, or is still starting.
-- S2Code restarted on a different port, for example after an update, and the
-  tunnel still points at the old port.
-- The server binds only one network address with `T3CODE_HOST`. The tunnel
-  sends requests to `127.0.0.1`, so the server must also listen there.
-
-Fix: restart S2Code on the host. For the background service, run
-`s2code-nightly service restart`. Then run `s2code-nightly connect status` on the host.
+Restart S2Code on the host (`s2code-nightly service restart` for a background service) and run `s2code-nightly connect status`.
 
 ## The T3 Connect address does not resolve or answer
 
-The host's S2 Connect address did not resolve, refused the connection, failed a
-secure (TLS) connection, or did not answer in time.
+The host's S2 Connect address failed DNS, TLS, connection, or timed out.
 
-Fix:
-
-1. Make sure the host is awake and online.
-2. On the host, run `s2code-nightly connect status`.
-3. If the check fails only on the host, check the host's DNS, VPN, or proxy.
-   If it says the host's network has an old cached answer, wait: it usually
-   clears within about 30 minutes.
-4. If it says the address no longer points to this machine's tunnel, the
-   environment was likely removed from S2 Connect. Link it again: on a desktop
-   host, turn **S2 Connect** off and on in **Settings > Sharing & access**. On a
-   command-line host, run `s2code-nightly connect link`, then restart S2Code.
+1. Confirm the host is online and run `s2code-nightly connect status`.
+2. If only the host fails, check DNS/VPN/proxy (stale DNS caches clear in ~30 minutes).
+3. If the address no longer points to this host, re-link it: toggle **S2 Connect** off and on in **Settings → Sharing & access**, or run `s2code-nightly connect link` and restart the server.
 
 ## This device can't reach T3 Connect
 
-The problem is on this device's network, not on the host. This device could
-not reach S2 Connect, or it reached S2 Connect but not the host's tunnel
-address.
+The issue is on the client device's network:
 
-Fix:
-
-1. Check this device's internet connection. On a captive or dead Wi-Fi network,
-   the device can look online but cannot reach anything.
-2. A VPN, firewall, ad blocker, or DNS filter on this device can block S2
-   Connect. Turn it off for a moment to test.
-3. On iPhone, Connectivity Assist in the Wi-Fi settings can break S2 Connect.
-   Turn it off to test.
-4. Try another network, or add a direct route to the host, such as its
-   Tailscale address. See
-   [Reach one machine several ways](./remote-access.md#reach-one-machine-several-ways).
+1. Check for captive portals or dead Wi-Fi.
+2. Temporarily disable VPNs, firewalls, ad blockers, or DNS filters (on iPhone, test turning off Wi-Fi **Connectivity Assist**).
+3. Try another network or add a direct Tailscale route ([Reach one machine several ways](./remote-access.md#reach-one-machine-several-ways)).
 
 ## Sign-in, account, or link problems
 
-This device's S2 Connect sign-in is not ready yet, or S2 Connect does not have
-an active link between your account and the host.
-
-- **The host is linked to a different account.** Sign in to the same S2 Connect
-  account on this device and on the host. On the host, run `s2code-nightly connect logout`,
-  then `s2code-nightly connect`.
-- **S2 Connect is off on the host, or the host only publishes agent activity.**
-  On the host, open **Settings > Sharing & access** and turn **S2 Connect** on, or
-  run `s2code-nightly connect`.
-- **The host was linked, but the server did not apply the link yet.** Restart
-  the server on the host: quit and reopen the S2Code desktop app, run
-  `s2code-nightly service restart`, or stop `s2code-nightly serve` and run it again.
-- **This device's sign-in expired, or the host no longer accepts this
-  device.** Sign out of S2 Connect and sign in again.
-- **This device is still loading its S2 Connect sign-in.** Wait a moment;
-  S2Code retries on its own. If it keeps waiting, reload or restart S2Code on
-  this device.
-- **The host is waiting for you to approve this device.** The host requires
-  approval for new devices. Approve the code this device shows from a device
-  that is already connected, or run `s2code-nightly auth connect-device approve <code>` on
-  the host. See [Approve new devices](./remote-access.md#approve-new-devices).
-- **Your account reached its tunnel limit.** Remove an environment you do not
-  use from your S2 account's S2 Connect page, then restart S2Code on the host.
+- **Different account**: Sign in to the same S2 Connect account on both sides (on the host, run `s2code-nightly connect logout` and then `s2code-nightly connect`).
+- **S2 Connect disabled on host**: Turn on **Settings → Sharing & access → S2 Connect** or run `s2code-nightly connect`.
+- **Link not yet applied**: Restart S2Code on the host (`s2code-nightly service restart` or restart the desktop app).
+- **Expired session**: Sign out of S2 Connect and sign back in.
+- **Waiting for device approval**: Approve the displayed code from an existing device or run `s2code-nightly auth connect-device approve <code>` on the host ([Approve new devices](./remote-access.md#approve-new-devices)).
+- **Machine limit reached**: Deregister an unused host or ask your relay operator about the limit, then restart the host.
 
 ## The clock is off
 
-S2 Connect signs requests with short-lived proofs. When the clock on this
-device or the host is a few minutes wrong, S2 Connect rejects them. Turn on
-automatic date and time on both devices, then retry.
+S2 Connect uses short-lived signed proofs. Enable automatic date and time on both the host and client device, then retry.
 
 ## The host runs an older T3 Code
 
-This app needs a newer S2Code on the host. Update S2Code on the host. See
-[Updating S2Code](./updating.md).
+Update S2Code on the host machine ([Updating S2Code](./updating.md)).
 
 ## T3 Connect returned an error
 
-| Error                                                     | Fix                                                                                                                                                                                                 |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Remove an unused environment, then restart S2Code on the host.                                                                                                                                      |
-| `auth_invalid` or `invalid_bearer`                        | Run `s2code-nightly connect login`. If credentials were revoked, run `s2code-nightly connect logout`, then `s2code-nightly connect` again. Restart the server after signing in.                     |
-| Expired or invalid link proof                             | Check the host's date and time, update S2Code, then restart it.                                                                                                                                     |
-| HTTP 403 without a recognized error                       | If the host requires approval for new devices, update S2Code on this device and approve it. Otherwise check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report. |
-| HTTP 408, 429, or 5xx                                     | Wait a few minutes. S2Code retries temporary failures on its own.                                                                                                                                   |
+| Error                                            | Fix                                                                                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `environment_link_limit_exceeded` / tunnel limit | Deregister an unused host or ask your relay operator about the limit, then restart the host.                                  |
+| `auth_invalid` / `invalid_bearer`                | Run `s2code-nightly connect login`, then restart the server.                                                                  |
+| Expired or invalid link proof                    | Sync system clock, update S2Code, and restart.                                                                                |
+| HTTP 403 (unrecognized)                          | If device approval is on, update the client and approve it; otherwise check proxies/firewalls and save any Cloudflare Ray ID. |
+| HTTP 408, 429, or 5xx                            | Temporary—wait a few minutes for automatic retry.                                                                             |
 
-After you fix a permanent rejection, restart the host's server with
-`s2code-nightly service restart`. For a foreground server, stop it and run `s2code-nightly serve` again.
-
-If S2Code on the host disappears when SSH closes, see
-[background-service troubleshooting](./background-service.md#troubleshooting).
+After fixing a permanent error, restart S2Code (`s2code-nightly service restart` or stop and rerun `s2code-nightly serve`). If S2Code stops when SSH disconnects, see [background-service troubleshooting](./background-service.md#troubleshooting).
 
 ## Report a problem
 
-If none of this helps, open an issue on
-[GitHub](https://github.com/shuv1337/s2code/issues). Include:
+Open an issue on [GitHub](https://github.com/shuv1337/s2code/issues) with:
 
-- The text from **Copy diagnostics** in the environment's **Details**.
-- The output of `s2code-nightly connect status` on the host.
-- The trace ID, if one is shown.
-- If the tunnel dropped earlier, the host's tunnel log, `relay-client.ndjson`
-  in the logs folder (`~/.t3/userdata/logs` by default). It records when the
-  tunnel connected, warned, exited, and restarted, with the tunnel token
-  removed.
+- **Copy diagnostics** from the environment's **Details**
+- Output of `s2code-nightly connect status` on the host
+- Trace ID (if shown)
+- `userdata/logs/relay-client.ndjson` in the fork server's home (tunnel tokens are already stripped)

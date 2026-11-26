@@ -427,7 +427,7 @@ Linked environments is a beta. Turn it on for both machines in **Settings →
 Labs**; on mobile, **Settings → Labs** lists each connected machine. On a
 headless server, open its address in a browser and pair to reach its **Settings
 → Labs**, or add `"linkedEnvironmentsEnabled": true` to `settings.json` in its
-`userdata` directory, such as `~/.t3/userdata/settings.json`; a running server
+fork server's `userdata` directory; a running server
 picks it up. While it is
 off on either machine, agents start nothing over a link between them. A task
 already running on the other machine still finishes, and if that machine has it
@@ -474,7 +474,7 @@ an address you trust: the code is sent there.
 - The link shows up in that machine's **Settings → Sharing & access** like any
   outside agent, and can be revoked there. **Forget** on this machine also ends
   it there when that machine confirms it. If it can't, such as when it is
-  offline or on an older T3 Code, Forget says so; revoke it in that machine's
+  offline or on an older S2Code build, Forget says so; revoke it in that machine's
   Sharing & access.
 - A link stays valid while agents use it. One unused for 30 days expires, as
   does one to a machine on an older S2Code after 30 days; link again with a
@@ -561,7 +561,7 @@ any other thread on web and desktop, and a shorter read-only list on mobile.
 - If this app is already connected to that machine, the thread opens there as
   usual instead.
 - You need permission to read threads on the machine you are connected to, and
-  Linked environments must be on there. Both machines need a version of T3 Code
+  Linked environments must be on there. Both machines need a version of S2Code
   that has this view.
 
 ## Manage or revoke access
