@@ -1885,7 +1885,7 @@
   "594bcbef04093f72": "WSL-Ordner öffnen",
   "04fd71efaa2c3b92": "Pull Requests öffnen",
   "57e875b79b98ab82": "Issues öffnen",
-  "f1db0a234c777a1d": "T3 Code in einer anderen App verwenden (MCP)",
+  "e92fa5cdc4be5f9f": "S2Code in einer anderen App verwenden (MCP)",
   "6050f22f63e2bcb5": "Workflows öffnen",
   "a0cc19e60dd99851": "Nutzung öffnen",
   "46694969044eee98": "Nächsten Arbeitsbereich fokussieren",
@@ -3348,8 +3348,8 @@
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
   "e9f4b93c4ec30453": "Anmeldecode",
-  "33194f3e1b80f838": [
-    "Hol dir einen über „T3 Code in einer anderen App verwenden (MCP)“, Einstellungen → Freigabe & Zugriff oder",
+  "8bb1ab71bb7c9e6a": [
+    "Hol dir einen über „S2Code in einer anderen App verwenden (MCP)“, Einstellungen → Freigabe & Zugriff oder",
     " ",
     {
       "t": "code",
@@ -6160,7 +6160,6 @@
   "3a883fbaed8d7561": "App",
   "3cc7159b902f36ec": "Zugriff",
   "a6615c82020deb59": "Verbinden",
-  "e92fa5cdc4be5f9f": "S2Code in einer anderen App verwenden (MCP)",
   "05780a7d2cfae2ef": "Verbinde dich zuerst mit einer Umgebung.",
   "b5442bb5b6122db6": "S2 Connect ist in diesem Build nicht verfügbar.",
   "5f46e2ad137db6ca": "Was kann die App?",

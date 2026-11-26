@@ -1886,7 +1886,7 @@
   "594bcbef04093f72": "Öppna WSL-mapp",
   "04fd71efaa2c3b92": "Öppna pull requests",
   "57e875b79b98ab82": "Öppna ärenden",
-  "f1db0a234c777a1d": "Använd T3 Code i en annan app (MCP)",
+  "e92fa5cdc4be5f9f": "Använd S2Code i en annan app (MCP)",
   "6050f22f63e2bcb5": "Öppna arbetsflöden",
   "a0cc19e60dd99851": "Öppna användning",
   "46694969044eee98": "Fokusera nästa område i arbetsytan",
@@ -3347,8 +3347,8 @@
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
   "e9f4b93c4ec30453": "Inloggningskod",
-  "33194f3e1b80f838": [
-    "Hämta en från Använd T3 Code i en annan app (MCP), Inställningar → Delning och åtkomst eller",
+  "8bb1ab71bb7c9e6a": [
+    "Hämta en från Använd S2Code i en annan app (MCP), Inställningar → Delning och åtkomst eller",
     " ",
     {
       "t": "code",
@@ -6160,7 +6160,6 @@
   "3a883fbaed8d7561": "App",
   "3cc7159b902f36ec": "Åtkomst",
   "a6615c82020deb59": "Anslut",
-  "e92fa5cdc4be5f9f": "Använd S2Code i en annan app (MCP)",
   "05780a7d2cfae2ef": "Anslut till en miljö först.",
   "b5442bb5b6122db6": "S2 Connect är inte tillgängligt i den här versionen.",
   "5f46e2ad137db6ca": "Vad får appen göra?",

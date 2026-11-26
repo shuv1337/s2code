@@ -814,6 +814,50 @@ describe("DesktopShellEnvironment", () => {
     }),
   );
 
+  it.effect.each(["S2CODE_RELEASE_BASE_URL", "SHUV2CODE_RELEASE_BASE_URL"] as const)(
+    "adopts a login-shell %s when the inherited value is whitespace-only",
+    (mirrorKey) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          [mirrorKey]: "   ",
+        };
+        let publishedPatch: Record<string, string | null | undefined> | undefined;
+
+        yield* runShellEnvironment({
+          env,
+          platform: "linux",
+          handler: () =>
+            envOutput({
+              PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
+              [mirrorKey]: "https://mirror.example.com/s2code",
+            }),
+          use: (service) =>
+            Effect.gen(function* () {
+              const prepared = yield* service.awaitDiscovery;
+              const snapshot = yield* Stream.runHead(service.updates);
+              assert.isTrue(Option.isSome(snapshot));
+              publishedPatch = Option.isSome(snapshot) ? snapshot.value.environment : undefined;
+              return prepared;
+            }),
+        });
+
+        assert.equal(env.S2CODE_RELEASE_BASE_URL, "https://mirror.example.com/s2code");
+        assert.equal(
+          env.SHUV2CODE_RELEASE_BASE_URL,
+          mirrorKey === "SHUV2CODE_RELEASE_BASE_URL"
+            ? "https://mirror.example.com/s2code"
+            : undefined,
+        );
+        assert.equal(publishedPatch?.S2CODE_RELEASE_BASE_URL, "https://mirror.example.com/s2code");
+        assert.equal(
+          publishedPatch?.SHUV2CODE_RELEASE_BASE_URL,
+          mirrorKey === "SHUV2CODE_RELEASE_BASE_URL" ? "https://mirror.example.com/s2code" : null,
+        );
+      }),
+  );
+
   it.effect("hydrates missing CA trust variables from the login shell", () =>
     Effect.gen(function* () {
       const env: NodeJS.ProcessEnv = {

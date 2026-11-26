@@ -587,11 +587,16 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "DO_NOT_TRACK",
       "T3CODE_FEATURE_FLAGS",
       "T3CODE_RELEASE_BASE_URL",
-      CLI_RELEASE_BASE_URL_ENV,
-      "SHUV2CODE_RELEASE_BASE_URL",
     ] as const) {
       if (!config.env[name] && shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];
+      }
+    }
+
+    for (const name of [CLI_RELEASE_BASE_URL_ENV, "SHUV2CODE_RELEASE_BASE_URL"] as const) {
+      const value = trimNonEmpty(shellEnvironment[name]);
+      if (Option.isNone(trimNonEmpty(config.env[name])) && Option.isSome(value)) {
+        config.env[name] = value.value;
       }
     }
 

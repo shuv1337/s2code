@@ -1886,7 +1886,7 @@
   "594bcbef04093f72": "Abrir carpeta de WSL",
   "04fd71efaa2c3b92": "Abrir pull requests",
   "57e875b79b98ab82": "Abrir issues",
-  "f1db0a234c777a1d": "Usar T3 Code en otra app (MCP)",
+  "e92fa5cdc4be5f9f": "Usar S2Code en otra app (MCP)",
   "6050f22f63e2bcb5": "Abrir flujos de trabajo",
   "a0cc19e60dd99851": "Abrir uso",
   "46694969044eee98": "Enfocar la siguiente área de trabajo",
@@ -3347,8 +3347,8 @@
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
   "e9f4b93c4ec30453": "Código de inicio de sesión",
-  "33194f3e1b80f838": [
-    "Obtén uno en Usar T3 Code en otra app (MCP), Ajustes → Compartir y acceso, o con",
+  "8bb1ab71bb7c9e6a": [
+    "Obtén uno en Usar S2Code en otra app (MCP), Ajustes → Compartir y acceso, o con",
     " ",
     {
       "t": "code",
@@ -6159,7 +6159,6 @@
   "3a883fbaed8d7561": "App",
   "3cc7159b902f36ec": "Acceso",
   "a6615c82020deb59": "Conectar",
-  "e92fa5cdc4be5f9f": "Usar S2Code en otra app (MCP)",
   "05780a7d2cfae2ef": "Conéctate primero a un entorno.",
   "b5442bb5b6122db6": "S2 Connect no está disponible en esta compilación.",
   "5f46e2ad137db6ca": "¿Qué puede hacer la app?",
