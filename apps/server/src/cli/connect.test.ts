@@ -333,6 +333,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
         const restart = yield* resolveHostCliCommand("service restart", ["--base-dir", baseDir]);
         const serve = yield* resolveHostCliCommand("serve", ["--base-dir", baseDir]);
         assert.include(printed, "✓ Authorized as user@example.com");
+        assert.include(printed, "An S2Code server is already running.");
         assert.include(printed, `\`${restart.command}\``);
         assert.notInclude(printed, `\`${serve.command}\``);
       }).pipe(

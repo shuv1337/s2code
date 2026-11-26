@@ -71,7 +71,7 @@ function validateId(
   const id = raw.trim();
   if (id === "") return Result.fail(m(msg("Enter a name.")));
   if (id.startsWith("t3")) {
-    return Result.fail(m(msg("Names starting with “t3” are reserved for T3 Code.")));
+    return Result.fail(m(msg("Names starting with “t3” are reserved for S2Code.")));
   }
   const decoded = decodeMcpServerId(id);
   if (Result.isFailure(decoded)) {
