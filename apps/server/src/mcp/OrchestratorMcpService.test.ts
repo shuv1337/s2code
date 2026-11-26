@@ -2383,6 +2383,9 @@ describe("OrchestratorMcpService provider resolution", () => {
 
   describe("listed models", () => {
     const opencodeInstanceId = ProviderInstanceId.make("opencode");
+    const antigravityInstanceId = ProviderInstanceId.make("antigravity");
+    const antigravitySlugs = Array.from({ length: 10 }, (_, index) => `ag-model-${index + 1}`);
+    const hiddenAntigravitySlug = "ag-model-1";
     const model = (slug: string, extra: Partial<ServerProvider["models"][number]> = {}) => ({
       slug,
       name: slug,
@@ -2446,7 +2449,7 @@ describe("OrchestratorMcpService provider resolution", () => {
       },
     ];
 
-    const capabilitiesWith = (search?: string) =>
+    const capabilitiesWith = (search?: string, providers = catalog) =>
       Effect.gen(function* () {
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
         return yield* service.capabilities(scope, search === undefined ? {} : { search });
@@ -2470,10 +2473,14 @@ describe("OrchestratorMcpService provider resolution", () => {
                   ],
                   providerModelPreferences: {
                     [opencodeInstanceId]: { hiddenModels: ["oc/m02"], modelOrder: ["oc/m12"] },
+                    [antigravityInstanceId]: {
+                      hiddenModels: [hiddenAntigravitySlug],
+                      modelOrder: [],
+                    },
                   },
                 }),
-                providerRegistryLayer(catalog),
-                adapterRegistryLayer([codexInstanceId, opencodeInstanceId]),
+                providerRegistryLayer(providers),
+                adapterRegistryLayer(providers.map(({ instanceId }) => instanceId)),
                 Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
                 Layer.mock(SecretRequests.SecretRequests)({}),
                 Layer.mock(RemoteDelegation.RemoteDelegation)({}),
@@ -2516,6 +2523,27 @@ describe("OrchestratorMcpService provider resolution", () => {
             },
           ]);
         }),
+    );
+
+    it.effect("lists every visible current Antigravity model even beyond the catalog cap", () =>
+      Effect.gen(function* () {
+        const providers = [
+          {
+            ...providerSnapshot({
+              instanceId: antigravityInstanceId,
+              driver: ProviderDriverKind.make("antigravity"),
+            }),
+            models: antigravitySlugs.map((slug) => model(slug)),
+          },
+        ];
+        assert.deepEqual(listing(yield* capabilitiesWith(undefined, providers)), [
+          {
+            id: antigravityInstanceId,
+            models: antigravitySlugs.filter((slug) => slug !== hiddenAntigravitySlug),
+            omitted: 0,
+          },
+        ]);
+      }),
     );
 
     it.effect("search matches every word and caps each provider's matches", () =>

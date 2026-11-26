@@ -218,7 +218,7 @@ function WorkflowsRow() {
       {...searchableSetting("workflows-beta")}
       settingKeys={["workflowsEnabled"]}
       description={gt(
-        "Run multi-step workflows from files in the workflows folder of this server's T3 home. Open them from the command palette. While off, nothing in that folder runs; runs wait until it is on again.",
+        "Run multi-step workflows from files in the workflows folder of this server's S2Code home. Open them from the command palette. While off, nothing in that folder runs; runs wait until it is on again.",
       )}
       control={
         <ScopedSwitch
@@ -339,7 +339,7 @@ function SimlockHostsRow() {
           <Link to="/settings/devices" className="underline underline-offset-2">
             Devices
           </Link>
-          . An alpha that may change or break. T3 Code never installs Simlock.
+          . An alpha that may change or break. S2Code never installs Simlock.
         </T>
       }
       control={
@@ -379,7 +379,7 @@ function FastWorktreeCheckoutRow() {
       {...searchableSetting("worktree-fast-checkout")}
       settingKeys={["fastWorktreeCheckout"]}
       description={gt(
-        "On a Mac, clone new worktrees from a checkout cached in the T3 home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache.",
+        "On a Mac, clone new worktrees from a checkout cached in the S2Code home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache.",
       )}
       control={
         <ScopedSwitch

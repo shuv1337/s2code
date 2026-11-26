@@ -67,6 +67,7 @@ import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 import { FEEDBACK_CLI_CLIENT_LABEL } from "../feedback/FeedbackReport.ts";
 import * as Feedback from "../feedback/FeedbackService.ts";
+import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import * as FeedbackHandlers from "./toolkits/feedback/handlers.ts";
 import { FeedbackToolkit } from "./toolkits/feedback/tools.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
@@ -306,6 +307,10 @@ it.effect("rejects a metadata-only response when the screenshot is saved", () =>
 const layerRecordingTools = (calls: Array<unknown>) => {
   const RecordingToolkit = Toolkit.make(
     OrchestratorToolkit.tools.delegate_task,
+    OrchestratorToolkit.tools.create_threads,
+    OrchestratorToolkit.tools.schedule_task,
+    AttachmentToolkit.tools.t3_attachment_prepare_upload,
+    AttachmentToolkit.tools.t3_thread_send_attachments,
     OrchestratorToolkit.tools.t3_thread_list,
     OrchestratorToolkit.tools.t3_thread_read,
     OrchestratorToolkit.tools.t3_thread_wait,
@@ -326,6 +331,10 @@ const layerRecordingTools = (calls: Array<unknown>) => {
     RecordingToolkit,
     McpToolAccess.toLayer(RecordingToolkit, {
       delegate_task: record,
+      create_threads: record,
+      schedule_task: record,
+      t3_attachment_prepare_upload: record,
+      t3_thread_send_attachments: record,
       t3_thread_list: record,
       t3_thread_read: record,
       t3_thread_wait: record,
@@ -352,6 +361,8 @@ const layerRecordingTools = (calls: Array<unknown>) => {
         Layer.mock(ServerSettings.ServerSettingsService)({}),
         Layer.mock(DocumentText.DocumentText)({}),
         Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+        Layer.mock(ServerSecretStore.ServerSecretStore)({}),
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-http-server-test-" }),
         NodeCrypto.layer,
       ),
@@ -678,31 +689,94 @@ it.effect("decodes null optional arguments the way it decodes omitted ones", () 
   }).pipe(Effect.provide(layerRecordingTools(calls)));
 });
 
-it.effect("decodes a JSON-stringified delegate target as the same object", () => {
+it.effect("decodes delegate and batch thread options from either an array or a record", () => {
   const calls: Array<unknown> = [];
   return Effect.gen(function* () {
     const task = "Inspect";
     const target = {
       providerInstanceId: "codex",
       model: "gpt-6.2-sol",
-      options: { reasoningEffort: "medium" },
     };
-    yield* callTool("delegate_task", { task, target });
-    yield* callTool("delegate_task", { task, target: JSON.stringify(target) });
+    const selections = [
+      { id: "reasoningEffort", value: "medium" },
+      { id: "fastMode", value: true },
+    ];
+    const arrayTarget = { ...target, options: selections };
+    const recordTarget = { ...target, options: { reasoningEffort: "medium", fastMode: true } };
+    yield* callTool("delegate_task", { task, target: arrayTarget });
+    yield* callTool("delegate_task", { task, target: recordTarget });
+    yield* callTool("delegate_task", { task, target: JSON.stringify(recordTarget) });
+    yield* callTool("create_threads", {
+      threads: [{ target: arrayTarget }, { target: recordTarget }],
+    });
 
     for (const invalidTarget of ["{model:", '{"model":42}']) {
       const error = yield* Effect.flip(callTool("delegate_task", { task, target: invalidTarget }));
       expect(error).toBeInstanceOf(McpSchema.InvalidParams);
     }
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toEqual({
-      task,
-      target: {
-        ...target,
-        options: [{ id: "reasoningEffort", value: "medium" }],
-      },
-    });
-    expect(calls[1]).toEqual(calls[0]);
+    expect(calls).toEqual([
+      { task, target: arrayTarget },
+      { task, target: arrayTarget },
+      { task, target: arrayTarget },
+      { threads: [{ target: arrayTarget }, { target: arrayTarget }] },
+    ]);
+  }).pipe(Effect.provide(layerRecordingTools(calls)));
+});
+
+it.effect("validates webhook filters with the codec rather than the advertised union", () => {
+  const calls: Array<unknown> = [];
+  return Effect.gen(function* () {
+    const prompt = "Check incoming events";
+    const schedule = {
+      type: "webhook",
+      filters: [
+        { path: "body.action", op: "equals", value: "opened" },
+        { path: "body.action", op: "in", value: ["opened", "closed"] },
+        { path: "body.action", op: "exists" },
+      ],
+    };
+    yield* callTool("schedule_task", { prompt, schedule });
+    yield* callTool("schedule_task", { prompt, schedule: JSON.stringify(schedule) });
+    const error = yield* Effect.flip(
+      callTool("schedule_task", {
+        prompt,
+        schedule: { ...schedule, filters: [{ path: "body.action", op: "in", value: "opened" }] },
+      }),
+    );
+    expect(error).toBeInstanceOf(McpSchema.InvalidParams);
+    expect(calls).toEqual([
+      { prompt, schedule },
+      { prompt, schedule },
+    ]);
+  }).pipe(Effect.provide(layerRecordingTools(calls)));
+});
+
+it.effect("decodes image and file attachments without changing their branch limits", () => {
+  const calls: Array<unknown> = [];
+  return Effect.gen(function* () {
+    const image = { name: "image.png", mimeType: "image/png", sizeBytes: 1 };
+    const file = {
+      type: "file",
+      name: "document.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 52_428_800,
+    };
+    const attachments = [
+      { ...image, type: "image", id: "image-id", sizeBytes: 0 },
+      { ...file, id: "file-id" },
+    ];
+    const launch = { title: "Review attachments", scratch: true, attachments };
+    yield* callTool("t3_attachment_prepare_upload", { upload: image });
+    yield* callTool("t3_attachment_prepare_upload", { upload: file });
+    yield* callTool("t3_thread_launch", launch);
+    yield* callTool("t3_thread_send_attachments", { attachments });
+    const error = yield* Effect.flip(
+      callTool("t3_attachment_prepare_upload", {
+        upload: { ...image, type: "image", sizeBytes: file.sizeBytes },
+      }),
+    );
+    expect(error).toBeInstanceOf(McpSchema.InvalidParams);
+    expect(calls).toEqual([{ upload: image }, { upload: file }, launch, { attachments }]);
   }).pipe(Effect.provide(layerRecordingTools(calls)));
 });
 

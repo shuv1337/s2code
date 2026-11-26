@@ -9019,7 +9019,7 @@
   "7a13173fc287b9de": "Partagez un fil avec un invité qui le suit en direct dans un navigateur et envoie des messages que vous approuvez. Connectez-vous à S2 Connect pour utiliser les liens invités.",
   "0aa5406ac4d7f7c7": "Liens invités",
   "f0e853acd2006d53": "Environnements associés",
-  "ef10c2dff987f3ea": "Exécutez des workflows en plusieurs étapes à partir des fichiers du dossier workflows du répertoire T3 de ce serveur. Ouvrez-les depuis la palette de commandes. Tant que c'est désactivé, rien dans ce dossier ne s'exécute ; les exécutions attendent sa réactivation.",
+  "6d9a982df559e145": "Exécutez des workflows en plusieurs étapes à partir des fichiers du dossier workflows du répertoire S2Code de ce serveur. Ouvrez-les depuis la palette de commandes. Tant que c'est désactivé, rien dans ce dossier ne s'exécute ; les exécutions attendent sa réactivation.",
   "2dadb2359422121c": "Workflows",
   "933dabf0700708af": "Nombre d’exécutions ignorées que chaque workflow conserve dans son historique. Les exécutions ignorées plus anciennes sont supprimées ; celles qui ont fait quelque chose sont toujours conservées.",
   "f172d7e5deb24f75": "Rétablir la valeur par défaut des exécutions ignorées conservées",
@@ -9028,7 +9028,7 @@
   "13e86eb5d8287a71": "Affiche un prochain message suggéré dans la zone de saisie vide après un tour Claude ou Codex. Tab l’utilise. Chaque suggestion est une requête en cache supplémentaire sur votre forfait. Nécessite Codex 0.165+. Les fils Claude se mettent à jour au redémarrage.",
   "d4b2a2ec812aafb0": "Suggérer le prochain prompt",
   "298c7150a7621c80": "Hôtes d’appareils Simlock",
-  "67937aa49179285e": "Sur Mac, clone les nouveaux worktrees depuis une copie en cache dans le dossier T3 home au lieu d’écrire chaque fichier. Utilise le checkout Git normal quand ce n’est pas possible. La désactivation supprime le cache.",
+  "fd5c771bad7f3bf7": "Sur Mac, clone les nouveaux worktrees depuis une copie en cache dans le dossier S2Code home au lieu d’écrire chaque fichier. Utilise le checkout Git normal quand ce n’est pas possible. La désactivation supprime le cache.",
   "f9904f78d3003f58": "Checkout rapide des worktrees",
   "9c2f647882522302": "Les machines sélectionnées utilisent des modes de retour des agents différents.",
   "31bbf7bf8c0a5279": "Retours des agents",
@@ -9052,7 +9052,7 @@
     },
     ". Tant qu’elle est désactivée, rien de nouveau ne démarre via une association ; les tâches en cours se terminent."
   ],
-  "ce6a3933a976ac7e": [
+  "0acbf72a77f9163d": [
     "Permet au panneau Appareils de louer des simulateurs et des émulateurs depuis votre propre pool",
     " ",
     {
@@ -9069,7 +9069,7 @@
       "i": 2,
       "c": "Appareils"
     },
-    ". Une version alpha susceptible de changer ou de casser. T3 Code n’installe jamais Simlock."
+    ". Une version alpha susceptible de changer ou de casser. S2Code n’installe jamais Simlock."
   ],
   "3836976622328d61": "Ce que les agents d’ici peuvent faire là-bas",
   "b20c269e7ad96f42": "Un agent n’a jamais plus d’accès là-bas que son propre mode ici. Sans accès complet, il ne peut modifier que les fils lancés par cette association, pas les fils, projets ou paramètres propres à cette machine.",
