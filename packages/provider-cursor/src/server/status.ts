@@ -320,8 +320,8 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
     } else if (failure.planRequired) {
       message =
         authenticationType === "browser"
-          ? "Cursor needs a paid plan to run in T3 Code. Upgrade this account or sign in with a different one."
-          : "Cursor needs a paid plan to run in T3 Code. Upgrade the account that owns CURSOR_API_KEY or use a key from a paid account.";
+          ? "Cursor needs a paid plan to run in S2Code. Upgrade this account or sign in with a different one."
+          : "Cursor needs a paid plan to run in S2Code. Upgrade the account that owns CURSOR_API_KEY or use a key from a paid account.";
     }
     return buildServerProvider({
       presentation: CURSOR_PRESENTATION,
