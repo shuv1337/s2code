@@ -19,6 +19,7 @@ import { GitManager } from "../git/GitManager.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { TaskFolders } from "../workspace/TaskFolders.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
+import * as McpToolExposure from "../mcp/McpToolExposure.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
 import {
   CLAUDE_PROVIDER,
@@ -138,6 +139,15 @@ const layerAdvertisedTools = McpHttpServer.layerTools.pipe(
   Layer.provide(toolHandlerServices),
 );
 
+const layerAdvertisedToolsWithSearch = Layer.mergeAll(
+  McpHttpServer.layerTools,
+  McpHttpServer.layerToolSearch,
+  McpHttpServer.layerToolExposure,
+).pipe(
+  Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+  Layer.provide(toolHandlerServices),
+);
+
 // Claude Code loads these tools up front instead of behind ToolSearch, outside this budget.
 it.effect("only request_secret and send_to_user ask Claude Code to load them up front", () =>
   Effect.gen(function* () {
@@ -188,4 +198,123 @@ it.effect("agent context matches the committed budget", () =>
       "Set agentContextBudget.json to the measured values. Before you cut text to fit, run the evals that cover it (evals/README.md).",
     ).toEqual(budget);
   }).pipe(Effect.provide(layerAdvertisedTools)),
+);
+
+it.effect("compact eager MCP toolset stays valid and within the agy schema budget", () =>
+  Effect.gen(function* () {
+    const mcp = yield* McpServer.McpServer;
+    const agentTools = mcp.tools.filter(
+      ({ annotations }) =>
+        Context.getOrUndefined(
+          annotations,
+          McpSchema.EnabledWhen,
+        )?.({
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+        }) ?? true,
+    );
+    const agentToolsByName = new Map(agentTools.map(({ tool }) => [tool.name, tool]));
+    const unknownTools = [...McpToolExposure.COMPACT_EAGER_TOOLS].filter(
+      (name) => !agentToolsByName.has(name),
+    );
+    expect(unknownTools).toEqual([]);
+
+    const requiredCoreTools = [
+      "delegate_task",
+      "create_threads",
+      "schedule_task",
+      "t3_thread_launch",
+      "request_secret",
+      "html_render",
+      "html_preview",
+      "send_to_user",
+      "task_status",
+      "task_cancel",
+      "orchestrator_capabilities",
+      "orchestrator_usage_limits",
+      "tool_search",
+    ];
+    for (const toolName of requiredCoreTools) {
+      expect(McpToolExposure.COMPACT_EAGER_TOOLS.has(toolName), toolName).toBe(true);
+    }
+
+    const compactTools = agentTools
+      .filter(({ tool }) => McpToolExposure.COMPACT_EAGER_TOOLS.has(tool.name))
+      .map(({ tool }) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      }));
+    const compactBytes = utf8Bytes(JSON.stringify(compactTools));
+    expect(compactBytes).toBeLessThanOrEqual(38_000);
+  }).pipe(Effect.provide(layerAdvertisedToolsWithSearch)),
+);
+
+it.effect("compact dynamic tool_search stays bounded and skips already-eager tools", () =>
+  Effect.gen(function* () {
+    const mcp = yield* McpServer.McpServer;
+    const exposure = yield* McpToolExposure.McpToolExposure;
+    const agentTools = mcp.tools.filter(
+      ({ annotations }) =>
+        Context.getOrUndefined(
+          annotations,
+          McpSchema.EnabledWhen,
+        )?.({
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+        }) ?? true,
+    );
+    const sessionId = "compact-budget-session";
+    const maxListedBytes = 38_000 + McpToolExposure.COMPACT_DYNAMIC_MAX_BYTES;
+    const listedBytes = () =>
+      utf8Bytes(
+        JSON.stringify(
+          agentTools
+            .filter(({ tool }) => exposure.isListed(sessionId, tool.name, "compact"))
+            .map(({ tool }) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })),
+        ),
+      );
+
+    const initialBytes = listedBytes();
+    const expectWithinBudget = (label: string) => {
+      const currentBytes = listedBytes();
+      expect(currentBytes - initialBytes, `${label} dynamic delta`).toBeLessThanOrEqual(
+        McpToolExposure.COMPACT_DYNAMIC_MAX_BYTES,
+      );
+      expect(currentBytes, `${label} total`).toBeLessThanOrEqual(maxListedBytes);
+    };
+
+    const previewHits = yield* exposure.search(sessionId, "preview", "compact");
+    expect(previewHits.length).toBeGreaterThan(0);
+    expect(previewHits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name))).toBe(
+      true,
+    );
+    expectWithinBudget("preview");
+
+    for (const query of ["project", "device", "worktree", "attachment"]) {
+      const hits = yield* exposure.search(sessionId, query, "compact");
+      expect(hits.length, query).toBeGreaterThan(0);
+      expect(
+        hits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name)),
+        query,
+      ).toBe(true);
+      expectWithinBudget(query);
+    }
+
+    const threadHits = yield* exposure.search(sessionId, "thread", "compact");
+    expect(threadHits.map((hit) => hit.name)).toContain("t3_thread_send_attachments");
+    expect(threadHits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name))).toBe(
+      true,
+    );
+    expectWithinBudget("thread");
+    expect(exposure.isListed(sessionId, "t3_thread_send_attachments", "compact")).toBe(true);
+    // Earlier dynamic search hits were evicted to keep the compact window bounded.
+    expect(previewHits.some((hit) => !exposure.isListed(sessionId, hit.name, "compact"))).toBe(
+      true,
+    );
+  }).pipe(Effect.provide(layerAdvertisedToolsWithSearch)),
 );

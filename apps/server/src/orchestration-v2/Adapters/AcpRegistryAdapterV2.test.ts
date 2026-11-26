@@ -1487,9 +1487,11 @@ describe("AcpRegistryAdapterV2", () => {
       );
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       const endpoint = "http://127.0.0.1:43123/mcp";
+      const sharedEndpoint = "http://127.0.0.1:43123/mcp/shared/executor";
       const sessionMcpServers = Effect.fn("sessionMcpServers")(function* (
         config: Record<string, unknown>,
         agentEnvironment: Record<string, string> = {},
+        sharedMcpServers?: ReadonlyArray<{ readonly name: string; readonly endpoint: string }>,
       ) {
         const requests: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
         const instanceId = ProviderInstanceId.make("acp-registry-mcp-transport");
@@ -1501,6 +1503,7 @@ describe("AcpRegistryAdapterV2", () => {
           providerInstanceId: instanceId,
           endpoint,
           browserToolsAvailable: false,
+          ...(sharedMcpServers === undefined ? {} : { sharedMcpServers }),
         };
         yield* mcpSessions.set({ ...mcpSession, authorizationHeader: "Bearer opened-token" });
         const adapter = yield* makeAcpRegistryAdapterV2({
@@ -1630,6 +1633,43 @@ describe("AcpRegistryAdapterV2", () => {
         load: plainHttp("Bearer rotated-token"),
       });
       assert.deepEqual(yield* sessionMcpServers(commandCode), {
+        new: stdio("Bearer opened-token"),
+        load: stdio("Bearer rotated-token"),
+      });
+      // Local agy uses HTTP MCP with compact exposure on t3-code only (never shared servers),
+      // and falls back to stdio when the agent does not advertise HTTP MCP capabilities.
+      const localAntigravity = {
+        source: "local",
+        commandPath: "/usr/local/bin/agy",
+        commandArgs: ["acp"],
+      };
+      const compactHttpWithShared = (authorization: string) => [
+        {
+          type: "http",
+          name: "t3-code",
+          url: endpoint,
+          headers: [
+            { name: "Authorization", value: authorization },
+            { name: "t3-tool-exposure", value: "compact" },
+          ],
+        },
+        {
+          type: "http",
+          name: "shared-executor",
+          url: sharedEndpoint,
+          headers: [{ name: "Authorization", value: authorization }],
+        },
+      ];
+      assert.deepEqual(
+        yield* sessionMcpServers(localAntigravity, { T3_ACP_MCP_HTTP: "1" }, [
+          { name: "shared-executor", endpoint: sharedEndpoint },
+        ]),
+        {
+          new: compactHttpWithShared("Bearer opened-token"),
+          load: compactHttpWithShared("Bearer rotated-token"),
+        },
+      );
+      assert.deepEqual(yield* sessionMcpServers(localAntigravity), {
         new: stdio("Bearer opened-token"),
         load: stdio("Bearer rotated-token"),
       });

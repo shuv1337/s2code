@@ -258,11 +258,11 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
     ? yield* makeKimiPromptOutcomeWatch(options.environment.KIMI_CODE_HOME)
     : undefined;
   const copilotRouting = isCopilot ? makeCopilotSubagentRouting() : undefined;
-  // Copilot CLI 1.0.105 rejects stdio MCP servers from the client, and Command Code cannot
-  // start the stdio bridge on Windows (it spawns MCP commands through cmd.exe, which splits
-  // the unquoted "T3 Code (Beta).exe" path). Both take T3's MCP endpoint over ACP HTTP.
+  // Copilot CLI 1.0.105 rejects stdio MCP servers from the client, Antigravity (agy) supports
+  // HTTP MCP and needs compact exposure under its ~45 KB eager schema cap, and Command Code
+  // cannot start the stdio bridge on Windows. All three take T3's MCP endpoint over ACP HTTP.
   const useHttpMcpServers =
-    copilotRouting !== undefined || prefersHttpMcpTransport(options.settings);
+    copilotRouting !== undefined || isAntigravityCli || prefersHttpMcpTransport(options.settings);
   const flavor: AcpAdapterV2Flavor = {
     driver: ACP_REGISTRY_PROVIDER,
     // Cancelling a Copilot prompt also kills the background agents it started.
@@ -274,7 +274,13 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       : AcpProviderCapabilitiesV2,
     customModels: readCustomModelEntries(options.settings.customModels).map((entry) => entry.slug),
     compactViaAdvertisedCommand: true,
-    ...(isAntigravityCli ? { wakeOnDetachedRequest: true, replyEndsWithUsageUpdate: true } : {}),
+    ...(isAntigravityCli
+      ? {
+          wakeOnDetachedRequest: true,
+          replyEndsWithUsageUpdate: true,
+          mcpToolExposure: "compact" as const,
+        }
+      : {}),
     promptFailure: (cause) =>
       acpRegistryPromptFailure(isVibe ? "mistral-vibe" : registryAgentId, cause),
     ...(isDroid
@@ -333,7 +339,7 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       ? {}
       : {
           clientCapabilitiesMeta: copilotClientCapabilitiesMeta,
-          deferMcpTools: true,
+          mcpToolExposure: "deferred",
           registerExtensions: copilotRouting.registerExtensions,
           normalizeSessionUpdate: copilotRouting.normalizeSessionUpdate,
           extractSubagentUpdate: extractCopilotSubagentUpdate,
