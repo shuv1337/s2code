@@ -2446,25 +2446,40 @@ it.effect("lists optional tools per exposure mode only after tool_search loads t
               .pipe(
                 Effect.flatMap((response) => response.text),
                 // tool_search answers over SSE, after its list_changed notification.
-                Effect.map((text): unknown =>
-                  text
+                Effect.map((text) => {
+                  const messages = text
                     .split("\n")
                     .filter((line) => line.startsWith("data: ") || line.startsWith("{"))
-                    .map((line) => JSON.parse(line.replace(/^data: /u, "")) as { id?: number })
-                    .find((message) => message.id === 2),
-                ),
+                    .map(
+                      (line) =>
+                        JSON.parse(line.replace(/^data: /u, "")) as {
+                          id?: number;
+                          method?: string;
+                          result?: unknown;
+                        },
+                    );
+                  return {
+                    message: messages.find((message) => message.id === 2),
+                    notifications: messages
+                      .filter((message) => message.id === undefined && message.method !== undefined)
+                      .map((message) => message.method!),
+                  };
+                }),
               );
           return {
             listed: rpc("tools/list", {}).pipe(
-              Effect.map((body) =>
-                (body as { result: { tools: ReadonlyArray<{ name: string }> } }).result.tools
+              Effect.map(({ message }) =>
+                (message as { result: { tools: ReadonlyArray<{ name: string }> } }).result.tools
                   .map((listed) => listed.name)
                   .sort(),
               ),
             ),
             call: (name: string, args: object) =>
               rpc("tools/call", { name, arguments: args }).pipe(
-                Effect.map((body) => (body as { result: { structuredContent?: unknown } }).result),
+                Effect.map(({ message, notifications }) => ({
+                  ...(message as { result: { structuredContent?: unknown } }).result,
+                  notifications,
+                })),
               ),
           };
         });
@@ -2489,24 +2504,155 @@ it.effect("lists optional tools per exposure mode only after tool_search loads t
       expect((yield* deferring.call("schedule_task", {})).structuredContent).toEqual({});
       expect((yield* compact.call("preview_open", {})).structuredContent).toEqual({});
 
-      expect(
-        (yield* deferring.call("tool_search", { query: "browser" })).structuredContent,
-      ).toEqual({ tools: [{ name: "preview_open", description: "Opens a browser preview." }] });
+      const deferredSearch = yield* deferring.call("tool_search", { query: "browser" });
+      expect(deferredSearch.structuredContent).toEqual({
+        tools: [{ name: "preview_open", description: "Opens a browser preview." }],
+      });
+      expect(deferredSearch.notifications).toEqual(["notifications/tools/list_changed"]);
       expect(yield* deferring.listed).toEqual(["delegate_task", "preview_open", "tool_search"]);
       // Loading a tool in one session never leaks into compact or default sessions.
       expect(yield* compact.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
       expect(yield* other.listed).toEqual(["delegate_task", "preview_open", "schedule_task"]);
 
-      expect((yield* compact.call("tool_search", { query: "browser" })).structuredContent).toEqual({
+      // Searching for an already-eager tool in compact mode skips it and sends no list_changed.
+      const eagerSearch = yield* compact.call("tool_search", { query: "schedule" });
+      expect(eagerSearch.structuredContent).toEqual({ tools: [] });
+      expect(eagerSearch.notifications).toEqual([]);
+
+      const compactSearch = yield* compact.call("tool_search", { query: "browser" });
+      expect(compactSearch.structuredContent).toEqual({
         tools: [{ name: "preview_open", description: "Opens a browser preview." }],
       });
+      expect(compactSearch.notifications).toEqual(["notifications/tools/list_changed"]);
       expect(yield* compact.listed).toEqual([
         "delegate_task",
         "preview_open",
         "schedule_task",
         "tool_search",
       ]);
+      // Re-searching an already-loaded tool does not emit a redundant list_changed notification.
+      const repeatSearch = yield* compact.call("tool_search", { query: "browser" });
+      expect(repeatSearch.notifications).toEqual([]);
       expect(yield* compactOther.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("compact exposure still honors EnabledWhen predicates for subagent sessions", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const scopeFor = (
+        token: string,
+        subagent: boolean,
+      ): McpInvocationContext.McpThreadInvocationScope => ({
+        environmentId,
+        requestNamespace: token,
+        thread: {
+          threadId: ThreadId.make(`thread-${token}`),
+          providerSessionId: token,
+          providerInstanceId: ProviderInstanceId.make("antigravity"),
+          ...(subagent ? { subagent: true } : {}),
+        },
+        client: undefined,
+        capabilities: new Set(["pull-requests"]),
+        issuedAt: 1,
+      });
+      const scopes = new Map([
+        ["parentCompactToken", scopeFor("parentCompactToken", false)],
+        ["subagentCompactToken", scopeFor("subagentCompactToken", true)],
+      ]);
+      const makeTool = (name: string, description: string, hideFromSubagents: boolean) => {
+        const base = Tool.make(name, {
+          description,
+          success: Schema.Struct({}),
+          failure: OrchestratorMcpFailure,
+          failureMode: "return",
+        });
+        return hideFromSubagents
+          ? base.annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromSubagents)
+          : base;
+      };
+      const WatchToolkit = Toolkit.make(
+        makeTool("link_pull_request", "Links a pull request.", false),
+        makeTool("watch_pull_request", "Watches a pull request.", true),
+        makeTool("unwatch_pull_request", "Unwatches a pull request.", true),
+      );
+      const reads = McpToolAccess.reads(() => Effect.succeed({}));
+      const serverLayer = McpHttpServer.layerMcpTransport(
+        Layer.mergeAll(
+          McpHttpServer.toolkitRegistration(
+            WatchToolkit,
+            McpToolAccess.toLayer(WatchToolkit, {
+              link_pull_request: reads,
+              watch_pull_request: reads,
+              unwatch_pull_request: reads,
+            }),
+          ),
+          McpHttpServer.layerToolSearch,
+        ),
+      ).pipe(
+        Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (token) => Effect.succeed(scopes.get(token)),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+      const openCompactSession = (token: string) =>
+        Effect.gen(function* () {
+          const headers = {
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${token}`,
+            "t3-tool-exposure": "compact",
+          };
+          const initialize = yield* httpClient.post("/mcp", {
+            headers,
+            body: HttpBody.text(
+              `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+              "application/json",
+            ),
+          });
+          return yield* httpClient
+            .post("/mcp", {
+              headers: {
+                ...headers,
+                "mcp-session-id": initialize.headers["mcp-session-id"]!,
+                "mcp-protocol-version": "2025-06-18",
+              },
+              body: HttpBody.text(
+                JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+                "application/json",
+              ),
+            })
+            .pipe(
+              Effect.flatMap((response) => response.text),
+              Effect.map((text) => {
+                const body = JSON.parse(
+                  text
+                    .split("\n")
+                    .find((line) => line.startsWith("data: ") || line.startsWith("{"))!
+                    .replace(/^data: /u, ""),
+                ) as { result: { tools: ReadonlyArray<{ name: string }> } };
+                return body.result.tools.map((tool) => tool.name).sort();
+              }),
+            );
+        });
+
+      expect(yield* openCompactSession("parentCompactToken")).toEqual([
+        "link_pull_request",
+        "tool_search",
+        "unwatch_pull_request",
+        "watch_pull_request",
+      ]);
+      expect(yield* openCompactSession("subagentCompactToken")).toEqual([
+        "link_pull_request",
+        "tool_search",
+      ]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

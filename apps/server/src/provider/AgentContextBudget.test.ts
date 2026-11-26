@@ -142,6 +142,7 @@ const layerAdvertisedTools = McpHttpServer.layerTools.pipe(
 const layerAdvertisedToolsWithSearch = Layer.mergeAll(
   McpHttpServer.layerTools,
   McpHttpServer.layerToolSearch,
+  McpHttpServer.layerToolExposure,
 ).pipe(
   Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
   Layer.provide(toolHandlerServices),
@@ -244,8 +245,67 @@ it.effect("compact eager MCP toolset stays valid and within the agy schema budge
         description: tool.description,
         inputSchema: tool.inputSchema,
       }));
-    expect(compactTools).toHaveLength(McpToolExposure.COMPACT_EAGER_TOOLS.size);
     const compactBytes = utf8Bytes(JSON.stringify(compactTools));
     expect(compactBytes).toBeLessThanOrEqual(38_000);
+  }).pipe(Effect.provide(layerAdvertisedToolsWithSearch)),
+);
+
+it.effect("compact dynamic tool_search stays bounded and skips already-eager tools", () =>
+  Effect.gen(function* () {
+    const mcp = yield* McpServer.McpServer;
+    const exposure = yield* McpToolExposure.McpToolExposure;
+    const agentTools = mcp.tools.filter(
+      ({ annotations }) =>
+        Context.getOrUndefined(
+          annotations,
+          McpSchema.EnabledWhen,
+        )?.({
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+        }) ?? true,
+    );
+    const sessionId = "compact-budget-session";
+    const maxListedBytes = 38_000 + McpToolExposure.COMPACT_DYNAMIC_MAX_BYTES;
+    const listedBytes = () =>
+      utf8Bytes(
+        JSON.stringify(
+          agentTools
+            .filter(({ tool }) => exposure.isListed(sessionId, tool.name, "compact"))
+            .map(({ tool }) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })),
+        ),
+      );
+
+    const previewHits = yield* exposure.search(sessionId, "preview", "compact");
+    expect(previewHits.length).toBeGreaterThan(0);
+    expect(previewHits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name))).toBe(
+      true,
+    );
+    expect(listedBytes()).toBeLessThanOrEqual(maxListedBytes);
+
+    for (const query of ["project", "device", "worktree", "attachment"]) {
+      const hits = yield* exposure.search(sessionId, query, "compact");
+      expect(hits.length, query).toBeGreaterThan(0);
+      expect(
+        hits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name)),
+        query,
+      ).toBe(true);
+      expect(listedBytes(), query).toBeLessThanOrEqual(maxListedBytes);
+    }
+
+    const threadHits = yield* exposure.search(sessionId, "thread", "compact");
+    expect(threadHits.map((hit) => hit.name)).toContain("t3_thread_send_attachments");
+    expect(threadHits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name))).toBe(
+      true,
+    );
+    expect(listedBytes()).toBeLessThanOrEqual(maxListedBytes);
+    expect(exposure.isListed(sessionId, "t3_thread_send_attachments", "compact")).toBe(true);
+    // Earlier dynamic search hits were evicted to keep the compact window bounded.
+    expect(previewHits.some((hit) => !exposure.isListed(sessionId, hit.name, "compact"))).toBe(
+      true,
+    );
   }).pipe(Effect.provide(layerAdvertisedToolsWithSearch)),
 );

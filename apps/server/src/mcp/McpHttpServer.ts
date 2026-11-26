@@ -388,6 +388,9 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       limited.thread === undefined
         ? undefined
         : yield* Cache.get(forgeOfThread, limited.thread.threadId);
+    const toolExposure = McpToolExposure.parseExposureMode(
+      request.headers[MCP_TOOL_EXPOSURE_HEADER],
+    );
     return {
       ...limited,
       linkedEnvironments,
@@ -395,6 +398,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       workflows,
       origin,
       ...(forge === undefined ? {} : { forge }),
+      ...(toolExposure === undefined ? {} : { toolExposure }),
     };
   });
   // Untraced: a span here would wrap the tool call; the HTTP server span already covers it.
@@ -1558,7 +1562,7 @@ export const layerToolCaller = Layer.effect(
   Effect.map(McpServer.McpServer, (server) => ({ call: server.callTool })),
 ).pipe(Layer.provide(Layer.fresh(layerTools.pipe(Layer.provideMerge(layerInProcessMcpServer)))));
 
-const layerToolExposure = Layer.effect(
+export const layerToolExposure = Layer.effect(
   McpToolExposure.McpToolExposure,
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
@@ -1572,7 +1576,17 @@ const layerToolExposure = Layer.effect(
               enabledWhen === undefined || enabledWhen({ protocolVersion: "", capabilities: {} })
             );
           })
-          .map(({ tool }) => ({ name: tool.name, description: tool.description ?? "" })),
+          .map(({ tool }) => ({
+            name: tool.name,
+            description: tool.description ?? "",
+            bytes: utf8Length(
+              JSON.stringify({
+                name: tool.name,
+                description: tool.description,
+                inputSchema: tool.inputSchema,
+              }),
+            ),
+          })),
       () => server.notifications["notifications/tools/list_changed"]({}),
     );
   }),
@@ -1587,11 +1601,13 @@ const layerDeferredListing = McpServer.visibility(
   Effect.gen(function* () {
     const exposure = yield* McpToolExposure.McpToolExposure;
     // Untraced: it runs once per tool on every list request.
-    return Effect.fnUntraced(function* ({ method, target, headers }: McpServer.MiddlewareOptions) {
+    return Effect.fnUntraced(function* ({ method, target }: McpServer.MiddlewareOptions) {
       if (method !== "tools/list") return true;
-      const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
-      const providerSessionId = Option.getOrUndefined(scope)?.thread?.providerSessionId;
-      const mode = McpToolExposure.parseExposureMode(headers[MCP_TOOL_EXPOSURE_HEADER]);
+      const scope = Option.getOrUndefined(
+        yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext),
+      );
+      const providerSessionId = scope?.thread?.providerSessionId;
+      const mode = scope?.toolExposure;
       if (mode === undefined || providerSessionId === undefined) {
         return target !== McpToolExposure.TOOL_SEARCH;
       }
