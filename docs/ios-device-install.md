@@ -169,7 +169,8 @@ After the upload exits 0, set `SQIM_URL` to the printed HTTPS install link
 ```bash
 (
   manifest=$(curl -fsSL "$SQIM_URL/manifest.plist") &&
-    grep -Fq '<string>dev.shuv.shuv2code.nightly</string>' <<< "$manifest" &&
+    tr '\n' ' ' <<< "$manifest" | grep -Eq \
+      '<key>bundle-identifier</key>[[:space:]]*<string>dev\.shuv\.shuv2code\.nightly</string>' &&
     ! grep -Fq '.watchkitapp' <<< "$manifest"
 )
 ```

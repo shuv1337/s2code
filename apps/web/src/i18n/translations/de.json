@@ -9020,7 +9020,7 @@
   "7a13173fc287b9de": "Teile einen Thread mit einem Gast, der ihn live im Browser verfolgt und Nachrichten sendet, die du genehmigst. Melde dich bei S2 Connect an, um Gastlinks zu nutzen.",
   "0aa5406ac4d7f7c7": "Gastlinks",
   "f0e853acd2006d53": "Verknüpfte Umgebungen",
-  "ef10c2dff987f3ea": "Führe mehrstufige Workflows aus Dateien im Ordner workflows des T3-Home dieses Servers aus. Öffne sie über die Befehlspalette. Solange es aus ist, läuft nichts aus diesem Ordner; Läufe warten, bis es wieder an ist.",
+  "6d9a982df559e145": "Führe mehrstufige Workflows aus Dateien im Ordner workflows des S2Code-Home dieses Servers aus. Öffne sie über die Befehlspalette. Solange es aus ist, läuft nichts aus diesem Ordner; Läufe warten, bis es wieder an ist.",
   "2dadb2359422121c": "Workflows",
   "933dabf0700708af": "Wie viele übersprungene Läufe jeder Workflow in seinem Verlauf behält. Ältere übersprungene Läufe werden gelöscht; Läufe, die etwas getan haben, bleiben immer erhalten.",
   "f172d7e5deb24f75": "Behaltene übersprungene Läufe auf Standard zurücksetzen",
@@ -9029,7 +9029,7 @@
   "13e86eb5d8287a71": "Nach einer Claude- oder Codex-Runde eine vorhergesagte nächste Nachricht im leeren Eingabefeld anzeigen. Tab übernimmt sie. Jede ist eine zusätzliche gecachte Anfrage in deinem Tarif. Erfordert Codex 0.165+. Claude-Threads werden nach einem Neustart aktualisiert.",
   "d4b2a2ec812aafb0": "Nächsten Prompt vorschlagen",
   "298c7150a7621c80": "Simlock-Geräte-Hosts",
-  "67937aa49179285e": "Auf einem Mac neue Worktrees aus einem im T3-Home-Ordner zwischengespeicherten Checkout klonen, statt jede Datei zu schreiben. Verwendet den normalen Git-Checkout, wenn das nicht geht. Beim Ausschalten wird der Cache gelöscht.",
+  "fd5c771bad7f3bf7": "Auf einem Mac neue Worktrees aus einem im S2Code-Home-Ordner zwischengespeicherten Checkout klonen, statt jede Datei zu schreiben. Verwendet den normalen Git-Checkout, wenn das nicht geht. Beim Ausschalten wird der Cache gelöscht.",
   "f9904f78d3003f58": "Schneller Worktree-Checkout",
   "9c2f647882522302": "Die ausgewählten Rechner verwenden unterschiedliche Modi für Agenten-Feedback.",
   "31bbf7bf8c0a5279": "Agenten-Feedback",
@@ -9053,7 +9053,7 @@
     },
     ". Solange es aus ist, startet nichts Neues über eine Verknüpfung; laufende Aufgaben werden beendet."
   ],
-  "ce6a3933a976ac7e": [
+  "0acbf72a77f9163d": [
     "Lass den Gerätebereich Simulatoren und Emulatoren aus deinem eigenen",
     " ",
     {
@@ -9069,7 +9069,7 @@
       "i": 2,
       "c": "Geräte"
     },
-    ". Eine Alpha-Version, die sich ändern oder kaputtgehen kann. T3 Code installiert Simlock nie."
+    ". Eine Alpha-Version, die sich ändern oder kaputtgehen kann. S2Code installiert Simlock nie."
   ],
   "3836976622328d61": "Was Agenten von hier dort tun dürfen",
   "b20c269e7ad96f42": "Ein Agent bekommt dort nie mehr Zugriff als sein eigener Modus hier. Unterhalb von Vollzugriff kann er nur Threads ändern, die diese Verknüpfung gestartet hat, nicht die eigenen Threads, Projekte oder Einstellungen dieses Rechners.",

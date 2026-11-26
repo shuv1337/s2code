@@ -25,38 +25,59 @@ const SAFE_INTEGER_BOUNDS: Record<string, number> = {
 const isNonStringEnum = (key: string, value: Json) =>
   key === "enum" && Array.isArray(value) && value.some((item) => typeof item !== "string");
 
-const tagOf = (branch: JsonObject, key: string): Json => {
-  const property = Predicate.isObject(branch.properties) ? branch.properties[key] : undefined;
-  return Predicate.isObject(property) && Array.isArray(property.enum) && property.enum.length === 1
-    ? property.enum[0]
+const stringEnum = (schema: Json) =>
+  Predicate.isObject(schema) &&
+  schema.type === "string" &&
+  Array.isArray(schema.enum) &&
+  schema.enum.length > 0 &&
+  schema.enum.every(Predicate.isString)
+    ? schema.enum
     : undefined;
+
+const mergeScalars = (branches: ReadonlyArray<JsonObject>): JsonObject | undefined => {
+  if (branches.every((branch) => branch.type === "string")) {
+    const enums = branches.map(stringEnum);
+    return enums.every((values) => values !== undefined)
+      ? { type: "string", enum: [...new Set(enums.flat())] }
+      : { type: "string" };
+  }
+  if (branches.every((branch) => branch.type === "boolean")) return { type: "boolean" };
+  if (branches.every((branch) => branch.type === "integer" || branch.type === "number")) {
+    const minimums = branches.map((branch) => branch.minimum);
+    const maximums = branches.map((branch) => branch.maximum);
+    return {
+      type: branches.some((branch) => branch.type === "number") ? "number" : "integer",
+      ...(minimums.every(Predicate.isNumber) ? { minimum: Math.min(...minimums) } : {}),
+      ...(maximums.every(Predicate.isNumber) ? { maximum: Math.max(...maximums) } : {}),
+    };
+  }
+  return undefined;
 };
 
 /** One object for a tagged union of objects: each property once, the tag listing every value. */
-const mergeTaggedObjects = (branches: ReadonlyArray<Json>): JsonObject | undefined => {
-  if (branches.length < 2) return undefined;
+const mergeTaggedObjects = (branches: ReadonlyArray<JsonObject>): JsonObject | undefined => {
   const objects = branches.filter(
     (branch): branch is JsonObject & { properties: JsonObject } =>
-      Predicate.isObject(branch) &&
-      branch.type === "object" &&
-      Predicate.isObject(branch.properties),
+      branch.type === "object" && Predicate.isObject(branch.properties),
   );
   if (objects.length !== branches.length) return undefined;
-  const tag = Object.keys(objects[0]!.properties).find((key) => {
-    const values = objects.map((object) => tagOf(object, key));
-    return values.every((value) => value !== undefined) && new Set(values).size === values.length;
-  });
+  const tag = Object.keys(objects[0]!.properties)
+    .map((key) => {
+      const enums = objects.map((object) => stringEnum(object.properties[key]));
+      if (enums.some((values) => values === undefined)) return undefined;
+      const values = enums.flat();
+      return new Set(values).size === values.length ? { key, values } : undefined;
+    })
+    .find((tag) => tag !== undefined);
   if (tag === undefined) return undefined;
-  const properties: JsonObject = {
-    [tag]: { type: "string", enum: objects.map((object) => tagOf(object, tag)) },
-  };
+  const properties: JsonObject = { [tag.key]: { type: "string", enum: tag.values } };
   for (const object of objects) {
     for (const [name, property] of Object.entries(object.properties)) {
-      if (name === tag) continue;
+      if (name === tag.key) continue;
       const seen = properties[name];
       if (seen === undefined) properties[name] = property;
       else if (JSON.stringify(seen) !== JSON.stringify(property)) {
-        const options = Predicate.isObject(seen) && isBareAnyOf(seen) ? seen.anyOf : [seen];
+        const options = isBareAnyOf(seen) ? seen.anyOf : [seen];
         if (!options.some((option) => JSON.stringify(option) === JSON.stringify(property)))
           properties[name] = { anyOf: [...options, property] };
       }
@@ -66,16 +87,16 @@ const mergeTaggedObjects = (branches: ReadonlyArray<Json>): JsonObject | undefin
     Array.isArray(object.required) ? object.required : [],
   );
   const requiredByAll = first.filter(
-    (name) => name !== tag && others.every((required) => required.includes(name)),
+    (name) => name !== tag.key && others.every((required) => required.includes(name)),
   );
-  return { type: "object", properties, required: [tag, ...requiredByAll] };
+  return { type: "object", properties, required: [tag.key, ...requiredByAll] };
 };
 
 const compact = (schema: Json, optional: boolean): Json => {
   if (Array.isArray(schema)) return schema.map((item) => compact(item, false));
   if (!Predicate.isObject(schema)) return schema;
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  let result: JsonObject = {};
+  const result: JsonObject = {};
   for (const [key, value] of Object.entries(schema)) {
     if (key === "additionalProperties" && value === true) continue;
     if (SAFE_INTEGER_BOUNDS[key] === value) continue;
@@ -95,17 +116,25 @@ const compact = (schema: Json, optional: boolean): Json => {
       .flatMap((branch) => (isBareAnyOf(branch) ? branch.anyOf : [branch]))
       .filter((branch) => !(optional && isNullSchema(branch)) && !isJsonStringSchema(branch));
     const { anyOf: _anyOf, ...rest } = result;
-    const only = branches.length === 1 ? branches[0] : mergeTaggedObjects(branches);
-    result = Predicate.isObject(only) ? { ...only, ...rest } : { ...rest, anyOf: branches };
+    if (branches.length === 0) return rest;
+    if (branches.length === 1 && Predicate.isObject(branches[0])) {
+      return { ...branches[0], ...rest };
+    }
+    if (branches.length > 1 && branches.every(Predicate.isObject)) {
+      const scalars = mergeScalars(branches);
+      if (scalars !== undefined) return { ...scalars, ...rest };
+      const tagged = mergeTaggedObjects(branches);
+      if (tagged !== undefined) return compact({ ...tagged, ...rest }, optional);
+    }
+    return { ...rest, anyOf: branches };
   }
   return result;
 };
 
 /**
- * The input schema T3 advertises for a tool. Drops JSON noise that every thread pays for:
- * `additionalProperties: true`, safe-integer bounds, nested `anyOf`, JSON-string fallbacks, and
- * the `null` branch of optional properties. A tagged union of objects becomes one object.
- * Decoding still uses the full schema, so each tag's own required fields still apply.
+ * Drops redundant JSON keywords, JSON-string fallbacks, and optional null branches from what T3
+ * advertises. Merges compatible scalar and disjoint tagged object unions but keeps heterogeneous
+ * and required nullable unions. Decoding still uses the full schema.
  */
 export const advertisedJsonSchema = (tool: Tool.Any) =>
   compact(Tool.getJsonSchema(tool), false) as ReturnType<typeof Tool.getJsonSchema>;
