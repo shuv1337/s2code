@@ -433,6 +433,43 @@ echo "$ref" >> "${refs}"`,
       expect(encryptedWindows).toContain(`${name}: \${{ vars.${name} }}`);
     }
   });
+
+  it("stages the hidden Vite manifest before uploading js-bundle and restores it in desktop builds", () => {
+    const buildBundleSection = workflow.split("  build_bundle:\n")[1]!.split("\n  desktop:")[0]!;
+    const stageIndex = buildBundleSection.indexOf("- name: Stage web asset manifest\n");
+    const uploadIndex = buildBundleSection.indexOf("name: js-bundle\n");
+    expect(stageIndex).toBeGreaterThan(-1);
+    expect(uploadIndex).toBeGreaterThan(stageIndex);
+
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "fork-vite-manifest-"));
+    try {
+      const bin = NodePath.join(root, "bin");
+      NodeFS.mkdirSync(bin);
+      const clientDir = NodePath.join(root, "apps/server/dist/client");
+      const hiddenDir = NodePath.join(clientDir, ".vite");
+      NodeFS.mkdirSync(hiddenDir, { recursive: true });
+      const manifestContent = '{"index.html":{"file":"assets/index.js"}}\n';
+      NodeFS.writeFileSync(NodePath.join(hiddenDir, "manifest.json"), manifestContent);
+
+      const stage = runStep(buildBundleSection, "Stage web asset manifest", root, bin, {});
+      expect(stage.status, stage.stderr).toBe(0);
+      expect(
+        NodeFS.readFileSync(NodePath.join(clientDir, "vite-manifest.release.json"), "utf8"),
+      ).toBe(manifestContent);
+
+      // Simulate actions/upload-artifact skipping hidden dotfiles when archiving apps/server/dist.
+      NodeFS.rmSync(hiddenDir, { recursive: true, force: true });
+
+      const restore = runStep(desktop, "Restore web asset manifest", root, bin, {});
+      expect(restore.status, restore.stderr).toBe(0);
+      expect(NodeFS.readFileSync(NodePath.join(hiddenDir, "manifest.json"), "utf8")).toBe(
+        manifestContent,
+      );
+      expect(NodeFS.existsSync(NodePath.join(clientDir, "vite-manifest.release.json"))).toBe(false);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 const hasPwsh =
