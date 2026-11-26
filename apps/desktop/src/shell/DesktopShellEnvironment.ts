@@ -182,6 +182,16 @@ const readEnvPath = (env: NodeJS.ProcessEnv): Option.Option<string> =>
 
 const normalizeRuntimeDir = (value: string): string => value.replace(/\/+$/u, "");
 
+const normalizeReleaseBaseUrl = (target: NodeJS.ProcessEnv): void => {
+  const canonical = target[CLI_RELEASE_BASE_URL_ENV]?.trim();
+  const legacy = target.SHUV2CODE_RELEASE_BASE_URL?.trim();
+  const resolved = canonical || legacy;
+  if (resolved) target[CLI_RELEASE_BASE_URL_ENV] = resolved;
+  else delete target[CLI_RELEASE_BASE_URL_ENV];
+  if (legacy) target.SHUV2CODE_RELEASE_BASE_URL = legacy;
+  else delete target.SHUV2CODE_RELEASE_BASE_URL;
+};
+
 const linuxRuntimeDirCandidates = (
   env: NodeJS.ProcessEnv,
   uid: number | undefined,
@@ -577,11 +587,16 @@ const installPosixEnvironment = Effect.fn("desktop.shellEnvironment.installPosix
       "DO_NOT_TRACK",
       "T3CODE_FEATURE_FLAGS",
       "T3CODE_RELEASE_BASE_URL",
-      CLI_RELEASE_BASE_URL_ENV,
-      "SHUV2CODE_RELEASE_BASE_URL",
     ] as const) {
       if (!config.env[name] && shellEnvironment[name]) {
         config.env[name] = shellEnvironment[name];
+      }
+    }
+
+    for (const name of [CLI_RELEASE_BASE_URL_ENV, "SHUV2CODE_RELEASE_BASE_URL"] as const) {
+      const value = trimNonEmpty(shellEnvironment[name]);
+      if (Option.isNone(trimNonEmpty(config.env[name])) && Option.isSome(value)) {
+        config.env[name] = value.value;
       }
     }
 
@@ -743,6 +758,12 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(latest, Option.some(message));
     yield* PubSub.publish(changes, message);
   });
+  const buildPatch = (source: NodeJS.ProcessEnv): ShellEnvironmentPatch => {
+    normalizeReleaseBaseUrl(source);
+    return Object.fromEntries(
+      Object.keys(ShellEnvironmentPatch.fields).map((name) => [name, source[name] ?? null]),
+    );
+  };
   const probe = Effect.fn("desktop.shellEnvironment.refresh")(
     function* (budget: ProbeBudget) {
       // Refresh from the inherited baseline so removed cached paths and values do not survive.
@@ -754,9 +775,7 @@ export const make = Effect.gen(function* () {
       });
       const { prepared } = discovery;
       stripAppImagePaths(fresh);
-      const patch = Object.fromEntries(
-        Object.keys(ShellEnvironmentPatch.fields).map((name) => [name, fresh[name] ?? null]),
-      );
+      const patch = buildPatch(fresh);
       if (prepared || Option.isNone(yield* Ref.get(latest))) yield* publish(patch, prepared);
       if (prepared) {
         const cached = Object.fromEntries(
@@ -825,11 +844,7 @@ export const make = Effect.gen(function* () {
           );
         }
         applyShellEnvironment(baseline, cached, environment.platform);
-        yield* publish(
-          Object.fromEntries(
-            Object.keys(ShellEnvironmentPatch.fields).map((name) => [name, baseline[name] ?? null]),
-          ),
-        );
+        yield* publish(buildPatch(baseline));
       }
       yield* Effect.forkIn(refresh, scope);
       return true;

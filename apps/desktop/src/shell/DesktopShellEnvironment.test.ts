@@ -733,13 +733,14 @@ describe("DesktopShellEnvironment", () => {
   );
 
   it.effect.each(["S2CODE_RELEASE_BASE_URL", "SHUV2CODE_RELEASE_BASE_URL"] as const)(
-    "hydrates PATH, missing SSH_AUTH_SOCK, and %s from the login shell on linux",
+    "hydrates PATH, missing SSH_AUTH_SOCK, and normalizes %s into S2CODE_RELEASE_BASE_URL on linux",
     (mirrorKey) =>
       Effect.gen(function* () {
         const env: NodeJS.ProcessEnv = {
           SHELL: "/bin/zsh",
           PATH: "/usr/bin",
         };
+        let publishedPatch: Record<string, string | null | undefined> | undefined;
 
         yield* runShellEnvironment({
           env,
@@ -751,12 +752,109 @@ describe("DesktopShellEnvironment", () => {
               SHUV2CODE_TELEMETRY_ENABLED: "false",
               [mirrorKey]: "https://mirror.example.com/s2code",
             }),
+          use: (service) =>
+            Effect.gen(function* () {
+              const prepared = yield* service.awaitDiscovery;
+              const snapshot = yield* Stream.runHead(service.updates);
+              assert.isTrue(Option.isSome(snapshot));
+              publishedPatch = Option.isSome(snapshot) ? snapshot.value.environment : undefined;
+              return prepared;
+            }),
         });
 
         assert.equal(env.PATH, "/home/linuxbrew/.linuxbrew/bin:/usr/bin");
         assert.equal(env.SSH_AUTH_SOCK, "/tmp/secretive.sock");
         assert.equal(env.T3CODE_TELEMETRY_ENABLED, "false");
-        assert.equal(env[mirrorKey], "https://mirror.example.com/s2code");
+        assert.equal(env.S2CODE_RELEASE_BASE_URL, "https://mirror.example.com/s2code");
+        assert.equal(
+          env.SHUV2CODE_RELEASE_BASE_URL,
+          mirrorKey === "SHUV2CODE_RELEASE_BASE_URL"
+            ? "https://mirror.example.com/s2code"
+            : undefined,
+        );
+        assert.equal(publishedPatch?.S2CODE_RELEASE_BASE_URL, "https://mirror.example.com/s2code");
+        assert.equal(
+          publishedPatch?.SHUV2CODE_RELEASE_BASE_URL,
+          mirrorKey === "SHUV2CODE_RELEASE_BASE_URL" ? "https://mirror.example.com/s2code" : null,
+        );
+      }),
+  );
+
+  it.effect("prefers canonical S2CODE_RELEASE_BASE_URL over SHUV2CODE_RELEASE_BASE_URL", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = {
+        SHELL: "/bin/zsh",
+        PATH: "/usr/bin",
+      };
+      let publishedPatch: Record<string, string | null | undefined> | undefined;
+
+      yield* runShellEnvironment({
+        env,
+        platform: "linux",
+        handler: () =>
+          envOutput({
+            PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
+            S2CODE_RELEASE_BASE_URL: "https://canonical.example.com/s2code",
+            SHUV2CODE_RELEASE_BASE_URL: "https://legacy.example.com/s2code",
+          }),
+        use: (service) =>
+          Effect.gen(function* () {
+            const prepared = yield* service.awaitDiscovery;
+            const snapshot = yield* Stream.runHead(service.updates);
+            assert.isTrue(Option.isSome(snapshot));
+            publishedPatch = Option.isSome(snapshot) ? snapshot.value.environment : undefined;
+            return prepared;
+          }),
+      });
+
+      assert.equal(env.S2CODE_RELEASE_BASE_URL, "https://canonical.example.com/s2code");
+      assert.equal(env.SHUV2CODE_RELEASE_BASE_URL, "https://legacy.example.com/s2code");
+      assert.equal(publishedPatch?.S2CODE_RELEASE_BASE_URL, "https://canonical.example.com/s2code");
+      assert.equal(publishedPatch?.SHUV2CODE_RELEASE_BASE_URL, "https://legacy.example.com/s2code");
+    }),
+  );
+
+  it.effect.each(["S2CODE_RELEASE_BASE_URL", "SHUV2CODE_RELEASE_BASE_URL"] as const)(
+    "adopts a login-shell %s when the inherited value is whitespace-only",
+    (mirrorKey) =>
+      Effect.gen(function* () {
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/zsh",
+          PATH: "/usr/bin",
+          [mirrorKey]: "   ",
+        };
+        let publishedPatch: Record<string, string | null | undefined> | undefined;
+
+        yield* runShellEnvironment({
+          env,
+          platform: "linux",
+          handler: () =>
+            envOutput({
+              PATH: "/home/linuxbrew/.linuxbrew/bin:/usr/bin",
+              [mirrorKey]: "https://mirror.example.com/s2code",
+            }),
+          use: (service) =>
+            Effect.gen(function* () {
+              const prepared = yield* service.awaitDiscovery;
+              const snapshot = yield* Stream.runHead(service.updates);
+              assert.isTrue(Option.isSome(snapshot));
+              publishedPatch = Option.isSome(snapshot) ? snapshot.value.environment : undefined;
+              return prepared;
+            }),
+        });
+
+        assert.equal(env.S2CODE_RELEASE_BASE_URL, "https://mirror.example.com/s2code");
+        assert.equal(
+          env.SHUV2CODE_RELEASE_BASE_URL,
+          mirrorKey === "SHUV2CODE_RELEASE_BASE_URL"
+            ? "https://mirror.example.com/s2code"
+            : undefined,
+        );
+        assert.equal(publishedPatch?.S2CODE_RELEASE_BASE_URL, "https://mirror.example.com/s2code");
+        assert.equal(
+          publishedPatch?.SHUV2CODE_RELEASE_BASE_URL,
+          mirrorKey === "SHUV2CODE_RELEASE_BASE_URL" ? "https://mirror.example.com/s2code" : null,
+        );
       }),
   );
 

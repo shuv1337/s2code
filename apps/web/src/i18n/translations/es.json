@@ -1886,7 +1886,7 @@
   "594bcbef04093f72": "Abrir carpeta de WSL",
   "04fd71efaa2c3b92": "Abrir pull requests",
   "57e875b79b98ab82": "Abrir issues",
-  "f1db0a234c777a1d": "Usar T3 Code en otra app (MCP)",
+  "e92fa5cdc4be5f9f": "Usar S2Code en otra app (MCP)",
   "6050f22f63e2bcb5": "Abrir flujos de trabajo",
   "a0cc19e60dd99851": "Abrir uso",
   "46694969044eee98": "Enfocar la siguiente área de trabajo",
@@ -3347,8 +3347,8 @@
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
   "e9f4b93c4ec30453": "Código de inicio de sesión",
-  "33194f3e1b80f838": [
-    "Obtén uno en Usar T3 Code en otra app (MCP), Ajustes → Compartir y acceso, o con",
+  "8bb1ab71bb7c9e6a": [
+    "Obtén uno en Usar S2Code en otra app (MCP), Ajustes → Compartir y acceso, o con",
     " ",
     {
       "t": "code",
@@ -6172,7 +6172,7 @@
   "2e54b83eebac5a5b": "Las apps como Poke y Claude se ejecutan en la nube. Necesitan una dirección pública para acceder a {environment}.",
   "f645b906c8b14212": "S2 Connect da esa dirección a {environment}. Cada app sigue necesitando tu aprobación.",
   "987158d85ee17ae8": "Conéctate primero a {environment}.",
-  "6bf09d4b7e4ba53b": "Actualiza T3 Code en {environment}",
+  "f9f0b2e1dab86901": "Actualiza S2Code en {environment}",
   "1f5ca8f60e873093": "Este dispositivo necesita el permiso Ver relay en {environment}.",
   "2fa31ba5b0186755": "Solución: {fix}",
   "e3a3024f000e5f41": "Activa S2 Connect en {environment}",
@@ -6203,8 +6203,8 @@
   "9ec433045537acfc": "Volver a comprobar",
   "3167907b690b5b49": "Comprobando S2 Connect…",
   "37123e19065d1dac": "Tu cuenta de S2 Connect se quedó sin túneles.",
-  "1505e983a4f9b08d": [
-    "Reinicia T3 Code en ",
+  "e1ae52b45c399f4b": [
+    "Reinicia S2Code en ",
     {
       "i": 1,
       "k": "_gt_value_1",
@@ -9199,7 +9199,7 @@
   "2f130a0cfd0a6c69": "Añadir servidor",
   "ab6b806a25a8c6bf": "Probando…",
   "6855de06fd5c0e7f": "Introduce un nombre.",
-  "4f0b12e9ab047829": "Los nombres que empiezan por «t3» están reservados para T3 Code.",
+  "4aaa8cabbaae5f33": "Los nombres que empiezan por «t3» están reservados para S2Code.",
   "c08ac9d3a2d33060": "Usa hasta 24 minúsculas, dígitos y guiones; empieza con una letra.",
   "8b85a72042c372e9": "Ya existe un servidor con ese nombre.",
   "809d7924f57375ea": "Introduce la URL del servidor.",
@@ -11331,7 +11331,7 @@
   "189c753a02fed5f2": "Cambios sin commit",
   "8ccc880c41e5e646": "Archivos con seguimiento editados",
   "dde724d790183148": "{counts} en todas las máquinas",
-  "96fde8cda73aa873": "Carpeta donde se crean los nuevos worktrees, en cualquier unidad, como D:\\worktrees o ~/worktrees. Los worktrees existentes se quedan donde están. Déjalo vacío para usar la carpeta de inicio de T3.",
+  "643a77b14b5be4a2": "Carpeta donde se crean los nuevos worktrees, en cualquier unidad, como D:\\worktrees o ~/worktrees. Los worktrees existentes se quedan donde están. Déjalo vacío para usar la carpeta de inicio de S2Code.",
   "c7d07d2bed742b25": "Restablecer la ubicación de los worktrees al valor predeterminado",
   "da6138080e9709f7": "Ubicación de los worktrees",
   "8711a1de99862971": "Reducir {label}",

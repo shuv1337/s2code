@@ -347,7 +347,7 @@ export const AntigravityDriver: ProviderDriver<
               : new ProviderSetupError({
                   instanceId,
                   operation: "runtime",
-                  detail: `Antigravity ${version} only serves allowlisted editors, not T3 Code. ${action} to ${OPEN_MODEL_ACCESS_RELEASE.join(".")} or newer, then retry.`,
+                  detail: `Antigravity ${version} only serves allowlisted editors, not S2Code. ${action} to ${OPEN_MODEL_ACCESS_RELEASE.join(".")} or newer, then retry.`,
                 })));
         if (refused) {
           return yield* new AcpErrors.AcpTransportError({ detail: refused.detail, cause: refused });

@@ -1778,7 +1778,7 @@ function OpenCommandPaletteDialog(props: {
       "openclaw",
       "hermes",
     ],
-    title: gt("Use T3 Code in another app (MCP)"),
+    title: gt("Use S2Code in another app (MCP)"),
     icon: <PlugIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       openUseInAnotherApp(
