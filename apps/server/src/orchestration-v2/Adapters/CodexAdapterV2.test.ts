@@ -1386,7 +1386,7 @@ describe("CodexAdapterV2 session initialize", () => {
       assert.instanceOf(failure.cause, ProviderSetupError);
       assert.equal(
         failure.cause.message,
-        "Codex 0.144.3 does not work with this T3 Code release. Update Codex to >=0.159.0, then retry.",
+        "Codex 0.144.3 does not work with this S2Code release. Update Codex to >=0.159.0, then retry.",
       );
     }).pipe(
       Effect.scoped,

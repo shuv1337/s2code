@@ -537,7 +537,7 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
   );
 
   for (const [agentVersion, expected] of [
-    ["1.4.5", "does not work with this T3 Code release"],
+    ["1.4.5", "does not work with this S2Code release"],
     // 1.5.0 offers Claude and GPT only to allowlisted editors such as Zed.
     ["1.5.0", "only serves allowlisted editors, not S2Code"],
   ] as const) {
