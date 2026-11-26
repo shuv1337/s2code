@@ -279,12 +279,21 @@ it.effect("compact dynamic tool_search stays bounded and skips already-eager too
         ),
       );
 
+    const initialBytes = listedBytes();
+    const expectWithinBudget = (label: string) => {
+      const currentBytes = listedBytes();
+      expect(currentBytes - initialBytes, `${label} dynamic delta`).toBeLessThanOrEqual(
+        McpToolExposure.COMPACT_DYNAMIC_MAX_BYTES,
+      );
+      expect(currentBytes, `${label} total`).toBeLessThanOrEqual(maxListedBytes);
+    };
+
     const previewHits = yield* exposure.search(sessionId, "preview", "compact");
     expect(previewHits.length).toBeGreaterThan(0);
     expect(previewHits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name))).toBe(
       true,
     );
-    expect(listedBytes()).toBeLessThanOrEqual(maxListedBytes);
+    expectWithinBudget("preview");
 
     for (const query of ["project", "device", "worktree", "attachment"]) {
       const hits = yield* exposure.search(sessionId, query, "compact");
@@ -293,7 +302,7 @@ it.effect("compact dynamic tool_search stays bounded and skips already-eager too
         hits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name)),
         query,
       ).toBe(true);
-      expect(listedBytes(), query).toBeLessThanOrEqual(maxListedBytes);
+      expectWithinBudget(query);
     }
 
     const threadHits = yield* exposure.search(sessionId, "thread", "compact");
@@ -301,7 +310,7 @@ it.effect("compact dynamic tool_search stays bounded and skips already-eager too
     expect(threadHits.every((hit) => !McpToolExposure.COMPACT_EAGER_TOOLS.has(hit.name))).toBe(
       true,
     );
-    expect(listedBytes()).toBeLessThanOrEqual(maxListedBytes);
+    expectWithinBudget("thread");
     expect(exposure.isListed(sessionId, "t3_thread_send_attachments", "compact")).toBe(true);
     // Earlier dynamic search hits were evicted to keep the compact window bounded.
     expect(previewHits.some((hit) => !exposure.isListed(sessionId, hit.name, "compact"))).toBe(

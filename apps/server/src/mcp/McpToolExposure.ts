@@ -110,7 +110,7 @@ export class McpToolExposure extends Context.Service<
     readonly search: (
       providerSessionId: string,
       query: string,
-      mode: McpToolExposureMode,
+      mode: McpToolExposureMode | undefined,
     ) => Effect.Effect<ReadonlyArray<SearchResultTool>>;
     readonly isListed: (
       providerSessionId: string,
@@ -135,21 +135,25 @@ const score = (tool: ListedTool, terms: ReadonlyArray<string>) => {
 const eagerToolsFor = (mode: McpToolExposureMode): ReadonlySet<string> =>
   mode === "compact" ? COMPACT_EAGER_TOOLS : DIRECT_TOOLS;
 
-const toolBytes = (tool: ListedTool): number =>
-  tool.bytes ??
-  Buffer.byteLength(JSON.stringify({ name: tool.name, description: tool.description }), "utf8");
+const sessionKey = (providerSessionId: string, mode: McpToolExposureMode): string =>
+  `${mode}:${providerSessionId}`;
+
+// Include +1 byte for the JSON array comma separator when appended to listed tools.
+const entryBytes = (tool: ListedTool): number =>
+  (tool.bytes ??
+    Buffer.byteLength(JSON.stringify({ name: tool.name, description: tool.description }), "utf8")) +
+  1;
 
 const selectMatches = (
   ranked: ReadonlyArray<ListedTool>,
-  mode: McpToolExposureMode,
+  mode: McpToolExposureMode | undefined,
 ): ReadonlyArray<ListedTool> => {
   if (mode !== "compact") return ranked;
   const selected: Array<ListedTool> = [];
   let usedBytes = 0;
   for (const tool of ranked) {
-    const bytes = toolBytes(tool);
-    // Always allow at least the top match so an oversized tool remains reachable.
-    if (selected.length === 0 || usedBytes + bytes <= COMPACT_DYNAMIC_MAX_BYTES) {
+    const bytes = entryBytes(tool);
+    if (usedBytes + bytes <= COMPACT_DYNAMIC_MAX_BYTES) {
       selected.push(tool);
       usedBytes += bytes;
     }
@@ -167,23 +171,28 @@ export const make = (
     selected: ReadonlyArray<ListedTool>,
     mode: McpToolExposureMode,
   ): boolean => {
-    const listed = loaded.get(providerSessionId) ?? new Map<string, number>();
+    const key = sessionKey(providerSessionId, mode);
+    const listed = loaded.get(key) ?? new Map<string, number>();
     const previousNames = new Set(listed.keys());
-    loaded.delete(providerSessionId);
-    loaded.set(providerSessionId, listed);
+    loaded.delete(key);
     for (const tool of selected) {
+      const bytes = entryBytes(tool);
+      if (mode === "compact" && bytes > COMPACT_DYNAMIC_MAX_BYTES) continue;
       listed.delete(tool.name);
-      listed.set(tool.name, toolBytes(tool));
+      listed.set(tool.name, bytes);
     }
     if (mode === "compact") {
       let totalBytes = 0;
       for (const bytes of listed.values()) totalBytes += bytes;
       for (const oldest of listed.keys()) {
-        if (totalBytes <= COMPACT_DYNAMIC_MAX_BYTES || listed.size <= 1) break;
+        if (totalBytes <= COMPACT_DYNAMIC_MAX_BYTES) break;
         const removedBytes = listed.get(oldest) ?? 0;
         listed.delete(oldest);
         totalBytes -= removedBytes;
       }
+    }
+    if (listed.size > 0) {
+      loaded.set(key, listed);
     }
     for (const oldest of loaded.keys()) {
       if (loaded.size <= MAX_SESSIONS) break;
@@ -201,21 +210,29 @@ export const make = (
         .toLowerCase()
         .split(/[^a-z0-9_]+/u)
         .filter(Boolean);
-      const eager = eagerToolsFor(mode);
       const ranked = tools()
-        .filter((tool) => tool.name !== TOOL_SEARCH && !eager.has(tool.name))
+        .filter(
+          (tool) =>
+            tool.name !== TOOL_SEARCH &&
+            (mode !== "compact" || !COMPACT_EAGER_TOOLS.has(tool.name)),
+        )
         .map((tool) => ({ tool, score: score(tool, terms) }))
         .filter((match) => match.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, MAX_RESULTS)
         .map((match) => match.tool);
       const found = selectMatches(ranked, mode);
-      if (found.length > 0 && load(providerSessionId, found, mode)) {
-        yield* announceListChanged();
+      if (mode !== undefined) {
+        const toLoad =
+          mode === "deferred" ? found.filter((tool) => !DIRECT_TOOLS.has(tool.name)) : found;
+        if (toLoad.length > 0 && load(providerSessionId, toLoad, mode)) {
+          yield* announceListChanged();
+        }
       }
       return found.map(({ name, description }) => ({ name, description }));
     }),
     isListed: (providerSessionId, tool, mode) =>
-      eagerToolsFor(mode).has(tool) || loaded.get(providerSessionId)?.has(tool) === true,
+      eagerToolsFor(mode).has(tool) ||
+      loaded.get(sessionKey(providerSessionId, mode))?.has(tool) === true,
   });
 };

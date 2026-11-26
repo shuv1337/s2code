@@ -2510,9 +2510,30 @@ it.effect("lists optional tools per exposure mode only after tool_search loads t
       });
       expect(deferredSearch.notifications).toEqual(["notifications/tools/list_changed"]);
       expect(yield* deferring.listed).toEqual(["delegate_task", "preview_open", "tool_search"]);
-      // Loading a tool in one session never leaks into compact or default sessions.
+      // Searching for a direct tool in deferred mode still returns it without redundant list_changed.
+      const deferredDirectSearch = yield* deferring.call("tool_search", {
+        query: "delegate_task",
+      });
+      expect(deferredDirectSearch.structuredContent).toEqual({
+        tools: [{ name: "delegate_task", description: "Delegates a task." }],
+      });
+      expect(deferredDirectSearch.notifications).toEqual([]);
+      // Loading a tool in one session never leaks into compact, default, or same-token compact sessions.
       expect(yield* compact.listed).toEqual(["delegate_task", "schedule_task", "tool_search"]);
       expect(yield* other.listed).toEqual(["delegate_task", "preview_open", "schedule_task"]);
+      const sameTokenCompact = yield* session("deferringToken", "compact");
+      expect(yield* sameTokenCompact.listed).toEqual([
+        "delegate_task",
+        "schedule_task",
+        "tool_search",
+      ]);
+
+      // A headerless caller invoking tool_search directly gets matches with no list_changed.
+      const headerlessSearch = yield* other.call("tool_search", { query: "browser" });
+      expect(headerlessSearch.structuredContent).toEqual({
+        tools: [{ name: "preview_open", description: "Opens a browser preview." }],
+      });
+      expect(headerlessSearch.notifications).toEqual([]);
 
       // Searching for an already-eager tool in compact mode skips it and sends no list_changed.
       const eagerSearch = yield* compact.call("tool_search", { query: "schedule" });

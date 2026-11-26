@@ -13,11 +13,7 @@ export const layer = McpToolAccess.toLayer(ToolSearchToolkit, {
       );
       const exposure = yield* McpToolExposure.McpToolExposure;
       return {
-        tools: yield* exposure.search(
-          scope.thread.providerSessionId,
-          query,
-          scope.toolExposure ?? "deferred",
-        ),
+        tools: yield* exposure.search(scope.thread.providerSessionId, query, scope.toolExposure),
       };
     }),
   ),
