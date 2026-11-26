@@ -772,6 +772,8 @@ it("revokes across windows even before the storage event and survives stale pref
   expect(mocks.voice.state.phase).toBe("recording");
   const other = document.createElement("iframe");
   document.body.append(other);
+  const settingsKey = "t3code:client-settings:v1";
+  const previousSettings = localStorage.getItem(settingsKey);
   try {
     const storage = other.contentWindow!.localStorage;
     const key = "t3code:voice-audio-grant:v1";
@@ -797,6 +799,8 @@ it("revokes across windows even before the storage event and survives stale pref
     expect(canSend()).toBe(false);
   } finally {
     other.remove();
+    if (previousSettings === null) localStorage.removeItem(settingsKey);
+    else localStorage.setItem(settingsKey, previousSettings);
   }
 });
 
