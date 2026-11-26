@@ -398,10 +398,10 @@ describe("source file scroll", () => {
     using _style = { [Symbol.dispose]: () => style.remove() };
     await preloadHighlighter({ themes: Object.values(DEFAULT_THEMES), langs: ["text"] });
     // Wrapped lines of differing lengths, so the viewer estimates heights until it measures them.
-    const contents = Array.from(
-      { length: 140 },
-      (_, i) =>
-        `Line ${i + 1}. ${"Notes that wrap across the preview. ".repeat(2 + ((i * 7) % 9))}`,
+    const contents = Array.from({ length: 140 }, (_, i) =>
+      i === 0
+        ? "Line 1."
+        : `Line ${i + 1}. ${"Notes that wrap across the preview. ".repeat(2 + ((i * 7) % 9))}`,
     ).join("\n");
     // A file outside the workspace is read-only, which CodeView renders.
     const hostFile = (reveal: { line: number; requestId: number } | null) => {
@@ -424,8 +424,14 @@ describe("source file scroll", () => {
       expect(Math.abs(middle(row(82)) - middle(scroller()))).toBeLessThan(2);
 
     await using screen = await render(hostFile(null));
-    await vi.waitFor(() => expect(scroller()?.scrollHeight).toBeGreaterThan(3000));
-    scroller()!.scrollTop = 2500;
+    await vi.waitFor(() => {
+      expect(row(1)).toBeTruthy();
+      expect(row(2)?.getBoundingClientRect().height).toBeGreaterThan(
+        row(1)!.getBoundingClientRect().height,
+      );
+      expect(scroller()?.scrollHeight).toBeGreaterThan(scroller()!.clientHeight);
+    });
+    scroller()!.scrollTop = scroller()!.scrollHeight;
     // The viewer has moved its window of mounted rows to the new offset.
     await vi.waitFor(() => expect(row(1)).toBeNull());
 
@@ -591,7 +597,9 @@ describe("source file scroll", () => {
     using _style = { [Symbol.dispose]: () => style.remove() };
     await preloadHighlighter({ themes: Object.values(DEFAULT_THEMES), langs: ["typescript"] });
     const wrapped = "wrap ".repeat(60);
-    const lines = Array.from({ length: 800 }, (_, i) => `const line${i} = "${wrapped}";`);
+    const lines = Array.from({ length: 800 }, (_, i) =>
+      i === 0 ? "const start = 0;" : `const line${i} = "${wrapped}";`,
+    );
     lines.push(
       "const needle = 1;",
       ...Array.from({ length: 40 }, (_, i) => `const tail${i} = ${i};`),
@@ -610,12 +618,18 @@ describe("source file scroll", () => {
         {filePreview("wrapped.ts")}
       </div>,
     );
-    await vi.waitFor(() => expect(scroller()?.scrollHeight).toBeGreaterThan(20_000));
     const shadowRows = () =>
       [...document.querySelectorAll("*")].flatMap((host) =>
         host.shadowRoot ? [...host.shadowRoot.querySelectorAll<HTMLElement>("[data-line]")] : [],
       );
-    await userEvent.click(shadowRows().find((row) => row.getAttribute("data-line") === "1")!);
+    const row = (line: number) => shadowRows().find((row) => row.dataset.line === String(line));
+    await vi.waitFor(() => {
+      expect(row(1)).toBeTruthy();
+      expect(row(2)?.getBoundingClientRect().height).toBeGreaterThan(
+        row(1)!.getBoundingClientRect().height,
+      );
+    });
+    await userEvent.click(row(1)!);
     await vi.waitFor(() => expect(deepActiveElement()?.matches("[data-content]")).toBe(true));
     await userEvent.keyboard(
       isMacPlatform(navigator.platform) ? "{Meta>}f{/Meta}" : "{Control>}f{/Control}",

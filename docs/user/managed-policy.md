@@ -113,7 +113,7 @@ When `maxRuntimeMode` is set, users cannot modify provider launch settings (`bin
 - `browserCookieImport: false`: Disables importing cookies from other browsers.
 - `previewTunnel: false`: Disables remote `localhost` tunneling and port forwarding (streams tabs instead).
 - `worktreeLayoutCommands: false`: Disables `t3.json` `worktreeLayout` `create`/`remove` commands.
-- `telemetry: false`: Disables product usage data and relay tracing for the server, desktop app, and server-opened browsers (does not control `the hosted web client` or mobile).
+- `telemetry: false`: Blocks opt-in [Agent feedback](./telemetry.md#agent-feedback) delivery. Background product analytics and relay client tracing are always off, regardless of policy.
 
 ### Providers
 

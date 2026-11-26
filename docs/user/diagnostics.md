@@ -21,16 +21,16 @@ Open **Settings → Maintenance → Diagnostics** (select an environment) to ins
 - Running child processes (with controls to signal or stop them)
 - **OpenTelemetry export** (OTLP HTTP endpoints; see [Export diagnostics](./telemetry.md#export-diagnostics-to-your-own-receiver))
 
-On mobile, startup crashes from the last 7 days are recorded under **Settings → Diagnostics** for bug reports.
+The mobile app does not send crash reports. You can manually copy startup diagnostics that are stored on the device. See [Local-only diagnostics](./telemetry.md#local-only-diagnostics).
 
-## Inspect local trace files (`s2code trace`)
+## Inspect local trace files (`s2code-nightly trace`)
 
 Summarize latency, rates, interrupts, and failures from the server's rotated trace files directly from the host terminal:
 
 ```sh
-s2code trace summary                    # Top 25 busiest spans
-s2code trace summary --since 30m        # Spans ended in the last 30 minutes
-s2code trace summary --since 2h --limit 50
+s2code-nightly trace summary                    # Top 25 busiest spans
+s2code-nightly trace summary --since 30m        # Spans ended in the last 30 minutes
+s2code-nightly trace summary --since 2h --limit 50
 ```
 
-Pass `--base-dir <path>` (or set `T3CODE_HOME`) for a non-default data directory.
+Pass `--base-dir <path>` (or set `S2CODE_HOME`) for a non-default data directory.

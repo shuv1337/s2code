@@ -3,7 +3,7 @@
 The Welcome page runs on a fresh local installation to help you verify an agent, optionally import existing projects and conversations, and connect the mobile app. Only one ready agent is required to start.
 
 - Reopen it anytime from **Settings → About → Welcome page → Open**.
-- Hosted `the hosted web client` skips this page and prompts you to sign in to S2 Connect and run `s2code connect` on your computer instead.
+- A separately hosted web client skips this page. Pair it with a running server as described in [Remote access](./remote-access.md#hosted-web-app).
 
 ## Agents
 

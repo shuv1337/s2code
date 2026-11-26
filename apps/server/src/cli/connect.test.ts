@@ -288,6 +288,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-connect-link-test-" });
+        yield* Effect.sync(() => ensureProductHome(baseDir));
         const relayClientPath = `${baseDir}/bin/cloudflared`;
         yield* fs.makeDirectory(`${baseDir}/bin`, { recursive: true });
         yield* fs.writeFileString(

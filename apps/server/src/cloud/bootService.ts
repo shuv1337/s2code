@@ -1237,11 +1237,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     runner.run({ command, args, timeout: Duration.seconds(5) }).pipe(Effect.option);
   const succeeded = (result: Option.Option<ProcessRunner.ProcessRunOutput>) =>
     Option.isSome(result) && result.value.code === 0;
-  const launchdJobLoaded = probe("launchctl", [
-    "print",
-    `gui/${uid}/${BOOT_SERVICE_LAUNCHD_LABEL}`,
-  ]).pipe(Effect.map(succeeded));
+  const launchdJobLoaded = Effect.suspend(() =>
+    probe("launchctl", ["print", `gui/${uid}/${identity.label}`]).pipe(Effect.map(succeeded)),
+  );
   const readLaunchdProblems = Effect.fn("cloud.boot_service.read_launchd_problems")(function* () {
+    const label = identity.label;
     const [loaded, disabled] = yield* Effect.all(
       [launchdJobLoaded, probe("launchctl", ["print-disabled", `gui/${uid}`])],
       { concurrency: "unbounded" },
@@ -1251,8 +1251,8 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       Option.isSome(disabled) &&
       disabled.value.code === 0 &&
       // Older macOS versions print `true` instead of `disabled`.
-      (disabled.value.stdout.includes(`"${BOOT_SERVICE_LAUNCHD_LABEL}" => disabled`) ||
-        disabled.value.stdout.includes(`"${BOOT_SERVICE_LAUNCHD_LABEL}" => true`))
+      (disabled.value.stdout.includes(`"${label}" => disabled`) ||
+        disabled.value.stdout.includes(`"${label}" => true`))
     ) {
       problems.push("service-disabled");
     }

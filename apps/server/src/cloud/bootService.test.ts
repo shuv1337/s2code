@@ -268,6 +268,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     lingerStartsManager: boolean;
     enabled: boolean;
     active: boolean;
+    launchdLabel: string;
     /** systemd refuses starts until `reset-failed`, as after `StartLimitBurst` trips. */
     startLimitHit: boolean;
     /** A Windows launcher: it holds its lock until its task ends. */
@@ -282,6 +283,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     lingerStartsManager: true,
     enabled: true,
     active: true,
+    launchdLabel: BootService.BOOT_SERVICE_LAUNCHD_LABEL,
     startLimitHit: false,
   };
   const runner = ProcessRunner.ProcessRunner.of({
@@ -388,7 +390,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
                 : input.command === "loginctl" && input.args[0] === "show-user"
                   ? `${control.linger ?? ""}\n`
                   : input.command === "launchctl" && input.args[0] === "print-disabled"
-                    ? `disabled services = {\n\t"${BootService.BOOT_SERVICE_LAUNCHD_LABEL}" => ${control.enabled ? "enabled" : "disabled"}\n}\n`
+                    ? `disabled services = {\n\t"${control.launchdLabel}" => ${control.enabled ? "enabled" : "disabled"}\n}\n`
                     : input.args[1] === "is-enabled"
                       ? control.enabled
                         ? "enabled\n"
@@ -408,7 +410,9 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
                   input.args[0] === "show-user" &&
                   control.linger === undefined) ||
                 (input.args[1] === "is-active" && !control.active) ||
-                (input.command === "launchctl" && input.args[0] === "print" && !control.active) ||
+                (input.command === "launchctl" &&
+                  input.args[0] === "print" &&
+                  (!control.active || input.args[1] !== `gui/501/${control.launchdLabel}`)) ||
                 (input.args[1] === "is-enabled" && !control.enabled)
               ? 1
               : 0,
@@ -524,6 +528,39 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         expect(yield* upgraded.uninstall).toBe(true);
         expect(yield* fs.exists(legacyUnitPath)).toBe(false);
       }),
+  );
+
+  it.effect("checks and restores a loaded legacy macOS launch agent by its own label", () =>
+    Effect.gen(function* () {
+      const { service, makeService, fs, commands, control } = yield* makeHarness("darwin");
+      const plan = yield* service.install();
+      const label = "dev.shuv.shuv2code.v2.service";
+      const legacyUnitPath = plan.unitPath.replace(BootService.BOOT_SERVICE_LAUNCHD_LABEL, label);
+      const unit = yield* fs.readFileString(plan.unitPath);
+      yield* fs.writeFileString(
+        legacyUnitPath,
+        unit.replaceAll(BootService.BOOT_SERVICE_LAUNCHD_LABEL, label),
+      );
+      yield* fs.remove(plan.unitPath);
+      control.launchdLabel = label;
+      control.enabled = false;
+      const upgraded = yield* makeService();
+
+      expect(yield* upgraded.status).toMatchObject({
+        unitPath: legacyUnitPath,
+        problems: ["service-disabled"],
+      });
+      commands.length = 0;
+      yield* upgraded.withStopped(Effect.sync(() => expect(control.active).toBe(false)));
+
+      expect(commands.filter((command) => command.startsWith("launchctl "))).toEqual([
+        `launchctl print gui/501/${label}`,
+        `launchctl bootout --wait gui/501/${label}`,
+        `launchctl bootstrap gui/501 ${legacyUnitPath}`,
+      ]);
+      expect(control.active).toBe(true);
+      expect(control.enabled).toBe(false);
+    }),
   );
 
   it.effect.each(["linux", "darwin"] as const)(

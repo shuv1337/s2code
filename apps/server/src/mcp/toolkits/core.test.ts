@@ -1037,10 +1037,22 @@ it.effect("a read-only client reads threads and is refused every write before it
 );
 const dispatched: Array<string> = [];
 
-it.effect("only a full-access client may change a thread's own agent mode", () =>
-  Effect.gen(function* () {
+it.effect("only a full-access client may change a thread's own agent mode", () => {
+  const picks: Array<unknown> = [];
+  const instanceId = ProviderInstanceId.make("acp-agent");
+  const thread = {
+    ...McpToolAccessTestkit.liveThreadShell(ThreadId.make("agent-thread"), {
+      runtimeMode: "approval-required",
+    }),
+    providerInstanceId: instanceId,
+    modelSelection: {
+      instanceId,
+      model: "default",
+      options: [{ id: "_t3/session-mode", value: "ask" }],
+    },
+  };
+  return Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
-    const picks: Array<unknown> = [];
     const configure = (access: "approval-required" | "full-access", mode: string) =>
       server
         .callTool({
@@ -1057,40 +1069,6 @@ it.effect("only a full-access client may change a thread's own agent mode", () =
         .pipe(
           Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope(access)),
           Effect.provideService(McpSchema.McpServerClient, client),
-          Effect.provideService(
-            ThreadManagement.ThreadManagementService,
-            ThreadManagement.ThreadManagementService.of({
-              getThreadShell: () =>
-                Effect.succeed({
-                  id: ThreadId.make("agent-thread"),
-                  projectId: "project",
-                  runtimeMode: "approval-required",
-                  interactionMode: "default",
-                  deletedAt: null,
-                } as never),
-              getProjectThreadRecords: () =>
-                Effect.succeed({
-                  thread: {
-                    id: ThreadId.make("agent-thread"),
-                    projectId: "project",
-                    providerInstanceId: "acp-agent",
-                    modelSelection: {
-                      instanceId: "acp-agent",
-                      model: "default",
-                      options: [{ id: "_t3/session-mode", value: "ask" }],
-                    },
-                    runtimeMode: "approval-required",
-                    interactionMode: "default",
-                    deletedAt: null,
-                  },
-                } as never),
-              dispatch: (command: { readonly modelSelection?: unknown }) =>
-                Effect.sync(() => {
-                  picks.push(command.modelSelection);
-                  return { sequence: 7 } as never;
-                }),
-            } as never),
-          ),
         );
 
     expect(declaredFailure(yield* configure("approval-required", "yolo"))).toMatchObject({
@@ -1107,11 +1085,24 @@ it.effect("only a full-access client may change a thread's own agent mode", () =
       layerThreadToolkit.pipe(
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
         Layer.provide(NodeCrypto.layer),
-        Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: () => Effect.succeed(thread),
+            getProjectThreadRecords: () =>
+              Effect.succeed(McpToolAccessTestkit.idleThreadProjection(thread)),
+            dispatch: (command) =>
+              Effect.sync(() => {
+                if (command.type === "thread.model-selection.set") {
+                  picks.push(command.modelSelection);
+                }
+                return { sequence: 7, storedEvents: [] };
+              }),
+          }),
+        ),
       ),
     ),
-  ),
-);
+  );
+});
 
 it.effect("hides act-as-caller tools from a client caller", () =>
   Effect.gen(function* () {

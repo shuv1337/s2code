@@ -9,8 +9,8 @@ Bring your own: Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigra
 ## Why use S2Code instead of Claude Code or the Codex app?
 
 - **Bring your own subscription**: Use Claude, Codex, and every other agent you already have installed in one place.
-- **Remote-first**: Run `s2code up` on any box and drive it from anywhere.
-- **Native mobile app**: Approve steps, review PRs, and steer threads from iOS and Android.
+- **Remote-first**: Run `s2code-nightly up` on the host and drive it from your other devices.
+- **Mobile access**: Approve steps, review PRs, and steer threads from the iOS TestFlight beta or a mobile browser.
 - **Open source (MIT)**: Fork the source code under your own branding if you ever want something different.
 
 ## Can I use S2Code with my Claude Code subscription?
@@ -19,15 +19,11 @@ Yes.
 
 ## How much does S2Code cost?
 
-Nothing. You pay your own model/agent providers. S2 Connect is free for up to 3 connected host machines per account (phones and browsers don't count). You can also self-host or use LAN/Tailscale.
+S2Code is free. You pay your model providers directly. LAN, Tailscale, and desktop-managed SSH do not require a hosted account. S2 Connect requires a separately configured fork relay.
 
 ## Can I fork or redistribute S2Code?
 
-Yes, for the source code. The [MIT License](../../LICENSE) covers source code only—not S2Code's trademarks, name, wordmark, logos, or icons. Any public fork or build must use its own branding and clearly state that it is unofficial and not affiliated with T3 Tools, Inc. See [TRADEMARK.md](../../TRADEMARK.md).
-
-## Can I connect more than 3 machines with S2 Connect?
-
-Yes. Link a paid T3 Chat account from your account menu → **T3 Chat → Link T3 Chat**: T3 Chat Pro raises the limit to 10 machines, and Premier raises it to 100. See [More machines with T3 Chat](./remote-access.md#more-machines-with-t3-chat).
+Yes. The source code is available under the [MIT License](../../LICENSE). S2Code is an independent fork, not an official T3 Code build.
 
 ## Why is my Claude 5-hour limit draining so fast?
 
@@ -35,11 +31,11 @@ Since v0.1.7, Claude in S2Code drains your 5-hour limit at the same rate as Clau
 
 ## How do I use S2Code remotely?
 
-Your agents run wherever the S2Code server runs (desktop, server, or VPS). Run `s2code up` on that machine and connect via S2 Connect, LAN, Tailscale, or [the hosted web client](https://the hosted web client). See [Remote access](./remote-access.md).
+Your agents run wherever the S2Code server runs (desktop, server, or VPS). Run `s2code-nightly up` there and connect over LAN, Tailscale, desktop-managed SSH, or a configured S2 Connect relay. See [Remote access](./remote-access.md).
 
 ## How do I use S2Code on my phone?
 
-Install the [iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code) app and connect it to your computer with S2 Connect or a pairing link. The phone is a remote control—your host computer runs the agents and must stay on. See [Mobile app](./install.md#mobile-app) and [Remote access](./remote-access.md).
+On iPhone, join the fork's [public TestFlight beta](https://testflight.apple.com/join/vhmETHSn). On Android, use the web client. Your host computer runs the agents and must stay on. See [Mobile app](./install.md#mobile-app) and [Remote access](./remote-access.md).
 
 ## Why does S2 Connect keep disconnecting?
 
@@ -61,11 +57,11 @@ Yes. Add another provider instance in **Settings → Providers** with its own en
 
 No. S2Code focuses on frontier coding agents.
 
-## Does my code go to T3 servers?
+## Does my code go to S2Code servers?
 
-No. Code and prompts go directly from your machine to your chosen provider. With S2 Connect, traffic travels over a Cloudflare tunnel (`cloudflared` on your machine); T3's relay coordinates the link without proxying your HTTP/WebSocket sessions.
+No. Code and prompts go directly from your machine to your chosen provider. With S2 Connect, the configured relay sets up a Cloudflare tunnel without proxying your HTTP or WebSocket sessions.
 
-S2Code sends basic product usage events (provider, model, token totals—no prompts or file contents). Disable with `T3CODE_TELEMETRY_ENABLED=false` or `DO_NOT_TRACK=1`. See [Product usage data](./telemetry.md).
+S2Code sends no background usage data, fingerprints, mobile crash reports, or relay traces. Agent feedback and OpenTelemetry export stay off unless you enable them. See [Telemetry and data flows](./telemetry.md).
 
 ## Worktrees are eating my disk. How do I clean them up?
 

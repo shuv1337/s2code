@@ -284,7 +284,11 @@ it("keeps the source list visible after a dismissed repository lookup succeeds",
   });
   const lookup = Promise.withResolvers<typeof repository>();
   scopes.lookupRepository.mockReset().mockReturnValue(lookup.promise);
-  await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+  await using _screen = await render(
+    <VoiceProvider>
+      <CommandPalette>{null}</CommandPalette>
+    </VoiceProvider>,
+  );
   await act(() => openCommandPalette({ open: "add-project" }));
   await page.getByRole("option", { name: /^GitHub repository/ }).click();
   await page.getByRole("combobox").fill("example/slow");

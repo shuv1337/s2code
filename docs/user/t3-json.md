@@ -13,11 +13,11 @@ Settings that `t3.json` can declare resolve in this order (first non-inherited v
 
 ## Schema reference
 
-Add `"$schema": "https://t3.codes/schema/t3.json"` for editor autocomplete and validation:
+For editor autocomplete and validation, set `$schema` to `/schema/t3.json` on your fork website deployment, if you have one. Replace `s2code.example` with your deployment's origin, or omit `$schema`.
 
 ```json
 {
-  "$schema": "https://t3.codes/schema/t3.json",
+  "$schema": "https://s2code.example/schema/t3.json",
   "iconPath": "assets/logo.svg",
   "defaultThreadEnvMode": "worktree",
   "worktreeSubmodules": "top-level",
