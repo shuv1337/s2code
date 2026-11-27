@@ -52,7 +52,8 @@ function keepKnownLatestVersion(previous: ServerProvider, probed: ServerProvider
   return probed.enabled &&
     known?.latestVersion &&
     !probed.versionAdvisory?.latestVersion &&
-    known.currentVersion === currentVersion
+    known.currentVersion === currentVersion &&
+    previous.version === probed.version
     ? { ...probed, versionAdvisory: known }
     : probed;
 }

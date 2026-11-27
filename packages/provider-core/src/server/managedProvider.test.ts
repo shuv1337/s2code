@@ -746,6 +746,21 @@ describe("makeManagedServerProvider", () => {
         yield* Ref.set(installedVersion, "2.0.0");
         const updated = yield* provider.refresh;
         assert.deepStrictEqual(updated.versionAdvisory, advisory("2.0.0", null));
+
+        // An external server restarting onto an already-installed version must not keep its old
+        // restart-pending advisory message while re-enrichment runs.
+        const publishRestartPending = yield* Queue.take(enrichments);
+        yield* publishRestartPending({
+          ...refreshedSnapshot,
+          version: "1.0.0",
+          versionAdvisory: {
+            ...advisory("2.0.0", "2.0.0"),
+            status: "current",
+            message: "still 1.0.0",
+          },
+        });
+        const restarted = yield* provider.refresh;
+        assert.deepStrictEqual(restarted.versionAdvisory, advisory("2.0.0", null));
       }),
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );
