@@ -245,8 +245,9 @@ it.effect("compact eager MCP toolset stays valid and within the agy schema budge
         description: tool.description,
         inputSchema: tool.inputSchema,
       }));
+    expect(compactTools).toHaveLength(53);
     const compactBytes = utf8Bytes(JSON.stringify(compactTools));
-    expect(compactBytes).toBeLessThanOrEqual(38_000);
+    expect(compactBytes).toBeLessThanOrEqual(36_000);
   }).pipe(Effect.provide(layerAdvertisedToolsWithSearch)),
 );
 
@@ -265,7 +266,7 @@ it.effect("compact dynamic tool_search stays bounded and skips already-eager too
         }) ?? true,
     );
     const sessionId = "compact-budget-session";
-    const maxListedBytes = 38_000 + McpToolExposure.COMPACT_DYNAMIC_MAX_BYTES;
+    const maxListedBytes = 36_000 + McpToolExposure.COMPACT_DYNAMIC_MAX_BYTES;
     const listedBytes = () =>
       utf8Bytes(
         JSON.stringify(

@@ -1934,7 +1934,8 @@ it.layer(layerUpdate)("OpenCodeDriver updates", (it) => {
             Stream.filter(
               (snapshot) =>
                 snapshot.version === running &&
-                snapshot.versionAdvisory?.currentVersion === installed,
+                snapshot.versionAdvisory?.currentVersion === installed &&
+                snapshot.versionAdvisory?.latestVersion === "2.0.30-shuv.1",
             ),
             Stream.take(1),
             Stream.runCollect,

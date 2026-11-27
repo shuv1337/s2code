@@ -772,6 +772,38 @@ process.exit(0);
     }),
   );
 
+  it.effect("recovers missing service state from a fork-owned runtime", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-no-state-" });
+      const versionDir = path.join(root, "runtime", "versions", "1.0.0");
+      const upstreamVersionDir = path.join(root, "runtime", "versions", "2.0.0");
+      yield* writeFakeRuntime(
+        fs,
+        path,
+        versionDir,
+        `
+import { writeFileSync } from "node:fs";
+writeFileSync(new URL("./started", import.meta.url), "");
+process.exit(0);
+`,
+      );
+      yield* writeFakeRuntime(fs, path, upstreamVersionDir, "process.exit(23);");
+      yield* fs.writeFileString(path.join(upstreamVersionDir, ".install-product"), "t3code\n");
+
+      yield* Effect.promise(() =>
+        expect(runLauncher(root)).rejects.toThrow("Active child exited unexpectedly (0)."),
+      );
+
+      assert.isTrue(yield* fs.exists(path.join(versionDir, "started")));
+      const recoveredState = yield* Effect.promise(() =>
+        readServiceState(path.join(root, "runtime", "service-state.json")),
+      );
+      assert.equal(recoveredState.activeVersion, "1.0.0");
+    }),
+  );
+
   it.effect("refuses non-install legacy documents without rewriting or spawning", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

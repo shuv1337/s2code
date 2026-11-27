@@ -5,10 +5,20 @@ import type * as Effect from "effect/Effect";
  * Sent by MCP clients that need T3 to curate their listed toolset.
  * `deferred` lists a minimal direct set plus `tool_search`; `compact` lists a
  * curated core set plus `tool_search` for clients with an eager schema cap.
+ * `deferred-proxy` keeps a fixed list with schema search and `tool_call`.
  */
 export const MCP_TOOL_EXPOSURE_HEADER = "t3-tool-exposure";
 
-export type McpToolExposureMode = "deferred" | "compact";
+export type McpToolExposureMode = "deferred" | "compact" | "deferred-proxy";
+
+export function parseMcpToolExposureMode(
+  value: string | ReadonlyArray<string> | undefined,
+): McpToolExposureMode | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : undefined;
+  return trimmed === "deferred" || trimmed === "compact" || trimmed === "deferred-proxy"
+    ? trimmed
+    : undefined;
+}
 
 /**
  * A remote MCP server from Settings, reached through T3's proxy with the
