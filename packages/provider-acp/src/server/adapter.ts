@@ -46,6 +46,8 @@ import {
   compactT3McpToolOutput,
   htmlRenderFromToolItem,
   mcpToolResultOutput,
+  omitToolOutputImageData,
+  toolOutputImages,
 } from "@t3tools/shared/toolOutput";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as Cause from "effect/Cause";
@@ -477,7 +479,7 @@ export interface AcpAdapterV2Flavor {
     EffectAcpSchema.InitializeRequest["clientCapabilities"]
   >["_meta"];
   readonly mcpOverHttp?: boolean;
-  /** T3 curates the listed MCP toolset (`deferred` or `compact`) instead of listing all tools. */
+  /** Exposure on T3's HTTP MCP endpoint. Compact uses a fixed proxy when bridged over ACP/stdio. */
   readonly mcpToolExposure?: McpProviderSession.McpToolExposureMode;
   readonly normalizeSessionUpdate?: (
     notification: EffectAcpSchema.SessionNotification,
@@ -1136,6 +1138,13 @@ interface AcpMcpContext {
   readonly endpoints?: ReadonlyMap<string, string>;
   readonly authorization?: string;
   readonly hasSharedMcpServers: boolean;
+  readonly bridgeToolExposure?: McpProviderSession.McpToolExposureMode;
+}
+
+function bridgedMcpToolExposure(
+  exposure: McpProviderSession.McpToolExposureMode | undefined,
+): McpProviderSession.McpToolExposureMode | undefined {
+  return exposure === "compact" || exposure === "deferred-proxy" ? "deferred-proxy" : undefined;
 }
 
 // A GUI-subsystem executable (packaged Windows desktop) does not hold the console, so PowerShell
@@ -1185,6 +1194,7 @@ function acpMcpContext(
     { name: "t3-code", endpoint: session.endpoint },
     ...(session.sharedMcpServers ?? []),
   ];
+  const bridgeToolExposure = bridgedMcpToolExposure(mcpToolExposure);
   // codex-acp 1.2.0 and pi-acp drop injected HTTP servers, so HTTP is opt-in per flavor.
   // Agents inherit processEnvironment, so each entry's env must name its own endpoint.
   return {
@@ -1196,6 +1206,9 @@ function acpMcpContext(
         { name: "ELECTRON_RUN_AS_NODE", value: "1" },
         { name: "T3_ACP_MCP_ENDPOINT", value: endpoint },
         { name: "T3_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
+        ...(name === "t3-code" && bridgeToolExposure !== undefined
+          ? [{ name: "T3_ACP_MCP_TOOL_EXPOSURE", value: bridgeToolExposure }]
+          : []),
       ],
     })),
     acpServers: bridged.map(({ name }) => ({ type: "acp" as const, name, serverId: name })),
@@ -1208,7 +1221,7 @@ function acpMcpContext(
             headers: [
               { name: "Authorization", value: session.authorizationHeader },
               // Shared servers reach T3's proxy, which has no `tool_search` to defer to.
-              ...(mcpToolExposure !== undefined && endpoint === session.endpoint
+              ...(mcpToolExposure !== undefined && name === "t3-code"
                 ? [{ name: McpProviderSession.MCP_TOOL_EXPOSURE_HEADER, value: mcpToolExposure }]
                 : []),
             ],
@@ -1216,6 +1229,7 @@ function acpMcpContext(
         : [],
     endpoints: new Map(bridged.map(({ name, endpoint }) => [name, endpoint])),
     authorization: session.authorizationHeader,
+    ...(bridgeToolExposure === undefined ? {} : { bridgeToolExposure }),
     processEnvironment: {
       // The thread id every process the agent starts inherits, so a tool run
       // from its shell can find its T3 thread. Claude and Codex sessions set
@@ -1333,6 +1347,25 @@ function appendToolContentText(content: unknown, text: string): unknown[] {
     next.push({ type: "content", content: { type: "text", text } });
   }
   return next;
+}
+
+// Claims live until the turn ends; past this, recovered screenshots keep their details only.
+const MAX_RECOVERED_IMAGE_CHARS_PER_TURN = 32 * 1024 * 1024;
+
+function withinRecoveredImageBudget(
+  context: Pick<ActiveAcpTurn, "recoveredImageChars">,
+  output: unknown,
+): unknown {
+  const chars = toolOutputImages(output).reduce(
+    (total, image) => total + (image.data?.length ?? 0),
+    0,
+  );
+  if (chars === 0) return output;
+  if (context.recoveredImageChars + chars > MAX_RECOVERED_IMAGE_CHARS_PER_TURN) {
+    return omitToolOutputImageData(output);
+  }
+  context.recoveredImageChars += chars;
+  return output;
 }
 
 function acpMcpToolCallOutput(rawOutput: unknown): unknown {
@@ -1810,6 +1843,8 @@ interface ActiveAcpTurn {
   readonly tools: Map<string, AcpToolCallState & { readonly backgroundCommandTaskId?: string }>;
   /** Confirmed T3 MCP tool outputs keyed by `${toolCallId}\0${tool}\0${inputHash}`. */
   readonly claimedToolResults: Map<string, unknown>;
+  /** Image characters recovered into `claimedToolResults` this turn. */
+  recoveredImageChars: number;
   /** `${toolCallId}\0${tool}\0${inputHash}` keys that already drained a recorded MCP result. */
   readonly drainedToolResultKeys: Set<string>;
   /** `${toolCallId}\0${tool}\0${inputHash}` keys that reached terminal failure and must never do input-only recovery. */
@@ -2407,6 +2442,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const host = yield* ProviderHost.ProviderHost;
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  yield* mcpSessions.recoversToolResultImages(options.instanceId);
   const { flavor, selfInvocation: self } = options;
   const callLauncher = yield* writeAcpMcpCallLauncher(host.paths.stateDir);
   const readMcpContext = (threadId: ThreadId | null) =>
@@ -5846,6 +5882,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   );
                   if (recoveredOutput !== undefined) {
                     context.drainedToolResultKeys.add(callInputKey);
+                    recoveredOutput = withinRecoveredImageBudget(context, recoveredOutput);
                   }
                 }
                 if (recoveredOutput !== undefined) {
@@ -5899,7 +5936,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
          */
         const emitNotice = Effect.fnUntraced(function* (
           context: ActiveAcpTurn,
-          notice: { readonly title: string; readonly description?: string },
+          notice: {
+            readonly severity: string;
+            readonly title: string;
+            readonly description?: string;
+          },
         ) {
           const nativeItemId = `${context.nativeTurnId}:notice:${context.itemOrdinals.size}`;
           const now = yield* DateTime.now;
@@ -5918,6 +5959,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               ordinal: yield* resolveItemOrdinal(context, nativeItemId),
               type: "system_notice",
               status: "completed",
+              // Severity is an open set; an unknown value gets the plain presentation.
+              level:
+                notice.severity === "warning" || notice.severity === "error"
+                  ? notice.severity
+                  : "info",
               title: notice.title,
               message:
                 notice.description === undefined
@@ -8677,6 +8723,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const mcpBridge = yield* makeAcpMcpOverAcpBridge({
             endpoints: mcpContext.endpoints,
             authorization: mcpContext.authorization,
+            toolExposure: mcpContext.bridgeToolExposure,
             allocateConnectionId: random.uuidV4(),
           });
           yield* Scope.addFinalizer(scope, mcpBridge.dispose);
@@ -10014,10 +10061,20 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           sessionId: string,
         ) {
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+          const setup = yield* Ref.get(activeSessionSetup);
+          const mcpCapabilities = setup?.initializeResult.agentCapabilities?.mcpCapabilities;
+          const usesHttp =
+            mcpCapabilities?.acp !== true &&
+            mcpCapabilities?.http === true &&
+            flavor.mcpOverHttp === true;
+          const toolExposure = usesHttp
+            ? flavor.mcpToolExposure
+            : bridgedMcpToolExposure(flavor.mcpToolExposure);
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasT3Mcp: mcpSession !== undefined,
             hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
+            ...(toolExposure === undefined ? {} : { toolExposure }),
           } satisfies T3AcpInstructionState;
           const userText =
             flavor.rewriteUserText === undefined
@@ -10605,6 +10662,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               nativeMetadata: initialNativeMetadata,
               tools: new Map(),
               claimedToolResults: new Map(),
+              recoveredImageChars: 0,
               drainedToolResultKeys: new Set(),
               blockedInputRecoveryKeys: new Set(),
               attemptedInputRecoveryKeys: new Set(),

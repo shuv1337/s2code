@@ -29,6 +29,7 @@ describe("AcpMcpOverAcpBridge", () => {
           ["executor", "http://127.0.0.1:1/mcp/servers/executor"],
         ]),
         authorization: "Bearer bridge-test",
+        toolExposure: "deferred-proxy",
         allocateConnectionId: Effect.sync(() => `connection-${++nextConnection}`),
         fetchImplementation: async (url, init) => {
           const method = init?.method ?? "GET";
@@ -105,6 +106,7 @@ describe("AcpMcpOverAcpBridge", () => {
       expect(requests[0]?.headers.get("authorization")).toBe("Bearer bridge-test");
       expect(requests[1]?.headers.get("mcp-session-id")).toBe("session-42");
       expect(requests[1]?.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+      expect(requests[1]?.headers.get("t3-tool-exposure")).toBe("deferred-proxy");
       expect(requests.at(-1)?.method).toBe("DELETE");
       expect(requests.at(-1)?.headers.get("mcp-session-id")).toBe("session-42");
 
@@ -116,6 +118,7 @@ describe("AcpMcpOverAcpBridge", () => {
       expect(requests.at(-1)?.url).toBe("http://127.0.0.1:1/mcp/servers/executor");
       expect(requests.at(-1)?.headers.get("authorization")).toBe("Bearer bridge-test");
       expect(requests.at(-1)?.headers.get("mcp-session-id")).toBeNull();
+      expect(requests.at(-1)?.headers.get("t3-tool-exposure")).toBeNull();
     }),
   );
 

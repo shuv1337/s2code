@@ -1620,6 +1620,17 @@ describe("AcpRegistryAdapterV2", () => {
         new: stdio("Bearer opened-token"),
         load: stdio("Bearer rotated-token"),
       });
+      const proxyStdio = (authorization: string) =>
+        stdio(authorization).map((server) => ({
+          ...server,
+          env: [...server.env, { name: "T3_ACP_MCP_TOOL_EXPOSURE", value: "deferred-proxy" }],
+        }));
+      for (const commandPath of ["agy", "antigravity", "/usr/local/bin/agy"]) {
+        assert.deepEqual(
+          yield* sessionMcpServers({ source: "local", commandPath, commandArgs: ["acp"] }),
+          { new: proxyStdio("Bearer opened-token"), load: proxyStdio("Bearer rotated-token") },
+        );
+      }
       // Command Code cannot start the stdio bridge on Windows: it spawns MCP commands through
       // cmd.exe, which splits the unquoted T3 executable path at the space.
       const commandCode = {
@@ -1669,10 +1680,6 @@ describe("AcpRegistryAdapterV2", () => {
           load: compactHttpWithShared("Bearer rotated-token"),
         },
       );
-      assert.deepEqual(yield* sessionMcpServers(localAntigravity), {
-        new: stdio("Bearer opened-token"),
-        load: stdio("Bearer rotated-token"),
-      });
       // Any other local agent keeps the stdio bridge.
       assert.deepEqual(
         yield* sessionMcpServers(

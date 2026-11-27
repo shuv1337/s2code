@@ -7,10 +7,16 @@ import * as McpToolExposure from "../../McpToolExposure.ts";
 
 const ToolSearchTool = Tool.make(McpToolExposure.TOOL_SEARCH, {
   description:
-    "Load T3 Code tools you do not have yet, then call them by name. Search by name or purpose: threads (t3_thread_*), projects (t3_project_*), worktrees, preview_* browser, device_*, html_preview/html_render, schedule_task, pull requests and guides, attachments, request_secret, environment links. Exact names work too.",
+    "Find S2Code tools by name or purpose. If tool_call is listed, pass it the tool name and arguments. Otherwise search loads matches for direct calls. Examples: threads, projects, worktrees, browser, devices, attachments, links.",
   parameters: Schema.Struct({ query: Schema.String.check(Schema.isMaxLength(500)) }),
   success: Schema.Struct({
-    tools: Schema.Array(Schema.Struct({ name: Schema.String, description: Schema.String })),
+    tools: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        description: Schema.String,
+        inputSchema: Schema.optional(Schema.Unknown),
+      }),
+    ),
   }),
   failure: OrchestratorMcpFailure,
   failureMode: "return",
