@@ -67,7 +67,9 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     );
     const launcher = yield* run({}, ["__service-launcher"]);
     expect(launcher.exitCode).toBe(1);
-    expect(launcher.stderr).toMatch(/\[service-launcher\] .*service-state\.json/);
+    expect(launcher.stderr).toContain(
+      "[service-launcher] Service state is missing and no installed runtime was found.",
+    );
     expect(launcher.stderr).not.toMatch(/LOADED_CLI_MAIN|CACHE=/);
     const launcherHelp = yield* run({}, ["__service-launcher", "--help"]);
     expect(launcherHelp.exitCode).toBe(0);
@@ -76,7 +78,9 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     const launcherFlags = yield* run({}, ["__service-launcher", "--log-level", "debug"]);
     expect(launcherFlags.exitCode).toBe(1);
     expect(launcherFlags.stderr).toContain("LOADED_CLI_MAIN");
-    expect(launcherFlags.stderr).toMatch(/\[service-launcher\] .*service-state\.json/);
+    expect(launcherFlags.stderr).toContain(
+      "[service-launcher] Service state is missing and no installed runtime was found.",
+    );
     const cacheDir = `${root}/cache/${PRODUCT_ID}/compile-cache`;
     yield* fs.makeDirectory(`${cacheDir}/v24.0.0-x64-legacy-1000`, { recursive: true });
     yield* fs.writeFileString(`${cacheDir}/v24.0.0-x64-legacy-1000/0123abcd`, "stale");
